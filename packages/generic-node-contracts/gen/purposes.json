@@ -1,0 +1,147 @@
+{
+  "DEFERRED_SUITE_PURPOSE_CENSUS": [
+    {
+      "purpose": "zp-implementer-event-v1",
+      "signed": true,
+      "signingKeyRole": "node_event",
+      "serializer": "suite",
+      "disposition": "deferred-c4",
+      "fieldSequenceOwner": "deferred — byte-freeze child (binding condition C4)",
+      "specCitation": "A.6"
+    },
+    {
+      "purpose": "zp-implementer-checkpoint-v1",
+      "signed": true,
+      "signingKeyRole": "node_event",
+      "serializer": "suite",
+      "disposition": "deferred-c4",
+      "fieldSequenceOwner": "deferred — byte-freeze child (binding condition C4)",
+      "specCitation": "A.6"
+    },
+    {
+      "purpose": "zp-implementer-keyrotation-v1",
+      "signed": true,
+      "signingKeyRole": "node_event",
+      "serializer": "suite",
+      "disposition": "deferred-c4",
+      "fieldSequenceOwner": "deferred — byte-freeze child (binding condition C4)",
+      "specCitation": "A.6"
+    }
+  ],
+  "LEGACY_PUSH_PURPOSES_REFERENCE": {
+    "owner": "src/reporting-auth/keys.ts",
+    "purposes": [
+      "zupay-reporting-v1",
+      "zupay-reporting-transport-v1",
+      "zupay-reporting-handshake-v1"
+    ],
+    "verifyOnV2SuitePath": false
+  },
+  "PURPOSES_CONTRACT_VERSION": 1,
+  "SOURCE": "suite purposes A.1.1, A.3-A.7; purpose-specific key custody; artifacts-freeze; compatibility-literals",
+  "SUITE_PURPOSE_CENSUS": [
+    {
+      "purpose": "zp-receive-expected-v1",
+      "signed": true,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/artifacts/expected-artifacts.contract.ts",
+      "specCitation": "A.3.1"
+    },
+    {
+      "purpose": "zp-move-internal-expected-v1",
+      "signed": true,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/artifacts/expected-artifacts.contract.ts",
+      "specCitation": "A.3.2"
+    },
+    {
+      "purpose": "zp-send-external-expected-v1",
+      "signed": true,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/artifacts/expected-artifacts.contract.ts",
+      "specCitation": "A.3.3"
+    },
+    {
+      "purpose": "zp-send-external-approval-v1",
+      "signed": true,
+      "signingKeyRole": "device",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/approval/approval-tuple.contract.ts",
+      "specCitation": "A.4.1"
+    },
+    {
+      "purpose": "zp-destination-bless-v1",
+      "signed": true,
+      "signingKeyRole": "device",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/machine-manifests/suite-tuples.contract.ts",
+      "specCitation": "A.4.2"
+    },
+    {
+      "purpose": "zp-device-enrol-v1",
+      "signed": true,
+      "signingKeyRole": "device",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/machine-manifests/suite-tuples.contract.ts",
+      "specCitation": "A.4.3"
+    },
+    {
+      "purpose": "zp-report-request-v1",
+      "signed": true,
+      "signingKeyRole": "reporting",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/reporting-tuples/request-tuple.ts",
+      "specCitation": "A.5"
+    },
+    {
+      "purpose": "zp-reporting-register-v1",
+      "signed": true,
+      "signingKeyRole": "reporting",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/reporting-auth/register-tuple.ts",
+      "specCitation": "A.5"
+    },
+    {
+      "purpose": "zp-node-event-v1",
+      "signed": true,
+      "signingKeyRole": "node_event",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/reporting-tuples/event-tuple.ts",
+      "specCitation": "A.6"
+    },
+    {
+      "purpose": "zp-wallet-head-fingerprint-v1",
+      "signed": false,
+      "signingKeyRole": "none",
+      "serializer": "suite",
+      "disposition": "frozen",
+      "fieldSequenceOwner": "src/machine-manifests/suite-tuples.contract.ts",
+      "specCitation": "A.7"
+    }
+  ],
+  "SUITE_PURPOSE_DISPOSITIONS": [
+    "frozen",
+    "deferred-c4"
+  ],
+  "SUITE_PURPOSE_SUFFIX": "-v1",
+  "SUITE_SERIALIZER": "suite",
+  "SUITE_SIGNING_KEY_ROLES": [
+    "node_identity",
+    "device",
+    "reporting",
+    "node_event",
+    "none"
+  ]
+}

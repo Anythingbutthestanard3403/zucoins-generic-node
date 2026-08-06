@@ -1,0 +1,33 @@
+{
+  "concern": "transfer-code",
+  "slice": "transfer-code.3",
+  "golden": "SEND = receiver_confirm_partial_transaction v1 (partial: step_2_signature omitted)",
+  "files": {
+    "json_preimage": "send-code.v1.json.txt",
+    "encoded": "send-code.v1.b64url.txt"
+  },
+  "digests": {
+    "json_sha256": "fc0af28b7232f2b83df93a39dac0bd1ddedcd477e658af23b49de49e3ed09640",
+    "b64url_sha256": "d454846fddc861c059476553ec4fe03fdbf3cb494a0b5be6357ceb8049d6d0e4",
+    "b64url_len": 1380
+  },
+  "provenance": {
+    "encode_pipeline": "JSON.stringify -> encodeURIComponent -> base64url -> strip '=' (transfer-code-encoding)",
+    "wallet_mirror": "reference SplitChain wallet implementation (splitchain.js)",
+    "wallet_lines": {
+      "encode_transfer_code": "splitchain.js:1791-1868",
+      "filter_transfer_code_structure__v1": "splitchain.js:1647-1789",
+      "filter_transaction_structure__v2": "splitchain.js:4067-4200"
+    },
+    "inner_source": "canonical fields A.8 (step-1 preimage + step_1_signature verbatim)",
+    "decisions": [
+      "transfer-code-encoding",
+      "code-matching-window",
+      "wire-version-freeze",
+      "inner-retention",
+      "expiry-seconds-encoding"
+    ],
+    "base64_parity": "Encoded bytes verified byte-identical between Node Buffer base64url and libsodium-wrappers@0.7.16 to_base64(URLSAFE) with padding stripped; round-trip decode verified via both Node base64url and libsodium URLSAFE_NO_PADDING.",
+    "regenerated_by": "Offline golden-writer (quarantined per ../../CONTRACT.md \"Golden regeneration and quarantine\"; no committed test writes a golden)."
+  }
+}

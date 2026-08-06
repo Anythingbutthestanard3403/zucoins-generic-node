@@ -1,0 +1,63 @@
+{
+  "selectors": {
+    "pool_receive_selection": {
+      "predicate": "isSelectableForReceive",
+      "requiresProjection": true
+    },
+    "move_destination_selection": {
+      "predicate": "isSelectableForReceive",
+      "requiresProjection": true
+    },
+    "send_source_selection": {
+      "predicate": "projectWalletState",
+      "requiresProjection": true
+    },
+    "signer_eligibility": {
+      "predicate": "projectWalletState",
+      "requiresProjection": true
+    },
+    "release_path": {
+      "predicate": "projectWalletState",
+      "requiresProjection": true
+    },
+    "recovery_flow": {
+      "predicate": "none",
+      "requiresProjection": false
+    }
+  },
+  "projectionBoundSelectors": [
+    "pool_receive_selection",
+    "move_destination_selection",
+    "send_source_selection",
+    "signer_eligibility",
+    "release_path"
+  ],
+  "bootAuditDispositions": {
+    "consistent": "CONSISTENT",
+    "repairToProjection": "REPAIR_TO_PROJECTION",
+    "quarantineForReconciliation": "QUARANTINE_FOR_RECONCILIATION",
+    "invariantBreachQuarantine": "INVARIANT_BREACH_QUARANTINE"
+  },
+  "bootAuditContradictionClasses": {
+    "none": {
+      "when": "stored === projected",
+      "disposition": "CONSISTENT",
+      "auditRequired": false
+    },
+    "persisted_invariant_breach": {
+      "when": "projection carries a breach (more than one active operation lease)",
+      "disposition": "INVARIANT_BREACH_QUARANTINE",
+      "auditRequired": true
+    },
+    "understated_restriction": {
+      "when": "projection is more restricted than stored (e.g. a leased wallet stored AVAILABLE)",
+      "disposition": "REPAIR_TO_PROJECTION",
+      "auditRequired": true
+    },
+    "overstated_restriction_to_available": {
+      "when": "projection is AVAILABLE but stored is more restricted (phantom PIN / lost lease / would-be un-retire)",
+      "disposition": "QUARANTINE_FOR_RECONCILIATION",
+      "auditRequired": true
+    }
+  }
+}

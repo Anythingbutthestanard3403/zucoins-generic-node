@@ -1,0 +1,77 @@
+{
+  "CANONICAL_DECIMAL_FORMATTER_RULES": {
+    "removesTrailingFractionalZeros": true,
+    "removesDecimalPointWhenFractionEmpty": true,
+    "emitsZeroNeverNegativeZero": true,
+    "foreignSignedBytesNeverRewrittenToMatch": true
+  },
+  "DB_REFERENCE_DOMAINS": {
+    "zkz_amount_text": "^(0|[1-9][0-9]*)(\\.[0-9]{1,32})?$",
+    "sha256_hex": "^[0-9a-f]{64}$",
+    "padded_base64url_pubkey": "^[A-Za-z0-9_-]{43}=$",
+    "padded_base64url_signature": "^[A-Za-z0-9_-]{86}==$"
+  },
+  "PADDED_BASE64URL_PUBKEY_LENGTH": 44,
+  "PADDED_BASE64URL_PUBKEY_PATTERN": "^[A-Za-z0-9_-]{43}=$",
+  "PADDED_BASE64URL_SIGNATURE_LENGTH": 88,
+  "PADDED_BASE64URL_SIGNATURE_PATTERN": "^[A-Za-z0-9_-]{86}==$",
+  "POSITIVE_ZKZ_AMOUNT_MAX": "100000000",
+  "SCALAR_TYPES": [
+    {
+      "name": "Uuid",
+      "wire": "lowercase canonical UUID string",
+      "rule": "RFC 4122 textual form; APIs reject alternate spellings"
+    },
+    {
+      "name": "WalletPublicKey",
+      "wire": "ASCII string",
+      "rule": "padded base64url; decodes to exactly 32 bytes; canonical re-encode equals input; normally 44 chars"
+    },
+    {
+      "name": "Ed25519Signature",
+      "wire": "ASCII string",
+      "rule": "padded base64url; decodes to exactly 64 bytes; canonical re-encode equals input; normally 88 chars"
+    },
+    {
+      "name": "ZkzAmount",
+      "wire": "decimal ASCII string",
+      "rule": "^(0|[1-9][0-9]*)(\\.[0-9]{1,32})?$; non-negative; no sign, exponent, separators, leading zero, or trailing decimal point"
+    },
+    {
+      "name": "PositiveZkzAmount",
+      "wire": "ZkzAmount",
+      "rule": "mathematically greater than zero and at most 100000000"
+    },
+    {
+      "name": "UnixTimeSecsV2",
+      "wire": "decimal ASCII string",
+      "rule": "finite non-negative decimal emitted by the wallet-compatible clock path; never converted to number after construction"
+    },
+    {
+      "name": "ExpiryUnixTimeSecs",
+      "wire": "decimal ASCII string",
+      "rule": "integer seconds; request-specific protocol bounds apply"
+    },
+    {
+      "name": "Sha256Hex",
+      "wire": "ASCII string",
+      "rule": "exactly 64 lowercase hexadecimal characters"
+    },
+    {
+      "name": "CanonicalVersion",
+      "wire": "integer",
+      "rule": "value 1 for all *-v1 v2-suite tuples"
+    },
+    {
+      "name": "OpaqueReference",
+      "wire": "UTF-8 string",
+      "rule": "limits set by API schema; never interpolated into signed SplitChain fields unless explicitly named"
+    }
+  ],
+  "SCHEMA_VOCABS_CONTRACT_VERSION": 1,
+  "SHA256_HEX_PATTERN": "^[0-9a-f]{64}$",
+  "SOURCE": "protocol scalar types; reference scalar domains; canonical amount bound",
+  "ZKZ_AMOUNT_MAX_DECIMAL_PLACES": 32,
+  "ZKZ_AMOUNT_TEXT_PATTERN": "^(0|[1-9][0-9]*)(\\.[0-9]{1,32})?$",
+  "ZKZ_BALANCE_TEXT_PATTERN": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+}

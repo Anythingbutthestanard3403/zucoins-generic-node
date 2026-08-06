@@ -1,0 +1,102 @@
+{
+  "targets": [
+    {
+      "openSessions": 0,
+      "poolCap": 50,
+      "target": 5
+    },
+    {
+      "openSessions": 4,
+      "poolCap": 50,
+      "target": 5
+    },
+    {
+      "openSessions": 5,
+      "poolCap": 50,
+      "target": 6
+    },
+    {
+      "openSessions": 6,
+      "poolCap": 50,
+      "target": 7
+    },
+    {
+      "openSessions": 50,
+      "poolCap": 50,
+      "target": 50
+    },
+    {
+      "openSessions": 55,
+      "poolCap": 50,
+      "target": 50
+    },
+    {
+      "openSessions": 50,
+      "poolCap": 500,
+      "target": 55
+    },
+    {
+      "openSessions": 100,
+      "poolCap": 500,
+      "target": 110
+    },
+    {
+      "openSessions": 110,
+      "poolCap": 500,
+      "target": 121
+    },
+    {
+      "openSessions": 200,
+      "poolCap": 500,
+      "target": 220
+    },
+    {
+      "openSessions": 500,
+      "poolCap": 500,
+      "target": 500
+    },
+    {
+      "openSessions": 600,
+      "poolCap": 500,
+      "target": 500
+    }
+  ],
+  "mintBatches": [
+    {
+      "target": 55,
+      "capCount": 0,
+      "poolCap": 500,
+      "mintBatch": 5
+    },
+    {
+      "target": 55,
+      "capCount": 53,
+      "poolCap": 500,
+      "mintBatch": 2
+    },
+    {
+      "target": 55,
+      "capCount": 55,
+      "poolCap": 500,
+      "mintBatch": 0
+    },
+    {
+      "target": 55,
+      "capCount": 60,
+      "poolCap": 500,
+      "mintBatch": 0
+    },
+    {
+      "target": 50,
+      "capCount": 50,
+      "poolCap": 50,
+      "mintBatch": 0
+    },
+    {
+      "target": 50,
+      "capCount": 48,
+      "poolCap": 50,
+      "mintBatch": 2
+    }
+  ]
+}

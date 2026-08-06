@@ -1,0 +1,442 @@
+{
+  "ZP_V1_PURPOSES": [
+    "zp-receive-expected-v1",
+    "zp-move-internal-expected-v1",
+    "zp-send-external-expected-v1",
+    "zp-send-external-approval-v1",
+    "zp-destination-bless-v1",
+    "zp-device-enrol-v1",
+    "zp-report-request-v1",
+    "zp-reporting-register-v1",
+    "zp-node-event-v1",
+    "zp-wallet-head-fingerprint-v1"
+  ],
+  "ZP1_RECEIVE_MESSAGE_PREFIX": "zp1:",
+  "ZP1_RECEIVE_MESSAGE_PATTERN_DESCRIPTION": "zp1:<discriminator>:<anchor>",
+  "REPORTING_HEADER_NAMES": [
+    "X-ZP-Reporting-Key-Id",
+    "X-ZP-Reporting-Timestamp",
+    "X-ZP-Reporting-Expires-At",
+    "X-ZP-Reporting-Nonce",
+    "X-ZP-Reporting-Signature"
+  ],
+  "TOTP_HEADER_NAME": "X-ZP-TOTP",
+  "ZP_HEADER_FAMILY": [
+    "X-ZP-Reporting-Key-Id",
+    "X-ZP-Reporting-Timestamp",
+    "X-ZP-Reporting-Expires-At",
+    "X-ZP-Reporting-Nonce",
+    "X-ZP-Reporting-Signature",
+    "X-ZP-TOTP"
+  ],
+  "ZUPAY_COMPAT_NAME": "zupay",
+  "ZUPAYMENTS_COMPAT_NAME": "zupayments",
+  "ZUPAY_NODE_DISCOVERY_PATH": "/.well-known/zupay-node",
+  "ZUPAYMENTS_SDK_ROUTE_PATH": "/sdk/zupayments.js",
+  "ZUPAYMENTS_PACKAGE_SCOPE_PREFIX": "@zupayments/",
+  "LEGACY_REPORTING_DOMAIN_PREFIXES": [
+    "zupay-reporting-v1",
+    "zupay-reporting-transport-v1",
+    "zupay-reporting-handshake-v1"
+  ],
+  "LEGACY_ZUPAY_HEADER_NAMES": [
+    "X-ZuPay-Node",
+    "X-ZuPay-Timestamp",
+    "X-ZuPay-Signature"
+  ],
+  "WALLET_SECRET_AAD_DOMAIN": "zp-wallet-secret-v1",
+  "FORBIDDEN_STATE_ALIASES": [
+    "RESERVED",
+    "OBSERVED",
+    "CONFIRMED",
+    "FINALISED",
+    "PAID",
+    "HELD",
+    "REFUNDED",
+    "SUBMITTED",
+    "FAILED",
+    "SETTLED"
+  ],
+  "FORBIDDEN_EVENT_ALIASES": [
+    "transfer.confirmed",
+    "transfer.finalised",
+    "sweep.settled",
+    "outbound.settled"
+  ],
+  "FORBIDDEN_EVENT_GLOBS": [
+    "reservation.*",
+    "payment.*",
+    "checkout.*",
+    "refund.*"
+  ],
+  "FORBIDDEN_ALIAS_EXCEPTIONS": {
+    "executionPhaseOnly": "SUBMIT_STARTED",
+    "afterLandingKindOnly": "HOLD"
+  },
+  "LITERAL_KINDS": [
+    "signed-purpose",
+    "wire-prefix",
+    "header",
+    "name"
+  ],
+  "REPLACEMENT_POLICY": {
+    "rule": "versioned-migration-only",
+    "forbidden": "repository-wide branding substitution",
+    "requirement": "Replacing any retained literal requires an explicitly versioned migration and compatibility plan — for a signed/hashed literal (signed-purpose, wire-prefix, or a byte-sensitive name), that means a NEW purpose/version string plus newly reviewed goldens, never an in-place rewrite of a `-v1` surface. It may never be a broad search-and-replace across the repository.",
+    "sourceDocCitation": "compat-literal-preservation"
+  },
+  "COMPATIBILITY_LITERAL_INVENTORY": [
+    {
+      "literal": "zp-receive-expected-v1",
+      "kind": "signed-purpose",
+      "definingContract": "receive-expected signing purpose (canonical suite tuple)",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/artifacts (full field-sequence/shape freeze); this module declares the bare purpose string independently, not gated on the artifacts shape freeze"
+    },
+    {
+      "literal": "zp-move-internal-expected-v1",
+      "kind": "signed-purpose",
+      "definingContract": "move-internal-expected signing purpose (canonical suite tuple)",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/artifacts (full field-sequence/shape freeze); this module declares the bare purpose string independently, not gated on the artifacts shape freeze"
+    },
+    {
+      "literal": "zp-send-external-expected-v1",
+      "kind": "signed-purpose",
+      "definingContract": "send-external-expected signing purpose (canonical suite tuple)",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/artifacts (full field-sequence/shape freeze); this module declares the bare purpose string independently, not gated on the artifacts shape freeze"
+    },
+    {
+      "literal": "zp-send-external-approval-v1",
+      "kind": "signed-purpose",
+      "definingContract": "send-external approval signing tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "docs-only — no code constructs this signing tuple yet"
+    },
+    {
+      "literal": "zp-destination-bless-v1",
+      "kind": "signed-purpose",
+      "definingContract": "destination-blessing signing tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "docs-only — no code constructs the destination-blessing tuple yet"
+    },
+    {
+      "literal": "zp-device-enrol-v1",
+      "kind": "signed-purpose",
+      "definingContract": "device-enrolment signing tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "docs-only — no code constructs the device-enrolment tuple yet"
+    },
+    {
+      "literal": "zp-report-request-v1",
+      "kind": "signed-purpose",
+      "definingContract": "reporting request signing tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples"
+    },
+    {
+      "literal": "zp-node-event-v1",
+      "kind": "signed-purpose",
+      "definingContract": "signed node-event tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples"
+    },
+    {
+      "literal": "zp-wallet-head-fingerprint-v1",
+      "kind": "signed-purpose",
+      "definingContract": "wallet-head semantic fingerprint (hashed, not signed)",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "docs-only — no code constructs the wallet-head fingerprint yet",
+      "notes": "Uses the same suite serializer + SHA-256 digest as the signed purposes above but is NOT Ed25519-signed — a fingerprint, not a signature."
+    },
+    {
+      "literal": "zp-wallet-secret-v1",
+      "kind": "signed-purpose",
+      "definingContract": "vault AEAD associated-data domain",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/vault",
+      "notes": "An AEAD associated-data (AAD) domain prefix — `zp-wallet-secret-v1\\n<node_id>\\n<wallet_id>\\n<key_version>\\n<public_key>\\n<key_origin>` — not an Ed25519-signed purpose. Grouped here because it follows the same domain-separated-literal convention this census protects."
+    },
+    {
+      "literal": "zp-reporting-register-v1",
+      "kind": "signed-purpose",
+      "definingContract": "reporting-key registration signing tuple",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-auth",
+      "notes": "The literal is machine-frozen in reporting-auth's register-tuple.ts, which is the byte authority for the tuple's own bytes."
+    },
+    {
+      "literal": "zp1:",
+      "kind": "wire-prefix",
+      "definingContract": "on-chain receive-message prefix",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "packages/generic-node-contracts/src/transfer-code",
+      "notes": "Construction: \"zp1:\" + discriminator + \":\" + anchor (see construction-sites.contract.ts)."
+    },
+    {
+      "literal": "X-ZP-TOTP",
+      "kind": "header",
+      "definingContract": "admin TOTP gate header",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "legacy-v1: apps/node/src/auth/totp-gate.ts verifyTotpForMutation primitive, read via c.req.header(\"x-zp-totp\") at every money-mutation route; sent via packages/vault-client/src/node-control/node-client.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZP-Reporting-Key-Id",
+      "kind": "header",
+      "definingContract": "reporting request headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples — request-tuple.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name. Selects the reporting-key registration; it is NOT itself a signed field."
+    },
+    {
+      "literal": "X-ZP-Reporting-Timestamp",
+      "kind": "header",
+      "definingContract": "reporting request headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples — request-tuple.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZP-Reporting-Expires-At",
+      "kind": "header",
+      "definingContract": "reporting request headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples — request-tuple.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZP-Reporting-Nonce",
+      "kind": "header",
+      "definingContract": "reporting request headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples — request-tuple.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZP-Reporting-Signature",
+      "kind": "header",
+      "definingContract": "reporting request headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/reporting-tuples — request-tuple.ts",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZuPay-Node",
+      "kind": "header",
+      "definingContract": "legacy v1 ingest transport headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/transport-signer.ts INGEST_HEADERS.node",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name. Distinct legacy family: spells the full \"ZuPay\" word, not the \"ZP\" abbreviation — does not literally match the \"X-ZP-*\" clause but is retained under the \"zupay\" compatibility-name clause instead (disjoint from, and unchanged by, the v2 reporting contract)."
+    },
+    {
+      "literal": "X-ZuPay-Timestamp",
+      "kind": "header",
+      "definingContract": "legacy v1 ingest transport headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/transport-signer.ts INGEST_HEADERS.timestamp",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "X-ZuPay-Signature",
+      "kind": "header",
+      "definingContract": "legacy v1 ingest transport headers",
+      "caseSensitive": false,
+      "byteSensitive": false,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/transport-signer.ts INGEST_HEADERS.signature",
+      "notes": "Header NAME case is not wire-significant (RFC 7230); the spelling here is the canonical documented/construction casing used at every call site. Case sensitivity binds the signed tuple field VALUES the header carries, not the header name."
+    },
+    {
+      "literal": "zupay",
+      "kind": "name",
+      "definingContract": "retained compatibility name",
+      "caseSensitive": true,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/scan/allowlist.d99.ts (this package)"
+    },
+    {
+      "literal": "zupayments",
+      "kind": "name",
+      "definingContract": "retained compatibility name",
+      "caseSensitive": true,
+      "byteSensitive": false,
+      "machineFrozenAt": "packages/generic-node-contracts/src/scan/allowlist.d99.ts (this package)"
+    },
+    {
+      "literal": "zupay-reporting-v1",
+      "kind": "name",
+      "definingContract": "legacy v1 per-event ingest signing domain (disjoint from and unchanged by the v2 contract)",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/envelope.ts REPORTING_PER_EVENT_DOMAIN; apps/platform/src/server/ingest/auth-verifier.ts PER_EVENT_PREFIX",
+      "notes": "A legacy Ed25519-signed domain prefix (hashed into the per-event reporting signature) — byte/case-sensitive despite being classified \"name\" (it spells the full \"zupay\" word per the compatibility-name clause, not the \"zp-*-v1\" purpose clause)."
+    },
+    {
+      "literal": "zupay-reporting-transport-v1",
+      "kind": "name",
+      "definingContract": "legacy v1 transport ingest signing domain",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/transport-signer.ts REPORTING_TRANSPORT_DOMAIN; apps/platform/src/server/ingest/auth-verifier.ts TRANSPORT_PREFIX"
+    },
+    {
+      "literal": "zupay-reporting-handshake-v1",
+      "kind": "name",
+      "definingContract": "legacy v1 handshake ingest signing domain",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "legacy-v1: apps/node/src/reporting/handshake-signer.ts REPORTING_HANDSHAKE_DOMAIN; apps/platform/src/nodes/handshake.ts + reporting-test-signer.ts HANDSHAKE_PREFIX"
+    },
+    {
+      "literal": "/.well-known/zupay-node",
+      "kind": "name",
+      "definingContract": "retained discovery route path",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "legacy-v1: apps/node/src/health/routes.ts (route mount); apps/platform/src/nodes/handshake.ts WELL_KNOWN_PATH; ALSO re-frozen for v2 in packages/generic-node-contracts/src/operations/routes.contract.ts PUBLIC_ROUTES — the same literal path, not a second competing spelling.",
+      "notes": "A route path, not a signed literal — byte-sensitive because router path matching is exact-string."
+    },
+    {
+      "literal": "/sdk/zupayments.js",
+      "kind": "name",
+      "definingContract": "retained SDK route path",
+      "caseSensitive": true,
+      "byteSensitive": true,
+      "machineFrozenAt": "legacy-v1: apps/node/src/checkout/sdk-route.ts (route mount)"
+    },
+    {
+      "literal": "@zupayments/",
+      "kind": "name",
+      "definingContract": "retained v1 package scope (@zucoins/* v2, @zupayments/* v1, disjoint)",
+      "caseSensitive": true,
+      "byteSensitive": false,
+      "machineFrozenAt": "legacy-v1: package.json \"name\" of apps/platform, apps/platform/dashboard, apps/node, apps/node/admin, packages/widget, packages/vault-client, packages/splitchain, packages/shared",
+      "notes": "No migration is needed: the generic core lives entirely under the net-new @zucoins/* scope, so there is no naming collision to resolve."
+    }
+  ],
+  "LITERAL_CONSTRUCTION_SITES": [
+    {
+      "family": "suite-signed-tuple (zp-*-v1 purposes)",
+      "rule": "preimage_text = purpose + \"\\n\" + JSON.stringify(payload_object); preimage_bytes = UTF8(preimage_text); digest = lowercase_hex(SHA256(preimage_bytes)); signature = padded_base64url(Ed25519.sign(preimage_bytes, signing_key)). `purpose` appears twice by design — once as the domain-separation prefix, once as payload field 1 — and a verifier requires both copies to equal the expected literal before checking the signature.",
+      "appliesTo": [
+        "zp-receive-expected-v1",
+        "zp-move-internal-expected-v1",
+        "zp-send-external-expected-v1",
+        "zp-send-external-approval-v1",
+        "zp-destination-bless-v1",
+        "zp-device-enrol-v1",
+        "zp-report-request-v1",
+        "zp-node-event-v1",
+        "zp-reporting-register-v1"
+      ],
+      "owningConcern": "artifacts (three expected artifacts); reporting-tuples (report-request, node-event); reporting-auth (reporting-register); unassigned (approval, bless, device-enrol — see inventory.contract.ts gaps)",
+      "sourceDocCitation": "canonical suite-tuple serialization rule"
+    },
+    {
+      "family": "wallet-head semantic fingerprint (zp-wallet-head-fingerprint-v1)",
+      "rule": "Same suite serializer and SHA-256 digest as the signed-tuple family above, but the result is NOT Ed25519-signed — it is a fingerprint used for equality comparison, never a signature.",
+      "appliesTo": [
+        "zp-wallet-head-fingerprint-v1"
+      ],
+      "owningConcern": "unassigned (future proof concern)",
+      "sourceDocCitation": "wallet-head fingerprint rule"
+    },
+    {
+      "family": "SplitChain receive-message prefix (zp1:)",
+      "rule": "\"zp1:\" + discriminator + \":\" + anchor. `discriminator` is the operation UUID (fixed width); `anchor` matches ^[A-Za-z0-9_-]{1,96}$. The fixed-width UUID and constrained anchor alphabet make the split unambiguous. No whitespace or normalization is added.",
+      "appliesTo": [
+        "zp1:"
+      ],
+      "owningConcern": "transfer-code (packages/generic-node-contracts/src/transfer-code)",
+      "sourceDocCitation": "receive-message construction rule"
+    },
+    {
+      "family": "transfer-code digest",
+      "rule": "transfer_code_sha256 = lowercase_hex(SHA256(UTF8(exact_transfer_code_string))). No newline, URL-decode, base64-decode, padding repair, or JSON parse occurs before hashing.",
+      "appliesTo": [],
+      "owningConcern": "transfer-code (packages/generic-node-contracts/src/transfer-code)",
+      "sourceDocCitation": "transfer-code digest rule"
+    },
+    {
+      "family": "vault AAD (zp-wallet-secret-v1)",
+      "rule": "Exact UTF-8 associated data: \"zp-wallet-secret-v1\\n\" + node_id + \"\\n\" + wallet_id + \"\\n\" + key_version + \"\\n\" + public_key + \"\\n\" + key_origin. Decryption rejects any AAD mismatch.",
+      "appliesTo": [
+        "zp-wallet-secret-v1"
+      ],
+      "owningConcern": "vault (packages/generic-node-contracts/src/vault)",
+      "sourceDocCitation": "vault AAD rule"
+    },
+    {
+      "family": "reporting-request header set (X-ZP-Reporting-*)",
+      "rule": "Five mandatory headers map onto the zp-report-request-v1 signed tuple's fields; the signature covers method, canonical path/query, request-body SHA-256, nonce, issued_at, and expires_at. Key-Id is a registration SELECTOR, not itself a signed field.",
+      "appliesTo": [
+        "X-ZP-Reporting-Key-Id",
+        "X-ZP-Reporting-Timestamp",
+        "X-ZP-Reporting-Expires-At",
+        "X-ZP-Reporting-Nonce",
+        "X-ZP-Reporting-Signature"
+      ],
+      "owningConcern": "reporting-tuples (packages/generic-node-contracts/src/reporting-tuples)",
+      "sourceDocCitation": "reporting request-tuple rule"
+    },
+    {
+      "family": "legacy reporting-ingest signed domain prefixes + X-ZuPay-* transport headers",
+      "rule": "Pre-existing v1 platform-ingest push path: per-event, transport, and handshake domain-separated Ed25519 signatures over their respective canonical strings. Disjoint from and unchanged by the v2 generic-node reporting contract (explicit no-repurpose) — v2 code must never fold these into or re-derive them from the new zp-*-v1 family.",
+      "appliesTo": [
+        "zupay-reporting-v1",
+        "zupay-reporting-transport-v1",
+        "zupay-reporting-handshake-v1",
+        "X-ZuPay-Node",
+        "X-ZuPay-Timestamp",
+        "X-ZuPay-Signature"
+      ],
+      "owningConcern": "legacy v1 (apps/node/src/reporting/*, apps/platform/src/{nodes,server/ingest}/*)",
+      "sourceDocCitation": "legacy v1 ingest signatures (disjoint from v2 reporting)"
+    },
+    {
+      "family": "discovery/API route paths + package scope (zupay/zupayments names)",
+      "rule": "Established v1 route and npm-scope literals. The v2 generic core introduces net-new paths and an entirely separate npm scope (@zucoins/*), so there is no collision and no rename to perform — the legacy literal is retained unmodified because nothing requires it to change. `/.well-known/zupay-node` is additionally re-frozen, unmodified, as a v2 public route by the operations concern — the same literal path in two owning concerns by design, not a drift.",
+      "appliesTo": [
+        "/.well-known/zupay-node",
+        "/sdk/zupayments.js",
+        "@zupayments/"
+      ],
+      "owningConcern": "legacy v1; /.well-known/zupay-node ALSO operations (packages/generic-node-contracts/src/operations/routes.contract.ts PUBLIC_ROUTES)",
+      "sourceDocCitation": "retained v1 routes and package scope"
+    }
+  ],
+  "CANONICAL_VERSION_FOR_PURPOSE": {
+    "zp-receive-expected-v1": 1,
+    "zp-move-internal-expected-v1": 1,
+    "zp-send-external-expected-v1": 1,
+    "zp-send-external-approval-v1": 1,
+    "zp-destination-bless-v1": 1,
+    "zp-device-enrol-v1": 1,
+    "zp-report-request-v1": 1,
+    "zp-reporting-register-v1": 1,
+    "zp-node-event-v1": 1,
+    "zp-wallet-head-fingerprint-v1": 1
+  },
+  "CANONICAL_VERSION_V1": 1
+}

@@ -1,0 +1,68 @@
+# Local / VPS reference compose for generic-node.
+# Primary secret path: scripts/generate-secrets.mjs → .env.local (gitignored).
+# Railway alt: one-click ${{secret()}} generators in test/railway-template-catalog.ts.
+#
+# Usage:
+#   node apps/generic-node/scripts/generate-secrets.mjs --out apps/generic-node/deploy/.env.local \
+#     --public-base-url http://127.0.0.1:8787
+#   cd apps/generic-node/deploy && docker compose --env-file .env.local up -d
+#   open $SETUP_URL   # printed by generator — http://127.0.0.1:8787/setup
+#
+# Requires: Docker + Compose v2. Postgres is included. Gateway URL defaults to
+# the public SplitChain entry (override SPLITCHAIN_GATEWAY_URLS for lab).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zunode
+      POSTGRES_PASSWORD: zunode
+      POSTGRES_DB: zunode
+    ports:
+      - "5433:5432"
+    volumes:
+      - zunode-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zunode -d zunode"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  zunode:
+    build:
+      context: ../../..
+      dockerfile: apps/generic-node/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8787:8080"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_URL: postgresql://zunode:zunode@postgres:5432/zunode
+      PORT: "8080"
+      BIND_HOST: "0.0.0.0"
+      # Secrets MUST come from env_file / host env (generator) — never baked in image.
+      NODE_ID: ${NODE_ID:?run generate-secrets.mjs first}
+      VAULT_MASTER_KEY: ${VAULT_MASTER_KEY:?run generate-secrets.mjs first}
+      BACKUP_MASTER_KEY: ${BACKUP_MASTER_KEY:?run generate-secrets.mjs first}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?run generate-secrets.mjs first}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:8787}
+      SPLITCHAIN_GATEWAY_URLS: ${SPLITCHAIN_GATEWAY_URLS:-https://gateway-entry-1-q2whsu3jlj.splitchain.com/}
+      BACKUP_SCHEDULE_ENABLED: ${BACKUP_SCHEDULE_ENABLED:-true}
+      BACKUP_OUTPUT_DIR: /var/lib/generic-node/backups
+      NODE_ENV: ${NODE_ENV:-development}
+    volumes:
+      - zunode-backups:/var/lib/generic-node/backups
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+
+volumes:
+  zunode-pg:
+  zunode-backups:

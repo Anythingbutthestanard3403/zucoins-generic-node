@@ -1,0 +1,2156 @@
+{
+  "schema": "generic-node-redesign-v2",
+  "censusId": "generic-node-schema-census",
+  "docsRead": [
+    "packages/node-core/test/data-model.fixture.md"
+  ],
+  "schemaFiles": [
+    "admin-sessions-node-id.sql",
+    "approval-stores.sql",
+    "audit-log.sql",
+    "base-enums-domains.sql",
+    "custody-eligibility.sql",
+    "device-enrollment-challenges.sql",
+    "device-keys.sql",
+    "event-ledger.sql",
+    "expected-artifacts.sql",
+    "gateway-observation-successor-indexes.sql",
+    "implementer-credentials.sql",
+    "implementer-event-stream.sql",
+    "landing-proof-verifications.sql",
+    "lease-foundation.sql",
+    "lineage-path-proofs.sql",
+    "move-baseline-binding.sql",
+    "move-observation-evidence.sql",
+    "node-events-seq-composite-pk.sql",
+    "node-implementer-registry.sql",
+    "node-signing-key-sealed-store.sql",
+    "observation-anomaly-indexes.sql",
+    "observation-ledger.sql",
+    "observation-stores.sql",
+    "operational-stores.sql",
+    "operations-response-columns.sql",
+    "operations.sql",
+    "privileges.sql",
+    "proof-body-store.sql",
+    "push-subscriptions.sql",
+    "receive-admission.sql",
+    "receive-arms.sql",
+    "receive-codes.sql",
+    "receive-expiry-release.sql",
+    "receive-external-landing.sql",
+    "reporting-persistence.sql",
+    "reporting-rate-limit-buckets-pk-collapse.sql",
+    "reporting-security-ports.sql",
+    "send-external-create.sql",
+    "send-external-expiry.sql",
+    "send-external-landing.sql",
+    "session-subscription-stores.sql",
+    "signer-support.sql",
+    "signing-key-registry.sql",
+    "submit-attempts.sql",
+    "transaction-material.sql",
+    "vault.sql",
+    "verification-access-windows.sql",
+    "verification-acknowledgements.sql",
+    "verification-proofs.sql",
+    "wallet-settled-ledger.sql"
+  ],
+  "summary": {
+    "nounsChecked": 39,
+    "nounsOk": 39,
+    "nounsFailed": 0,
+    "foreignKeysChecked": 187,
+    "accessPatternsChecked": 12,
+    "failureCount": 0,
+    "byClass": {
+      "missing_store": 0,
+      "orphan_fk": 0,
+      "unsafe_cascade": 0,
+      "unindexed_query": 0,
+      "excluded_present": 0,
+      "docs_unread": 0,
+      "undispositioned_spec_table": 0,
+      "stale_spec_disposition": 0
+    }
+  },
+  "nouns": [
+    {
+      "id": "node-scope.pool-membership",
+      "noun": "pool membership / counters",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "node-core",
+          "section": "receive pool limits"
+        }
+      ],
+      "satisfiedBy": "table:wallet_active_leases",
+      "retentionClass": "active lease projection / operational",
+      "ok": true
+    },
+    {
+      "id": "node-scope.reporting-nonces",
+      "noun": "reporting nonces",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "data-model",
+          "section": "reporting registry / operation artifacts"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        }
+      ],
+      "satisfiedBy": "table:reporting_request_nonces",
+      "retentionClass": "mutation/register burns permanent",
+      "ok": true
+    },
+    {
+      "id": "node-scope.subscription-handles",
+      "noun": "subscription handles",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy / receive creation / event stream"
+        },
+        {
+          "doc": "operation-flows",
+          "section": "request admission durable side effects"
+        }
+      ],
+      "satisfiedBy": "table:subscription_handles",
+      "ok": true
+    },
+    {
+      "id": "node-scope.callback-registrations",
+      "noun": "callback registrations / deliveries",
+      "disposition": "excluded",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "operation-flows",
+          "section": "request admission durable side effects / operation lifecycle"
+        },
+        {
+          "doc": "decision:no-network-egress",
+          "section": "full decision"
+        }
+      ],
+      "satisfiedBy": "NONE (excluded-by-canon)",
+      "authority": "no-network-egress decision: remove callback_url and every node-initiated callback surface",
+      "ok": true
+    },
+    {
+      "id": "node-scope.signer-audit",
+      "noun": "signer audit",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "node-core",
+          "section": "durable runtime facts"
+        }
+      ],
+      "satisfiedBy": "table:signer_audit",
+      "retentionClass": "permanent / append-only",
+      "ok": true
+    },
+    {
+      "id": "node-scope.worker-leader-state",
+      "noun": "worker / leader state",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "node-core",
+          "section": "durable runtime facts"
+        },
+        {
+          "doc": "data-model",
+          "section": "retention matrix"
+        }
+      ],
+      "satisfiedBy": "table:worker_cursors",
+      "retentionClass": "operational",
+      "ok": true
+    },
+    {
+      "id": "node-scope.credentials",
+      "noun": "credentials (implementer reporting keys / node signing keys)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        },
+        {
+          "doc": "data-model",
+          "section": "reporting registry"
+        }
+      ],
+      "satisfiedBy": "table:implementer_reporting_keys",
+      "retentionClass": "reporting key lifecycle permanent",
+      "ok": true
+    },
+    {
+      "id": "node-scope.admin-sessions",
+      "noun": "admin sessions",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        }
+      ],
+      "satisfiedBy": "table:admin_sessions",
+      "ok": true
+    },
+    {
+      "id": "node-scope.totp-burns",
+      "noun": "TOTP burns",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        }
+      ],
+      "satisfiedBy": "table:totp_timestep_burns",
+      "retentionClass": "permanent / insert-only",
+      "ok": true
+    },
+    {
+      "id": "node-scope.blessing-artifacts",
+      "noun": "blessing artifacts",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "data-model",
+          "section": "custody tables"
+        },
+        {
+          "doc": "api-contract",
+          "section": "operator custody endpoints"
+        }
+      ],
+      "satisfiedBy": "table:destination_blessing_artifacts",
+      "retentionClass": "wallet origin/blessing/recovery evidence permanent",
+      "ok": true
+    },
+    {
+      "id": "node-scope.candidate-manifests",
+      "noun": "candidate manifests (PROOF_CHANNEL bodies + external partial material)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "operation-flows",
+          "section": "candidate intake"
+        },
+        {
+          "doc": "data-model",
+          "section": "transaction material / proof-channel candidate bodies"
+        }
+      ],
+      "satisfiedBy": "table:proof_channel_candidate_bodies",
+      "retentionClass": "permanent / verbatim",
+      "ok": true
+    },
+    {
+      "id": "node-scope.gateway-read-intents",
+      "noun": "gateway read intents / observation capture",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-scope",
+          "section": "scope line"
+        },
+        {
+          "doc": "node-core",
+          "section": "durable runtime facts / idempotency"
+        },
+        {
+          "doc": "operation-flows",
+          "section": "request admission"
+        }
+      ],
+      "satisfiedBy": "table:gateway_observations",
+      "retentionClass": "changed raw observation permanent",
+      "ok": true
+    },
+    {
+      "id": "gap.destinations-blessing-artifact-fk-target",
+      "noun": "destinations.blessing_artifact_id FK target table",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "custody tables"
+        },
+        {
+          "doc": "node-scope",
+          "section": "named gap"
+        }
+      ],
+      "satisfiedBy": "table:destination_blessing_artifacts",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "node-core.operations",
+      "noun": "operations (guarded mutation identity)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-core",
+          "section": "guarded mutation identity"
+        }
+      ],
+      "satisfiedBy": "table:operations",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "node-core.wallet-leases",
+      "noun": "single active wallet lease",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-core",
+          "section": "durable runtime facts / lease discipline"
+        }
+      ],
+      "satisfiedBy": "table:wallet_active_leases",
+      "retentionClass": "active lease projection",
+      "ok": true
+    },
+    {
+      "id": "node-core.node-settings",
+      "noun": "node settings (pool/queue constants)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-core",
+          "section": "receive pool limits"
+        }
+      ],
+      "satisfiedBy": "table:node_settings",
+      "retentionClass": "operational",
+      "ok": true
+    },
+    {
+      "id": "node-core.operator-halts",
+      "noun": "operator halt state",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "node-core",
+          "section": "durable runtime facts"
+        }
+      ],
+      "satisfiedBy": "table:operator_halts",
+      "retentionClass": "operational",
+      "ok": true
+    },
+    {
+      "id": "data-model.wallets",
+      "noun": "wallets",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "custody tables"
+        }
+      ],
+      "satisfiedBy": "table:wallets",
+      "retentionClass": "wallet ciphertext / origin permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.destinations",
+      "noun": "destinations",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "custody tables"
+        }
+      ],
+      "satisfiedBy": "table:destinations",
+      "retentionClass": "blessing/recovery evidence permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.wallet-recovery-verifications",
+      "noun": "wallet recovery verifications",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "custody tables"
+        }
+      ],
+      "satisfiedBy": "table:wallet_recovery_verifications",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.operation-transactions",
+      "noun": "operation_transactions (SplitChain preimages/signatures)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "transaction material"
+        }
+      ],
+      "satisfiedBy": "table:operation_transactions",
+      "retentionClass": "permanent, verbatim",
+      "ok": true
+    },
+    {
+      "id": "data-model.submit-attempts",
+      "noun": "submit attempts / decisions",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "submit decisions and attempts"
+        }
+      ],
+      "satisfiedBy": "table:gateway_submit_attempts",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.gateway-observations",
+      "noun": "gateway_observations",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "observation ledger"
+        }
+      ],
+      "satisfiedBy": "table:gateway_observations",
+      "retentionClass": "changed raw observation permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.observation-anomalies",
+      "noun": "observation_anomalies",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "observation ledger"
+        }
+      ],
+      "satisfiedBy": "table:observation_anomalies",
+      "retentionClass": "anomaly raw observation permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.node-events",
+      "noun": "node_events (signed event ledger)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "event ledger"
+        }
+      ],
+      "satisfiedBy": "table:node_events",
+      "retentionClass": "signed node event permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.implementer-events",
+      "noun": "implementer-scoped continuity stream (zp-implementer-event-v1) + its gapless implementer_seq cursor",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "implementer event stream / retention matrix (implementer event)"
+        },
+        {
+          "doc": "api-contract",
+          "section": "implementer event stream"
+        }
+      ],
+      "satisfiedBy": "table:implementer_events",
+      "retentionClass": "implementer event permanent / append-only",
+      "ok": true
+    },
+    {
+      "id": "data-model.implementer-state-snapshots",
+      "noun": "latest implementer state snapshot (GET /v1/state/snapshot serving row)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "api-contract",
+          "section": "state snapshot"
+        }
+      ],
+      "satisfiedBy": "table:implementer_state_snapshots",
+      "retentionClass": "latest-snapshot projection / operational",
+      "ok": true
+    },
+    {
+      "id": "data-model.implementer-checkpoints",
+      "noun": "implementer checkpoint stream (zp-implementer-checkpoint-v1) served on GET /v1/events checkpoints[]",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "implementer event stream / retention matrix (implementer checkpoint)"
+        },
+        {
+          "doc": "api-contract",
+          "section": "event checkpoints"
+        }
+      ],
+      "satisfiedBy": "table:implementer_checkpoints",
+      "retentionClass": "implementer checkpoint permanent / anti-rollback",
+      "ok": true
+    },
+    {
+      "id": "data-model.audit-log",
+      "noun": "audit_log",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "audit log"
+        }
+      ],
+      "satisfiedBy": "table:audit_log",
+      "retentionClass": "audit log permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.vault",
+      "noun": "vault (wallet ciphertext)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "wallet vault"
+        }
+      ],
+      "satisfiedBy": "table:vault",
+      "retentionClass": "while wallet exists",
+      "ok": true
+    },
+    {
+      "id": "data-model.recovery-nonces",
+      "noun": "recovery_nonces",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "device-key store shape / recovery"
+        }
+      ],
+      "satisfiedBy": "table:recovery_nonces",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.expected-artifacts",
+      "noun": "operation expected artifacts",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "operation artifacts / move baseline"
+        }
+      ],
+      "satisfiedBy": "table:operation_expected_artifacts",
+      "retentionClass": "permanent / insert-only",
+      "ok": true
+    },
+    {
+      "id": "data-model.external-send-sign-intents",
+      "noun": "external_send_sign_intents",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "transaction material"
+        }
+      ],
+      "satisfiedBy": "table:external_send_sign_intents",
+      "retentionClass": "permanent, verbatim",
+      "ok": true
+    },
+    {
+      "id": "data-model.external-send-partials",
+      "noun": "external_send_partials",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "transaction material"
+        }
+      ],
+      "satisfiedBy": "table:external_send_partials",
+      "retentionClass": "permanent, verbatim",
+      "ok": true
+    },
+    {
+      "id": "data-model.reporting-mutation-idempotency",
+      "noun": "reporting_mutation_idempotency",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "operation artifacts"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        }
+      ],
+      "satisfiedBy": "table:reporting_mutation_idempotency",
+      "retentionClass": "permanent",
+      "ok": true
+    },
+    {
+      "id": "data-model.device-keys",
+      "noun": "operator_device_keys",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "data-model",
+          "section": "device keys and approvals"
+        },
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        }
+      ],
+      "satisfiedBy": "table:operator_device_keys",
+      "retentionClass": "lifecycle permanent",
+      "ok": true
+    },
+    {
+      "id": "api-contract.nodes-implementers",
+      "noun": "nodes + implementers registry",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "api-contract",
+          "section": "authentication and tenancy"
+        },
+        {
+          "doc": "data-model",
+          "section": "reporting registry"
+        }
+      ],
+      "satisfiedBy": "table:nodes",
+      "ok": true
+    },
+    {
+      "id": "operation-flows.lease-groups",
+      "noun": "lease groups (receive create DB-TX)",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "operation-flows",
+          "section": "request admission durable side effects"
+        }
+      ],
+      "satisfiedBy": "table:lease_groups",
+      "retentionClass": "lease group history permanent",
+      "ok": true
+    },
+    {
+      "id": "operation-flows.idempotency",
+      "noun": "operation idempotency key",
+      "disposition": "required",
+      "sources": [
+        {
+          "doc": "operation-flows",
+          "section": "request admission durable side effects"
+        },
+        {
+          "doc": "node-core",
+          "section": "idempotency"
+        }
+      ],
+      "satisfiedBy": "column:operations.idempotency_key",
+      "ok": true
+    }
+  ],
+  "failures": [],
+  "foreignKeys": [
+    {
+      "source": "operator_device_keys(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "approval_challenges(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "approval_challenges(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "approval_challenges(superseded_by)",
+      "target": "approval_challenges(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_approvals(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_approvals(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_approvals(device_key_id)",
+      "target": "operator_device_keys(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_approvals(challenge_id,node_id,operation_id,challenge_status)",
+      "target": "approval_challenges(id,node_id,operation_id,status)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "audit_log(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "audit_log(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "audit_log(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallets(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_recovery_verifications(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallets(recovery_verification_id)",
+      "target": "wallet_recovery_verifications(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "destinations(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "destinations(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_active_leases(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "device_enrollment_challenges(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "device_enrollment_challenges(superseded_by)",
+      "target": "device_enrollment_challenges(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operator_device_keys(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_event_seq_counters(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_events(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_events(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_events(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_events(signing_key_id)",
+      "target": "node_signing_keys(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_expected_artifacts(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_expected_artifacts(signing_key_id)",
+      "target": "node_signing_keys(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_credentials(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_credentials(rotated_from_id)",
+      "target": "implementer_credentials(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_credentials(rotated_to_id)",
+      "target": "implementer_credentials(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_landing_proofs(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_landing_proofs(verifier_observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_landing_proofs(operation_id,expected_transaction_attempt_no)",
+      "target": "operation_transactions(operation_id,attempt_no)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(verifier_observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(terminal_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(landing_proof_id,operation_id,verifier_observer_id)",
+      "target": "operation_landing_proofs(id,operation_id,verifier_observer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lease_group_operations(lease_group_id)",
+      "target": "lease_groups(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_lease_memberships(lease_group_id)",
+      "target": "lease_groups(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_active_leases(membership_id)",
+      "target": "wallet_lease_memberships(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_active_leases(lease_group_id)",
+      "target": "lease_groups(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lineage_path_proofs(landing_proof_id)",
+      "target": "operation_landing_proofs(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lineage_path_proofs(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lineage_path_proofs(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lineage_path_proofs(fresh_head_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "lineage_path_bodies(path_proof_id)",
+      "target": "lineage_path_proofs(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "move_observation_evidence(source_t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "observation_anomalies(observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "observation_anomalies(observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "observation_anomalies(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "observation_anomalies(prior_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_observations(observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_observations(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_observations(previous_recorded_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_observation_cursors(observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_observation_cursors(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_observation_cursors(last_recorded_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(source_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(receiver_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(destination_id)",
+      "target": "destinations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(after_landing_destination_id)",
+      "target": "destinations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(spawned_from_operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operations(references_operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_wallets(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_wallets(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "push_subscriptions(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_operations(destination_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_operations(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_operations(destination_id)",
+      "target": "destinations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(operation_id)",
+      "target": "receive_codes(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(operation_id,node_id,implementer_id)",
+      "target": "operations(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(reporting_nonce_id,node_id,implementer_id,reporting_purpose,route_id,request_class,retention_class,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose,route_id,request_class,retention_class,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(mutation_idempotency_id,node_id,implementer_id,route_id,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_mutation_idempotency(id,node_id,implementer_id,route_id,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_arms(node_t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_codes(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_codes(receiver_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_codes(expected_artifact_id)",
+      "target": "operation_expected_artifacts(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_codes(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_release_proofs(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_release_proofs(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_expiry_events(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_expiry_attention_events(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_landing_proofs(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_landing_path_bodies(operation_id)",
+      "target": "receive_landing_proofs(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_landing_events(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_reporting_keys(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_reporting_keys(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_bootstrap_evidence(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_bootstrap_evidence(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_bootstrap_evidence(new_reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_nonce_burn_counters(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_request_nonces(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_request_nonces(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_request_nonces(reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_request_nonces(new_reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_request_nonces(bootstrap_evidence_id,node_id,implementer_id,new_reporting_key_id)",
+      "target": "reporting_key_bootstrap_evidence(id,node_id,implementer_id,new_reporting_key_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(new_reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(supersedes_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(authorizing_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(bootstrap_evidence_id,node_id,implementer_id,new_reporting_key_id)",
+      "target": "reporting_key_bootstrap_evidence(id,node_id,implementer_id,new_reporting_key_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(nonce_evidence_id,node_id,implementer_id,registration_purpose,new_reporting_key_id,bootstrap_evidence_id,proof_of_possession_preimage_text,proof_of_possession_preimage_sha256,proof_of_possession_signature,issued_at,expires_at)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose,new_reporting_key_id,bootstrap_evidence_id,request_preimage_text,request_preimage_sha256,request_signature,issued_at,expires_at)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_enrolment_evidence(nonce_evidence_id,node_id,implementer_id,registration_purpose,new_reporting_key_id,supersedes_key_id,proof_of_possession_preimage_text,proof_of_possession_preimage_sha256,proof_of_possession_signature,issued_at,expires_at)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose,new_reporting_key_id,reporting_key_id,request_preimage_text,request_preimage_sha256,request_signature,issued_at,expires_at)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_states(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_states(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_states(reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(current_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(prior_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(current_key_id,node_id,implementer_id,successor_registered_at)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id,registered_at)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(nonce_evidence_id,node_id,implementer_id,nonce_purpose)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(enrolment_evidence_id,node_id,implementer_id,nonce_evidence_id,current_key_id)",
+      "target": "reporting_key_enrolment_evidence(id,node_id,implementer_id,nonce_evidence_id,new_reporting_key_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_events(previous_event_id,node_id,implementer_id,previous_epoch,previous_event_hash)",
+      "target": "reporting_key_lifecycle_events(id,node_id,implementer_id,epoch,event_hash)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_state_transitions(lifecycle_event_id,node_id,implementer_id,lifecycle_epoch,event_type)",
+      "target": "reporting_key_lifecycle_events(id,node_id,implementer_id,epoch,event_type)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_state_transitions(reporting_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_state_transitions(from_state_row_id,node_id,implementer_id,reporting_key_id,from_lifecycle_epoch,from_state)",
+      "target": "reporting_key_lifecycle_states(id,node_id,implementer_id,reporting_key_id,lifecycle_epoch,state)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_state_transitions(to_state_row_id,node_id,implementer_id,reporting_key_id,to_lifecycle_epoch,to_state)",
+      "target": "reporting_key_lifecycle_states(id,node_id,implementer_id,reporting_key_id,lifecycle_epoch,state)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_states(lifecycle_event_id,node_id,implementer_id,lifecycle_epoch)",
+      "target": "reporting_key_lifecycle_events(id,node_id,implementer_id,epoch)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_heads(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_heads(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_heads(current_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_heads(prior_key_id,node_id,implementer_id)",
+      "target": "implementer_reporting_keys(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_key_lifecycle_heads(lifecycle_event_id,node_id,implementer_id,epoch,current_key_id,prior_key_id,overlap_expires_at,auth_hold)",
+      "target": "reporting_key_lifecycle_events(id,node_id,implementer_id,epoch,current_key_id,prior_key_id,overlap_expires_at,auth_hold)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_mutation_idempotency(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_mutation_idempotency(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_mutation_idempotency(reporting_nonce_id,node_id,implementer_id,route_id,method,raw_target,body_sha256,logical_fingerprint)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,route_id,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_restore_state(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "reporting_rate_limit_buckets(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "send_operations(source_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "send_operation_expected_artifacts(operation_id)",
+      "target": "send_operations(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_attention_events(operation_id)",
+      "target": "send_operations(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_landing_records(operation_id)",
+      "target": "send_operations(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_landing_events(operation_id)",
+      "target": "send_operations(operation_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "recovery_nonces(superseded_by)",
+      "target": "recovery_nonces(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "destinations(blessing_artifact_id)",
+      "target": "destination_blessing_artifacts(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_reporting_keys(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "implementer_reporting_keys(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "node_signing_keys(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "submit_decisions(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "submit_decisions(operation_id,transaction_attempt_no)",
+      "target": "operation_transactions(operation_id,attempt_no)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_submit_attempts(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_submit_attempts(decision_id,operation_id,transaction_attempt_no)",
+      "target": "submit_decisions(id,operation_id,transaction_attempt_no)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "gateway_submit_attempts(operation_id,transaction_attempt_no)",
+      "target": "operation_transactions(operation_id,attempt_no)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_sign_intents(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_sign_intents(approval_id)",
+      "target": "operation_approvals(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_sign_intents(source_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_transactions(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_partials(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "external_send_partials(approval_id)",
+      "target": "operation_approvals(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "vault(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(operation_id,node_id,implementer_id)",
+      "target": "operations(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(reporting_nonce_id,node_id,implementer_id,reporting_purpose,route_id,request_class,retention_class,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose,route_id,request_class,retention_class,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(mutation_idempotency_id,node_id,implementer_id,route_id,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_mutation_idempotency(id,node_id,implementer_id,route_id,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(acknowledgement_id)",
+      "target": "verification_acknowledgements(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(terminal_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(verifier_observer_id)",
+      "target": "observers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(terminal_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "operation_verifications(landing_proof_id,operation_id,verifier_observer_id)",
+      "target": "operation_landing_proofs(id,operation_id,verifier_observer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(operation_id,node_id,implementer_id)",
+      "target": "operations(id,node_id,implementer_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(reporting_nonce_id,node_id,implementer_id,reporting_purpose,route_id,request_class,retention_class,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_request_nonces(id,node_id,implementer_id,purpose,route_id,request_class,retention_class,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_acknowledgements(mutation_idempotency_id,node_id,implementer_id,route_id,method,raw_target,request_body_sha256,logical_fingerprint)",
+      "target": "reporting_mutation_idempotency(id,node_id,implementer_id,route_id,method,raw_target,body_sha256,logical_fingerprint)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(acknowledgement_id)",
+      "target": "verification_acknowledgements(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(t0_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "verification_ack_wallet_evidence(terminal_observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "receive_release_proofs(verification_acknowledgement_id)",
+      "target": "verification_acknowledgements(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_settled_ledger(wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_settled_ledger(operation_id)",
+      "target": "operations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_settled_ledger(operation_id,attempt_no)",
+      "target": "operation_transactions(operation_id,attempt_no)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "wallet_settled_ledger(operation_id,wallet_id)",
+      "target": "operation_wallets(operation_id,wallet_id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    }
+  ],
+  "accessPatterns": [
+    {
+      "id": "ops.by-id",
+      "table": "operations",
+      "columns": [
+        "id"
+      ],
+      "satisfiedBy": "index:operations_pkey",
+      "ok": true
+    },
+    {
+      "id": "ops.idempotency",
+      "table": "operations",
+      "columns": [
+        "implementer_id",
+        "kind",
+        "idempotency_key"
+      ],
+      "satisfiedBy": "index:operations_unique_113",
+      "ok": true
+    },
+    {
+      "id": "ops.spawn-parent",
+      "table": "operations",
+      "columns": [
+        "spawned_from_operation_id"
+      ],
+      "satisfiedBy": "index:operations_one_spawn_per_parent_uidx",
+      "ok": true
+    },
+    {
+      "id": "obs.wallet-stream",
+      "table": "gateway_observations",
+      "columns": [
+        "wallet_public_key",
+        "wallet_seq"
+      ],
+      "satisfiedBy": "index:gateway_observations_wallet_stream_idx",
+      "ok": true
+    },
+    {
+      "id": "obs.body-hash",
+      "table": "gateway_observations",
+      "columns": [
+        "raw_response_sha256"
+      ],
+      "satisfiedBy": "index:gateway_observations_body_hash_idx",
+      "ok": true
+    },
+    {
+      "id": "events.by-seq",
+      "table": "node_events",
+      "columns": [
+        "node_id",
+        "seq"
+      ],
+      "satisfiedBy": "index:node_events_pkey",
+      "ok": true
+    },
+    {
+      "id": "audit.by-id",
+      "table": "audit_log",
+      "columns": [
+        "id"
+      ],
+      "satisfiedBy": "index:audit_log_unique_59",
+      "ok": true
+    },
+    {
+      "id": "signer-audit.by-operation",
+      "table": "signer_audit",
+      "columns": [
+        "operation_id"
+      ],
+      "satisfiedBy": "index:signer_audit_by_operation",
+      "ok": true
+    },
+    {
+      "id": "worker-cursors.pk",
+      "table": "worker_cursors",
+      "columns": [
+        "worker_id",
+        "cursor_key"
+      ],
+      "satisfiedBy": "index:worker_cursors_pkey",
+      "ok": true
+    },
+    {
+      "id": "settings.by-key",
+      "table": "node_settings",
+      "columns": [
+        "setting_key"
+      ],
+      "satisfiedBy": "index:node_settings_pkey",
+      "ok": true
+    },
+    {
+      "id": "halts.by-id",
+      "table": "operator_halts",
+      "columns": [
+        "halt_id"
+      ],
+      "satisfiedBy": "index:operator_halts_pkey",
+      "ok": true
+    },
+    {
+      "id": "obs-cursors.wallet",
+      "table": "wallet_observation_cursors",
+      "columns": [
+        "wallet_id"
+      ],
+      "satisfiedBy": "index:wallet_observation_cursors_wallet_id_idx",
+      "ok": true
+    }
+  ]
+}

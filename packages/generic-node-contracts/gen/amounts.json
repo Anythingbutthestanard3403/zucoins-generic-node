@@ -1,0 +1,33 @@
+{
+  "upperBoundExclusive": "100000000",
+  "greatestLegalValue": "99999999.99999999999999999999999999999999",
+  "maxDecimalPlaces": 32,
+  "rounding": "ROUND_DOWN",
+  "exponentialAt": [
+    -33,
+    33
+  ],
+  "canonicalDecimalPattern": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$",
+  "layers": {
+    "balance": {
+      "lowerBound": "0",
+      "lowerBoundInclusive": true,
+      "upperBoundExclusive": "100000000"
+    },
+    "operation": {
+      "lowerBound": "0",
+      "lowerBoundInclusive": false,
+      "upperBoundExclusive": "100000000"
+    }
+  },
+  "dbCheckDomains": {
+    "zkz_balance_text": "VALUE ~ '^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$'",
+    "zkz_amount_positive_text": "VALUE ~ '^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$' AND VALUE::numeric > 0"
+  },
+  "rejectionReasons": {
+    "grammar": "amount_grammar_violation",
+    "nonCanonical": "amount_not_canonical",
+    "notPositive": "amount_not_positive",
+    "outOfRange": "amount_out_of_range"
+  }
+}

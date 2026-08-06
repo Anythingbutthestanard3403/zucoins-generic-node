@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    // This package's scripts/tests run directly via `node scripts/*.ts` (Node 22's native
+    // TypeScript execution, no build step) as well as via `tsc -b`. Node's ESM resolver
+    // requires explicit, resolvable extensions, so relative imports use `.ts` throughout;
+    // `rewriteRelativeImportExtensions` lets `tsc -b` still emit correct `.js`-suffixed
+    // imports in `dist/` without a separate source dialect for the two run modes.
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.json"]
+}

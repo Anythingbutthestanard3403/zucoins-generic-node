@@ -1,0 +1,58 @@
+{
+  "boundary": {
+    "source": "operation_transactions",
+    "minPhase": "STEP1_SIGNATURE_PERSISTED",
+    "mustNotKeyOn": "execution_phase",
+    "operationTransactionPhases": [
+      "INNER_PREIMAGE_PERSISTED",
+      "STEP1_SIGNATURE_PERSISTED",
+      "STEP2_PREIMAGE_PERSISTED",
+      "STEP2_SIGNATURE_PERSISTED",
+      "SETTLED_BODY_PERSISTED"
+    ]
+  },
+  "lifecycle": {
+    "states": [
+      "CREATED",
+      "READY",
+      "EXPIRED",
+      "RECEIVE_LANDED",
+      "INDETERMINATE"
+    ],
+    "terminalStates": [
+      "EXPIRED",
+      "RECEIVE_LANDED"
+    ],
+    "newAttentionReason": "POST_EXPIRY_RECONCILING",
+    "postBoundaryExpiryOutcome": {
+      "state": "READY",
+      "attentionReason": "POST_EXPIRY_RECONCILING",
+      "leaseHeld": true,
+      "appendsNeedsAttention": true,
+      "appendsExpiredEvent": false
+    }
+  },
+  "resolution": {
+    "postBoundaryResolutions": [
+      "RECEIVE_LANDED",
+      "INDETERMINATE"
+    ],
+    "foldOutAllowed": false,
+    "unattributedSuccessorDisposition": "INVARIANT_BREACH_QUARANTINE"
+  },
+  "consumer": {
+    "safeTerminalReleaseStatus": "RELEASED_T0_UNCHANGED",
+    "releasedWalletSafety": {
+      "observedPostRelease": true,
+      "headMovementQuarantines": true,
+      "neverNewT0Baseline": true,
+      "releaseThenRetireNotReassign": true
+    }
+  },
+  "liveChainPremise": {
+    "premise": "No ZKZ can land on a node receiver without that wallet's step-2 signature (v2 receive = 2-signer unique_combinable only).",
+    "status": "load_bearing_assumption",
+    "validWhile": "the live gateway is confirmed to expose no receiver-passive credit path.",
+    "acceptanceGate": "live-gateway-acceptance"
+  }
+}

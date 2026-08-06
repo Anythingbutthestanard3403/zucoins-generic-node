@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/generic-node-contracts" },
+    { "path": "packages/node-core" },
+    { "path": "packages/generic-node-consumer" },
+    { "path": "packages/consumer-example" },
+    { "path": "apps/generic-node" }
+  ]
+}

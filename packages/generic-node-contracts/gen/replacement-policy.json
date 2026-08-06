@@ -1,0 +1,10 @@
+{
+  "REPLACEMENT_POLICY": {
+    "rule": "versioned-migration-only",
+    "forbidden": "repository-wide branding substitution",
+    "requirement": "Replacing any retained literal requires an explicitly versioned migration and compatibility plan — for a signed/hashed literal (signed-purpose, wire-prefix, or a byte-sensitive name), that means a NEW purpose/version string plus newly reviewed goldens, never an in-place rewrite of a `-v1` surface. It may never be a broad search-and-replace across the repository.",
+    "sourceDocCitation": "compat-literal-preservation"
+  },
+  "REPLACEMENT_POLICY_FORBIDDEN": "repository-wide branding substitution",
+  "REPLACEMENT_POLICY_RULE": "versioned-migration-only"
+}

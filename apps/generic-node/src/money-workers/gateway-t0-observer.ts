@@ -1,0 +1,327 @@
+// Real RECEIVE_T0 OBSERVE.
+// Read path only: get_transaction__v1 via node-core gateway read (package multi-endpoint
+// failover on the read primitive). Never submit (the never-blind-retry rule).
+// Replaces genesis-t0 stub on the money path when gateway URLs are set.
+//
+// Durable stream write uses the frozen capture planner + SQL stream writer:
+// advisory lock, relationship classify, previous_recorded, wallet_observation_cursors upsert.
+// No DIY FIRST / null-previous INSERT.
+//
+// ARM 409: when consumer arm projection ≠ this durable T0 {observation_id,S0,P0,B0},
+// POST /v1/operations/:id/armed returns 409 t0_mismatch and never releases the code
+// (arm-route). That compare path is already landed; this module supplies the
+// honest gateway-derived T0 rows the compare consumes.
+
+import { randomUUID } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
+
+import {
+  GENESIS_PROJECTION,
+  buildGenesisWalletHeadFingerprint,
+  buildGetTransactionActionData,
+  createSerializedStreamWriter,
+  createSqlStreamWriterEffects,
+  fingerprintEndpoint,
+  parseGatewayEnvelope,
+  projectGenesisState,
+  readGatewayAction,
+  verifySettledTransaction,
+  type GatewayExchangeTransport,
+  type MetricsHooks,
+  type ObservationRowProjection,
+  type ReceiveT0Observation,
+  type ReceiveT0Observer,
+  type WalletStateProjection,
+} from "@zucoins/node-core";
+
+const DEFAULT_LIMITS = {
+  readTimeoutMs: 10_000,
+  maxRequestBytes: 1_048_576,
+  maxResponseBytes: 4_194_304,
+} as const;
+
+export interface GatewayT0ObserverDeps {
+  readonly pool: Pool;
+  readonly nodeId: string;
+  /** Production SPLITCHAIN_GATEWAY_URLS — non-empty required (no silent genesis stub). */
+  readonly gatewayUrls: readonly string[];
+  /**
+   * Offline fixtures inject a scripted exchange (synthetic gateway). Production leaves
+   * this undefined so the default undici transport is used.
+   */
+  readonly exchange?: GatewayExchangeTransport;
+  /** GATEWAY_READ_RETRY_MAX_ATTEMPTS — absent resolves to the read primitive's default. */
+  readonly maxAttempts?: number;
+  /** GATEWAY_READ_BACKOFF_MAX_MS — absent resolves to the read primitive's default. */
+  readonly backoffMaxMs?: number;
+  /** T0 read failure / observation anomaly / gateway duration, at the real seam. */
+  readonly metricsHooks?: MetricsHooks;
+}
+
+function genesisProjection(): WalletStateProjection {
+  return {
+    role: "genesis",
+    S: GENESIS_PROJECTION.S,
+    P: GENESIS_PROJECTION.P,
+    B: GENESIS_PROJECTION.B,
+    I: null,
+  };
+}
+
+/**
+ * The one NODE-domain observer row every gateway read on this node is attributed to.
+ * Shared with sql-fresh-head-reader.ts so T0 and the landing confirm-read append to the
+ * same observation stream rather than two observers for the same node.
+ */
+export async function ensureNodeObserver(
+  client: PoolClient,
+  nodeId: string,
+  endpointFingerprint: string,
+): Promise<string> {
+  const existing = await client.query<{ id: string }>(
+    `SELECT id::text AS id FROM observers
+      WHERE domain = 'NODE' AND owner_id = $1::uuid LIMIT 1`,
+    [nodeId],
+  );
+  if (existing.rows[0]?.id !== undefined) return existing.rows[0].id;
+
+  const observerId = randomUUID();
+  await client.query(
+    `INSERT INTO observers (id, domain, owner_id, gateway_endpoint_fingerprint, created_at)
+     VALUES ($1::uuid, 'NODE', $2::uuid, $3, now())
+     ON CONFLICT (domain, owner_id) DO NOTHING`,
+    [observerId, nodeId, endpointFingerprint],
+  );
+  const again = await client.query<{ id: string }>(
+    `SELECT id::text AS id FROM observers
+      WHERE domain = 'NODE' AND owner_id = $1::uuid LIMIT 1`,
+    [nodeId],
+  );
+  return again.rows[0]?.id ?? observerId;
+}
+
+/**
+ * Build a durable ReceiveT0Observer that OBSERVEs via get_transaction__v1 (read-only)
+ * and persists observation_id + S/P/B through the frozen stream writer for artifact
+ * binding and ARM compare.
+ */
+export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0Observer {
+  if (deps.gatewayUrls.length === 0) {
+    throw new Error(
+      "createGatewayT0Observer requires at least one gateway URL (no silent genesis stub)",
+    );
+  }
+
+  return {
+    async observe(walletPublicKey: string): Promise<ReceiveT0Observation> {
+      let rawBytes: Uint8Array;
+      let httpStatus: number | null;
+      let endpointFingerprint: string;
+      const readOnce = (): Promise<Awaited<ReturnType<typeof readGatewayAction>>> =>
+        readGatewayAction(
+          "get_transaction__v1",
+          // Canonical codec — shared with the other three wallet-head readers so the
+          // field name cannot drift again.
+          buildGetTransactionActionData(walletPublicKey),
+          {
+            endpoints: deps.gatewayUrls,
+            limits: DEFAULT_LIMITS,
+            // Durability is owned by createSqlStreamWriterEffects below — not this hook.
+            recorder: { recordObservation: async () => {} },
+            ...(deps.exchange !== undefined ? { exchange: deps.exchange } : {}),
+            ...(deps.maxAttempts !== undefined ? { maxAttempts: deps.maxAttempts } : {}),
+            ...(deps.backoffMaxMs !== undefined ? { backoffMaxMs: deps.backoffMaxMs } : {}),
+          },
+        );
+      try {
+        // Multi-URL list → package read primitive iterates with bounded jittered backoff
+        // (gateway/read.ts). SUBMIT is structurally excluded (GatewayReadActionName).
+        const result = deps.metricsHooks
+          ? await deps.metricsHooks.timeGateway("get_transaction__v1", readOnce)
+          : await readOnce();
+        rawBytes = result.capture.responseBytes;
+        httpStatus = result.capture.statusCode;
+        endpointFingerprint =
+          result.capture.endpointFingerprint ??
+          fingerprintEndpoint(result.capture.endpoint ?? deps.gatewayUrls[0]!);
+      } catch (err) {
+        deps.metricsHooks?.onT0ReadFailure();
+        deps.metricsHooks?.onObservationAnomaly("TRANSPORT_ERROR");
+        return {
+          kind: "INDETERMINATE",
+          detail:
+            err instanceof Error
+              ? `gateway T0 read failed: ${err.message}`
+              : "gateway T0 read failed",
+        };
+      }
+
+      const envelope = parseGatewayEnvelope(rawBytes);
+      if (envelope.classification === "MALFORMED_ENVELOPE") {
+        deps.metricsHooks?.onObservationAnomaly("MALFORMED_ENVELOPE");
+        return {
+          kind: "UNVERIFIED",
+          detail: `T0 envelope malformed: ${envelope.reason}`,
+        };
+      }
+
+      type CaptureShape = {
+        readonly parseResult: "VERIFIED_GENESIS" | "VERIFIED_HEAD";
+        readonly rawResponseBytes: Uint8Array;
+        readonly isGenesis: boolean;
+        readonly sSignature: string;
+        readonly pSignature: string;
+        readonly semanticFingerprint: string;
+      };
+
+      let sequenceCapture: CaptureShape;
+      let returnProjection: WalletStateProjection;
+      let rowProjectionBase: Omit<
+        ObservationRowProjection,
+        "endpointFingerprint" | "walletId" | "httpStatus" | "observedAt"
+      >;
+
+      if (envelope.classification === "GENESIS") {
+        const genesis = projectGenesisState();
+        const fp = buildGenesisWalletHeadFingerprint(walletPublicKey, genesis);
+        if (!fp.ok) {
+          return { kind: "UNVERIFIED", detail: fp.detail };
+        }
+        sequenceCapture = {
+          parseResult: "VERIFIED_GENESIS",
+          rawResponseBytes: rawBytes,
+          isGenesis: true,
+          sSignature: "",
+          pSignature: "",
+          semanticFingerprint: fp.fingerprint.sha256,
+        };
+        returnProjection = genesisProjection();
+        rowProjectionBase = {
+          walletRole: "genesis",
+          bAmount: "0",
+          innerPreimageText: null,
+          step1Signature: null,
+          step2Signature: null,
+          completedTransactionText: null,
+          completedTransactionSha256: null,
+        };
+      } else {
+        const verified = verifySettledTransaction(envelope.parsed, walletPublicKey);
+        if (verified.verdict !== "VERIFIED") {
+          const detail =
+            verified.verdict === "UNVERIFIED_SIGNATURE"
+              ? `T0 signature unverified step=${verified.failedStep}`
+              : verified.verdict === "WALLET_ROLE_INVALID"
+                ? `T0 role invalid: ${verified.detail}`
+                : `T0 transaction not verified: ${verified.verdict}`;
+          // verified.verdict here is one of UNVERIFIED_SIGNATURE | WALLET_ROLE_INVALID |
+          // MALFORMED_TRANSACTION — all three are closed METRIC_ANOMALY_KINDS values.
+          deps.metricsHooks?.onObservationAnomaly(verified.verdict);
+          return { kind: "UNVERIFIED", detail };
+        }
+        sequenceCapture = {
+          parseResult: "VERIFIED_HEAD",
+          rawResponseBytes: rawBytes,
+          isGenesis: false,
+          sSignature: verified.projection.S,
+          pSignature: verified.projection.P,
+          semanticFingerprint: verified.semanticFingerprint,
+        };
+        returnProjection = verified.projection;
+        rowProjectionBase = {
+          walletRole: verified.projection.role,
+          bAmount: verified.projection.B,
+          innerPreimageText: verified.innerPreimageText,
+          step1Signature: envelope.parsed.step_1_signature,
+          step2Signature: envelope.parsed.step_2_signature,
+          completedTransactionText: verified.completedTransactionText,
+          completedTransactionSha256: verified.completedTransactionSha256,
+        };
+      }
+
+      const client = await deps.pool.connect();
+      try {
+        await client.query("BEGIN");
+        const observerId = await ensureNodeObserver(
+          client,
+          deps.nodeId,
+          endpointFingerprint,
+        );
+
+        const wallet = await client.query<{ id: string }>(
+          `SELECT id::text AS id FROM wallets WHERE public_key = $1 LIMIT 1`,
+          [walletPublicKey],
+        );
+        const walletId = wallet.rows[0]?.id ?? null;
+
+        // Pre-mint so APPEND binds a known id; SUPPRESS reuses cursor tip.
+        let allocatedObservationId: string | null = null;
+        const effects = createSqlStreamWriterEffects({
+          sql: {
+            query: async <R>(text: string, params: readonly unknown[]) => {
+              const result = await client.query(text, params as never[]);
+              return { rows: result.rows as R[] };
+            },
+          },
+          project: (): ObservationRowProjection => ({
+            endpointFingerprint,
+            walletId,
+            httpStatus: httpStatus ?? 200,
+            observedAt: new Date(),
+            ...rowProjectionBase,
+          }),
+          allocateObservationId: () => {
+            allocatedObservationId = randomUUID();
+            return allocatedObservationId;
+          },
+          takeAdvisoryLock: true,
+        });
+        const writer = createSerializedStreamWriter(effects);
+        const writeResult = await writer.capture(
+          { observerId, walletPublicKey },
+          sequenceCapture,
+        );
+
+        let observationId: string;
+        if (writeResult.plan.kind === "APPEND") {
+          if (allocatedObservationId === null) {
+            throw new Error("stream writer APPEND without allocated observation id");
+          }
+          observationId = allocatedObservationId;
+        } else {
+          // Exact-byte re-observation: cursor tip is the bindable observation.
+          const tip = await client.query<{ id: string }>(
+            `SELECT last_recorded_observation_id::text AS id
+               FROM wallet_observation_cursors
+              WHERE observer_id = $1::uuid AND wallet_public_key = $2`,
+            [observerId, walletPublicKey],
+          );
+          const tipId = tip.rows[0]?.id;
+          if (tipId === undefined) {
+            throw new Error("stream writer SUPPRESS without cursor tip");
+          }
+          observationId = tipId;
+        }
+
+        await client.query("COMMIT");
+        return {
+          kind: "VERIFIED",
+          observationId,
+          projection: returnProjection,
+        };
+      } catch (err) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          /* original */
+        }
+        return {
+          kind: "INDETERMINATE",
+          detail: err instanceof Error ? err.message : "gateway T0 persist failed",
+        };
+      } finally {
+        client.release();
+      }
+    },
+  };
+}

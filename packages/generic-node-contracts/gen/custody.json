@@ -1,0 +1,59 @@
+{
+  "bindingObligations": {
+    "immutableWalletFields": [
+      "key_origin",
+      "node_id",
+      "public_key"
+    ],
+    "importedDestinationInsert": "REJECT",
+    "recoveryFields": "SET_TOGETHER_AFTER_SUCCESSFUL_AUDITED_EXPORT_AND_NEVER_CLEAR",
+    "selectionRecheck": "RECHECK_ALL_CONJUNCTS_AT_EXECUTION_TIME",
+    "failClosedUnknownMalformedOrFutureValues": true,
+    "recoveryNeverUpgradesOrigin": true
+  },
+  "evidence": {
+    "origin": "IMMUTABLE_WALLETS_KEY_ORIGIN",
+    "blessing": "DESTINATION_BLESSING_ARTIFACT_BINDS_PUBLIC_KEY_WALLET_ID_NODE_ID_NONCE_ISSUED_AT_EXPIRES_AT",
+    "recovery": "AUDITED_EXPORT_MATCHES_WALLET_PUBLIC_KEY_AND_RECORDS_EXACT_EXPORT_DIGEST"
+  },
+  "predicates": {
+    "INTERNAL_CUSTODY_CONJUNCTS": {
+      "keyOrigin": "node_generated",
+      "destinationState": "BLESSED"
+    },
+    "AUTOMATIC_SINK_CONJUNCTS": {
+      "requiresInternalCustody": true,
+      "requiresValidRecoveryVerifiedAt": true,
+      "allowedWalletStates": [
+        "AVAILABLE",
+        "PINNED"
+      ]
+    }
+  },
+  "vocabulary": {
+    "WALLET_KEY_ORIGINS": [
+      "node_generated",
+      "imported"
+    ],
+    "DESTINATION_STATES": [
+      "PENDING",
+      "BLESSED",
+      "RETIRED"
+    ],
+    "WALLET_STATES": [
+      "AVAILABLE",
+      "PINNED",
+      "QUARANTINED",
+      "RETIRED"
+    ],
+    "CUSTODY_DENIAL_REASONS": [
+      "INVALID_KEY_ORIGIN",
+      "KEY_ORIGIN_NOT_NODE_GENERATED",
+      "INVALID_DESTINATION_STATE",
+      "DESTINATION_NOT_BLESSED",
+      "INVALID_RECOVERY_VERIFIED_AT",
+      "INVALID_WALLET_STATE",
+      "WALLET_STATE_NOT_AUTOMATIC_SINK_ELIGIBLE"
+    ]
+  }
+}

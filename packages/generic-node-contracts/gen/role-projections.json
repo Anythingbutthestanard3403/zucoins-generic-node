@@ -1,0 +1,89 @@
+{
+  "GENESIS_PROJECTION": {
+    "S": "",
+    "P": "",
+    "B": "0"
+  },
+  "OBSERVATION_NAME_SETS": {
+    "baselineAtIssuance": [
+      "S0",
+      "P0",
+      "B0"
+    ],
+    "laterAccepted": [
+      "S1",
+      "P1",
+      "B1"
+    ],
+    "namesAreRolesNotColumns": true
+  },
+  "ROLE_PREDICATES": {
+    "sender": "T.inner.step_1_key_public__base64urlsafe == W",
+    "receiver": "T.inner.step_2_key_public__base64urlsafe == W",
+    "exactlyOneMustHold": true,
+    "selfTransferRejected": true,
+    "absentWalletRejected": true
+  },
+  "ROLE_PROJECTIONS_CONTRACT_VERSION": 1,
+  "ROLE_RELATIVE_PROJECTIONS": [
+    {
+      "value": "S",
+      "sender": "T.step_2_signature",
+      "receiver": "T.step_2_signature"
+    },
+    {
+      "value": "P",
+      "sender": "T.inner.previous_step_1_state_signature",
+      "receiver": "T.inner.previous_step_2_state_signature"
+    },
+    {
+      "value": "B",
+      "sender": "T.inner.step_1_state.amount",
+      "receiver": "T.inner.step_2_state.amount"
+    }
+  ],
+  "ROLE_RELATIVE_TERMINAL_PROJECTION_GOLDENS": [
+    {
+      "fixture": "A.8.1 predecessor",
+      "settledBytes": "src/receive-golden/gen/predecessor.settled.json",
+      "walletRole": "sender",
+      "wallet": "seed-05",
+      "S": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+      "P": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ==",
+      "B": "0"
+    },
+    {
+      "fixture": "A.8.1 predecessor",
+      "settledBytes": "src/receive-golden/gen/predecessor.settled.json",
+      "walletRole": "receiver",
+      "wallet": "seed-02",
+      "S": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+      "P": "",
+      "B": "10"
+    },
+    {
+      "fixture": "A.8.1 target",
+      "settledBytes": "src/receive-golden/gen/target.settled.json",
+      "walletRole": "sender",
+      "wallet": "seed-02",
+      "S": "uP0HeCG-ZT1svQK-drwexhc1mrxx4QLBdfgFlw8nqRrwwvcJcPazgcPxp8aMdz7iJricO75II0bUzvwlBUUDDw==",
+      "P": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+      "B": "7.75"
+    },
+    {
+      "fixture": "A.8.1 target",
+      "settledBytes": "src/receive-golden/gen/target.settled.json",
+      "walletRole": "receiver",
+      "wallet": "seed-03",
+      "S": "uP0HeCG-ZT1svQK-drwexhc1mrxx4QLBdfgFlw8nqRrwwvcJcPazgcPxp8aMdz7iJricO75II0bUzvwlBUUDDw==",
+      "P": "",
+      "B": "2.25"
+    }
+  ],
+  "SOURCE": "role-relative projections; A.8.1; complete-path-adjudication",
+  "SUCCESSION_RULE": "P(W,T1) == S(W,T0)",
+  "WALLET_TRANSACTION_ROLES": [
+    "sender",
+    "receiver"
+  ]
+}

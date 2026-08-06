@@ -1,0 +1,106 @@
+{
+  "concern": "sequence-recovery",
+  "ticket": "events.3",
+  "governing": {
+    "spec": "event-ledger data model; signed event tuple A.6; event-serving rules",
+    "decisions": [
+      "signed-event-log",
+      "sealed-store",
+      "reporting-channel"
+    ]
+  },
+  "dimensions": [
+    "concurrency",
+    "crash",
+    "restart",
+    "rotation",
+    "redelivery"
+  ],
+  "matrix": [
+    {
+      "dimension": "concurrency",
+      "scenario": "locked_same_txn",
+      "outcome": "SERIALIZED_CONTIGUOUS"
+    },
+    {
+      "dimension": "concurrency",
+      "scenario": "unlocked_race",
+      "outcome": "RACE_DUPLICATE_OR_GAP"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_lock_and_increment_counter",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_read_previous_event_hash",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_construct_exact_preimage_with_seq_and_prev_hash",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_sign",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_insert_event_row",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_update_operation_state",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_before_commit_at_enqueue_outbox_delivery",
+      "outcome": "ROLLBACK_CLEAN"
+    },
+    {
+      "dimension": "crash",
+      "scenario": "crash_after_commit",
+      "outcome": "COMMIT_DURABLE"
+    },
+    {
+      "dimension": "restart",
+      "scenario": "resume_high_water_uncommitted_rolled_back",
+      "outcome": "RESUME_GAPLESS"
+    },
+    {
+      "dimension": "restart",
+      "scenario": "resume_without_high_water",
+      "outcome": "PHANTOM_GAP"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "boundary_chain_intact_seq_continuous",
+      "outcome": "CHAIN_INTACT_SEQ_CONTINUOUS"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "boundary_seq_reset",
+      "outcome": "SEQ_RESET"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "boundary_chain_break",
+      "outcome": "CHAIN_BREAK"
+    },
+    {
+      "dimension": "redelivery",
+      "scenario": "concurrent_deduped",
+      "outcome": "IDEMPOTENT_DEDUP"
+    },
+    {
+      "dimension": "redelivery",
+      "scenario": "no_dedup_key_resigns",
+      "outcome": "DOUBLE_COUNT"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+zp-implementer-checkpoint-v1
+{"purpose":"zp-implementer-checkpoint-v1","canonical_version":1,"node_id":"11111111-1111-4111-8111-111111111111","implementer_id":"22222222-2222-4222-8222-222222222222","checkpoint_epoch":"1","implementer_seq_head":"2","implementer_event_hash":"5d30760469db67c76d98aa99f68616ef564db7e2c088f6559337d4789af17391","signing_key_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","created_at":"2026-07-18T00:00:02.000Z"}

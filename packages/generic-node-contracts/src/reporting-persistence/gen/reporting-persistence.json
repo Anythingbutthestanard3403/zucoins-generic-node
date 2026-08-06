@@ -1,0 +1,436 @@
+{
+  "concern": "reporting-persistence",
+  "ticket": "reporting-persistence",
+  "governing": {
+    "decisions": [
+      "reporting-channel",
+      "reporting-key-enrolment"
+    ],
+    "spec": [
+      "reporting data model",
+      "reporting API surfaces",
+      "signing custody and security",
+      "operations recovery"
+    ]
+  },
+  "nonceLedger": {
+    "purposes": [
+      "zp-reporting-register-v1",
+      "zp-report-request-v1"
+    ],
+    "fields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "nonce",
+      "purpose",
+      "route_id",
+      "request_class",
+      "reporting_key_id",
+      "new_reporting_key_id",
+      "bootstrap_evidence_id",
+      "lifecycle_epoch",
+      "nonce_burn_sequence",
+      "request_preimage_text",
+      "request_preimage_sha256",
+      "request_signature",
+      "method",
+      "raw_target",
+      "body_sha256",
+      "logical_fingerprint",
+      "issued_at",
+      "expires_at",
+      "received_at",
+      "consumed_at",
+      "retention_class"
+    ],
+    "uniqueBy": [
+      "node_id",
+      "implementer_id",
+      "nonce"
+    ],
+    "scopeExcludes": [
+      "purpose",
+      "route_id",
+      "request_class",
+      "reporting_key_id",
+      "new_reporting_key_id",
+      "bootstrap_evidence_id"
+    ],
+    "allFieldsImmutable": true,
+    "reportingKeyIdNullability": {
+      "nullableOnlyFor": "FIRST_KEY_BOOTSTRAP",
+      "requiredFor": [
+        "EXISTING_KEY_ANCHORED_ROTATION",
+        "SIGNED_REQUEST"
+      ]
+    },
+    "signedWindowMs": {
+      "zp-report-request-v1": 60000,
+      "zp-reporting-register-v1": 300000
+    },
+    "registerRequiresNewReportingKeyId": true,
+    "rawTargetRule": "OPAQUE_EXACT_SIGNED_BYTES_NEVER_NORMALIZE_OR_RECONSTRUCT",
+    "invalidAuthBurnsNothing": true,
+    "authenticatedFailureRetainsBurn": [
+      404,
+      409,
+      500,
+      "handler_failure",
+      "handler_crash"
+    ]
+  },
+  "requestPipeline": {
+    "preBurnChecks": [
+      "bounded_shape",
+      "signed_time_window",
+      "bounded_size",
+      "bounded_rate",
+      "tenant_and_key_binding",
+      "lifecycle_eligibility",
+      "signature"
+    ],
+    "burnTransaction": [
+      "begin_short_transaction",
+      "lock_shared_lifecycle_head",
+      "recheck_lifecycle_epoch_key_and_auth_hold",
+      "insert_shared_nonce_evidence",
+      "commit_burn"
+    ],
+    "postBurnStages": [
+      "completed_idempotency_lookup_and_fingerprint_check",
+      "protected_lookup_if_no_completed_result",
+      "guarded_handler"
+    ],
+    "shortTransactionEndsBeforeProtectedLookup": true,
+    "completedIdempotencyPrecedesProtectedLookup": true,
+    "changedFingerprintConflictsBeforeProtectedLookup": true
+  },
+  "lifecycle": {
+    "identityFields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "public_key",
+      "registered_at"
+    ],
+    "headFields": [
+      "node_id",
+      "implementer_id",
+      "epoch",
+      "current_key_id",
+      "prior_key_id",
+      "overlap_expires_at",
+      "auth_hold",
+      "lifecycle_event_id",
+      "updated_at"
+    ],
+    "eventFields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "epoch",
+      "event_type",
+      "current_key_id",
+      "prior_key_id",
+      "overlap_expires_at",
+      "auth_hold",
+      "successor_registered_at",
+      "nonce_evidence_id",
+      "nonce_purpose",
+      "enrolment_evidence_id",
+      "public_evidence_text",
+      "public_evidence_sha256",
+      "previous_event_hash",
+      "event_hash",
+      "committed_at"
+    ],
+    "oneHeadBy": [
+      "node_id",
+      "implementer_id"
+    ],
+    "canonicalPreBootstrapHead": {
+      "epoch": 0,
+      "currentKeyId": null,
+      "priorKeyId": null,
+      "overlapExpiresAt": null,
+      "authHold": true,
+      "lifecycleEventId": null
+    },
+    "positiveEventEpoch": true,
+    "eventUniqueBy": [
+      "node_id",
+      "implementer_id",
+      "epoch"
+    ],
+    "keyStates": [
+      "PENDING",
+      "ACTIVE",
+      "RETIRED",
+      "REVOKED"
+    ],
+    "eventTypes": [
+      "FIRST_KEY_ACTIVATED",
+      "KEY_ROTATED",
+      "PRIOR_KEY_RETIRED",
+      "KEY_REVOKED",
+      "AUTH_HOLD_SET",
+      "AUTH_HOLD_RELEASED"
+    ],
+    "legalKeyTransitions": [
+      {
+        "eventType": "FIRST_KEY_ACTIVATED",
+        "from": "PENDING",
+        "to": "ACTIVE"
+      },
+      {
+        "eventType": "KEY_ROTATED",
+        "from": "PENDING",
+        "to": "ACTIVE"
+      },
+      {
+        "eventType": "PRIOR_KEY_RETIRED",
+        "from": "ACTIVE",
+        "to": "RETIRED"
+      },
+      {
+        "eventType": "KEY_REVOKED",
+        "from": "ACTIVE",
+        "to": "REVOKED"
+      }
+    ],
+    "eventsAppendOnly": true,
+    "identitiesImmutable": true,
+    "overlapWindowMs": 86400000,
+    "overlapInterval": "SUCCESSOR_COMMIT_INCLUSIVE_TO_EXPIRY_EXCLUSIVE",
+    "transitionsUseSameHeadLock": [
+      "FIRST_KEY_ACTIVATED",
+      "KEY_ROTATED",
+      "PRIOR_KEY_RETIRED",
+      "KEY_REVOKED",
+      "AUTH_HOLD_SET",
+      "AUTH_HOLD_RELEASED"
+    ],
+    "firstHeadLockCommitWins": true,
+    "lifecycleEventIsAuthoritative": true,
+    "headProjectionMustEqualCitedEvent": true,
+    "terminalKeysReactivate": false,
+    "occupiedPriorMustBeExplicitlyRetiredOrRevokedBeforeRotation": true,
+    "overlapExpiryDerivedFromSuccessorCommit": true,
+    "storedOverlapExpiryMustEqualDerivedExpiry": true,
+    "registrationEvidenceModes": [
+      "FIRST_KEY_BOOTSTRAP",
+      "EXISTING_KEY_ANCHORED_ROTATION"
+    ],
+    "registrationEvidenceFields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "new_reporting_key_id",
+      "supersedes_key_id",
+      "authorizing_key_id",
+      "bootstrap_evidence_id",
+      "nonce_evidence_id",
+      "registration_purpose",
+      "proof_of_possession_preimage_text",
+      "proof_of_possession_preimage_sha256",
+      "proof_of_possession_signature",
+      "authorizing_preimage_text",
+      "authorizing_preimage_sha256",
+      "authorizing_signature",
+      "issued_at",
+      "expires_at",
+      "created_at"
+    ],
+    "firstBootstrapEvidence": "AUTHENTICATED_CALLER_PLUS_NODE_APPROVAL_PLUS_PROOF_OF_POSSESSION",
+    "rotationEvidence": "EXISTING_KEY_ANCHOR_PLUS_PROOF_OF_POSSESSION",
+    "registrationCrossBinding": {
+      "exactNonceEvidenceFields": [
+        "request_preimage_text",
+        "request_preimage_sha256",
+        "request_signature",
+        "issued_at",
+        "expires_at",
+        "new_reporting_key_id"
+      ],
+      "enrolmentMustExactlyMatchNonceEvidence": true,
+      "bootstrapEvidenceIdMustMatchCitedEvidence": true,
+      "bootstrapEvidenceNewKeyMustMatchRegisterPreimage": true,
+      "rotationAuthorizingKeyMatchesLedgerKey": true,
+      "rotationAuthorizingPreimageDigestAndSignatureMustExactlyMatch": true
+    },
+    "eventHashChain": {
+      "eventsAppendOnly": true,
+      "eventBytesImmutable": true,
+      "predecessorHashRequiredAfterFirstEvent": true,
+      "predecessorHashMustEqualPriorEventHash": true
+    }
+  },
+  "mutationIdempotency": {
+    "fields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "route_id",
+      "idempotency_key",
+      "reporting_nonce_id",
+      "child_record_id",
+      "method",
+      "raw_target",
+      "body_sha256",
+      "logical_fingerprint",
+      "response_status",
+      "response_bytes",
+      "completed_at",
+      "created_at"
+    ],
+    "uniqueBy": [
+      "node_id",
+      "implementer_id",
+      "route_id",
+      "idempotency_key"
+    ],
+    "logicalFingerprintFields": [
+      "method",
+      "raw_target",
+      "body_sha256"
+    ],
+    "logicalFingerprintExcludes": [
+      "nonce",
+      "reporting_key_id",
+      "lifecycle_epoch",
+      "issued_at",
+      "expires_at",
+      "received_at",
+      "idempotency_key"
+    ],
+    "bodyDigestComparedOutsideKeyUniqueness": true,
+    "exactStatusAndResponseBytesCommitAtomicallyWithMutation": true,
+    "exactResponseBytesReplayAcrossKeyRotation": true,
+    "fingerprintGuardedRouteIds": [
+      "operation_armed",
+      "verification_complete"
+    ],
+    "guardedFingerprintPartialUnique": {
+      "fields": [
+        "node_id",
+        "implementer_id",
+        "route_id",
+        "method",
+        "raw_target",
+        "body_sha256"
+      ],
+      "whereRouteIdIn": [
+        "operation_armed",
+        "verification_complete"
+      ]
+    },
+    "fingerprintGuardDefeatsChangedUnsignedIdempotencyHeader": true,
+    "guardedDuplicateAuthorityFields": [
+      "method",
+      "raw_target",
+      "body_sha256"
+    ],
+    "logicalFingerprintDerivedAuditOnly": true,
+    "idempotencyKey": {
+      "minLength": 16,
+      "maxLength": 255,
+      "minCodePoint": 33,
+      "maxCodePoint": 126
+    },
+    "durablePendingRowsAllowed": false,
+    "requiredCompletionFields": [
+      "response_status",
+      "response_bytes",
+      "completed_at"
+    ],
+    "mutationAndCompletedResultAtomic": true,
+    "completedParentRequiresMatchingChild": true,
+    "evidenceBindingFields": [
+      "reporting_nonce_id",
+      "mutation_idempotency_id",
+      "child_record_id",
+      "method",
+      "raw_target",
+      "body_sha256",
+      "logical_fingerprint"
+    ],
+    "nonceIdempotencyAndChildEvidenceMustMatch": true,
+    "routeRetention": "PERMANENT",
+    "immutability": {
+      "nonceEvidenceAppendOnly": true,
+      "nonceEvidenceImmutable": true,
+      "idempotencyEvidenceAppendOnly": true,
+      "idempotencyEvidenceImmutable": true,
+      "responseEvidenceImmutable": true
+    },
+    "exactResponsePersistence": {
+      "statusRange": [
+        100,
+        599
+      ],
+      "statusRequired": true,
+      "bodyRequired": true,
+      "completionTimestampRequired": true,
+      "bytesImmutableCopy": true,
+      "mutationAndResultCrashAtomic": true,
+      "replayReturnsFreshByteCopy": true
+    }
+  },
+  "recovery": {
+    "backupIncludesAllEvidence": true,
+    "regressionMarkers": [
+      "lifecycle_epoch",
+      "nonce_burn_high_water"
+    ],
+    "restorePolicy": {
+      "regressionResult": "HARD_HOLD_REPORTING_AUTH",
+      "missingSafetySourceResult": "HARD_HOLD_REPORTING_AUTH",
+      "automaticHoldRelease": false,
+      "releaseRequires": [
+        "external_lifecycle_epoch_verified_exact_equal",
+        "external_nonce_burn_high_water_verified_exact_equal",
+        "trusted_event_hash_equal",
+        "next_event_previous_hash_continuous"
+      ],
+      "equalLocalMarkersReleaseHold": false
+    },
+    "restoreAdmissionRequiresBothHoldsClear": [
+      "node_restore_hold",
+      "lifecycle_head_auth_hold"
+    ],
+    "retention": {
+      "readNonceBurn": "NO_PRUNE_UNTIL_SAFETY_SOURCE_AND_MARGIN_FROZEN",
+      "mutationNonceBurn": "PERMANENT",
+      "mutationIdempotency": "PERMANENT",
+      "lifecycleEvidence": "PERMANENT"
+    }
+  },
+  "custody": {
+    "allowedIdentityFields": [
+      "id",
+      "node_id",
+      "implementer_id",
+      "public_key",
+      "registered_at"
+    ],
+    "forbiddenIdentityFields": [
+      "private_key",
+      "private_key_bytes",
+      "seed",
+      "secret",
+      "vault_ref",
+      "vault_secret_ref"
+    ],
+    "nodeStoresReportingPublicKeyOnly": true,
+    "exactFieldSetRequired": true,
+    "unknownFieldsRejected": true
+  },
+  "scopeExclusions": [
+    "physical_application_migration",
+    "legacy_push_reporting_tables",
+    "frozen_v1_path_changes",
+    "private_key_storage",
+    "live_action"
+  ]
+}

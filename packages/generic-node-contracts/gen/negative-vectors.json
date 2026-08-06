@@ -1,0 +1,228 @@
+{
+  "ADVERSARIAL_CATEGORIES": [
+    "purposes",
+    "fields",
+    "prefixes",
+    "versions",
+    "genesis",
+    "suite-tuples",
+    "gateway-envelopes",
+    "role-projections",
+    "api",
+    "schema-vocabs"
+  ],
+  "ADVERSARIAL_FIXTURES": [
+    {
+      "id": "purposes/unknown-purpose",
+      "category": "purposes",
+      "mutation": "a purpose literal outside the census (`zp-extra-thing-v1`) is presented",
+      "rejectionReason": "the purpose census is closed; an unlisted literal has no verification path",
+      "specCitation": "A.1.1"
+    },
+    {
+      "id": "purposes/deferred-tuple-as-frozen",
+      "category": "purposes",
+      "mutation": "a C4-deferred implementer tuple is treated as a frozen verification target",
+      "rejectionReason": "zp-implementer-* field sequences and goldens are deferred (C4); only architecture exists",
+      "specCitation": "A.6"
+    },
+    {
+      "id": "purposes/legacy-on-suite-path",
+      "category": "purposes",
+      "mutation": "a legacy zupay push purpose is verified on the v2 suite path",
+      "rejectionReason": "cross-purpose verification rejects; legacy push literals never verify as suite tuples (A.9 #10)",
+      "specCitation": "A.9; compatibility-literals"
+    },
+    {
+      "id": "fields/reordered-inner",
+      "category": "fields",
+      "mutation": "inner keys reordered (reversed sequence)",
+      "rejectionReason": "the 14-position inner field sequence is frozen; any reorder changes the signed bytes (A.9 #1)",
+      "specCitation": "protocol rule 3; A.9"
+    },
+    {
+      "id": "fields/missing-field",
+      "category": "fields",
+      "mutation": "a required inner field is dropped",
+      "rejectionReason": "all 12 required fields are always present; a missing field fails closed (A.9 #1)",
+      "specCitation": "protocol rule 3; A.9"
+    },
+    {
+      "id": "fields/unexpected-field",
+      "category": "fields",
+      "mutation": "an unknown top-level inner field is added",
+      "rejectionReason": "unknown top-level inner fields fail closed until a future protocol version supports them (protocol rule 3)",
+      "specCitation": "protocol rule 3"
+    },
+    {
+      "id": "fields/optional-misplaced",
+      "category": "fields",
+      "mutation": "`message` is placed before `expiry__unix_time_secs`",
+      "rejectionReason": "the two optional fields are trailing-only, expiry before message (protocol rule 3; A.1.2)",
+      "specCitation": "protocol rule 3; A.1.2"
+    },
+    {
+      "id": "prefixes/purpose-prefix-mismatch",
+      "category": "prefixes",
+      "mutation": "the domain-separation prefix differs from payload field 1",
+      "rejectionReason": "purpose appears twice by design; both copies must equal the expected literal (A.9 #2)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "prefixes/trailing-newline",
+      "category": "prefixes",
+      "mutation": "a trailing LF (or BOM/whitespace) is appended to the preimage",
+      "rejectionReason": "no BOM, trailing newline, or insignificant whitespace (A.9 #8)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "prefixes/decoded-transfer-code-hash",
+      "category": "prefixes",
+      "mutation": "transfer_code_sha256 is computed after URL/base64 decode or padding repair",
+      "rejectionReason": "the digest input is the exact stored string bytes, never preprocessed (A.9 #11)",
+      "specCitation": "A.2,A.9"
+    },
+    {
+      "id": "versions/canonical-version-as-string",
+      "category": "versions",
+      "mutation": "canonical_version is the string \"1\" instead of the number 1",
+      "rejectionReason": "canonical_version is the JSON number 1 only (A.9 #3)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "versions/inner-version-as-number",
+      "category": "versions",
+      "mutation": "the SplitChain inner `version` is the number 2 instead of the string \"2\"",
+      "rejectionReason": "the inner version literal is the string \"2\" (protocol rule 3 position 2)",
+      "specCitation": "protocol rules 1.2,3"
+    },
+    {
+      "id": "genesis/funded-sender-empty-predecessor",
+      "category": "genesis",
+      "mutation": "a funded sender presents an empty genesis predecessor in a re-signed RECEIVE target",
+      "rejectionReason": "fails as funded-sender/genesis-predecessor during sender preflight, before co-sign or submit (A.9 #17)",
+      "specCitation": "A.9"
+    },
+    {
+      "id": "genesis/genesis-link-after-history",
+      "category": "genesis",
+      "mutation": "a genesis link (\"\") is asserted for a wallet with settled history",
+      "rejectionReason": "the chain link is the most recent settled step_2_signature; genesis is \"\" only with no history (protocol rule 1.5)",
+      "specCitation": "protocol rules 1.5,5"
+    },
+    {
+      "id": "suite-tuples/uppercase-uuid",
+      "category": "suite-tuples",
+      "mutation": "a UUID field uses uppercase spelling",
+      "rejectionReason": "UUIDs are lowercase canonical strings (A.9 #4)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "suite-tuples/unpadded-key",
+      "category": "suite-tuples",
+      "mutation": "a public key/signature loses its canonical base64url padding",
+      "rejectionReason": "canonical padded base64url only; unpadded or non-canonical re-encode rejects (A.9 #5)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "suite-tuples/amount-as-number",
+      "category": "suite-tuples",
+      "mutation": "an amount field is a JSON number (or exponent/signed/leading-zero/>32dp string)",
+      "rejectionReason": "amounts are canonical decimal strings (A.9 #6)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "suite-tuples/timestamp-without-millis",
+      "category": "suite-tuples",
+      "mutation": "a timestamp lacks exactly three fractional digits or the trailing Z",
+      "rejectionReason": "canonical timestamps are UTC RFC 3339 with exactly three fractional digits (A.9 #7)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "suite-tuples/nfc-nfd-substitution",
+      "category": "suite-tuples",
+      "mutation": "an NFC form is substituted by NFD (or vice versa) in a UTF-8 string field",
+      "rejectionReason": "no Unicode normalization; the signed bytes change and reject (A.9 #9)",
+      "specCitation": "A.1.1,A.9"
+    },
+    {
+      "id": "suite-tuples/ceremony-window-over-300",
+      "category": "suite-tuples",
+      "mutation": "expires_at is more than 300 seconds after the signed issued_at on a ceremony tuple",
+      "rejectionReason": "0 < expires_at − issued_at ≤ 300s, checked against the signed issued_at (A.4.1-A.4.3)",
+      "specCitation": "A.4.2,A.4.3"
+    },
+    {
+      "id": "gateway-envelopes/envelope-mutation-changes-verdict",
+      "category": "gateway-envelopes",
+      "mutation": "raw gateway envelope bytes are mutated and the change alters preimage verification",
+      "rejectionReason": "envelope mutation never changes signed-preimage verification; changed bytes are retained as distinct evidence, EQUIVALENT_STATE_DIFFERENT_ENVELOPE when the semantic head is unchanged (protocol rule 10 v11)",
+      "specCitation": "protocol rules 4.3,10"
+    },
+    {
+      "id": "role-projections/self-transfer",
+      "category": "role-projections",
+      "mutation": "the queried wallet is BOTH step-1 and step-2 party",
+      "rejectionReason": "exactly one role predicate must hold; self-transfers are rejected (protocol rule 5)",
+      "specCitation": "protocol rule 5"
+    },
+    {
+      "id": "role-projections/absent-wallet",
+      "category": "role-projections",
+      "mutation": "the queried wallet is NEITHER step-1 nor step-2 party",
+      "rejectionReason": "a wallet absent from both positions is rejected (protocol rule 5)",
+      "specCitation": "protocol rule 5"
+    },
+    {
+      "id": "role-projections/cross-role-p-substitution",
+      "category": "role-projections",
+      "mutation": "the receiver's previous_step_2_state_signature is hard-coded for a sender-side observation",
+      "rejectionReason": "P reads the role's own side of the inner; cross-role substitution is forbidden (protocol rule 5)",
+      "specCitation": "protocol rule 5"
+    },
+    {
+      "id": "api/403-scope-code",
+      "category": "api",
+      "mutation": "a 403 `forbidden`/`insufficient_scope` auth-error code is reintroduced",
+      "rejectionReason": "scope denial collapses to the generic 401 invalid_api_key; the 403 auth code is a scope oracle",
+      "specCitation": "API 1.1; non-oracular-auth-errors"
+    },
+    {
+      "id": "api/amount-as-json-number",
+      "category": "api",
+      "mutation": "an amount request field is sent as a JSON number",
+      "rejectionReason": "JSON numbers are rejected for all amount fields (API 1)",
+      "specCitation": "API 1"
+    },
+    {
+      "id": "schema-vocabs/amount-leading-zero",
+      "category": "schema-vocabs",
+      "mutation": "an amount string carries a leading zero (`01.5`)",
+      "rejectionReason": "ZkzAmount forbids leading zeros (protocol rule 2)",
+      "specCitation": "protocol rule 2"
+    },
+    {
+      "id": "schema-vocabs/amount-exponent",
+      "category": "schema-vocabs",
+      "mutation": "an amount string uses exponent notation (`1e2`)",
+      "rejectionReason": "ZkzAmount forbids exponents (protocol rule 2)",
+      "specCitation": "protocol rule 2"
+    },
+    {
+      "id": "schema-vocabs/amount-over-32dp",
+      "category": "schema-vocabs",
+      "mutation": "an amount string carries 33 decimal places",
+      "rejectionReason": "ZkzAmount allows at most 32 decimals (protocol rule 2)",
+      "specCitation": "protocol rule 2"
+    },
+    {
+      "id": "schema-vocabs/noncanonical-uuid",
+      "category": "schema-vocabs",
+      "mutation": "a Uuid is uppercased or otherwise alternately spelled",
+      "rejectionReason": "APIs reject alternate UUID spellings (protocol rule 2)",
+      "specCitation": "protocol rule 2"
+    }
+  ],
+  "NEGATIVE_VECTORS_CONTRACT_VERSION": 1,
+  "SOURCE": "A.9 negative vectors; role predicates; forbidden aliases; non-oracular-auth-errors"
+}

@@ -1,0 +1,150 @@
+{
+  "ADMIN_ROUTES": [
+    {
+      "method": "GET",
+      "path": "/admin/v1/external-sends/:operation_id/approval-challenge",
+      "authMode": "operator_session"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/external-sends/:operation_id/approve",
+      "authMode": "operator_session_totp"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/external-sends/:operation_id/reject",
+      "authMode": "operator_session_totp"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/destinations/:destination_id/bless",
+      "authMode": "operator_session_totp_device"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/destinations/:destination_id/retire",
+      "authMode": "operator_session"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/operations/needs-attention",
+      "authMode": "operator_session"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/operations/:operation_id/recovery",
+      "authMode": "operator_session"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/operations/:operation_id/recovery-actions",
+      "authMode": "operator_session_totp"
+    }
+  ],
+  "AUTH_MODES": [
+    "implementer_bearer",
+    "implementer_bearer_or_signed_reporting",
+    "signed_reporting_credential",
+    "subscription_handle",
+    "operator_session",
+    "operator_session_totp",
+    "operator_session_totp_device",
+    "public"
+  ],
+  "PUBLIC_ROUTES": [
+    {
+      "method": "POST",
+      "path": "/v1/receives",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/receives/:operation_id",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/internal-moves",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/internal-moves/:operation_id",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/external-sends",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/external-sends/:operation_id",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/destinations",
+      "authMode": "implementer_bearer"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/destinations",
+      "authMode": "implementer_bearer_or_signed_reporting"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events/stream",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/state/snapshot",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/operations/:operation_id/subscribe",
+      "authMode": "subscription_handle"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/operations/:operation_id/armed",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/operations/:operation_id/verification-complete",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/operations/:operation_id/verification-material",
+      "authMode": "signed_reporting_credential"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/zupay-node",
+      "authMode": "public"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "authMode": "public"
+    }
+  ],
+  "RETIRED_ROUTES": [
+    "/v1/reservations*",
+    "/v1/outbound-requests*",
+    "/v1/payments*",
+    "/v1/refunds*",
+    "/admin/v1/drains*"
+  ],
+  "RETIRED_ROUTES_NON_PATH_CATEGORY": "any import endpoint",
+  "SOURCE": "API contract: route inventory and retired paths"
+}

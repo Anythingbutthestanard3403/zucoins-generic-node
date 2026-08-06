@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "concern": "recovery-drill",
+  "provenance": {
+    "generator": "packages/generic-node-contracts/scripts/emit-recovery-golden.ts",
+    "construction": "objects with keys fixed in construction sequence, serialized only with JSON.stringify; no trailing newline in byte-authority files",
+    "key_material": "test-only 32-byte filled Ed25519 seeds (node identity 0x00, wallets 0x11/0x12/0x13); synthetic boot root fill 0xa1",
+    "source": "offline canonical constructor; no gateway capture, import, or live-chain submission"
+  },
+  "archive": {
+    "format": "zp-node-backup-v1",
+    "file": "archive.json.txt",
+    "sha256": "4037e574a0f823a37acbe2d0154b6bd90631700c64d921125eea812697e71dbc",
+    "manifest_sha256": "139f7e56de039f5c7ced5c873bd23b265e97f0ff6ba62497e35b004861315b5d",
+    "independent_verifier": "src/recovery-drill/verify.ts verifyArchive (all-or-nothing)"
+  },
+  "chained_golden": {
+    "export_digest_sha256": "62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44",
+    "recovery_verification_field_8_export_sha256": "62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44",
+    "equal": true,
+    "note": "the zp-recovery-verification-v1 probe binds to the zp-backup-wallet-export-v1 golden via field 8"
+  },
+  "decisions": [
+    "backup-archive-freeze",
+    "recovery-verification-probe-freeze",
+    "recovery-drill-matrix-freeze"
+  ]
+}

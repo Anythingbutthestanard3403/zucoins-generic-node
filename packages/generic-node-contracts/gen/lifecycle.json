@@ -1,0 +1,15 @@
+{
+  "AFTER_LANDING_KINDS": [
+    "HOLD",
+    "INTERNAL_MOVE"
+  ],
+  "CHILD_LINK_FIELD": "spawned_from_operation_id",
+  "LIFECYCLE_RULES": {
+    "parentOperation": "RECEIVE_EXTERNAL",
+    "childOperation": "MOVE_INTERNAL",
+    "maxChildrenPerReceive": 1,
+    "childLinkField": "spawned_from_operation_id",
+    "workflowGraphSupported": false
+  },
+  "SOURCE": "core operation model; after-landing lifecycle; API create contract"
+}

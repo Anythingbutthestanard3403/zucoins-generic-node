@@ -1,0 +1,262 @@
+{
+  "concern": "api-schema",
+  "ticket": "crypto-goldens.2",
+  "version": 2,
+  "governing": {
+    "spec": "api-contract; data-model enum vocabulary; state-event reference",
+    "decisions": ["three-generic-operations", "launch-deferral", "api-schema-freeze"]
+  },
+  "errorVocabulary": {
+    "httpStatusCount": 8,
+    "httpStatusCodes": [400, 401, 404, 409, 410, 422, 429, 503],
+    "envelopeFields": ["code", "message", "request_id", "details"],
+    "citedErrorCodes": [
+      "wallet_busy",
+      "unknown_field",
+      "receive_queue_full",
+      "t0_mismatch",
+      "operation_version_conflict",
+      "operation_not_armable",
+      "verification_material_not_ready",
+      "verification_material_expired",
+      "cursor_mismatch"
+    ]
+  },
+  "authScopes": {
+    "implementerScopes": [
+      "receive:create",
+      "receive:read",
+      "move:create",
+      "move:read",
+      "send:create",
+      "send:read",
+      "destination:create",
+      "destination:read"
+    ],
+    "authClasses": [
+      "implementer_bearer",
+      "signed_reporting_credential",
+      "subscription_handle",
+      "operator_session"
+    ],
+    "reportingHeaders": [
+      "X-ZP-Reporting-Key-Id",
+      "X-ZP-Reporting-Timestamp",
+      "X-ZP-Reporting-Expires-At",
+      "X-ZP-Reporting-Nonce",
+      "X-ZP-Reporting-Signature"
+    ],
+    "bearerKeyExclusions": [
+      "read_raw_verification_material",
+      "arm",
+      "acknowledge_verification",
+      "approve_send",
+      "bless_destination",
+      "resolve_attention"
+    ]
+  },
+  "pgEnums": {
+    "count": 17,
+    "names": [
+      "operation_kind",
+      "operation_status",
+      "wallet_key_origin",
+      "wallet_state",
+      "destination_state",
+      "wallet_lease_role",
+      "approval_method",
+      "approval_challenge_status",
+      "external_formation_state",
+      "observer_domain",
+      "observation_parse_result",
+      "observation_relationship",
+      "verification_verdict",
+      "lineage_proof_verdict",
+      "reporting_key_state",
+      "reporting_key_lifecycle_event_type",
+      "reporting_request_class"
+    ],
+    "values": {
+      "operation_kind": ["RECEIVE_EXTERNAL", "MOVE_INTERNAL", "SEND_EXTERNAL"],
+      "operation_status": [
+        "CREATED",
+        "READY",
+        "RECEIVE_LANDED",
+        "INTERNAL_MOVE_LANDED",
+        "APPROVED",
+        "AWAITING_REDEMPTION",
+        "EXTERNAL_SEND_LANDED",
+        "EXPIRED",
+        "REJECTED",
+        "NEEDS_ATTENTION"
+      ],
+      "wallet_key_origin": ["node_generated", "imported"],
+      "wallet_state": ["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"],
+      "destination_state": ["PENDING", "BLESSED", "RETIRED"],
+      "wallet_lease_role": [
+        "RECEIVE_WINDOW",
+        "MOVE_SOURCE",
+        "MOVE_DESTINATION",
+        "SEND_SOURCE",
+        "RECONCILIATION"
+      ],
+      "approval_method": ["TOTP_ONLY", "TOTP_AND_DEVICE"],
+      "approval_challenge_status": ["ISSUED", "CONSUMED", "SUPERSEDED", "EXPIRED"],
+      "external_formation_state": [
+        "NOT_REQUIRED",
+        "APPROVAL_PENDING",
+        "APPROVED_UNSIGNED",
+        "SIGNING_CLAIMED",
+        "PARTIAL_PERSISTED",
+        "PARTIAL_DELIVERED"
+      ],
+      "observer_domain": ["NODE", "PLATFORM"],
+      "observation_parse_result": [
+        "VERIFIED_GENESIS",
+        "VERIFIED_HEAD",
+        "TRANSPORT_ERROR",
+        "MALFORMED_ENVELOPE",
+        "MALFORMED_TRANSACTION",
+        "UNVERIFIED_SIGNATURE",
+        "WALLET_ROLE_INVALID"
+      ],
+      "observation_relationship": [
+        "FIRST",
+        "SUCCESSOR",
+        "COMPLETE_PATH_SUCCESSOR",
+        "DUPLICATE",
+        "EQUIVALENT_STATE_DIFFERENT_ENVELOPE",
+        "REGRESSION",
+        "UNEXPLAINED_JUMP",
+        "GENESIS_AFTER_HISTORY",
+        "SIGNATURE_COLLISION",
+        "NOT_APPLICABLE"
+      ],
+      "verification_verdict": ["PENDING", "VERIFIED", "REJECTED", "INDETERMINATE"],
+      "lineage_proof_verdict": [
+        "LANDED_EXACT",
+        "LANDED_COMPLETE_PATH",
+        "INDETERMINATE",
+        "INVARIANT_BREACH"
+      ],
+      "reporting_key_state": ["PENDING", "ACTIVE", "RETIRED", "REVOKED"],
+      "reporting_key_lifecycle_event_type": [
+        "FIRST_KEY_ACTIVATED",
+        "KEY_ROTATED",
+        "PRIOR_KEY_RETIRED",
+        "KEY_REVOKED",
+        "AUTH_HOLD_SET",
+        "AUTH_HOLD_RELEASED"
+      ],
+      "reporting_request_class": ["READ", "MUTATION"]
+    }
+  },
+  "discovery": {
+    "path": "/.well-known/zupay-node",
+    "responseFields": [
+      "node_id",
+      "api_version",
+      "supported_operation_types",
+      "event_signing_public_keys",
+      "expected_artifact_public_keys",
+      "canonical_suite_versions",
+      "key_validity_intervals"
+    ],
+    "exclusions": [
+      "private_configuration",
+      "gateway_credential",
+      "implementer_list",
+      "wallet_list",
+      "health_detail"
+    ]
+  },
+  "routes": {
+    "publicCount": 16,
+    "adminCount": 8,
+    "totalCount": 24,
+    "retiredCount": 5
+  },
+  "events": {
+    "durableCount": 9
+  },
+  "operationTypes": {
+    "count": 3
+  },
+  "requestResponseSchemas": {
+    "ticket": "operation-schemas.1",
+    "count": 3,
+    "definitions": [
+      {
+        "operationType": "RECEIVE_EXTERNAL",
+        "method": "POST",
+        "path": "/v1/receives",
+        "requestSchema": "ReceiveExternalRequestSchema",
+        "responseSchema": "ReceiveExternalResponseSchema",
+        "requestFields": ["amount_zkz", "anchor", "expires_in_seconds", "after_landing"],
+        "responseStatuses": [201, 202],
+        "responseFields": [
+          "operation",
+          "receiver_pubkey",
+          "discriminator",
+          "expires_at",
+          "after_landing",
+          "code_status",
+          "transfer_code",
+          "expected_artifact",
+          "t0",
+          "subscription_handle"
+        ]
+      },
+      {
+        "operationType": "MOVE_INTERNAL",
+        "method": "POST",
+        "path": "/v1/internal-moves",
+        "requestSchema": "MoveInternalRequestSchema",
+        "responseSchema": "MoveInternalResponseSchema",
+        "requestFields": ["source_wallet_id", "destination_id", "amount_zkz"],
+        "responseStatuses": [201],
+        "responseFields": [
+          "operation",
+          "source_wallet_id",
+          "destination_id",
+          "spawned_from_operation_id",
+          "lease_status",
+          "expected_artifact"
+        ]
+      },
+      {
+        "operationType": "SEND_EXTERNAL",
+        "method": "POST",
+        "path": "/v1/external-sends",
+        "requestSchema": "SendExternalRequestSchema",
+        "responseSchema": "SendExternalResponseSchema",
+        "requestFields": [
+          "source_wallet_id",
+          "destination_address",
+          "amount_zkz",
+          "references_operation_id",
+          "client_reference",
+          "description"
+        ],
+        "responseStatuses": [201],
+        "responseFields": [
+          "operation",
+          "source_wallet_id",
+          "destination_address",
+          "references_operation_id",
+          "approval_status",
+          "transfer_code",
+          "transfer_code_sha256",
+          "available_until",
+          "expected_artifact"
+        ]
+      }
+    ]
+  },
+  "stateTransitions": {
+    "receive": 5,
+    "move": 5,
+    "send": 11,
+    "total": 21
+  }
+}

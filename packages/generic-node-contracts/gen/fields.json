@@ -1,0 +1,79 @@
+{
+  "FIELDS_CONTRACT_VERSION": 1,
+  "SOURCE": "SplitChain inner field rules; A.1.2; artifacts-freeze",
+  "SPLITCHAIN_INNER_FIELD_SEQUENCE": [
+    "type",
+    "version",
+    "unix_time_secs",
+    "signer_steps",
+    "step_1_signer",
+    "step_2_signer",
+    "step_1_key_public__base64urlsafe",
+    "step_2_key_public__base64urlsafe",
+    "step_1_state",
+    "step_2_state",
+    "previous_step_1_state_signature",
+    "previous_step_2_state_signature",
+    "expiry__unix_time_secs",
+    "message"
+  ],
+  "SPLITCHAIN_INNER_FIXED_LITERALS": {
+    "type": "unique_combinable",
+    "version": "2",
+    "signerSteps": 2,
+    "step1Signer": "sender",
+    "step2Signer": "receiver",
+    "unixTimeSecsUnit": "seconds"
+  },
+  "SPLITCHAIN_INNER_OPTIONAL_FIELDS": [
+    "expiry__unix_time_secs",
+    "message"
+  ],
+  "SPLITCHAIN_INNER_PROHIBITIONS": {
+    "objectSpreadOnSigningPath": false,
+    "alphabeticalSorting": false,
+    "schemaSerializersThatReorderKeys": false,
+    "parseRebuildCycles": false,
+    "unknownTopLevelFields": "fail-closed until a future protocol version supports them",
+    "foreignMetadataPreservedAsOpaqueSignedData": true,
+    "foreignMetadataAsApplicationChannel": false,
+    "jsonbReconstruction": false
+  },
+  "SPLITCHAIN_INNER_REQUIRED_FIELD_SEQUENCE": [
+    "type",
+    "version",
+    "unix_time_secs",
+    "signer_steps",
+    "step_1_signer",
+    "step_2_signer",
+    "step_1_key_public__base64urlsafe",
+    "step_2_key_public__base64urlsafe",
+    "step_1_state",
+    "step_2_state",
+    "previous_step_1_state_signature",
+    "previous_step_2_state_signature"
+  ],
+  "SPLITCHAIN_PREIMAGE_CONSTRUCTION": {
+    "step1PreimageText": "JSON.stringify(inner)",
+    "step2PreimageText": "JSON.stringify({inner,step_1_signature})",
+    "settledTextTemplate": "{\"inner\":<exact step_1_preimage_text>,\"step_1_signature\":<JSON string>,\"step_2_signature\":<JSON string>}",
+    "utf8EncodeExactStrings": true,
+    "detachedEd25519": true,
+    "noPrefixNewlineHashCanonicalJsonOrWhitespace": true,
+    "signatureEncoding": "canonical padded base64url",
+    "suitePrefixUsed": false
+  },
+  "SPLITCHAIN_SETTLED_TEXT_FIELD_SEQUENCE": [
+    "inner",
+    "step_1_signature",
+    "step_2_signature"
+  ],
+  "SPLITCHAIN_STATE_OBJECT_FIELD_SEQUENCE": [
+    "amount",
+    "metadata"
+  ],
+  "SPLITCHAIN_STEP_2_PREIMAGE_FIELD_SEQUENCE": [
+    "inner",
+    "step_1_signature"
+  ]
+}

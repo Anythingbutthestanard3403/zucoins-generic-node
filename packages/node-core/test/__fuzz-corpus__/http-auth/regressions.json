@@ -1,0 +1,429 @@
+{
+  "entries": [
+    {
+      "id": "verify-valid-action",
+      "kind": "verify-decision",
+      "header": "Bearer ak_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expected": {
+        "nextCalled": true,
+        "status": null,
+        "apiKeyKind": "ACTION",
+        "selects": 1,
+        "updates": 1
+      }
+    },
+    {
+      "id": "verify-wrong-scope-reporting",
+      "kind": "verify-decision",
+      "header": "Bearer rk_RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 1,
+        "updates": 0
+      }
+    },
+    {
+      "id": "verify-test-key",
+      "kind": "verify-decision",
+      "header": "Bearer ak_test_xxxxxxxxxxxxxxxxxxxx",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 0,
+        "updates": 0
+      }
+    },
+    {
+      "id": "verify-unknown-action",
+      "kind": "verify-decision",
+      "header": "Bearer ak_QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 1,
+        "updates": 0
+      }
+    },
+    {
+      "id": "verify-unknown-scheme",
+      "kind": "verify-decision",
+      "header": "Bearer xx_yyyyyyyyyyyyyyyyyyyy",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 0,
+        "updates": 0
+      }
+    },
+    {
+      "id": "verify-lowercase-scheme",
+      "kind": "verify-decision",
+      "header": "bearer ak_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 0,
+        "updates": 0
+      }
+    },
+    {
+      "id": "verify-bare-token",
+      "kind": "verify-decision",
+      "header": "ak_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expected": {
+        "nextCalled": false,
+        "status": 401,
+        "code": "invalid_api_key",
+        "selects": 0,
+        "updates": 0
+      }
+    },
+    {
+      "id": "csrf-match",
+      "kind": "csrf-gate",
+      "provided": "tok",
+      "expected": "tok",
+      "nextCalled": true
+    },
+    {
+      "id": "csrf-mismatch",
+      "kind": "csrf-gate",
+      "provided": "wrong",
+      "expected": "tok",
+      "nextCalled": false,
+      "status": 401
+    },
+    {
+      "id": "csrf-missing",
+      "kind": "csrf-gate",
+      "provided": null,
+      "expected": "tok",
+      "nextCalled": false,
+      "status": 401
+    },
+    {
+      "id": "csrf-ak-standdown",
+      "kind": "csrf-unless-action-key",
+      "authMode": "action_key",
+      "provided": null,
+      "expected": "tok",
+      "nextCalled": true
+    },
+    {
+      "id": "csrf-session-enforced",
+      "kind": "csrf-unless-action-key",
+      "authMode": "session",
+      "provided": "x",
+      "expected": "y",
+      "nextCalled": false,
+      "status": 401
+    },
+    {
+      "id": "csrf-unset-failclosed",
+      "kind": "csrf-unless-action-key",
+      "authMode": null,
+      "provided": "tok",
+      "expected": "tok",
+      "nextCalled": true
+    },
+    {
+      "id": "totp-required",
+      "kind": "totp-gate",
+      "mustEnrol": true,
+      "status": 401
+    },
+    {
+      "id": "totp-ok",
+      "kind": "totp-gate",
+      "mustEnrol": false,
+      "nextCalled": true
+    },
+    {
+      "id": "password-required",
+      "kind": "password-gate",
+      "mustChange": true,
+      "status": 403,
+      "code": "password_change_required"
+    },
+    {
+      "id": "password-ok",
+      "kind": "password-gate",
+      "mustChange": false,
+      "nextCalled": true
+    },
+    {
+      "id": "lockout-trip",
+      "kind": "lockout-sequence",
+      "actions": [
+        {
+          "ip": "10.0.0.1",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.1",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.1",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.1",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.1",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        }
+      ],
+      "probe": {
+        "ip": "10.0.0.1",
+        "username": "admin",
+        "atMs": 500,
+        "locked": true
+      }
+    },
+    {
+      "id": "lockout-four-no-trip",
+      "kind": "lockout-sequence",
+      "actions": [
+        {
+          "ip": "10.0.0.2",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.2",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.2",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.2",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        }
+      ],
+      "probe": {
+        "ip": "10.0.0.2",
+        "username": "admin",
+        "atMs": 400,
+        "locked": false
+      }
+    },
+    {
+      "id": "lockout-window-expiry",
+      "kind": "lockout-sequence",
+      "actions": [
+        {
+          "ip": "10.0.0.3",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.3",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.3",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.3",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": "10.0.0.3",
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        }
+      ],
+      "probe": {
+        "ip": "10.0.0.3",
+        "username": "admin",
+        "atMs": 905000,
+        "locked": false
+      }
+    },
+    {
+      "id": "lockout-casefold-nullip",
+      "kind": "lockout-sequence",
+      "actions": [
+        {
+          "ip": null,
+          "username": "Admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": null,
+          "username": "ADMIN",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": null,
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": null,
+          "username": "Admin",
+          "op": "fail",
+          "advanceMs": 100
+        },
+        {
+          "ip": null,
+          "username": "admin",
+          "op": "fail",
+          "advanceMs": 100
+        }
+      ],
+      "probe": {
+        "ip": null,
+        "username": "admin",
+        "atMs": 500,
+        "locked": true
+      }
+    },
+    {
+      "id": "login-valid",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": {
+        "username": "u",
+        "password": "p"
+      },
+      "valid": true
+    },
+    {
+      "id": "login-valid-totp",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": {
+        "username": "u",
+        "password": "p",
+        "totp": "123456"
+      },
+      "valid": true
+    },
+    {
+      "id": "login-extra-key",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": {
+        "username": "u",
+        "password": "p",
+        "extra": 1
+      },
+      "valid": false
+    },
+    {
+      "id": "login-wrong-type",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": {
+        "username": 5,
+        "password": "p"
+      },
+      "valid": false
+    },
+    {
+      "id": "login-empty-username",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": {
+        "username": "",
+        "password": "p"
+      },
+      "valid": false
+    },
+    {
+      "id": "login-non-object",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": "nope",
+      "valid": false
+    },
+    {
+      "id": "login-array",
+      "kind": "schema-shape",
+      "schema": "login",
+      "value": [
+        1,
+        2
+      ],
+      "valid": false
+    },
+    {
+      "id": "confirm-6digit",
+      "kind": "schema-shape",
+      "schema": "confirmTotp",
+      "value": {
+        "totp": "123456"
+      },
+      "valid": true
+    },
+    {
+      "id": "confirm-5digit",
+      "kind": "schema-shape",
+      "schema": "confirmTotp",
+      "value": {
+        "totp": "12345"
+      },
+      "valid": false
+    },
+    {
+      "id": "confirm-alpha",
+      "kind": "schema-shape",
+      "schema": "confirmTotp",
+      "value": {
+        "totp": "12a456"
+      },
+      "valid": false
+    },
+    {
+      "id": "confirm-extra-key",
+      "kind": "schema-shape",
+      "schema": "confirmTotp",
+      "value": {
+        "totp": "123456",
+        "x": 1
+      },
+      "valid": false
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "CONCURRENT_TOGGLE_RESOLUTION": {
+    "mechanism": "compare-and-swap-on-expected-prior-version",
+    "sequenceDiscipline": "strict-monotonic-increment",
+    "biasedTowardEngage": false,
+    "biasedTowardDisengage": false,
+    "loserAction": "REJECT_AND_REQUIRE_REREAD"
+  },
+  "HALT_RACE_ACTIONS": [
+    "BLOCKED_FROM_STARTING",
+    "COMPLETES_NO_ABORT",
+    "NEVER_GATED"
+  ],
+  "HALT_RACE_PHASES": [
+    "NOT_STARTED",
+    "PREIMAGE_PERSISTED",
+    "SIGNED_PERSISTED",
+    "DELIVERED",
+    "SUBMIT_STARTED",
+    "SUBMIT_RETURNED",
+    "LANDED_VERIFIED"
+  ],
+  "HALT_RACE_TABLE": [
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "NOT_STARTED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "PREIMAGE_PERSISTED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "SIGNED_PERSISTED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "SUBMIT_STARTED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "SUBMIT_RETURNED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "phaseAtEngage": "LANDED_VERIFIED",
+      "action": "NEVER_GATED"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "NOT_STARTED",
+      "action": "BLOCKED_FROM_STARTING"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "PREIMAGE_PERSISTED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "SIGNED_PERSISTED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "SUBMIT_STARTED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "SUBMIT_RETURNED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "phaseAtEngage": "LANDED_VERIFIED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "phaseAtEngage": "NOT_STARTED",
+      "action": "BLOCKED_FROM_STARTING"
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "phaseAtEngage": "PREIMAGE_PERSISTED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "phaseAtEngage": "SIGNED_PERSISTED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "phaseAtEngage": "DELIVERED",
+      "action": "COMPLETES_NO_ABORT"
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "phaseAtEngage": "LANDED_VERIFIED",
+      "action": "COMPLETES_NO_ABORT"
+    }
+  ],
+  "PHASE_APPLICABILITY": {
+    "MOVE_INTERNAL": [
+      "NOT_STARTED",
+      "PREIMAGE_PERSISTED",
+      "SIGNED_PERSISTED",
+      "SUBMIT_STARTED",
+      "SUBMIT_RETURNED",
+      "LANDED_VERIFIED"
+    ],
+    "SEND_EXTERNAL": [
+      "NOT_STARTED",
+      "PREIMAGE_PERSISTED",
+      "SIGNED_PERSISTED",
+      "DELIVERED",
+      "LANDED_VERIFIED"
+    ],
+    "RECEIVE_EXTERNAL": [
+      "NOT_STARTED",
+      "PREIMAGE_PERSISTED",
+      "SIGNED_PERSISTED",
+      "SUBMIT_STARTED",
+      "SUBMIT_RETURNED",
+      "LANDED_VERIFIED"
+    ]
+  },
+  "SOURCE": "operator-kill-switch; applies-to table; guarded CAS mutation; the never-blind-retry rule"
+}

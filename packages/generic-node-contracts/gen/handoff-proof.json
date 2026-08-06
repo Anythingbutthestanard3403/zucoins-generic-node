@@ -1,0 +1,228 @@
+{
+  "scenarios": {
+    "SCENARIO_CLASSES": [
+      "OVERLAP_DEPLOY",
+      "GRACEFUL_HANDOFF",
+      "CRASH_FAILOVER",
+      "SPLIT_BRAIN_ATTEMPT",
+      "READINESS_TRUTH"
+    ],
+    "SCENARIO_MATRIX": [
+      {
+        "id": "overlap-deploy-standby",
+        "scenarioClass": "OVERLAP_DEPLOY",
+        "instanceA": {
+          "role": "INCUMBENT_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "instanceB": {
+          "role": "NEW_STANDBY",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": false
+          }
+        },
+        "sharedWallet": {
+          "aWriteUnresolved": true,
+          "walletSequencingHeld": true
+        },
+        "takeover": {
+          "oldQuiesced": true,
+          "newArmed": false
+        },
+        "expected": {
+          "readyA": true,
+          "leaderA": true,
+          "readyB": true,
+          "leaderB": false,
+          "bSharedWriteAdmitted": false,
+          "noConcurrentDoubleWrite": true,
+          "takeoverAccepted": true
+        }
+      },
+      {
+        "id": "graceful-handoff-complete",
+        "scenarioClass": "GRACEFUL_HANDOFF",
+        "instanceA": {
+          "role": "OUTGOING_QUIESCED",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": false
+          }
+        },
+        "instanceB": {
+          "role": "NEW_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "sharedWallet": {
+          "aWriteUnresolved": false,
+          "walletSequencingHeld": false
+        },
+        "takeover": {
+          "oldQuiesced": true,
+          "newArmed": true
+        },
+        "expected": {
+          "readyA": true,
+          "leaderA": false,
+          "readyB": true,
+          "leaderB": true,
+          "bSharedWriteAdmitted": true,
+          "noConcurrentDoubleWrite": true,
+          "takeoverAccepted": true
+        }
+      },
+      {
+        "id": "crash-failover-inflight",
+        "scenarioClass": "CRASH_FAILOVER",
+        "instanceA": {
+          "role": "CRASHED_INCUMBENT",
+          "state": {
+            "schemaMigrated": false,
+            "databaseReachable": false,
+            "vaultKeyRingLoaded": false,
+            "vaultCensusVerified": false,
+            "observationReadCapable": false,
+            "leadershipLockHeld": false
+          }
+        },
+        "instanceB": {
+          "role": "RECOVERED_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "sharedWallet": {
+          "aWriteUnresolved": true,
+          "walletSequencingHeld": true
+        },
+        "takeover": {
+          "oldQuiesced": true,
+          "newArmed": true
+        },
+        "expected": {
+          "readyA": false,
+          "leaderA": false,
+          "readyB": true,
+          "leaderB": true,
+          "bSharedWriteAdmitted": false,
+          "noConcurrentDoubleWrite": true,
+          "takeoverAccepted": true
+        }
+      },
+      {
+        "id": "split-brain-window",
+        "scenarioClass": "SPLIT_BRAIN_ATTEMPT",
+        "instanceA": {
+          "role": "REAL_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "instanceB": {
+          "role": "PHANTOM_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "sharedWallet": {
+          "aWriteUnresolved": true,
+          "walletSequencingHeld": true
+        },
+        "takeover": {
+          "oldQuiesced": true,
+          "newArmed": false
+        },
+        "expected": {
+          "readyA": true,
+          "leaderA": true,
+          "readyB": true,
+          "leaderB": true,
+          "bSharedWriteAdmitted": false,
+          "noConcurrentDoubleWrite": true,
+          "takeoverAccepted": true
+        }
+      },
+      {
+        "id": "new-instance-booting",
+        "scenarioClass": "READINESS_TRUTH",
+        "instanceA": {
+          "role": "INCUMBENT_LEADER",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": true,
+            "vaultCensusVerified": true,
+            "observationReadCapable": true,
+            "leadershipLockHeld": true
+          }
+        },
+        "instanceB": {
+          "role": "BOOTING",
+          "state": {
+            "schemaMigrated": true,
+            "databaseReachable": true,
+            "vaultKeyRingLoaded": false,
+            "vaultCensusVerified": false,
+            "observationReadCapable": false,
+            "leadershipLockHeld": false
+          }
+        },
+        "sharedWallet": {
+          "aWriteUnresolved": true,
+          "walletSequencingHeld": true
+        },
+        "takeover": {
+          "oldQuiesced": true,
+          "newArmed": false
+        },
+        "expected": {
+          "readyA": true,
+          "leaderA": true,
+          "readyB": false,
+          "leaderB": false,
+          "bSharedWriteAdmitted": false,
+          "noConcurrentDoubleWrite": true,
+          "takeoverAccepted": true
+        }
+      }
+    ]
+  }
+}

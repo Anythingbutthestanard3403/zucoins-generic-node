@@ -1,0 +1,384 @@
+{
+  "concern": "approval",
+  "governing": {
+    "decisions": [
+      "approval-tuple-freeze",
+      "two-timer-separation"
+    ],
+    "gate": "CONTRACT_FREEZE",
+    "spec": [
+      "canonical serialization A.1.1, tuple A.4.1, goldens A.8, negative vectors A.9",
+      "signing custody and security invariants",
+      "operation flows",
+      "build/test gates"
+    ]
+  },
+  "approvalTuple": {
+    "purpose": "zp-send-external-approval-v1",
+    "canonicalVersion": 1,
+    "serializer": "suite",
+    "optionalSignatureKeyRole": "device",
+    "construction": {
+      "payloadObject": "object built in the exact field sequence below",
+      "payloadJson": "JSON.stringify(payload_object)",
+      "preimageText": "purpose + \"\\n\" + payload_json",
+      "preimageBytes": "UTF8(preimage_text)",
+      "digest": "lowercase_hex(SHA256(preimage_bytes))",
+      "domainSeparationPrefix": "purpose",
+      "purposeAppearsAsPrefixAndField1": true,
+      "splitchainNativeSharesBytes": false
+    },
+    "fieldTypes": [
+      "purpose_literal",
+      "canonical_version_literal",
+      "uuid",
+      "operation_uuid",
+      "source_selector_object",
+      "ed25519_pubkey_padded",
+      "external_address_padded",
+      "zkz_amount_positive",
+      "uuid_nullable",
+      "canonical_timestamp"
+    ],
+    "fieldRoles": [
+      "IDENTITY",
+      "SOURCE",
+      "DESTINATION",
+      "AMOUNT",
+      "REFERENCE",
+      "NONCE",
+      "ISSUE_TIME",
+      "EXPIRY"
+    ],
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "operation_id",
+        "type": "operation_uuid",
+        "nullable": false,
+        "role": "REFERENCE"
+      },
+      {
+        "name": "source_selector",
+        "type": "source_selector_object",
+        "nullable": false,
+        "role": "SOURCE"
+      },
+      {
+        "name": "source_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false,
+        "role": "SOURCE"
+      },
+      {
+        "name": "destination_address",
+        "type": "external_address_padded",
+        "nullable": false,
+        "role": "DESTINATION"
+      },
+      {
+        "name": "amount_zkz",
+        "type": "zkz_amount_positive",
+        "nullable": false,
+        "role": "AMOUNT"
+      },
+      {
+        "name": "references_operation_id",
+        "type": "uuid_nullable",
+        "nullable": true,
+        "role": "REFERENCE"
+      },
+      {
+        "name": "nonce",
+        "type": "uuid",
+        "nullable": false,
+        "role": "NONCE"
+      },
+      {
+        "name": "issued_at",
+        "type": "canonical_timestamp",
+        "nullable": false,
+        "role": "ISSUE_TIME"
+      },
+      {
+        "name": "expires_at",
+        "type": "canonical_timestamp",
+        "nullable": false,
+        "role": "EXPIRY"
+      }
+    ]
+  },
+  "auth": {
+    "mandatoryGate": "fresh_single_use_totp",
+    "totpIsDigitalSignature": false,
+    "totpBinding": "guarded_mutation",
+    "optionalDeviceSignature": true,
+    "deviceSignatureKind": "additive_hardening",
+    "deviceSignatureSignsExactApprovalBytes": true,
+    "deviceSignatureReplacesTotp": false,
+    "deviceSignatureAloneAuthorizes": false
+  },
+  "precedence": {
+    "phases": [
+      "APPROVAL",
+      "SOURCE_LEASE_ACQUISITION",
+      "FRESH_CHAIN_FORMATION"
+    ],
+    "timeFacts": {
+      "sourceLeaseHeldAtApprovalTime": false,
+      "splitchainInnerFormedAtApprovalTime": false,
+      "bindsLaterFormedSplitchainInner": false,
+      "carriesSplitInnerSha256Field": false
+    }
+  },
+  "formation": {
+    "states": [
+      "APPROVED_UNSIGNED",
+      "SIGNING_CLAIMED",
+      "PARTIAL_PERSISTED",
+      "PARTIAL_DELIVERED",
+      "AWAITING_REDEMPTION"
+    ],
+    "transitions": [
+      {
+        "from": "APPROVED_UNSIGNED",
+        "to": "SIGNING_CLAIMED",
+        "guard": "persist_sign_intent_before_signer_then_compare_and_swap"
+      },
+      {
+        "from": "SIGNING_CLAIMED",
+        "to": "PARTIAL_PERSISTED",
+        "guard": "sign_exact_persisted_preimage_then_persist_partial_before_delivery"
+      },
+      {
+        "from": "PARTIAL_PERSISTED",
+        "to": "PARTIAL_DELIVERED",
+        "guard": "make_persisted_code_externally_observable"
+      },
+      {
+        "from": "PARTIAL_DELIVERED",
+        "to": "AWAITING_REDEMPTION",
+        "guard": "await_external_cosign_and_settlement_observation"
+      }
+    ],
+    "cardinality": {
+      "signIntent": {
+        "maxPerApproval": 1
+      },
+      "stepOneSignature": {
+        "maxPerApproval": 1
+      },
+      "persistedPartial": {
+        "maxPerApproval": 1
+      },
+      "externallyObservableCode": {
+        "maxPerApproval": 1
+      }
+    },
+    "signIntentBoundInputs": [
+      "consumed_approval_id",
+      "source_observation_id",
+      "destination_observation_id",
+      "lease_group",
+      "lease_epoch",
+      "inner_preimage_text",
+      "inner_digest"
+    ],
+    "frozenAfterExists": [
+      "inner_preimage_text",
+      "inner_digest",
+      "chain_link",
+      "redemption_time",
+      "redemption_expiry",
+      "destination_address",
+      "amount_zkz"
+    ],
+    "consumption": {
+      "consumedBeforeMutation": true,
+      "burnOnSignerFailure": true,
+      "burnOnPersistenceFailure": true,
+      "burnOnDeliveryFailure": true,
+      "burnOnGatewayFailure": true,
+      "restoredAfterDownstreamFailure": false
+    },
+    "redelivery": "byte_identical_persisted_partial_only",
+    "replacement": {
+      "triggeredBy": [
+        "expiry",
+        "changed_chain_link",
+        "changed_time",
+        "changed_expiry",
+        "changed_destination",
+        "changed_amount",
+        "changed_signed_byte"
+      ],
+      "requires": [
+        "safe_resolution_of_existing_operation",
+        "new_operation",
+        "fresh_approval"
+      ],
+      "permitsSecondPartialUnderOldApproval": false,
+      "refreshesExpiryUnderOldApproval": false
+    },
+    "timers": {
+      "t1ApprovalChallengeFreshness": {
+        "source": "approval_tuple.expires_at",
+        "refreshableWhilePreConsumption": true,
+        "frozenAtConsumption": true,
+        "isRedemptionDeadline": false
+      },
+      "t2RedemptionExpiry": {
+        "source": "signed_splitchain_inner.expiry",
+        "materializedAt": "sign_intent_formation",
+        "byteFrozenAfterFormation": true,
+        "isSingleImmutableRedemptionDeadline": true
+      }
+    }
+  },
+  "crash": {
+    "durableStates": [
+      "APPROVAL_PENDING_NO_SIGN_INTENT",
+      "APPROVAL_CONSUMED_NO_SIGN_INTENT",
+      "SIGNING_CLAIMED_NO_PARTIAL",
+      "PARTIAL_COMMITTED_UNDELIVERED",
+      "PARTIAL_DELIVERED_HEAD_UNCHANGED",
+      "PARTIAL_DELIVERED_EXPECTED_AT_HEAD",
+      "PARTIAL_DELIVERED_HEAD_ANOMALOUS",
+      "PARTIAL_EXPIRED"
+    ],
+    "recoveryActions": [
+      "AWAIT_APPROVAL_OR_REJECT_SAFELY",
+      "ACQUIRE_READ_FRESH_PERSIST_FIRST_SIGN_INTENT",
+      "REVALIDATE_SAME_PREIMAGE_COMPLETE_FIRST_FORMATION",
+      "DELIVER_EXACT_PERSISTED_CODE",
+      "REDELIVER_EXACT_PERSISTED_CODE",
+      "MARK_LANDED_FROM_VERIFIED_OBSERVATION",
+      "NEEDS_ATTENTION_PRESERVE_LEASE_EVIDENCE",
+      "TERMINALIZE_ON_POSITIVE_EXPIRY_OR_NON_LANDING"
+    ],
+    "forbiddenActions": [
+      "ACQUIRE_OR_SIGN",
+      "CREATE_SECOND_SIGN_INTENT",
+      "CONSTRUCT_DIFFERENT_INNER_OR_CODE",
+      "RE_SIGN_OR_RE_FORM",
+      "MINT_REPLACEMENT_PARTIAL",
+      "SUBMIT_OR_DELIVER_NEW_CODE",
+      "INFER_NON_LANDING_OR_RETRY",
+      "REFRESH_EXPIRY_UNDER_OLD_APPROVAL"
+    ],
+    "matrix": [
+      {
+        "durableState": "APPROVAL_PENDING_NO_SIGN_INTENT",
+        "recovery": "AWAIT_APPROVAL_OR_REJECT_SAFELY",
+        "forbidden": "ACQUIRE_OR_SIGN",
+        "note": "no approval consumed yet; keep awaiting the guarded mutation or reject safely"
+      },
+      {
+        "durableState": "APPROVAL_CONSUMED_NO_SIGN_INTENT",
+        "recovery": "ACQUIRE_READ_FRESH_PERSIST_FIRST_SIGN_INTENT",
+        "forbidden": "CREATE_SECOND_SIGN_INTENT",
+        "note": "acquire the source lease, read fresh source/destination, persist the first sign intent only"
+      },
+      {
+        "durableState": "SIGNING_CLAIMED_NO_PARTIAL",
+        "recovery": "REVALIDATE_SAME_PREIMAGE_COMPLETE_FIRST_FORMATION",
+        "forbidden": "CONSTRUCT_DIFFERENT_INNER_OR_CODE",
+        "note": "prove no delivery path ran, revalidate the same preimage/head, complete the first persisted formation"
+      },
+      {
+        "durableState": "PARTIAL_COMMITTED_UNDELIVERED",
+        "recovery": "DELIVER_EXACT_PERSISTED_CODE",
+        "forbidden": "RE_SIGN_OR_RE_FORM",
+        "note": "a partial is committed but was never delivered; deliver the exact persisted code"
+      },
+      {
+        "durableState": "PARTIAL_DELIVERED_HEAD_UNCHANGED",
+        "recovery": "REDELIVER_EXACT_PERSISTED_CODE",
+        "forbidden": "MINT_REPLACEMENT_PARTIAL",
+        "note": "delivered and the source head is unchanged; redeliver the exact persisted code only under delivery policy"
+      },
+      {
+        "durableState": "PARTIAL_DELIVERED_EXPECTED_AT_HEAD",
+        "recovery": "MARK_LANDED_FROM_VERIFIED_OBSERVATION",
+        "forbidden": "SUBMIT_OR_DELIVER_NEW_CODE",
+        "note": "the expected transaction is at the head; mark landed from the verified observation"
+      },
+      {
+        "durableState": "PARTIAL_DELIVERED_HEAD_ANOMALOUS",
+        "recovery": "NEEDS_ATTENTION_PRESERVE_LEASE_EVIDENCE",
+        "forbidden": "INFER_NON_LANDING_OR_RETRY",
+        "note": "unrelated/regressed/unverifiable head; escalate to needs-attention and preserve the lease and evidence"
+      },
+      {
+        "durableState": "PARTIAL_EXPIRED",
+        "recovery": "TERMINALIZE_ON_POSITIVE_EXPIRY_OR_NON_LANDING",
+        "forbidden": "REFRESH_EXPIRY_UNDER_OLD_APPROVAL",
+        "note": "terminalize the operation under positive expiry/non-landing rules; a replacement is a new operation with a fresh approval"
+      }
+    ],
+    "crashPoints": [
+      {
+        "point": "BEFORE_SIGN_INTENT_PERSIST",
+        "states": [
+          "APPROVAL_PENDING_NO_SIGN_INTENT",
+          "APPROVAL_CONSUMED_NO_SIGN_INTENT"
+        ]
+      },
+      {
+        "point": "AFTER_SIGN_INTENT_BEFORE_SIGN",
+        "states": [
+          "SIGNING_CLAIMED_NO_PARTIAL"
+        ]
+      },
+      {
+        "point": "AFTER_SIGN_BEFORE_DELIVERY",
+        "states": [
+          "PARTIAL_COMMITTED_UNDELIVERED"
+        ]
+      },
+      {
+        "point": "AFTER_DELIVERY",
+        "states": [
+          "PARTIAL_DELIVERED_HEAD_UNCHANGED",
+          "PARTIAL_DELIVERED_EXPECTED_AT_HEAD",
+          "PARTIAL_DELIVERED_HEAD_ANOMALOUS",
+          "PARTIAL_EXPIRED"
+        ]
+      }
+    ],
+    "deterministicResign": {
+      "stepOneSignerMustBeDeterministicEd25519Rfc8032": true,
+      "hedgedOrRandomizedEd25519Forbidden": true,
+      "signerRequirementViolationFailsClosed": true,
+      "ed25519DeterministicForFixedKeyAndMessage": true,
+      "recoveryReSignsSamePreimage": true,
+      "recoveryYieldsSameSignature": true,
+      "isCompletionNotNewAuthorization": true,
+      "recoveryByteComparesAgainstPriorSignerAuditSignatureBeforeDelivery": true,
+      "mismatchClassification": "INVARIANT_BREACH"
+    }
+  },
+  "golden": {
+    "purpose": "zp-send-external-approval-v1",
+    "artifactDigestSha256": "d7c03561bd9bc87e302c533f03741c34d44058fc0aaf1b59b17a4f28f8022146",
+    "deviceSignatureB64": "HLd6EN7uw2KHCgRAryuyEh6ljmHsjgvCJ6Ke1Gq3fb0PDV1Vsn3QCzuo51o0VnH9LCbDI3c_s6AFK3NO013ZCA==",
+    "devicePublicKeyB64": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w="
+  }
+}

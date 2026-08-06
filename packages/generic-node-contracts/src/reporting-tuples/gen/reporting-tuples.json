@@ -1,0 +1,126 @@
+{
+  "concern": "reporting-tuples",
+  "governing": {
+    "spec": "canonical serializer; report-request and node-event tuple tables and goldens; closed event set; api-contract auth",
+    "decisions": [
+      "reporting-ingest-auth",
+      "signed-event-log",
+      "sealed-store",
+      "reporting-channel"
+    ],
+    "dependsOn": "the reporting-auth register tuple"
+  },
+  "requestTuple": {
+    "purpose": "zp-report-request-v1",
+    "canonicalVersion": 1,
+    "fieldOrder": [
+      "purpose",
+      "canonical_version",
+      "node_id",
+      "implementer_id",
+      "method",
+      "path",
+      "body_sha256",
+      "nonce",
+      "issued_at",
+      "expires_at"
+    ],
+    "maxWindowSeconds": 60,
+    "clockSkewMs": 0,
+    "rawTargetPolicy": {
+      "source": "OUTER_TRUSTED_HTTP_ADAPTER_EXACT_ORIGIN_FORM",
+      "reconstruction": "FORBIDDEN",
+      "proxyOriginalUrlHeader": "UNTRUSTED",
+      "encoding": "VISIBLE_ASCII_ONLY",
+      "percentEncoding": "REJECTED",
+      "queryOrder": "UNIQUE_KEYS_STRICTLY_ASCENDING_RAW_ASCII"
+    },
+    "headers": [
+      {
+        "header": "X-ZP-Reporting-Key-Id",
+        "mapsTo": "reporting_key_id_selector",
+        "signed": false
+      },
+      {
+        "header": "X-ZP-Reporting-Timestamp",
+        "mapsTo": "issued_at",
+        "signed": true
+      },
+      {
+        "header": "X-ZP-Reporting-Expires-At",
+        "mapsTo": "expires_at",
+        "signed": true
+      },
+      {
+        "header": "X-ZP-Reporting-Nonce",
+        "mapsTo": "nonce",
+        "signed": true
+      },
+      {
+        "header": "X-ZP-Reporting-Signature",
+        "mapsTo": "signature",
+        "signed": false
+      }
+    ],
+    "golden": {
+      "preimage": "zp-report-request-v1\n{\"purpose\":\"zp-report-request-v1\",\"canonical_version\":1,\"node_id\":\"11111111-1111-4111-8111-111111111111\",\"implementer_id\":\"22222222-2222-4222-8222-222222222222\",\"method\":\"POST\",\"path\":\"/v1/operations/33333333-3333-4333-8333-333333333333/verification-complete\",\"body_sha256\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"nonce\":\"99999999-9999-4999-8999-999999999999\",\"issued_at\":\"2026-07-18T00:00:00.000Z\",\"expires_at\":\"2026-07-18T00:01:00.000Z\"}",
+      "sha256": "31a0edb52dea2b193bd56add32363b7afba1021c5f9820b8c2ee3ea263cfc463",
+      "signature": "Drt5bF_T8OWPyJuth1w6rB-dS0rNBhoh_msFgW8lZiY25FzXiuzeSbKU4x8mA5Et2aIrjBa8dlRGPV6GNF3yAw==",
+      "reportingKeyPubkey": "ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw="
+    },
+    "queryGolden": {
+      "preimage": "zp-report-request-v1\n{\"purpose\":\"zp-report-request-v1\",\"canonical_version\":1,\"node_id\":\"11111111-1111-4111-8111-111111111111\",\"implementer_id\":\"22222222-2222-4222-8222-222222222222\",\"method\":\"GET\",\"path\":\"/v1/events?after_implementer_seq=1043&limit=100&wait_seconds=30\",\"body_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"nonce\":\"99999999-9999-4999-8999-999999999999\",\"issued_at\":\"2026-07-18T00:00:00.000Z\",\"expires_at\":\"2026-07-18T00:01:00.000Z\"}",
+      "sha256": "e752d80f744472031ac7a85bfe605b938005fb10a2a10d0bffdc83338aca9d81",
+      "signature": "UaWgBv7G9FSz2HDawlutYhFXwJe-VdGGyBWyVNpom7Gihe3jBXMvd8CaxisYsVy_DWqvC8F5NV7O7SWhtUD6CQ==",
+      "reportingKeyPubkey": "ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw="
+    }
+  },
+  "eventTuple": {
+    "purpose": "zp-node-event-v1",
+    "canonicalVersion": 1,
+    "fieldOrder": [
+      "purpose",
+      "canonical_version",
+      "node_id",
+      "event_id",
+      "seq",
+      "operation_id",
+      "wallet_id",
+      "event_type",
+      "data_sha256",
+      "previous_event_hash",
+      "created_at"
+    ],
+    "eventTypes": [
+      "receive.ready",
+      "receive.landed",
+      "internal_move.created",
+      "internal_move.landed",
+      "external_send.created",
+      "external_send.awaiting_redemption",
+      "external_send.landed",
+      "operation.needs_attention",
+      "operation.expired"
+    ],
+    "sequenceModel": {
+      "source": "per_node_gapless_counter_allocated_pre_sign",
+      "countersPerNode": 1,
+      "skippedSeqMeaning": "another_tenants_event_not_a_gap",
+      "forbiddenSource": "identity_or_bigserial"
+    },
+    "eventHashRule": "SHA256(preimage_bytes || signature_bytes)",
+    "nodeEventKeyPubkey": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+    "goldenA": {
+      "preimage": "zp-node-event-v1\n{\"purpose\":\"zp-node-event-v1\",\"canonical_version\":1,\"node_id\":\"11111111-1111-4111-8111-111111111111\",\"event_id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"seq\":\"1\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"wallet_id\":\"55555555-5555-4555-8555-555555555555\",\"event_type\":\"receive.ready\",\"data_sha256\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"previous_event_hash\":null,\"created_at\":\"2026-07-18T00:00:00.000Z\"}",
+      "sha256": "9644a48d9f0a988c62321a371ad66f993ae4f428ae3a3ee48d0dc290e0560226",
+      "signature": "AQPu22VB5jB8nGjtSmbT_U1AN0yvswxFt2nTxD38xeEWgF_n43g-i23l5nMy0u9tBRWaYStxzjNdyllvwXGxDg==",
+      "eventHash": "1f0ec14dd26b58d3ce4200a18125080951b0e391c6ec081f71b8c49d44b8f4be"
+    },
+    "goldenB": {
+      "preimage": "zp-node-event-v1\n{\"purpose\":\"zp-node-event-v1\",\"canonical_version\":1,\"node_id\":\"11111111-1111-4111-8111-111111111111\",\"event_id\":\"dddddddd-dddd-4ddd-8ddd-dddddddddddd\",\"seq\":\"2\",\"operation_id\":\"33333333-3333-4333-8333-333333333333\",\"wallet_id\":null,\"event_type\":\"operation.needs_attention\",\"data_sha256\":\"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"previous_event_hash\":\"1f0ec14dd26b58d3ce4200a18125080951b0e391c6ec081f71b8c49d44b8f4be\",\"created_at\":\"2026-07-18T00:00:01.000Z\"}",
+      "sha256": "42c27944165f242f2c4fc276ff369da58ed6055ffd71c2788f1f6fe73aec2e2c",
+      "signature": "lYyU11UCfQMvAS5KMMZKU9Cg6_Qvo6HbcLNz_ulD0WuBNWherIa3iLZeEiNla-gkx1qNsyDtGYJNHIpqeHSdCg==",
+      "eventHash": "ff6f8bbadf5e50f8d0476802341eec50b8ffff4268d41591537b04e3d255ecd5"
+    }
+  }
+}

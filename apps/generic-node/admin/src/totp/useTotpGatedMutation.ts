@@ -1,0 +1,122 @@
+// Step-up TOTP for operator_session_totp money mutations.
+// Never blind-retries a rejected code.
+
+import {
+  useMutation,
+  type UseMutationOptions,
+  type UseMutationResult,
+} from "@tanstack/react-query";
+import { useCallback, useRef } from "react";
+import { ApiError } from "../lib/api.js";
+import {
+  TotpCancelledError,
+  useTotpPrompt,
+} from "./TotpPromptProvider.js";
+
+function totpErrorMessage(code: string): string {
+  if (code === "totp_invalid" || code === "invalid_credentials") {
+    return "Code invalid — try again.";
+  }
+  return "Code required.";
+}
+
+function isTotpChallenge(err: unknown): err is ApiError {
+  return (
+    err instanceof ApiError &&
+    err.status === 401 &&
+    (err.code === "totp_required" ||
+      err.code === "totp_invalid" ||
+      err.code === "invalid_credentials")
+  );
+}
+
+function assertCurrent(signal: AbortSignal, isCurrent: () => boolean) {
+  if (signal.aborted || !isCurrent()) throw new TotpCancelledError();
+}
+
+async function withTotpRetry<T>(
+  requestCode: ReturnType<typeof useTotpPrompt>["requestCode"],
+  title: string,
+  detail: string | undefined,
+  signal: AbortSignal,
+  isCurrent: () => boolean,
+  attempt: (totp: string) => Promise<T>,
+): Promise<T> {
+  let errorMessage: string | undefined;
+  for (;;) {
+    assertCurrent(signal, isCurrent);
+    const totp = await requestCode({ title, detail, errorMessage, signal });
+    // Promise continuation is a separate mutation sink: re-check even when a
+    // provider submission resolved just before the caller invalidated it.
+    assertCurrent(signal, isCurrent);
+    try {
+      return await attempt(totp);
+    } catch (err) {
+      if (isTotpChallenge(err)) {
+        errorMessage = totpErrorMessage(err.code);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+type TotpGatedOptions<TResponse, TVariables> = Omit<
+  UseMutationOptions<TResponse, unknown, TVariables>,
+  "mutationFn"
+> & {
+  title?: string;
+  detail?: string | ((variables: TVariables) => string | undefined);
+  /** Re-evaluated immediately before each POST attempt. */
+  isValid?: (variables: TVariables) => boolean;
+};
+
+export type TotpGatedMutationResult<TResponse, TVariables> =
+  UseMutationResult<TResponse, unknown, TVariables> & {
+    /** Dismisses the owned provider prompt and invalidates resolved continuations. */
+    cancel: () => void;
+  };
+
+export function useTotpGatedMutation<TResponse, TVariables = void>(
+  mutationFn: (variables: TVariables, totp: string) => Promise<TResponse>,
+  options?: TotpGatedOptions<TResponse, TVariables>,
+): TotpGatedMutationResult<TResponse, TVariables> {
+  const { requestCode } = useTotpPrompt();
+  const generationRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
+  const { title = "Enter verification code", detail, isValid, ...rest } = options ?? {};
+
+  const cancel = useCallback(() => {
+    generationRef.current += 1;
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+  }, []);
+
+  const mutation = useMutation<TResponse, unknown, TVariables>({
+    ...rest,
+    mutationFn: async (variables) => {
+      controllerRef.current?.abort();
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      const generation = ++generationRef.current;
+      const isCurrent = () =>
+        generationRef.current === generation &&
+        (isValid?.(variables) ?? true);
+      const d = typeof detail === "function" ? detail(variables) : detail;
+      try {
+        return await withTotpRetry(
+          requestCode,
+          title,
+          d,
+          controller.signal,
+          isCurrent,
+          (totp) => mutationFn(variables, totp),
+        );
+      } finally {
+        if (generationRef.current === generation) controllerRef.current = null;
+      }
+    },
+  });
+
+  return { ...mutation, cancel };
+}

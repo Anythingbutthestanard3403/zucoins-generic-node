@@ -1,0 +1,29 @@
+{
+  "artifact": "zp-send-external-approval-v1",
+  "canonical_version": 1,
+  "signing_role": "device",
+  "signing_note": "optional additive device-key signature; the mandatory approval gate is fresh TOTP, which does not sign this tuple (signing custody: the approval gate). Device seed byte 0x01.",
+  "artifact_digest_sha256": "d7c03561bd9bc87e302c533f03741c34d44058fc0aaf1b59b17a4f28f8022146",
+  "verification_pubkey_b64": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+  "source": {
+    "schema_fields": "canonical fields A.4.1",
+    "preimage_bytes": "canonical fields A.8.2",
+    "digest_and_signature": "canonical fields A.8 (expected machine-generated outputs table)",
+    "fixture_identifiers": "canonical fields A.8",
+    "decision": "approval-tuple-freeze"
+  },
+  "files": {
+    "zp-send-external-approval-v1.preimage.txt": {
+      "sha256": "d7c03561bd9bc87e302c533f03741c34d44058fc0aaf1b59b17a4f28f8022146",
+      "note": "exact preimage bytes (purpose + LF + JSON.stringify(payload)); its own sha256 equals artifact_digest_sha256"
+    },
+    "zp-send-external-approval-v1.digest.hex": {
+      "sha256": "b8a162f4b807402a1c74443fdc113b874b517be527f726714cae883ea3d34e3b",
+      "content_equals": "artifact_digest_sha256"
+    },
+    "zp-send-external-approval-v1.sig.b64": {
+      "sha256": "a112a12ce9b9187eb9e75e7404c76ee4da67eb5e24a9ae6adfe43a3f082c86e3",
+      "note": "Ed25519 detached signature over the preimage, padded base64url, signed by the device key (seed byte 0x01)"
+    }
+  }
+}

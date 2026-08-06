@@ -1,0 +1,2 @@
+zp-send-external-expected-v1
+{"purpose":"zp-send-external-expected-v1","canonical_version":1,"node_id":"11111111-1111-4111-8111-111111111111","implementer_id":"22222222-2222-4222-8222-222222222222","operation_id":"33333333-3333-4333-8333-333333333333","source_selector":{"kind":"WALLET_ID","wallet_id":"55555555-5555-4555-8555-555555555555"},"source_pubkey":"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=","destination_address":"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=","amount_zkz":"2.25","references_operation_id":null}

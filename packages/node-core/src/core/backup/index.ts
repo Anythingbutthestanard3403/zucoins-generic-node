@@ -1,0 +1,48 @@
+// Backup archive module barrel. Exports the frozen envelope/coverage constants, the
+// archive types, the exporter, and the integrity verifier. Crypto helpers stay module-internal.
+export {
+  BACKUP_ARCHIVE_FIELD_SEQUENCE,
+  BACKUP_CANONICAL_VERSION,
+  BACKUP_COVERAGE_TABLES,
+  BACKUP_EVIDENCE_INDEX_FIELD_SEQUENCE,
+  BACKUP_EVIDENCE_SECTION_FIELD_SEQUENCE,
+  BACKUP_FORMAT,
+  BACKUP_MANIFEST_FIELD_SEQUENCE,
+  BACKUP_MANIFEST_PURPOSE,
+  BACKUP_MANIFEST_SIGNING_KEY_FIELD_SEQUENCE,
+  BACKUP_MANIFEST_WALLET_FIELD_SEQUENCE,
+  BACKUP_NODE_GENERATED_ORIGIN,
+  BACKUP_VAULT_FIELD_SEQUENCE,
+  BACKUP_WALLET_EXPORT_PURPOSE,
+  BACKUP_WALLET_PREIMAGE_FIELD_SEQUENCE,
+  BACKUP_WALLET_SECTION_FIELD_SEQUENCE,
+  type BackupCoverageTable,
+} from "./format.js";
+export {
+  BackupExportError,
+  type BackupArchive,
+  type BackupArchiveVault,
+  type BackupEvidenceIndexEntry,
+  type BackupEvidenceRow,
+  type BackupEvidenceSection,
+  type BackupEvidenceTableInput,
+  type BackupEvidenceValue,
+  type BackupExportResult,
+  type BackupManifest,
+  type BackupManifestSigningKeyEntry,
+  type BackupManifestWalletEntry,
+  type BackupNodeSigningKeyInput,
+  type BackupPrimaryKeyColumn,
+  type BackupPrimaryKeyKind,
+  type BackupRejectionReason,
+  type BackupSettingsSnapshot,
+  type BackupSigner,
+  type BackupSnapshot,
+  type BackupVerificationFailure,
+  type BackupVerificationResult,
+  type BackupVerificationSuccess,
+  type BackupWalletInput,
+  type BackupWalletSection,
+} from "./types.js";
+export { buildBackupArchive } from "./export.js";
+export { verifyBackupArchive } from "./verify.js";

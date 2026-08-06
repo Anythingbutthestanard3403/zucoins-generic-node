@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "generator": "packages/generic-node-contracts/scripts/emit-receive-golden.ts",
+    "construction": "insertion-ordered objects serialized only with JSON.stringify",
+    "key_material": "test-only 32-byte filled Ed25519 seeds 02, 03, and 05",
+    "source": "offline canonical constructor; no gateway capture, import, or submission"
+  },
+  "runtime_enforcement": {
+    "status": "DEFERRED",
+    "owner": "external-partial-intake",
+    "owner_title": "Implement external partial intake, co-sign, and single submit",
+    "boundary": "receive external partial intake sender preflight, before receiver co-sign or submit",
+    "statement": "Static adversarial fixtures only. Each candidate is a validly re-signed but invalid RECEIVE target. No reusable pre-sign semantic validator exists in this package or in @zucoins/node-core yet, so runtime rejection is NOT asserted here. The external-partial-intake concern owns feeding each candidate through the real validator and asserting rejection before receiver co-sign or submit.",
+    "sources": [
+      "canonical-fields negative vector 17 (funded sender with genesis predecessor)",
+      "operation-flows economic-conservation rule"
+    ]
+  },
+  "preflight": {
+    "sender_balance_zkz": "10",
+    "receiver_t0_balance_zkz": "0",
+    "expected_amount_zkz": "2.25"
+  },
+  "positive_target_step_1_sha256": "ce0741df9ed652b25d0294746c67acd6d9ecb4e3318c3691582fc2acdd52be51",
+  "vectors": [
+    {
+      "name": "funded-sender-genesis-predecessor",
+      "inner_file": "funded-sender-genesis-predecessor.inner.json",
+      "step_1_signature_file": "funded-sender-genesis-predecessor.step-1-signature.txt",
+      "inner_sha256": "f0e12e993cc4d6b452162cd49b2699b9f912d7a2bf3d8ddd418e3a29c6bbf0b7",
+      "step_1_signer_seed": "02",
+      "step_1_signature": "Rq6Oyn7HEISIb1t3dRuSv-czb33rsWAUmiZe2YmBTK813iHOfNXGF8fIzenv_UENGqUzKJl6f1iTpeAMfnHeAA==",
+      "defect": "funded sender (preflight balance 10) presents an empty genesis previous_step_1_state_signature",
+      "expected_rejection": "funded-sender/genesis-predecessor",
+      "canonical_source": "canonical negative vector 17 (canonical classification)"
+    },
+    {
+      "name": "wrong-sender-balance",
+      "inner_file": "wrong-sender-balance.inner.json",
+      "step_1_signature_file": "wrong-sender-balance.step-1-signature.txt",
+      "inner_sha256": "162abee42053bd7933f237cad5edea901b275f63a63b7a111998822cfb93245c",
+      "step_1_signer_seed": "02",
+      "step_1_signature": "kpKvn_xa60qG9_4Pc0WeYNXfE7npiRWOENfr2b0fCbW8krvQ6XJRrf8o-qlt1gxLxkTg1iE_5tW-v2dbwe32BA==",
+      "defect": "sender post-state 7.74 implies a 2.26 debit from preflight balance 10, not the 2.25 receive amount",
+      "expected_rejection": "sender-amount-mismatch",
+      "canonical_source": "economic conservation; delta check (reason code provisional until the runtime intake validator lands)"
+    },
+    {
+      "name": "wrong-receiver-balance",
+      "inner_file": "wrong-receiver-balance.inner.json",
+      "step_1_signature_file": "wrong-receiver-balance.step-1-signature.txt",
+      "inner_sha256": "9d4d5f1c906333657fc06f0a6c0775fd1764a5652f9e6147ed90597ef6584ba9",
+      "step_1_signer_seed": "02",
+      "step_1_signature": "I4OReCU4o_ZGErpT4Pzn6uMJX7diIVR_GhOV1NdbSI_M8PRera1QSnieeEf5y7jy4P-CyTqV0jNtSXxbMKyvBQ==",
+      "defect": "receiver post-state 2.24 implies a 2.24 credit over T0 balance 0, not the 2.25 receive amount",
+      "expected_rejection": "receiver-amount-mismatch",
+      "canonical_source": "economic conservation; delta check (reason code provisional until the runtime intake validator lands)"
+    }
+  ]
+}

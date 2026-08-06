@@ -1,0 +1,109 @@
+{
+  "sizing": {
+    "POOL_FLOOR": 5,
+    "POOL_CAP_DEFAULT": 50,
+    "POOL_CAP_CEILING": 500,
+    "MINT_BATCH_LIMIT": 5,
+    "HEADROOM_NUMERATOR": 11,
+    "HEADROOM_DENOMINATOR": 10
+  },
+  "queue": {
+    "RECEIVE_QUEUE_MAX_WAIT_MS": 30000,
+    "RECEIVE_QUEUE_CAP": "pool_cap",
+    "RECEIVE_QUEUE_RETRY_AFTER_SECONDS": 30,
+    "RECEIVE_QUEUE_DEQUEUE_ORDER": [
+      "created_at ASC",
+      "operation_id ASC"
+    ],
+    "RECEIVE_QUEUE_QUEUED_PREDICATE": {
+      "kind": "RECEIVE_EXTERNAL",
+      "status": "CREATED",
+      "receiverWalletId": null,
+      "expiryUnixTimeSecs": null,
+      "t0ObservationId": null,
+      "hasDurableCode": false,
+      "hasActiveLease": false
+    },
+    "RECEIVE_QUEUE_PROMOTION_TRANSACTION": {
+      "operationLock": "FOR UPDATE",
+      "skipLocked": false,
+      "decisionTime": "after_operation_lock",
+      "strictFifo": true,
+      "atomicBranch": "expire_or_assign",
+      "assignmentRequiresQueuedPredicateRecheck": true,
+      "expiryBranch": {
+        "transition": "CREATED_TO_EXPIRED",
+        "walletAssigned": false,
+        "leaseCreated": false,
+        "t0Created": false,
+        "codeCreated": false,
+        "artifactCreated": false,
+        "signingInvoked": false
+      }
+    }
+  },
+  "states": {
+    "all": [
+      "AVAILABLE",
+      "PINNED",
+      "QUARANTINED",
+      "RETIRED"
+    ],
+    "transitions": [
+      [
+        "AVAILABLE",
+        "PINNED"
+      ],
+      [
+        "PINNED",
+        "AVAILABLE"
+      ],
+      [
+        "AVAILABLE",
+        "QUARANTINED"
+      ],
+      [
+        "QUARANTINED",
+        "AVAILABLE"
+      ],
+      [
+        "AVAILABLE",
+        "RETIRED"
+      ]
+    ],
+    "keyDeletionAllowed": false
+  },
+  "eligibility": {
+    "keyOriginNodeGenerated": "node_generated",
+    "receiveEligiblePredicate": "key_origin='node_generated' AND recovery_verified_at IS NOT NULL AND state='AVAILABLE'",
+    "capCountsAllNonDeleted": true
+  },
+  "flags": {
+    "RECEIVE_QUEUE_MAX_WAIT_MS": {
+      "operative": 30000,
+      "recommended": 120000,
+      "status": "flagged_for_operator",
+      "reason": "30s risks a false-EXPIRED before one replenishment cycle; the dual-run recommends ~120s while remaining bounded."
+    },
+    "POOL_CAP_CEILING": {
+      "operative": 500,
+      "status": "flagged_for_operator",
+      "reason": "freezes the illustrative 500 as max permanent key material per node."
+    },
+    "MINT_BATCH_LIMIT": {
+      "operative": 5,
+      "status": "flagged_for_operator",
+      "reason": "anchored to POOL_FLOOR; bounds per-cycle permanent mint and vault-lock hold."
+    },
+    "RECEIVE_QUEUE_CAP": {
+      "operative": "pool_cap",
+      "status": "derived",
+      "reason": "derived from pool_cap, not an independent magic number."
+    },
+    "RECEIVE_QUEUE_RETRY_AFTER_SECONDS": {
+      "operative": 30,
+      "status": "derived",
+      "reason": "Retry-After for the 503 receive_queue_full; derived from RECEIVE_QUEUE_MAX_WAIT (30s), the soonest a queued receive expires and frees a slot. Tracks the max-wait if operator policy raises it."
+    }
+  }
+}

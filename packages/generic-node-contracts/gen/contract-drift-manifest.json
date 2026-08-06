@@ -1,0 +1,1205 @@
+{
+  "blockerItems": [
+    {
+      "id": "amount-contract",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "zkz-amount-grammar"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "vault-contract",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "vault-storage-model"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "reporting-credential",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "reporting-channel",
+          "reporting-key-enrolment",
+          "bootstrap-enrolment-trust-root"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "receive-pool",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "receive-pool-sizing-freeze"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "send-expiry",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "send-expiry-single-source-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "receive-expiry",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "receive-expiry-prevention-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "no-callback",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "no-network-egress"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    },
+    {
+      "id": "recovery-gate",
+      "disposition": {
+        "decisionLayer": "delegated",
+        "decisionRefs": [
+          "recovery-gate-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+      }
+    }
+  ],
+  "canonicalItems": [
+    {
+      "id": "three-generic-operations",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "three-generic-operations"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "expected-artifact-surfaces-freeze",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "expected-artifact-surfaces-freeze"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "custody-and-sink-eligibility-rule",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "custody-and-sink-eligibility-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "launch-capability-deferral",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "launch-capability-deferral"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "observation-dedup",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "observation-dedup"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "complete-path-adjudication",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "complete-path-adjudication"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register",
+        "note": "The narrower tx16 single-direct-successor linkage remains open/deferred per the operation-flows spec."
+      }
+    },
+    {
+      "id": "operator-approval-surface-rule",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "operator-approval-surface-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "single-approval-single-sign-rule",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "single-approval-single-sign-rule"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    },
+    {
+      "id": "compatibility-literals",
+      "disposition": {
+        "decisionLayer": "canonical",
+        "decisionRefs": [
+          "compatibility-literals"
+        ],
+        "driftAuditStatus": "residual-open",
+        "sourceDoc": "foundational rule register"
+      }
+    }
+  ],
+  "concerns": [
+    {
+      "concernDir": "amounts",
+      "concernId": "amounts",
+      "decisionRefs": [
+        "zkz-amount-grammar",
+        "amount-bounds-authority-split",
+        "amount-column-precision-widening"
+      ],
+      "sourceDocCitations": [
+        "zkz-amount-grammar: canonical ZKZ decimal-text grammar, exclusive < 1e8 bound, 32 dp, ROUND_DOWN",
+        "amount-bounds-authority-split: protocol bound 0 <= amount < 1e8 enforced at the protocol layer only",
+        "amount-column-precision-widening: ledger amount columns carry numeric(40,32) matching the protocol bound"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/amounts.json",
+          "sha256": "c5acaa06b6e55e0cb3ec08ad6fe9c54d243ac36dc89ebbe5dfd5a71e1d9ea32e"
+        }
+      ]
+    },
+    {
+      "concernDir": "api-schema",
+      "concernId": "crypto-goldens",
+      "decisionRefs": [
+        "three-generic-operations",
+        "launch-deferral",
+        "zkz-amount-grammar",
+        "no-network-egress",
+        "pull-cursor-authority"
+      ],
+      "sourceDocCitations": [
+        "api-contract: error vocabulary",
+        "api-contract: authentication classes",
+        "api-contract: discovery endpoint",
+        "api-contract: event pull",
+        "api-contract: operation routes",
+        "data-model: enum vocabulary",
+        "state-event reference: operations and events",
+        "decision: three-generic-operations",
+        "decision: launch-deferral",
+        "decision: zkz-amount-grammar",
+        "decision: no-network-egress",
+        "decision: pull-cursor-authority"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/api-schema/gen/api-schema.json",
+          "sha256": "f30dd07bdd5e5ae63c41d47a461c94ef5a28546eb55bd047bd4c86ca1c366fc7"
+        }
+      ]
+    },
+    {
+      "concernDir": "approval",
+      "concernId": "approval",
+      "decisionRefs": [
+        "approval-tuple-freeze",
+        "two-timer-separation"
+      ],
+      "sourceDocCitations": [
+        "canonical serialization A.1.1",
+        "approval tuple A.4.1",
+        "byte goldens A.8",
+        "negative vectors A.9",
+        "signing custody and security invariants",
+        "operation flows",
+        "build/test gates",
+        "approval-tuple freeze",
+        "two-timer separation"
+      ],
+      "goldenRefs": [
+        {
+          "path": "goldens/approval/zp-send-external-approval-v1.preimage.txt",
+          "sha256": "d7c03561bd9bc87e302c533f03741c34d44058fc0aaf1b59b17a4f28f8022146"
+        },
+        {
+          "path": "goldens/approval/zp-send-external-approval-v1.digest.hex",
+          "sha256": "b8a162f4b807402a1c74443fdc113b874b517be527f726714cae883ea3d34e3b"
+        },
+        {
+          "path": "goldens/approval/zp-send-external-approval-v1.sig.b64",
+          "sha256": "a112a12ce9b9187eb9e75e7404c76ee4da67eb5e24a9ae6adfe43a3f082c86e3"
+        }
+      ]
+    },
+    {
+      "concernDir": "artifacts",
+      "concernId": "artifacts",
+      "decisionRefs": [
+        "artifacts-freeze"
+      ],
+      "sourceDocCitations": [
+        "expected-artifact byte contract A.1, A.3",
+        "byte goldens A.8-A.9",
+        "observation verification",
+        "artifacts-freeze"
+      ],
+      "goldenRefs": [
+        {
+          "path": "goldens/artifacts/zp-receive-expected-v1.preimage.txt",
+          "sha256": "f49635f02d8de86c5b4324f13520cc38c094d79ee2c0df5df60547c590ede498"
+        },
+        {
+          "path": "goldens/artifacts/zp-receive-expected-v1.digest.hex",
+          "sha256": "8d2380efddc58bc1cf1ed40d4c2cd6421604618e8aee5f65b5d973245e7ca9cb"
+        },
+        {
+          "path": "goldens/artifacts/zp-receive-expected-v1.sig.b64",
+          "sha256": "513c9c00d0deeae6597e60f144de3ad3944de80aabeebdbb3f4f5604abeabbc4"
+        },
+        {
+          "path": "goldens/artifacts/zp-move-internal-expected-v1.preimage.txt",
+          "sha256": "ad964723e07ca2aef3356f1e02990e07b90be49b5387a7095091398a10944a14"
+        },
+        {
+          "path": "goldens/artifacts/zp-move-internal-expected-v1.digest.hex",
+          "sha256": "cdb975c40bd68f9585b3285c403585fbebb73551638faa668ea78259636b0472"
+        },
+        {
+          "path": "goldens/artifacts/zp-move-internal-expected-v1.sig.b64",
+          "sha256": "62b5fcccdc4d7d17ee48a9e416bca4f64db5d62b9d482c026134db98eb8bf0d0"
+        },
+        {
+          "path": "goldens/artifacts/zp-send-external-expected-v1.preimage.txt",
+          "sha256": "f094f981f833c908fae1fa661cb6d9f6c3cdf29bab792f2660b866c588f22cb5"
+        },
+        {
+          "path": "goldens/artifacts/zp-send-external-expected-v1.digest.hex",
+          "sha256": "3bbed6945721e4cd33a1f17ed9e920ad0941a333c221e33b8655e25004d35af6"
+        },
+        {
+          "path": "goldens/artifacts/zp-send-external-expected-v1.sig.b64",
+          "sha256": "b08f34d7ece5a11c12bca40c392f9c529c8699be2969b18002843b73a03ab343"
+        },
+        {
+          "path": "goldens/artifacts/node-identity.pub.b64",
+          "sha256": "8eb7cca2ecabb7fb12e9d6f356ff4c204c64cb94f0db87b0ccad4649f69c7de0"
+        }
+      ]
+    },
+    {
+      "concernDir": "auth-errors",
+      "concernId": "auth-errors",
+      "decisionRefs": [
+        "non-oracular-auth-errors"
+      ],
+      "sourceDocCitations": [
+        "API error envelope and authentication classes",
+        "non-oracular-auth-errors"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/auth-errors/gen/auth-errors.json",
+          "sha256": "2a93ff5598bbe13b412e0ce5b19f712f5f05735985e13e8fa9dbef44677de578"
+        },
+        {
+          "path": "src/auth-errors/gen/auth-error-401.body.json",
+          "sha256": "44fa5568b442479b191887b617c06c3d37ccb8c97f8c1c5d063362c540961e7e"
+        },
+        {
+          "path": "src/auth-errors/gen/auth-error-404.body.json",
+          "sha256": "949585168d1c03d64520afd562f8c1f8a11e7ddf7ee7133fad8d6bab1064d147"
+        }
+      ]
+    },
+    {
+      "concernDir": "compat-literals",
+      "concernId": "compat-literals",
+      "decisionRefs": [
+        "compat-literal-preservation"
+      ],
+      "sourceDocCitations": [
+        "compat-literal-preservation",
+        "canonical retained-literal families",
+        "forbidden state/event aliases",
+        "compatibility routes",
+        "signing purposes and domains"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "credential-matrix",
+      "concernId": "credential-matrix",
+      "decisionRefs": [
+        "non-oracular-auth-errors"
+      ],
+      "sourceDocCitations": [
+        "API contract: wire conventions and authentication classes",
+        "non-oracular-auth-errors: credential/scope/tenant failures collapse to canonical 401/404 bodies; never 403"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/credential-matrix/gen/credential-matrix.json",
+          "sha256": "beaacb10e37900f93a7d9cea08938b5bde8becca59c09091c2bda8baa6d5c85c"
+        }
+      ]
+    },
+    {
+      "concernDir": "crypto-goldens",
+      "concernId": "crypto-goldens",
+      "decisionRefs": [
+        "artifacts-freeze",
+        "compatibility-literals",
+        "two-timer-separation",
+        "reporting-key-enrolment"
+      ],
+      "sourceDocCitations": [
+        "canonical serialization A.1.1",
+        "native signing A.1.2",
+        "byte goldens A.8",
+        "negative vectors A.9",
+        "artifacts-freeze",
+        "compatibility-literals",
+        "two-timer-separation",
+        "reporting-key-enrolment"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/crypto-goldens/gen/crypto-goldens.json",
+          "sha256": "434e243b475ad25da7a3f146ac8286f9a9041141c6f5890f3a9a6bde3ac1a288"
+        }
+      ]
+    },
+    {
+      "concernDir": "custody",
+      "concernId": "custody",
+      "decisionRefs": [
+        "custody-classification-policy",
+        "custody-evidence-requirements",
+        "custody-binding-obligations"
+      ],
+      "sourceDocCitations": [
+        "custody data model",
+        "signing/custody/security invariants",
+        "custody-classification-policy",
+        "custody-evidence-requirements",
+        "custody-binding-obligations"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/custody.json",
+          "sha256": "7e192a00a51b5e3e0f70a93ec917657998b796f408cd1d3cae0f91c130add5ba"
+        }
+      ]
+    },
+    {
+      "concernDir": "engine-startup",
+      "concernId": "engine-startup",
+      "decisionRefs": [
+        "startup-sequence",
+        "vault-storage-model",
+        "leadership-lease"
+      ],
+      "sourceDocCitations": [
+        "node-core: runtime components",
+        "operations-recovery: boot recovery",
+        "operations-recovery: leadership",
+        "decision: startup-sequence",
+        "decision: vault-storage-model",
+        "decision: leadership-lease"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/engine-startup.json",
+          "sha256": "e0e9a41eda82b46a1be4719615b1af308bc24eed067f57b1fcbd196947c39c93"
+        }
+      ]
+    },
+    {
+      "concernDir": "event-commit",
+      "concernId": "events",
+      "decisionRefs": [
+        "signed-event-log",
+        "sealed-store",
+        "reporting-channel"
+      ],
+      "sourceDocCitations": [
+        "data-model: node_events",
+        "canonical-fields: event signing",
+        "state-event reference: event serving",
+        "api-contract: event pull",
+        "decision: signed-event-log",
+        "decision: sealed-store",
+        "decision: reporting-channel"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/event-commit/gen/event-commit.json",
+          "sha256": "c740a432c5329df66c5ebb7ece429169fef8b7c2e794c6e23a15d32c6995b8d6"
+        }
+      ]
+    },
+    {
+      "concernDir": "event-sequencing",
+      "concernId": "event-sequencing",
+      "decisionRefs": [
+        "gapless-counter-allocation",
+        "cursor-tracks-dedicated-sequence"
+      ],
+      "sourceDocCitations": [
+        "data-model node_events",
+        "signed node-event tuple",
+        "events cursor api",
+        "gapless-counter-allocation",
+        "cursor-tracks-dedicated-sequence"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/event-sequencing/gen/event-sequencing.json",
+          "sha256": "38fc86c2559f1d9d6e3be8a9b8141e60e0d72069a410468774fe302466a8a3bc"
+        }
+      ]
+    },
+    {
+      "concernDir": "handoff-proof",
+      "concernId": "handoff-proof",
+      "decisionRefs": [
+        "two-instance-handoff-backstop",
+        "vault-storage-envelope",
+        "boot-recovery-lease-survival"
+      ],
+      "sourceDocCitations": [
+        "node-core wallet leases",
+        "node-core leadership lock",
+        "operations-recovery boot recovery",
+        "two-instance-handoff-backstop",
+        "vault-storage-envelope"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/handoff-proof.json",
+          "sha256": "28234953278707bdd4234fc78fee34cf5a2b92d79670eda6c96abb285cd400e1"
+        }
+      ]
+    },
+    {
+      "concernDir": "implementer-events",
+      "concernId": "events",
+      "decisionRefs": [
+        "reporting-channel",
+        "reporting-key-enrolment",
+        "pull-cursor-authority",
+        "checkpoint-anti-rollback"
+      ],
+      "sourceDocCitations": [
+        "canonical serialization A.1.1; implementer events A.6; goldens A.8-A.9",
+        "closed event set",
+        "dual continuity and implementer_seq encoding",
+        "reporting-channel",
+        "reporting-key-enrolment",
+        "pull-cursor-authority",
+        "checkpoint-anti-rollback"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/implementer-events/gen/implementer-events.json",
+          "sha256": "5a5bccbb9b69dbaac5a9ee557f67ec4cb8d94a75cb0c413debd11c3f7624a640"
+        },
+        {
+          "path": "src/implementer-events/gen/zp-implementer-event-v1.golden-a.preimage.txt",
+          "sha256": "78c8dd8155acec6e4750079e206a6b9733bbcd92c35cc43b64a433d86db803b2"
+        },
+        {
+          "path": "src/implementer-events/gen/zp-implementer-event-v1.golden-b.preimage.txt",
+          "sha256": "eee07e39a4bebb8de9880323934d10492cf46980e25e7d084424405eb0691c70"
+        },
+        {
+          "path": "src/implementer-events/gen/zp-implementer-checkpoint-v1.preimage.txt",
+          "sha256": "55faede68dee05b764943804b19042c765ea1737df9f3fb98fb9e63887a0e29d"
+        },
+        {
+          "path": "src/implementer-events/gen/zp-implementer-keyrotation-v1.preimage.txt",
+          "sha256": "5bf01bd4f011179e5560b38f8ef16b2bbd103ee17e0108d13836e23589fddbdb"
+        }
+      ]
+    },
+    {
+      "concernDir": "instruction-origin",
+      "concernId": "instruction-origin",
+      "decisionRefs": [
+        "instruction-origin-identity"
+      ],
+      "sourceDocCitations": [
+        "implementer-controlled-origin model",
+        "system overview",
+        "signing custody and security",
+        "API discovery and proof surfaces",
+        "instruction-origin-identity"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "landing-proof",
+      "concernId": "landing-proof",
+      "decisionRefs": [
+        "complete-path-adjudication"
+      ],
+      "sourceDocCitations": [
+        "complete-path-adjudication: any-depth complete-path landing proof anchored at a fresh head",
+        "protocol foundation: chain-link, signing, and settlement rules",
+        "operation flows: landing checkpoints per operation kind",
+        "observation-verification: complete-path walk, anomaly classes, retention",
+        "operations-recovery: landing determination in recovery flows"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/landing-proof.json",
+          "sha256": "ab5959c3ec8d2d38cada04e183997edaffe368c9763adbb73783b6b058194ab8"
+        }
+      ]
+    },
+    {
+      "concernDir": "launch-deferral",
+      "concernId": "launch-deferral",
+      "decisionRefs": [
+        "launch-capability-deferral"
+      ],
+      "sourceDocCitations": [
+        "launch-capability-deferral",
+        "system-overview launch scope",
+        "node-core launch capabilities"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "machine-manifests",
+      "concernId": "machine-manifests",
+      "decisionRefs": [
+        "artifacts-freeze",
+        "compatibility-literals",
+        "reporting-key-enrolment",
+        "drift-gate-scanner",
+        "pull-cursor-authority"
+      ],
+      "sourceDocCitations": [
+        "A.1-A.9",
+        "protocol rules 1-10",
+        "API 1,1.1,2",
+        "state-event reference 7",
+        "data model 1-2",
+        "the adversarial-fixture gate",
+        "artifacts-freeze",
+        "compatibility-literals",
+        "reporting-key-enrolment",
+        "drift-gate-scanner",
+        "pull-cursor-authority"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "no-callback",
+      "concernId": "no-callback",
+      "decisionRefs": [
+        "no-callback-removal",
+        "reporting-channel",
+        "ssrf-url-guard"
+      ],
+      "sourceDocCitations": [
+        "api receive surface",
+        "operation-flow delivery channels",
+        "no-callback-removal",
+        "reporting-channel",
+        "ssrf-url-guard"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/no-callback/gen/attack-surface.json",
+          "sha256": "e242c4d32ad2ae749f48dcf128674a84fd751bc3775c3564c1c1f139ba6c03d3"
+        }
+      ]
+    },
+    {
+      "concernDir": "no-callback",
+      "concernId": "no-callback",
+      "decisionRefs": [
+        "no-callback-removal"
+      ],
+      "sourceDocCitations": [
+        "api receive surface",
+        "operation-flow delivery channels",
+        "no-callback-removal"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/no-callback/gen/no-callback.json",
+          "sha256": "8896bb07dba9d32ea894268a5b2297b6c49792ad635fbf3256e0d132e254b59b"
+        }
+      ]
+    },
+    {
+      "concernDir": "observation",
+      "concernId": "observation",
+      "decisionRefs": [
+        "observation-dedup",
+        "complete-path-adjudication",
+        "zkz-amount-grammar"
+      ],
+      "sourceDocCitations": [
+        "freeze-gate: permanent retention",
+        "product-evaluation: observation feed",
+        "data-model: enum vocabulary",
+        "data-model: observation tables",
+        "observation-verification: capture and classification",
+        "observation-verification: retention and goldens",
+        "integration: observation feed",
+        "decision: observation-dedup",
+        "decision: complete-path-adjudication",
+        "decision: zkz-amount-grammar"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/observation.json",
+          "sha256": "5b3f801c14624da539e0c9fea99ed37a160726cfd8f7de2962d8c29ccd98ec78"
+        }
+      ]
+    },
+    {
+      "concernDir": "operations",
+      "concernId": "operations",
+      "decisionRefs": [
+        "three-operation-model",
+        "launch-deferral"
+      ],
+      "sourceDocCitations": [
+        "three-operation-model: the node exposes exactly three public money operations",
+        "launch-deferral: no wallet-key import capability ships at launch",
+        "core capabilities and launch exclusions",
+        "API contract: route inventory and retired paths",
+        "state-event reference: states, events, transitions, forbidden aliases"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "operator-halt",
+      "concernId": "operator-halt",
+      "decisionRefs": [
+        "operator-kill-switch",
+        "scale-to-zero"
+      ],
+      "sourceDocCitations": [
+        "operator-kill-switch",
+        "scale-to-zero",
+        "operations recovery",
+        "guarded CAS mutation",
+        "state-event applies-to table"
+      ],
+      "goldenRefs": []
+    },
+    {
+      "concernDir": "pool-policy",
+      "concernId": "pool-policy",
+      "decisionRefs": [
+        "receive-queue-backpressure",
+        "recovery-gated-eligibility",
+        "permanent-key-material-cap",
+        "pool-sizing-policy",
+        "custody-evidence-requirements"
+      ],
+      "sourceDocCitations": [
+        "receive-queue-backpressure",
+        "recovery-gated-eligibility",
+        "permanent-key-material-cap",
+        "pool-sizing-policy",
+        "custody-evidence-requirements"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/pool-policy.json",
+          "sha256": "ad4c771c9ad44a8c73a7c0bd218e25f276cb1023aa3d5e3bf42fbfbcbf22ff65"
+        }
+      ]
+    },
+    {
+      "concernDir": "readiness",
+      "concernId": "readiness",
+      "decisionRefs": [
+        "startup-sequence",
+        "vault-storage-model",
+        "leadership-lease"
+      ],
+      "sourceDocCitations": [
+        "node-core: runtime components and the readiness sentence",
+        "operations-recovery: boot recovery and degraded operation",
+        "startup-sequence: readiness is decoupled from signer-lock ownership",
+        "vault-storage-model: the vault leadership facts this concern consumes",
+        "leadership-lease: the non-gating-check precedent"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/readiness.json",
+          "sha256": "752a57a3895997c596074132e9121765f30391a1aad92ada41d4b4c708bd82b9"
+        }
+      ]
+    },
+    {
+      "concernDir": "reporting-auth",
+      "concernId": "reporting",
+      "decisionRefs": [
+        "reporting-ingest-auth",
+        "signed-event-log",
+        "sealed-store",
+        "reporting-channel",
+        "reporting-key-enrolment"
+      ],
+      "sourceDocCitations": [
+        "canonical-fields: suite serializer, register tuple, golden fixtures, negative vectors",
+        "signing-custody: keys and signing matrix",
+        "api-contract: signed reporting",
+        "decision: reporting-ingest-auth",
+        "decision: signed-event-log",
+        "decision: sealed-store",
+        "decision: reporting-channel",
+        "decision: reporting-key-enrolment"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/reporting-auth/gen/reporting-auth.json",
+          "sha256": "7adb9e12864c832fc5583989e7ac10335a7f67ae01105b7e9dfb1eeb598a36df"
+        },
+        {
+          "path": "src/reporting-auth/gen/zp-reporting-register-v1.preimage.txt",
+          "sha256": "98fba788ad4ba2141dc400f1cd0f58db3a03b34a00b5a04ecdcfe239e9912e7e"
+        }
+      ]
+    },
+    {
+      "concernDir": "reporting-behavior",
+      "concernId": "reporting",
+      "decisionRefs": [
+        "reporting-ingest-auth",
+        "signed-event-log",
+        "sealed-store",
+        "reporting-channel"
+      ],
+      "sourceDocCitations": [
+        "canonical-fields: register tuple, event signing",
+        "api-contract: signed reporting",
+        "decision: reporting-ingest-auth",
+        "decision: signed-event-log",
+        "decision: sealed-store",
+        "decision: reporting-channel"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/reporting-behavior/gen/reporting-behavior.json",
+          "sha256": "af0c0254c56cd39effc1cd982bb224f6e2c4c2e86f1244fbbf0f1098de0481d0"
+        }
+      ]
+    },
+    {
+      "concernDir": "reporting-tuples",
+      "concernId": "reporting",
+      "decisionRefs": [
+        "reporting-ingest-auth",
+        "signed-event-log",
+        "sealed-store",
+        "reporting-channel"
+      ],
+      "sourceDocCitations": [
+        "canonical-fields reference: serializer, report-request and node-event tuple tables, goldens, negative vectors",
+        "state-event reference: closed durable event set",
+        "api contract: reporting auth",
+        "reporting-ingest-auth",
+        "signed-event-log",
+        "sealed-store",
+        "reporting-channel"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/reporting-tuples/gen/reporting-tuples.json",
+          "sha256": "5ff91a1e7771148902a84558dcc8f5a62387102ccb0452d6aef052b4f3661410"
+        },
+        {
+          "path": "src/reporting-tuples/gen/zp-node-event-v1.golden-a.preimage.txt",
+          "sha256": "9644a48d9f0a988c62321a371ad66f993ae4f428ae3a3ee48d0dc290e0560226"
+        },
+        {
+          "path": "src/reporting-tuples/gen/zp-node-event-v1.golden-b.preimage.txt",
+          "sha256": "42c27944165f242f2c4fc276ff369da58ed6055ffd71c2788f1f6fe73aec2e2c"
+        },
+        {
+          "path": "src/reporting-tuples/gen/zp-report-request-v1.preimage.txt",
+          "sha256": "31a0edb52dea2b193bd56add32363b7afba1021c5f9820b8c2ee3ea263cfc463"
+        },
+        {
+          "path": "src/reporting-tuples/gen/zp-report-request-v1.query.preimage.txt",
+          "sha256": "e752d80f744472031ac7a85bfe605b938005fb10a2a10d0bffdc83338aca9d81"
+        }
+      ]
+    },
+    {
+      "concernDir": "route-policy",
+      "concernId": "route-policy",
+      "decisionRefs": [
+        "non-oracular-auth-errors"
+      ],
+      "sourceDocCitations": [
+        "API contract: wire conventions, authentication classes, retired paths",
+        "non-oracular-auth-errors: credential/scope/tenant failures collapse to canonical 401/404 bodies; never 403"
+      ],
+      "goldenRefs": [
+        {
+          "path": "src/route-policy/gen/route-policy.json",
+          "sha256": "24584ee08db10a88d682f973d17fb9333711ed16085e66fc5b94077137b8fd35"
+        }
+      ]
+    },
+    {
+      "concernDir": "transfer-code",
+      "concernId": "transfer-code",
+      "decisionRefs": [
+        "form-transport",
+        "transfer-code-encoding",
+        "code-matching-window",
+        "wire-version-freeze",
+        "inner-retention",
+        "expiry-seconds-encoding",
+        "submit-ack-receipt-only",
+        "receiver-channel-literals",
+        "candidate-intake"
+      ],
+      "sourceDocCitations": [
+        "protocol transport and submit semantics",
+        "operation flows",
+        "transfer-code bytes A.2, A.8",
+        "form-transport",
+        "transfer-code-encoding",
+        "code-matching-window",
+        "wire-version-freeze",
+        "inner-retention",
+        "expiry-seconds-encoding",
+        "submit-ack-receipt-only",
+        "receiver-channel-literals",
+        "candidate-intake",
+        "wallet splitchain.js:1647-1868,4067-4200"
+      ],
+      "goldenRefs": [
+        {
+          "path": "goldens/transfer-code/receive-code.v1.b64url.txt",
+          "sha256": "104eb00c3bda958b82b7ce5a24e582dd9efa3e63d2192838fe26b5b23dcb2bab"
+        },
+        {
+          "path": "goldens/transfer-code/receive-code.v1.json.txt",
+          "sha256": "6884acef681a435f7ef04b82c0d6d5df28c8f12275c2c69063d721ae6dcd0869"
+        },
+        {
+          "path": "goldens/transfer-code/send-code.v1.b64url.txt",
+          "sha256": "d454846fddc861c059476553ec4fe03fdbf3cb494a0b5be6357ceb8049d6d0e4"
+        },
+        {
+          "path": "goldens/transfer-code/send-code.v1.json.txt",
+          "sha256": "fc0af28b7232f2b83df93a39dac0bd1ddedcd477e658af23b49de49e3ed09640"
+        }
+      ]
+    },
+    {
+      "concernDir": "vault",
+      "concernId": "vault",
+      "decisionRefs": [
+        "vault-storage-model",
+        "single-blob-vault-precursor",
+        "vault-column-names",
+        "secure-buffer",
+        "sealed-store"
+      ],
+      "sourceDocCitations": [
+        "data-model: vault table",
+        "signing-custody: vault",
+        "decision: single-blob-vault-precursor",
+        "decision: vault-column-names",
+        "decision: vault-storage-model",
+        "decision: secure-buffer",
+        "decision: sealed-store",
+        "SO conflicts"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/vault.json",
+          "sha256": "da37c41bb2dd6d2361dd18676c2f611c824c8c30b6e947028bb05b34d42a97a0"
+        }
+      ]
+    },
+    {
+      "concernDir": "wallet-state",
+      "concernId": "wallet-state",
+      "decisionRefs": [
+        "receive-expiry-prevention-rule",
+        "recovery-gate-rule"
+      ],
+      "sourceDocCitations": [
+        "the C-02 lease invariant: public wallet state is a projection of lease reality",
+        "data model: wallet, lease, and destination tables",
+        "operation flows: lease acquisition and release per operation kind",
+        "operations-recovery: boot recovery",
+        "receive-expiry-prevention-rule",
+        "recovery-gate-rule"
+      ],
+      "goldenRefs": [
+        {
+          "path": "gen/wallet-state.json",
+          "sha256": "2189d02e18f0e29ea64586f57a4533c99db9fca80fe35a12a332078592e3d5ab"
+        }
+      ]
+    }
+  ],
+  "driftItems": [
+    {
+      "item": "destination-label",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "custody-and-sink-eligibility-rule",
+          "three-generic-operations"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "data-model destinations DDL; api-contract destination endpoints",
+        "note": "DESTINATION_STATES (PENDING/BLESSED/RETIRED) agree across the data model's destination_state DDL and the api contract's state filter. The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes."
+      }
+    },
+    {
+      "item": "terminal-timestamps",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "receive-expiry-prevention-rule",
+          "three-generic-operations"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "state-event reference terminal column; data-model operations tables",
+        "note": "The state-event reference's Terminal column and the frozen TERMINAL_RECEIVE_STATES are the same two-value set (EXPIRED, RECEIVE_LANDED). The terminal timestamp is named `terminal_at` on operations and `terminal_observation_id` on operation_wallets throughout the data model — one spelling each, no competing field."
+      }
+    },
+    {
+      "item": "evidence-role-names",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "observation-dedup"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "observation-verification relationship table; data-model wallet-observation roles",
+        "note": "The observation-verification relationship table matches RELATIONSHIP_CLASSIFICATION_RULES row-for-row in sequence, relationship name and state_changed. WALLET_OBSERVATION_ROLES (sender/receiver/genesis) appear verbatim in the data model's CHECK domain."
+      }
+    },
+    {
+      "item": "proof-windows",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "complete-path-adjudication",
+          "observation-dedup"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "observation-verification retention rules; data-model retention matrix",
+        "note": "MANIFEST_RETENTION.accessWindowDefault (TERMINAL_PLUS_30_DAYS) matches observation-verification's \"terminal plus 30 days\" and the data model's \"terminal plus configured window, default 30 days\". Expiry revokes endpoint access only in all three, so the evidence-vs-access separation invariant is not weakened."
+      }
+    },
+    {
+      "item": "settled-body-phases",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "complete-path-adjudication",
+          "expected-artifact-surfaces-freeze"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "observation-verification verdict vocabulary; canonical-fields settled-body table; data-model attempt_phase domain",
+        "note": "Settled-body bytes are clean: the ledger text sequence {inner, step_1_signature, step_2_signature} is identical in SPLITCHAIN_SETTLED_TEXT_FIELD_SEQUENCE and the canonical-fields appendix, and observation-verification carries the frozen complete-path verdict vocabulary — byte-contract material read, never rewritten. Phase half: OPERATION_TRANSACTION_PHASES deep-equals the data model's attempt_phase CHECK domain in sequence and borrows no public execution_phase values (NOT_STARTED/SUBMITTED/LANDED)."
+      }
+    },
+    {
+      "item": "idempotency-length",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "auth-401-collapse"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract idempotency rules; data-model idempotency_key CHECKs",
+        "note": "IDEMPOTENCY_KEY_CONTRACT (16–255, code points 0x21–0x7e) matches the api contract and the data model's `^[!-~]{16,255}$`. The operations table carried the weaker `length(idempotency_key) BETWEEN 1 AND 255` — a schema that accepted keys the wire contract rejects; reconciled to the canonical regex. Every POST in ROUTE_POLICIES requires an Idempotency-Key."
+      }
+    },
+    {
+      "item": "discovery",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "three-generic-operations",
+          "compatibility-literals"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract discovery endpoint",
+        "note": "DISCOVERY_PATH, all seven DISCOVERY_RESPONSE_FIELDS, and all five DISCOVERY_EXCLUSIONS resolve one-for-one against the api contract's discovery prose under snake_case normalisation, in the doc's own sequence. The `zupay` literal is retained per the compatibility-literal preservation rule."
+      }
+    },
+    {
+      "item": "subscription-handles",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "auth-401-collapse",
+          "three-generic-operations"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract auth modes; api-contract subscription stream",
+        "note": "The single subscription route (GET /v1/operations/:operation_id/subscribe) carries the subscription-handle auth mode in both independently frozen route sets (ROUTE_POLICIES and PUBLIC_ROUTES) and in the api contract; no other route accepts a handle, and the handle authorises no raw body, arm, or verification-complete."
+      }
+    },
+    {
+      "item": "signer-audit",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "vault-storage-model"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "signing-custody-security signer boundary; data-model audit_log",
+        "note": "SIGNER_BOUNDARY's two signing purposes (SPLITCHAIN_STEP_1/STEP_2) and its never-returns-private-key rule appear in the signing-custody-security spec; the audit surface is the single append-only `audit_log` of the data model — no second signer-audit table or field spelling exists."
+      }
+    },
+    {
+      "item": "callbacks",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "no-network-egress",
+          "reporting-channel"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract delivery model; operation-flows delivery sections",
+        "note": "The no-callback rule's three mandatory strike sites are landed: the api contract and both operation-flow sections each state no node-initiated callback or push channel exists and name the signed pull stream as sole delivery. No node-initiated callback property survives in any numbered generic-node spec; the remaining product-layer references live in the integration docs, which the rule explicitly permits."
+      }
+    },
+    {
+      "item": "pool-membership",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "receive-pool-sizing-freeze",
+          "recovery-gate-rule"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "data-model wallet_state enum; data-model receive-eligibility predicate",
+        "note": "POOL_WALLET_STATES and the custody concern's WALLET_STATES are the same four-value sequence and equal the data model's wallet_state enum; receive-eligibility is node_generated AND recovery_verified_at IS NOT NULL AND state='AVAILABLE', matching the recovery-gate rule with no blessing conjunct."
+      }
+    },
+    {
+      "item": "bearer-admin-storage",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "auth-401-collapse",
+          "three-generic-operations"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract auth scopes",
+        "note": "All eight IMPLEMENTER_SCOPES and all six BEARER_KEY_EXCLUSIONS resolve in the api contract's scope list; every scope named by a frozen route policy is one of the eight, and no bearer-scoped route reaches an excluded capability. Handles are stored hashed and the operator surface is session+CSRF — three distinct storage rules, no overlap."
+      }
+    },
+    {
+      "item": "totp-burns",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "single-approval-single-sign-rule",
+          "auth-401-collapse"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "api-contract auth step-up; api-contract admin routes",
+        "note": "The admin routes whose frozen authMode requires TOTP are exactly the api-contract bullets that require `X-ZP-TOTP`/fresh TOTP (approve, reject, bless, recovery-actions); destination retire requires neither, in both. TOTP_HEADER_NAME matches the api contract, which states the burn is consumed atomically and does not sign bytes — the TOTP-never-signs invariant is intact."
+      }
+    },
+    {
+      "item": "canonical-ledger",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "observation-dedup",
+          "complete-path-adjudication"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "data-model retention matrix; observation-verification retention rules",
+        "note": "The data model's canonical-wallet-ledger row is `permanent, verbatim` / `append-only`, matching RETENTION_RULE.append_only and observation-verification's permanent list (canonical settled transaction text). Proof-access expiry revokes access only in both — the separation of evidence from access holds."
+      }
+    },
+    {
+      "item": "candidate-intake",
+      "disposition": {
+        "decisionLayer": "package-freeze",
+        "decisionRefs": [
+          "gateway-transport-contract",
+          "sender-head-settlement-confirmation-rule",
+          "receive-expiry-prevention-rule"
+        ],
+        "driftAuditStatus": "automated-clean",
+        "sourceDoc": "operation-flows candidate intake; protocol-foundation transport",
+        "note": "CANDIDATE_RAW_CAPTURE_FIELDS and CANDIDATE_LOCATE_KEYS resolve verbatim in the operation-flows candidate-intake section, which also carries the unarmed-refusal and single-winner rules the frozen booleans assert. The intake adapter is not a fourth public money operation in either side, so the three-generic-operation rule is not widened."
+      }
+    }
+  ],
+  "schemaVersion": "contract-drift-manifest/1"
+}

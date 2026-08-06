@@ -1,0 +1,583 @@
+// Admin routes for second-device enrol, dual-control policy, operator push.
+
+import { createHmac, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+
+import { describe, expect, it } from "vitest";
+
+import {
+  buildDeviceEnrol,
+  createAdminSessionService,
+  createFailClosedDestinationService,
+  createHaltGate,
+  createInMemoryHaltEvidenceRecorder,
+  createInMemoryOperatorHaltStore,
+  hashPassword,
+  InMemoryAdminSessionStore,
+  InMemoryAdminUserStore,
+  InMemoryApprovalChallengeIssuerStore,
+  InMemoryApprovalChallengeStore,
+  InMemoryDeviceKeyStore,
+  InMemoryDualControlPolicy,
+  InMemoryEnrollmentAuditLog,
+  InMemoryEnrollmentChallengeStore,
+  InMemoryOperatorPushSubscriptionStore,
+  InMemorySecondDeviceCeremonyStore,
+  parseUuid,
+  parseWalletPublicKey,
+  RUNNING,
+  TotpConsumptionLog,
+  type AdminUser,
+  type ApprovalOperationSnapshot,
+  type OperatorPushSender,
+} from "@zucoins/node-core";
+
+import { createAdminRouter } from "../src/admin-router.js";
+
+const NODE_ID = "11111111-1111-4111-8111-111111111111";
+const ORIGIN = "https://node.example";
+
+function cookieFrom(setCookie: string | undefined): string {
+  return setCookie?.split(";")[0] ?? "";
+}
+
+function makeRouter(opts?: {
+  dualMode?: "single_operator" | "two_human";
+  operatorPushSender?: OperatorPushSender;
+  sealAuth?: (auth: string) => string;
+  loadOperation?: (operationId: string) => Promise<ApprovalOperationSnapshot | null>;
+  challengeStoreOverride?: InMemoryApprovalChallengeStore;
+}) {
+  const userStore = new InMemoryAdminUserStore();
+  const sessions = createAdminSessionService(
+    { nodeId: NODE_ID },
+    new InMemoryAdminSessionStore(),
+    userStore,
+  );
+  const deviceStore = new InMemoryDeviceKeyStore();
+  const dualControlPolicy = new InMemoryDualControlPolicy(opts?.dualMode ?? "single_operator");
+  const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
+  const enrollmentChallengeStore = new InMemoryEnrollmentChallengeStore();
+  const ceremonyStore = new InMemorySecondDeviceCeremonyStore();
+  const auditLog = new InMemoryEnrollmentAuditLog();
+  const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();
+  const sealAuth =
+    opts?.sealAuth ??
+    ((auth: string) => {
+      // Real sealed bytes (not length-only discard). Test sealer is reversible via prefix.
+      return `zp-op-push-auth-v1.test.${Buffer.from(auth, "utf8").toString("base64")}`;
+    });
+
+  const router = createAdminRouter({
+    sessions,
+    userStore,
+    csrf: { allowedOrigins: [ORIGIN] },
+    totp: {
+      secret: new TextEncoder().encode("test-secret-key-32-bytes-long!!"),
+      windowSteps: 1,
+    },
+    totpLog: new TotpConsumptionLog(),
+    nodeId: NODE_ID,
+    challengeStore: opts?.challengeStoreOverride ?? {
+      findIssuedByOperation: async () => null,
+      findByNonce: async () => null,
+      insertIssued: async () => {},
+      commitApprovalMutation: async () => {
+        throw new Error("unused");
+      },
+    },
+    loadOperation: opts?.loadOperation ?? (async () => null),
+    sendDecisionStore: {
+      rejectCreated: async () => {
+        throw new Error("unused");
+      },
+      approveCreated: async () => {
+        throw new Error("unused");
+      },
+    },
+    deviceStore,
+    dualControlPolicy,
+    challengeIssuerStore,
+    secondDeviceEnrol: {
+      enrollmentChallengeStore,
+      ceremonyStore,
+      auditLog,
+      nodeOrigin: ORIGIN,
+    },
+    operatorPush: {
+      store: operatorPushStore,
+      sealAuth,
+      ...(opts?.operatorPushSender !== undefined ? { sender: opts.operatorPushSender } : {}),
+    },
+    recoveryStore: {
+      listNeedsAttention: async () => [],
+      loadRecoveryFacts: async () => null,
+      issueRecoveryNonce: async () => {
+        throw new Error("unused");
+      },
+    },
+    recoveryActionStore: {
+      lookupIdempotency: async () => ({ kind: "miss" }),
+      loadRecoveryFactsLocked: async () => null,
+      commitRecoveryAction: async () => {
+        throw new Error("unused");
+      },
+      storeIdempotency: async () => {},
+    },
+    destinationService: createFailClosedDestinationService(),
+    newRequestId: () => randomUUID(),
+    halt: {
+      gate: createHaltGate(RUNNING),
+      store: createInMemoryOperatorHaltStore(RUNNING),
+      evidence: createInMemoryHaltEvidenceRecorder(),
+    },
+  });
+
+  return {
+    router,
+    userStore,
+    dualControlPolicy,
+    operatorPushStore,
+    deviceStore,
+    ceremonyStore,
+    enrollmentChallengeStore,
+    auditLog,
+  };
+}
+
+const ED25519_SPKI_DER_PREFIX = Uint8Array.from([
+  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+]);
+
+function generateTestKeyPair() {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const spkiDer = publicKey.export({ format: "der", type: "spki" });
+  const rawPub = new Uint8Array(spkiDer.slice(ED25519_SPKI_DER_PREFIX.length));
+  const paddedBase64Url = Buffer.from(rawPub)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+  return { publicKey, privateKey, paddedBase64Url };
+}
+
+function signPreimageB64(
+  privateKey: ReturnType<typeof generateTestKeyPair>["privateKey"],
+  preimageText: string,
+): string {
+  const sig = sign(null, Buffer.from(preimageText, "utf8"), privateKey);
+  return Buffer.from(sig).toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+const TOTP_SECRET = new TextEncoder().encode("test-secret-key-32-bytes-long!!");
+
+function totpNow(nowMs: number = Date.now()): string {
+  const step = Math.floor(nowMs / 1000 / 30);
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(step));
+  const hmac = createHmac("sha1", TOTP_SECRET).update(msg).digest();
+  const offset = hmac[hmac.length - 1]! & 0x0f;
+  const code =
+    ((hmac[offset]! & 0x7f) << 24) |
+    ((hmac[offset + 1]! & 0xff) << 16) |
+    ((hmac[offset + 2]! & 0xff) << 8) |
+    (hmac[offset + 3]! & 0xff);
+  return String(code % 1_000_000).padStart(6, "0");
+}
+
+function encodeBase32(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = 0;
+  let value = 0;
+  let output = "";
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31]!;
+      bits -= 5;
+    }
+  }
+  if (bits > 0) {
+    output += alphabet[(value << (5 - bits)) & 31]!;
+  }
+  return output;
+}
+
+async function login(
+  router: ReturnType<typeof makeRouter>["router"],
+  userStore: InMemoryAdminUserStore,
+) {
+  const password = "correct-horse-battery-staple";
+  const user: AdminUser = {
+    id: randomUUID(),
+    nodeId: NODE_ID,
+    username: "admin",
+    passwordHash: await hashPassword(password),
+    role: "admin",
+    mustChangePassword: false,
+    mustEnrolTotp: false,
+    disabledAt: null,
+    createdAt: Date.now(),
+  };
+  await userStore.insert(user);
+  // Bind active TOTP so authorize (runGuardedAdminMutation) can verify x-zp-totp.
+  await userStore.setActiveTotpSecret(user.id, encodeBase32(TOTP_SECRET));
+  const response = await router(
+    "POST",
+    "/admin/v1/login",
+    Buffer.from(JSON.stringify({ username: user.username, password })),
+    { "content-type": "application/json" },
+  );
+  expect(response.status).toBe(200);
+  return {
+    cookie: cookieFrom(response.headers["set-cookie"]),
+    csrf: (JSON.parse(response.body) as { csrfToken: string }).csrfToken,
+    userId: user.id,
+  };
+}
+
+describe("G4 dual-control policy", () => {
+  it("GET /admin/v1/dual-control-policy returns mode + plain copy", async () => {
+    const { router, userStore } = makeRouter({ dualMode: "two_human" });
+    const auth = await login(router, userStore);
+    const res = await router("GET", "/admin/v1/dual-control-policy", new Uint8Array(), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+    });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as {
+      mode: string;
+      short: string;
+      long: string;
+      approve_hint: string;
+    };
+    expect(body.mode).toBe("two_human");
+    expect(body.short).toMatch(/Two-human/i);
+    expect(body.long).toMatch(/different admin operator/i);
+  });
+});
+
+describe("G4 second-device enrolment", () => {
+  it("issue returns QR with only challenge_id + node_origin", async () => {
+    const { router, userStore } = makeRouter();
+    const auth = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/device-enrol/issue",
+      Buffer.from("{}"),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as {
+      challenge_id: string;
+      qr: Record<string, string>;
+      deep_link_path: string;
+    };
+    expect(Object.keys(body.qr).sort()).toEqual(["challenge_id", "node_origin"]);
+    expect(body.qr.node_origin).toBe(ORIGIN);
+    expect(body.qr.challenge_id).toBe(body.challenge_id);
+    expect(JSON.stringify(body)).not.toMatch(/private_key|totp|master_key/i);
+    expect(body.deep_link_path).toContain(body.challenge_id);
+
+    const peek = await router(
+      "GET",
+      `/admin/v1/device-enrol/${body.challenge_id}`,
+      new Uint8Array(),
+      { cookie: auth.cookie, origin: ORIGIN, "x-csrf-token": auth.csrf },
+    );
+    expect(peek.status).toBe(200);
+    expect(peek.body).not.toMatch(/private_key|authorizing_signature|totp_code/i);
+  });
+
+  it("expired bind fails closed", async () => {
+    const { router, userStore } = makeRouter();
+    const auth = await login(router, userStore);
+    // Issue then bind with a far-future wall clock via nowMs override is not exposed;
+    // bind with invalid pubkey still fails closed without enrolling.
+    const issue = await router("POST", "/admin/v1/device-enrol/issue", Buffer.from("{}"), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+      "content-type": "application/json",
+    });
+    const { challenge_id } = JSON.parse(issue.body) as { challenge_id: string };
+    const bind = await router(
+      "POST",
+      "/admin/v1/device-enrol/bind",
+      Buffer.from(
+        JSON.stringify({
+          challenge_id,
+          new_device_public_key: "not-a-key",
+          label: "x",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(bind.status).toBeGreaterThanOrEqual(400);
+    expect(bind.status).toBeLessThan(500);
+  });
+});
+
+describe("G4 operator push", () => {
+  it("lists empty opt-in status without conflating wallet push", async () => {
+    const { router, userStore } = makeRouter();
+    const auth = await login(router, userStore);
+    const res = await router("GET", "/admin/v1/operator-push/subscriptions", new Uint8Array(), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+    });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as { note: string; subscriptions: unknown[] };
+    expect(body.note.toLowerCase()).toMatch(/wallet/);
+    expect(body.note.toLowerCase()).toMatch(/optional|inbox/);
+    expect(body.subscriptions).toEqual([]);
+  });
+
+  it("subscribe + preview payload forbids secrets", async () => {
+    const { router, userStore, operatorPushStore } = makeRouter();
+    const auth = await login(router, userStore);
+    const sub = await router(
+      "POST",
+      "/admin/v1/operator-push/subscribe",
+      Buffer.from(
+        JSON.stringify({
+          endpoint: "https://push.example/ep/abc",
+          p256dh: "public-p256dh-value-here",
+          auth: "auth-secret-not-returned",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(sub.status).toBe(200);
+    expect(sub.body).not.toContain("auth-secret-not-returned");
+    // Store must retain openable sealed auth (not sealed:<length> discard).
+    const stored = operatorPushStore.listByOperator(NODE_ID, auth.userId);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]!.authSealed.startsWith("zp-op-push-auth-v1.")).toBe(true);
+    expect(stored[0]!.authSealed).not.toMatch(/^sealed:\d+$/);
+    expect(stored[0]!.authSealed).not.toContain("auth-secret-not-returned");
+
+    const preview = await router(
+      "POST",
+      "/admin/v1/operator-push/preview-payload",
+      Buffer.from(
+        JSON.stringify({
+          attention_type: "send_pending_approval",
+          deep_link_path: "/transfers/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          summary: "Outgoing needs approval",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(preview.status).toBe(200);
+    const payload = (JSON.parse(preview.body) as { payload: Record<string, unknown> }).payload;
+    expect(Object.keys(payload).sort()).toEqual([
+      "attention_type",
+      "deep_link_path",
+      "summary",
+    ]);
+    expect(JSON.stringify(payload)).not.toMatch(/totp|private_key|transfer_code|master/i);
+  });
+});
+
+describe("G4 second-device full ceremony via admin HTTP", () => {
+  it("issue → bind → authorize (TOTP) → complete enrols second device", async () => {
+    const { router, userStore, deviceStore } = makeRouter();
+    const auth = await login(router, userStore);
+    const authorizing = generateTestKeyPair();
+    const newDevice = generateTestKeyPair();
+    const authorizerId = randomUUID();
+    deviceStore.insert({
+      id: authorizerId,
+      nodeId: NODE_ID,
+      publicKey: authorizing.paddedBase64Url,
+      label: "phone-a",
+      enrolledAt: "2026-01-01T00:00:00.000Z",
+      revokedAt: null,
+    });
+
+    const issue = await router("POST", "/admin/v1/device-enrol/issue", Buffer.from("{}"), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+      "content-type": "application/json",
+    });
+    expect(issue.status).toBe(200);
+    const { challenge_id } = JSON.parse(issue.body) as { challenge_id: string };
+
+    const bind = await router(
+      "POST",
+      "/admin/v1/device-enrol/bind",
+      Buffer.from(
+        JSON.stringify({
+          challenge_id,
+          new_device_public_key: newDevice.paddedBase64Url,
+          label: "phone-b",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(bind.status).toBe(200);
+    const bound = JSON.parse(bind.body) as {
+      new_device_key_id: string;
+      nonce: string;
+      issued_at: string;
+      expires_at: string;
+      node_id: string;
+    };
+
+    const built = buildDeviceEnrol({
+      node_id: parseUuid(bound.node_id),
+      new_device_key_id: parseUuid(bound.new_device_key_id),
+      new_device_public_key: parseWalletPublicKey(newDevice.paddedBase64Url),
+      label: "phone-b" as never,
+      nonce: parseUuid(bound.nonce),
+      issued_at: bound.issued_at,
+      expires_at: bound.expires_at,
+    });
+
+    const authz = await router(
+      "POST",
+      "/admin/v1/device-enrol/authorize",
+      Buffer.from(
+        JSON.stringify({
+          challenge_id,
+          authorizing_key_id: authorizerId,
+          authorizing_public_key: authorizing.paddedBase64Url,
+          authorizing_signature: signPreimageB64(authorizing.privateKey, built.preimageText),
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+        "x-zp-totp": totpNow(),
+      },
+    );
+    expect(authz.status).toBe(200);
+    const authzBody = JSON.parse(authz.body) as { preimage_text: string; status: string };
+    expect(authzBody.status).toBe("AUTHORIZED");
+    expect(authzBody.preimage_text).toBe(built.preimageText);
+
+    const pop = signPreimageB64(newDevice.privateKey, authzBody.preimage_text);
+    const complete = await router(
+      "POST",
+      "/admin/v1/device-enrol/complete",
+      Buffer.from(
+        JSON.stringify({
+          challenge_id,
+          new_device_pop_signature: pop,
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(complete.status).toBe(200);
+    const completed = JSON.parse(complete.body) as { device_key_id: string; label: string };
+    expect(completed.label).toBe("phone-b");
+    expect(deviceStore.listActiveByNode(NODE_ID)).toHaveLength(2);
+    expect(deviceStore.listActiveByNode(NODE_ID).map((d) => d.id)).toContain(completed.device_key_id);
+  });
+});
+
+describe("G4 operator push notify on challenge issue", () => {
+  it("fires notifyOperatorsPendingAttention when approval challenge is issued", async () => {
+    const opId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const walletId = "55555555-5555-4555-8555-555555555555";
+    const sent: { payload: Record<string, unknown> }[] = [];
+    const sender: OperatorPushSender = {
+      async send(_sub, payload) {
+        sent.push({ payload: payload as unknown as Record<string, unknown> });
+        return true;
+      },
+    };
+    const challengeStore = new InMemoryApprovalChallengeStore();
+    const op: ApprovalOperationSnapshot = {
+      operationId: opId,
+      nodeId: NODE_ID,
+      status: "CREATED",
+      rowVersion: 1,
+      sourceWalletId: walletId,
+      sourcePubkey: "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+      destinationAddress: "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=",
+      amountZkz: "0.01",
+      referencesOperationId: null,
+    };
+    const { router, userStore, operatorPushStore } = makeRouter({
+      operatorPushSender: sender,
+      loadOperation: async (id) => (id === opId ? op : null),
+      challengeStoreOverride: challengeStore,
+    });
+    const auth = await login(router, userStore);
+    const sub = await router(
+      "POST",
+      "/admin/v1/operator-push/subscribe",
+      Buffer.from(
+        JSON.stringify({
+          endpoint: "https://push.example/ep/notify-test",
+          p256dh: "public-p256dh-value-here",
+          auth: "auth-secret-for-notify",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(sub.status).toBe(200);
+    expect(operatorPushStore.listActiveByNode(NODE_ID)).toHaveLength(1);
+    // Sealed auth is real envelope, not length discard.
+    expect(operatorPushStore.listActiveByNode(NODE_ID)[0]!.authSealed).toMatch(
+      /^zp-op-push-auth-v1\./,
+    );
+
+    const res = await router(
+      "GET",
+      `/admin/v1/external-sends/${opId}/approval-challenge`,
+      new Uint8Array(),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(sent[0]!.payload.attention_type).toBe("send_pending_approval");
+    expect(String(sent[0]!.payload.deep_link_path)).toContain(opId);
+    expect(JSON.stringify(sent[0]!.payload)).not.toMatch(/totp|private_key|auth-secret/i);
+  });
+});

@@ -1,0 +1,264 @@
+{
+  "boot": {
+    "BOOT_SEQUENCE": [
+      "SCHEMA_VALIDATE",
+      "VAULT_KEY_RING_LOAD",
+      "VAULT_CENSUS_VERIFY",
+      "LEADERSHIP_ACQUIRE",
+      "BOOT_RECOVERY_CLASSIFY",
+      "ENGINE_ACTIVATION"
+    ],
+    "LEADERSHIP_PREREQUISITE_SEQUENCE": [
+      "VAULT_KEY_RING_LOAD",
+      "VAULT_CENSUS_VERIFY",
+      "LEADERSHIP_ACQUIRE"
+    ],
+    "BOOT_SEQUENCE_INVARIANTS": {
+      "vault_census_after_key_ring_load": true,
+      "leadership_acquire_after_vault_census": true,
+      "engine_activation_after_leadership": true,
+      "readiness_reachable_before_leadership": true,
+      "signer_authority_active_last": true
+    },
+    "SHUTDOWN_SEQUENCE": [
+      "SIGNER_AUTHORITY_WITHDRAW",
+      "ENGINE_QUIESCE",
+      "INFLIGHT_SIGNING_COMPLETE",
+      "LEADERSHIP_RELEASE"
+    ],
+    "SHUTDOWN_SEQUENCE_INVARIANTS": {
+      "signer_authority_withdrawn_first": true,
+      "engines_quiesce_before_inflight_signing_completes": true,
+      "inflight_signing_completes_before_leadership_release": true,
+      "leadership_release_is_last": true
+    }
+  },
+  "checks": {
+    "READINESS_CHECKS": [
+      {
+        "id": "schema_migrated",
+        "gating": true,
+        "stampingAuthority": "MIGRATION_RUNNER",
+        "asserts": "the persistent schema is at the frozen expected migration version",
+        "doesNotAssert": [
+          "signer leadership is held by this instance",
+          "the gateway is reachable",
+          "money engines are running"
+        ]
+      },
+      {
+        "id": "database_reachable",
+        "gating": true,
+        "stampingAuthority": "DATABASE_HEALTH_PROBE",
+        "asserts": "the primary database answers a health query",
+        "doesNotAssert": [
+          "signer leadership is held by this instance",
+          "the gateway is reachable"
+        ]
+      },
+      {
+        "id": "vault_available",
+        "gating": true,
+        "stampingAuthority": "VAULT_KEY_RING_LOADER",
+        "asserts": "the boot key-ring is loaded and the vault census is verified",
+        "doesNotAssert": [
+          "signer leadership is held by this instance",
+          "a specific wallet lease is owned"
+        ]
+      },
+      {
+        "id": "observation_read_capable",
+        "gating": true,
+        "stampingAuthority": "OBSERVATION_SERVICE",
+        "asserts": "a validated gateway read succeeded inside the configured failure budget",
+        "doesNotAssert": [
+          "signer leadership is held by this instance",
+          "any transaction has landed"
+        ]
+      },
+      {
+        "id": "signer_leadership",
+        "gating": false,
+        "stampingAuthority": "LEADERSHIP_LOCK_MANAGER",
+        "asserts": "this instance currently holds the single process-wide signer leadership lock",
+        "doesNotAssert": [
+          "the node is ready to serve read and admin traffic",
+          "a wallet may be signed for without its own C-02 lease"
+        ]
+      }
+    ],
+    "GATING_CHECK_IDS": [
+      "schema_migrated",
+      "database_reachable",
+      "vault_available",
+      "observation_read_capable"
+    ],
+    "NON_GATING_CHECK_IDS": [
+      "signer_leadership"
+    ],
+    "READINESS_LEADERSHIP_SEPARATION": {
+      "readiness_requires_leadership": false,
+      "signing_requires_leadership": true,
+      "leadership_is_node_level_writer_role": true,
+      "leadership_is_wallet_sequencing_authority": false,
+      "liveness_may_be_true_while_readiness_false": true
+    },
+    "RECONCILIATION": {
+      "canonical": "startup-sequence",
+      "supersedes_draft_clauses": [
+        "node-core draft: readiness is false until signer leadership is held by exactly one instance",
+        "operations-recovery draft boot step: report readiness only when exactly one signer leader is active",
+        "operations-recovery draft degraded mode: readiness is false when the signer is unavailable"
+      ],
+      "resolution": "readiness gates on schema, database, vault, and observation checks only; signer_leadership is a reported non-gating check",
+      "reason": "coupling readiness to leadership re-introduces the overlap-deploy deadlock the decoupling rule fixed"
+    }
+  },
+  "failClosed": {
+    "WALLET_SEQUENCING_AUTHORITY": "C-02_UNIVERSAL_LEASE",
+    "CONSUMED_VAULT_LEADERSHIP": {
+      "mutations_single_writer": true,
+      "rotation_is_sole_all_envelope_writer": true,
+      "no_hybrid_fallback": true,
+      "vault_row_lock_held_across_signing": false
+    },
+    "FAIL_CLOSED_RULES": [
+      {
+        "id": "NO_SIGNING_WITHOUT_LEADERSHIP",
+        "rule": "a signing path is permitted only when this instance holds signer leadership"
+      },
+      {
+        "id": "NO_LEADERSHIP_WITHOUT_VAULT_CENSUS",
+        "rule": "a leadership claim is permitted only after the vault census has verified"
+      },
+      {
+        "id": "LEADERSHIP_LOSS_QUIESCES_SIGNING",
+        "rule": "losing leadership mid-operation quiesces signing and engines and never releases or re-sequences wallet leases"
+      },
+      {
+        "id": "LEADERSHIP_IS_NODE_LEVEL_NOT_WALLET_SEQUENCING",
+        "rule": "leadership is a node-level writer role; the wallet sequencing authority remains the C-02 universal lease"
+      },
+      {
+        "id": "LEADERSHIP_LOCK_RELEASED_ON_GRACEFUL_SHUTDOWN",
+        "rule": "graceful shutdown withdraws signer authority and quiesces engines and in-flight signing before releasing the leadership lock, releasing it last so a successor never signs concurrently"
+      },
+      {
+        "id": "INVOLUNTARY_LEADERSHIP_LOSS_FAILS_CLOSED",
+        "rule": "a leadership lock lost involuntarily (connection loss or database failover) stops signing and money engines immediately and restarts to re-acquire; it never continues signing after loss"
+      }
+    ],
+    "LEADERSHIP_LOSS_HANDLING": {
+      "quiesces_signing": true,
+      "quiesces_money_engines": true,
+      "releases_wallet_leases": false,
+      "re_sequences_wallet_leases": false,
+      "db_single_in_flight_is_backstop": true
+    },
+    "LEADERSHIP_LOCK_EXIT": {
+      "released_on_graceful_shutdown": true,
+      "released_after_signing_quiesced": true,
+      "freed_by_connection_loss_or_failover": true,
+      "continues_signing_after_loss": false,
+      "restarts_to_reacquire_after_loss": true,
+      "releases_or_resequences_wallet_leases_on_exit": false,
+      "db_single_in_flight_backstops_loss_window": true
+    }
+  },
+  "modes": {
+    "NODE_OPERATION_CLASSES": [
+      "REPORT_HEALTH",
+      "SERVE_READS",
+      "SERVE_ADMIN_QUERIES",
+      "ADMIT_BOUNDED_QUEUE",
+      "SERVE_EXACT_PARTIAL",
+      "SIGN",
+      "SUBMIT",
+      "RUN_MONEY_ENGINES",
+      "MUTATE_ECONOMIC_STATE"
+    ],
+    "LEADER_ONLY_OPERATION_CLASSES": [
+      "SIGN",
+      "SUBMIT",
+      "RUN_MONEY_ENGINES",
+      "MUTATE_ECONOMIC_STATE"
+    ],
+    "NODE_MODES": [
+      {
+        "id": "READY_AND_LEADER",
+        "ready": true,
+        "leader": true,
+        "degraded": false,
+        "allowed": [
+          "REPORT_HEALTH",
+          "SERVE_READS",
+          "SERVE_ADMIN_QUERIES",
+          "ADMIT_BOUNDED_QUEUE",
+          "SERVE_EXACT_PARTIAL",
+          "SIGN",
+          "SUBMIT",
+          "RUN_MONEY_ENGINES",
+          "MUTATE_ECONOMIC_STATE"
+        ],
+        "forbidden": []
+      },
+      {
+        "id": "READY_NOT_LEADER",
+        "ready": true,
+        "leader": false,
+        "degraded": true,
+        "allowed": [
+          "REPORT_HEALTH",
+          "SERVE_READS",
+          "SERVE_ADMIN_QUERIES",
+          "ADMIT_BOUNDED_QUEUE",
+          "SERVE_EXACT_PARTIAL"
+        ],
+        "forbidden": [
+          "SIGN",
+          "SUBMIT",
+          "RUN_MONEY_ENGINES",
+          "MUTATE_ECONOMIC_STATE"
+        ]
+      },
+      {
+        "id": "LEADER_NOT_READY",
+        "ready": false,
+        "leader": true,
+        "degraded": true,
+        "allowed": [
+          "REPORT_HEALTH",
+          "SERVE_EXACT_PARTIAL"
+        ],
+        "forbidden": [
+          "SERVE_READS",
+          "SERVE_ADMIN_QUERIES",
+          "ADMIT_BOUNDED_QUEUE",
+          "SIGN",
+          "SUBMIT",
+          "RUN_MONEY_ENGINES",
+          "MUTATE_ECONOMIC_STATE"
+        ]
+      },
+      {
+        "id": "NOT_READY_NOT_LEADER",
+        "ready": false,
+        "leader": false,
+        "degraded": true,
+        "allowed": [
+          "REPORT_HEALTH"
+        ],
+        "forbidden": [
+          "SERVE_READS",
+          "SERVE_ADMIN_QUERIES",
+          "ADMIT_BOUNDED_QUEUE",
+          "SERVE_EXACT_PARTIAL",
+          "SIGN",
+          "SUBMIT",
+          "RUN_MONEY_ENGINES",
+          "MUTATE_ECONOMIC_STATE"
+        ]
+      }
+    ]
+  }
+}

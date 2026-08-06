@@ -1,0 +1,50 @@
+{
+  "MONEY_MUTATION_HALT_MAP": [
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "trigger": "FRESH_ADMISSION",
+      "signingPurpose": "COSIGN_INBOUND",
+      "haltGated": false
+    },
+    {
+      "operationKind": "RECEIVE_EXTERNAL",
+      "trigger": "RECOVERY_RESUMED_FIRST_FORMATION",
+      "signingPurpose": "COSIGN_INBOUND",
+      "haltGated": false
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "trigger": "FRESH_ADMISSION",
+      "signingPurpose": "FIRST_FORMATION",
+      "haltGated": true
+    },
+    {
+      "operationKind": "MOVE_INTERNAL",
+      "trigger": "RECOVERY_RESUMED_FIRST_FORMATION",
+      "signingPurpose": "FIRST_FORMATION",
+      "haltGated": true
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "trigger": "FRESH_ADMISSION",
+      "signingPurpose": "FIRST_FORMATION",
+      "haltGated": true
+    },
+    {
+      "operationKind": "SEND_EXTERNAL",
+      "trigger": "RECOVERY_RESUMED_FIRST_FORMATION",
+      "signingPurpose": "FIRST_FORMATION",
+      "haltGated": true
+    }
+  ],
+  "SIGNING_PURPOSE_BY_OPERATION_KIND": {
+    "RECEIVE_EXTERNAL": "COSIGN_INBOUND",
+    "MOVE_INTERNAL": "FIRST_FORMATION",
+    "SEND_EXTERNAL": "FIRST_FORMATION"
+  },
+  "SIGNING_TRIGGERS": [
+    "FRESH_ADMISSION",
+    "RECOVERY_RESUMED_FIRST_FORMATION"
+  ],
+  "SOURCE": "operator-kill-switch; operations recovery; inbound co-sign boundary"
+}

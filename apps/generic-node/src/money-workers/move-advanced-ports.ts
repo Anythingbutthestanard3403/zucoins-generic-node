@@ -1,0 +1,862 @@
+// Production composition of the 5 advanced MOVE_INTERNAL money ports
+// Each port binds a node-core helper to the custody
+// pool + vault + gateway + leadership, adapting the same patterns as receive-settle-step.ts
+//  and the SEND signer deps.
+//
+// Invariants: one in-flight transaction per wallet (dual-lease acquisition enforces this),
+// Byte-exact (byte-exact JSON.stringify signing — the node-core helpers construct preimages
+// from persisted text, never reformatted), No-blind-retry (claim-before-submit via
+// bindExecuteMoveSubmitClaimOnce; never blind-retry).
+
+import type { Pool, PoolClient } from "pg";
+
+import {
+  captureAndBindMoveBaselines,
+  createMoneySignerBoundaryDeps,
+  formMoveInner,
+  landingProofToPathObservation,
+  makeSubmitAttemptRecorder,
+  makeSubmitDecisionClaimStore,
+  MOVE_INTERNAL_ARTIFACT_PURPOSE,
+  MOVE_INTERNAL_CANONICAL_VERSION,
+  parseGatewayEnvelope,
+  parsePositiveZkzAmount,
+  persistMoveInnerAttemptSql,
+  persistMoveOutcome,
+  proveExactHeadLanding,
+  signMoveStepsUnderLeases,
+  resumeMoveStep2FromPersistedStep1,
+  verifySettledTransaction,
+  bindExecuteMoveSubmitClaimOnce,
+  classifyMoveReconcile,
+  createSqlSignerAuditLog,
+  GENESIS_PROJECTION,
+  buildNodeEvent,
+  computeEventLogNodeEventHash,
+  LEASE_STATEMENTS,
+  parseSha256Hex,
+  parseUuid,
+  sha256HexUtf8,
+  type GatewayExchangeTransport,
+  type GatewayLimits,
+  type MoveBaselineBound,
+  type MoveBaselineObservationOutcome,
+  type MoveBaselineObserver,
+  type MoveInternalMoneyWorkerPorts,
+  type MoveReconcileOutcome,
+  type MoveReconcileInput,
+  type MoveBaselineBindingInput,
+  type MoveBaselineBindingResult,
+  type DestinationEligibilityReader,
+  type DestinationRecheck,
+  type MoveNodeIdentitySigner,
+  type PersistedExpectedArtifact,
+  type MoveBaselineSqlExecutor,
+  type SignerLeadershipLatch,
+  type EncryptedWalletKeyStore,
+  type MoneyPathSignerGates,
+  type SqlQueryFn,
+  type ReceiveCodeNodeIdentitySigner,
+  type WalletStateProjection,
+  type ReconcilePathObservation as PathObservation,
+  type FreshHeadRead,
+  type ReadFreshHead,
+  type NodeEventInput,
+  type SignedNodeEvent,
+  type SignedMoveSteps,
+  recordWalletSettledLedger,
+  writeExactHeadLineagePath,
+} from "@zucoins/node-core";
+
+import { issueLandedAccessWindow } from "./issue-landed-access-window.js";
+
+import type { MoveInternalWorkerLogger } from "./move-internal-worker.js";
+import { createSqlLeaseReader } from "./send-signer-deps.js";
+import { createPoolVaultSigner } from "./send-vault-signer.js";
+import { createSqlFreshHeadReader } from "./sql-fresh-head-reader.js";
+
+export interface MoveAdvancedPortsDeps {
+  readonly pool: Pool;
+  readonly vault: EncryptedWalletKeyStore;
+  readonly nodeId: string;
+  readonly ownerInstanceId: string;
+  readonly leadership: SignerLeadershipLatch;
+  readonly moneyPathGates: MoneyPathSignerGates & {
+    readonly assertHaltAdmitsKind: (kind: string) => void;
+  };
+  readonly submitGateway: {
+    readonly endpoint: string;
+    readonly limits: GatewayLimits;
+    readonly exchange?: GatewayExchangeTransport;
+  };
+  readonly gatewayUrls: readonly string[];
+  readonly gatewayExchange?: GatewayExchangeTransport;
+  /**
+   * GATEWAY_READ_RETRY_MAX_ATTEMPTS / GATEWAY_READ_BACKOFF_MAX_MS — the createSqlFreshHeadReader
+   * READ below only. The never-blind-retry rule: never threaded into submitOptions.
+   */
+  readonly gatewayMaxAttempts?: number;
+  readonly gatewayBackoffMaxMs?: number;
+  readonly nodeIdentitySigner: () => ReceiveCodeNodeIdentitySigner | null;
+  readonly logger: MoveInternalWorkerLogger;
+}
+
+interface MoveOperationDetails {
+  readonly operationId: string;
+  readonly implementerId: string;
+  readonly nodeId: string;
+  readonly sourceWalletId: string;
+  readonly destinationId: string;
+  readonly destinationWalletId: string;
+  readonly sourcePublicKey: string;
+  readonly destinationPublicKey: string;
+  readonly amountZkz: string;
+  readonly leaseGroupId: string;
+  readonly spawnedFromOperationId: string | null;
+  readonly referencesOperationId: string | null;
+  readonly rowVersion: number;
+}
+
+const LOAD_MOVE_DETAILS_SQL = `
+  SELECT
+    o.id::text AS operation_id,
+    o.implementer_id::text AS implementer_id,
+    o.node_id::text AS node_id,
+    o.source_wallet_id::text AS source_wallet_id,
+    o.destination_id::text AS destination_id,
+    d.wallet_id::text AS destination_wallet_id,
+    sw.public_key AS source_public_key,
+    dw.public_key AS destination_public_key,
+    o.amount_zkz::text AS amount_zkz,
+    lgo.lease_group_id::text AS lease_group_id,
+    o.spawned_from_operation_id::text AS spawned_from_operation_id,
+    o.references_operation_id::text AS references_operation_id,
+    o.row_version::int AS row_version
+  FROM operations o
+  JOIN destinations d ON d.id = o.destination_id
+  JOIN wallets sw ON sw.id = o.source_wallet_id
+  JOIN wallets dw ON dw.id = d.wallet_id
+  JOIN lease_group_operations lgo ON lgo.operation_id = o.id
+  WHERE o.id = $1::uuid AND o.kind = 'MOVE_INTERNAL'
+`;
+
+async function loadMoveDetails(pool: Pool, operationId: string): Promise<MoveOperationDetails | null> {
+  const result = await pool.query<{
+    operation_id: string; implementer_id: string; node_id: string;
+    source_wallet_id: string; destination_id: string; destination_wallet_id: string;
+    source_public_key: string; destination_public_key: string; amount_zkz: string;
+    lease_group_id: string; spawned_from_operation_id: string | null;
+    references_operation_id: string | null; row_version: number;
+  }>(LOAD_MOVE_DETAILS_SQL, [operationId]);
+  const r = result.rows[0];
+  if (r === undefined) return null;
+  return {
+    operationId: r.operation_id, implementerId: r.implementer_id, nodeId: r.node_id,
+    sourceWalletId: r.source_wallet_id, destinationId: r.destination_id,
+    destinationWalletId: r.destination_wallet_id, sourcePublicKey: r.source_public_key,
+    destinationPublicKey: r.destination_public_key, amountZkz: r.amount_zkz,
+    leaseGroupId: r.lease_group_id, spawnedFromOperationId: r.spawned_from_operation_id,
+    referencesOperationId: r.references_operation_id, rowVersion: r.row_version,
+  };
+}
+
+function createSqlQueryFn(pool: Pool | PoolClient): SqlQueryFn {
+  return async (text, values) => {
+    const result = await pool.query(text, values as unknown[]);
+    return result.rows as readonly Record<string, unknown>[];
+  };
+}
+
+function createSqlExecutor(pool: Pool): MoveBaselineSqlExecutor {
+  return {
+    async query(text, params) {
+      const result = await pool.query(text, params as never[]);
+      return { rows: result.rows };
+    },
+  };
+}
+
+// Mirrors event-log/pg-event-store.ts's counter SQL (node_event_seq_counters), but does not
+// import it: persistMoveOutcome's PERSIST_MOVE_OUTCOME CTE already inserts the node_events
+// row atomically with the operation CAS, so appendBatch cannot be reused here without
+// double-inserting. The counter row itself is still the single source of the next seq.
+const ENSURE_EVENT_SEQ_COUNTER_SQL = `
+INSERT INTO node_event_seq_counters (node_id, next_seq)
+VALUES ($1::uuid, 1)
+ON CONFLICT (node_id) DO NOTHING`;
+
+// Locks the counter row for the duration of the transaction and, in the same round trip,
+// reads the previous event's hash (seq = next_seq - 1) for the hash-chain link.
+const LOCK_EVENT_SEQ_COUNTER_SQL = `
+SELECT c.next_seq AS next_seq, e.event_hash AS last_event_hash
+  FROM node_event_seq_counters c
+  LEFT JOIN node_events e ON e.node_id = c.node_id AND e.seq = c.next_seq - 1
+ WHERE c.node_id = $1::uuid
+ FOR UPDATE OF c`;
+
+const ADVANCE_EVENT_SEQ_COUNTER_SQL = `
+UPDATE node_event_seq_counters
+   SET next_seq = $2::bigint
+ WHERE node_id = $1::uuid AND next_seq = $3::bigint
+ RETURNING next_seq`;
+
+interface LockedEventSeq {
+  readonly seq: bigint;
+  readonly previousEventHash: string | null;
+}
+
+/** Allocates the next node_events seq under a row lock held for the caller's transaction. */
+async function lockNextEventSeq(txQuery: SqlQueryFn, nodeId: string): Promise<LockedEventSeq> {
+  await txQuery(ENSURE_EVENT_SEQ_COUNTER_SQL, [nodeId]);
+  const rows = await txQuery(LOCK_EVENT_SEQ_COUNTER_SQL, [nodeId]);
+  const row = rows[0] as { next_seq: string; last_event_hash: string | null } | undefined;
+  if (row === undefined) throw new Error("event seq counter missing after ensure");
+  return { seq: BigInt(row.next_seq), previousEventHash: row.last_event_hash };
+}
+
+/** Advances the counter past the seq just inserted; CAS on the value locked/read above. */
+async function advanceEventSeq(txQuery: SqlQueryFn, nodeId: string, lockedSeq: bigint): Promise<void> {
+  const rows = await txQuery(ADVANCE_EVENT_SEQ_COUNTER_SQL, [
+    nodeId,
+    (lockedSeq + 1n).toString(),
+    lockedSeq.toString(),
+  ]);
+  if (rows[0] === undefined) throw new Error("event seq counter advanced concurrently under lock");
+}
+
+/**
+ * Existence-only lease-state check (One-in-flight: at most one active lease per wallet, so presence
+ * of any row is enough — no need to cross-check operation_id or lease_role here).
+ */
+async function deriveLeaseState(query: SqlQueryFn, walletId: string): Promise<"ACTIVE" | "RELEASED"> {
+  const rows = await query(LEASE_STATEMENTS.SELECT_ACTIVE, [walletId]);
+  return rows.length > 0 ? "ACTIVE" : "RELEASED";
+}
+
+/** Narrows the persisted operation status before the CAS handoff to persistMoveOutcome. */
+function isKnownMoveOperationStatus(status: string): status is "CREATED" | "NEEDS_ATTENTION" {
+  return status === "CREATED" || status === "NEEDS_ATTENTION";
+}
+
+/**
+ * The internal_move.landed event payload: both terminal
+ * observation ids plus the landing instant. Field sequence is fixed for audit reproducibility
+ * (Byte-exact-adjacent — dataText is independently hashed, never re-signed/reformatted downstream).
+ */
+function buildMoveLandedEventData(
+  outcome: Extract<MoveReconcileOutcome, { kind: "LANDED_VERIFIED" }>,
+  landedAtIso: string,
+): string {
+  return JSON.stringify({
+    source_terminal_observation_id: outcome.sourcePath.freshHeadObservationId,
+    destination_terminal_observation_id: outcome.destinationPath.freshHeadObservationId,
+    landed_at: landedAtIso,
+  });
+}
+
+/** Convert a FreshHeadRead to a MoveBaselineObservationOutcome. */
+function freshHeadToOutcome(read: FreshHeadRead, walletPublicKey: string): MoveBaselineObservationOutcome {
+  const envelope = read.envelope;
+  if (envelope.classification === "GENESIS") {
+    return { kind: "VERIFIED", observationId: read.observationId, projection: GENESIS_PROJECTION };
+  }
+  if (envelope.classification !== "HEAD") {
+    return { kind: "INDETERMINATE", detail: `envelope: ${envelope.classification}` };
+  }
+  // verifySettledTransaction is called inside createSqlFreshHeadReader already (it throws
+  // on failure), so by the time we get here the envelope is verified. We re-derive the
+  // projection to match the ObservationOutcome shape.
+  const verified = verifySettledTransaction(envelope.parsed, walletPublicKey);
+  if (verified.verdict === "VERIFIED") {
+    return { kind: "VERIFIED", observationId: read.observationId, projection: verified.projection };
+  }
+  return { kind: "UNVERIFIED", detail: `verify: ${verified.verdict}` };
+}
+
+function createMoveBaselineObserver(
+  readFreshHead: (walletPublicKey: string) => Promise<FreshHeadRead>,
+): MoveBaselineObserver {
+  return {
+    async observe(walletPublicKey: string): Promise<MoveBaselineObservationOutcome> {
+      try {
+        const read = await readFreshHead(walletPublicKey);
+        return freshHeadToOutcome(read, walletPublicKey);
+      } catch (err) {
+        return { kind: "INDETERMINATE", detail: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  };
+}
+
+function createDestinationEligibilityReader(pool: Pool): DestinationEligibilityReader {
+  return {
+    async recheckDestination(destinationId: string): Promise<DestinationRecheck> {
+      const result = await pool.query<{
+        destination_state: string; wallet_state: string; recovery_verified_at: string | null;
+      }>(
+        // destinations has state (PENDING|BLESSED|RETIRED), not a boolean `blessed` column.
+        `SELECT d.state::text AS destination_state, w.state::text AS wallet_state,
+                w.recovery_verified_at::text AS recovery_verified_at
+           FROM destinations d JOIN wallets w ON w.id = d.wallet_id
+          WHERE d.id = $1::uuid`,
+        [destinationId],
+      );
+      const r = result.rows[0];
+      if (r === undefined) return { eligible: false, detail: "destination not found" };
+      if (r.destination_state !== "BLESSED") return { eligible: false, detail: "not blessed" };
+      if (r.wallet_state !== "AVAILABLE" && r.wallet_state !== "PINNED")
+        return { eligible: false, detail: `wallet state: ${r.wallet_state}` };
+      if (r.recovery_verified_at === null)
+        return { eligible: false, detail: "recovery not verified" };
+      return { eligible: true, detail: "eligible" };
+    },
+  };
+}
+
+function createNodeIdentitySignerAdapter(
+  nodeIdentitySigner: () => ReceiveCodeNodeIdentitySigner | null,
+): MoveNodeIdentitySigner {
+  return {
+    async signWithNodeIdentity(preimageBytes: Uint8Array): Promise<{ signature: string; signingKeyId: string }> {
+      const signer = nodeIdentitySigner();
+      if (signer === null) throw new Error("node identity signer unavailable");
+      const signature: string = signer.sign(preimageBytes) as string;
+      return { signature, signingKeyId: signer.signingKeyId };
+    },
+  };
+}
+
+/**
+ * Build a PathObservation for one wallet leg of a MOVE_INTERNAL reconcile via the landing-proof rule
+ * landing oracle's depth-0 exact-head case (`proveExactHeadLanding` — the only sanctioned
+ * producer of a positive LandingPathProof). Reads the wallet's head
+ * TWICE (anchor + confirm, per the double-read rule) rather than reusing a single earlier read, so a
+ * head that moves mid-reconcile is CONFLICT, never a stale positive.
+ */
+async function buildPathObservation(
+  walletPublicKey: string,
+  expectedBodySha256: string,
+  readFreshHead: ReadFreshHead,
+): Promise<PathObservation> {
+  const outcome = await proveExactHeadLanding(
+    { walletPubkeyBase64Urlsafe: walletPublicKey, expectedBodySha256 },
+    readFreshHead,
+  );
+  return landingProofToPathObservation(outcome);
+}
+
+export function createMoveAdvancedPorts(
+  deps: MoveAdvancedPortsDeps,
+): Partial<MoveInternalMoneyWorkerPorts> {
+  const query = createSqlQueryFn(deps.pool);
+  const sqlExecutor = createSqlExecutor(deps.pool);
+  const readFreshHead = createSqlFreshHeadReader({
+    pool: deps.pool,
+    nodeId: deps.nodeId,
+    gatewayUrls: deps.gatewayUrls,
+    exchange: deps.gatewayExchange,
+    maxAttempts: deps.gatewayMaxAttempts,
+    backoffMaxMs: deps.gatewayBackoffMaxMs,
+  });
+  const observer = createMoveBaselineObserver(readFreshHead);
+  const destinationReader = createDestinationEligibilityReader(deps.pool);
+  const nodeIdentitySigner = createNodeIdentitySignerAdapter(deps.nodeIdentitySigner);
+
+  const resolveSignerBoundaryDeps = () => {
+    if (!deps.leadership.held) return null;
+    try {
+      return createMoneySignerBoundaryDeps(
+        {
+          leadership: deps.leadership,
+          leaseReader: createSqlLeaseReader(deps.pool),
+          vaultSigner: createPoolVaultSigner({ pool: deps.pool, vault: deps.vault, nodeId: deps.nodeId }),
+          auditLog: createSqlSignerAuditLog(query),
+        },
+        deps.moneyPathGates,
+      );
+    } catch { return null; }
+  };
+
+  const claimStore = makeSubmitDecisionClaimStore(query);
+  const recorder = makeSubmitAttemptRecorder(query);
+  const submitOnce = bindExecuteMoveSubmitClaimOnce({
+    claimStore,
+    authorizationFor: (operationId) => ({
+      submitDecisionId: operationId,
+      operationId,
+      transactionAttemptNo: 1 as const,
+    }),
+    submitOptions: {
+      endpoint: deps.submitGateway.endpoint,
+      limits: deps.submitGateway.limits,
+      recorder,
+      ...(deps.submitGateway.exchange !== undefined || deps.gatewayExchange !== undefined
+        ? { exchange: deps.submitGateway.exchange ?? deps.gatewayExchange }
+        : {}),
+    },
+  });
+
+  return {
+    captureBaselines: async (operationId, _leases) => {
+      const details = await loadMoveDetails(deps.pool, operationId);
+      if (details === null) return { ok: false, reason: "operation not found" };
+      const input: MoveBaselineBindingInput = {
+        nodeId: details.nodeId,
+        implementerId: details.implementerId,
+        operationId,
+        expectedArtifactId: crypto.randomUUID(),
+        sourceWalletId: details.sourceWalletId,
+        sourceWalletPublicKey: details.sourcePublicKey,
+        destinationId: details.destinationId,
+        destinationWalletId: details.destinationWalletId,
+        destinationWalletPublicKey: details.destinationPublicKey,
+        amountZkz: details.amountZkz,
+        spawnedFromOperationId: details.spawnedFromOperationId,
+        referencesOperationId: details.referencesOperationId,
+        sourceLease: { role: "MOVE_SOURCE", lifecycle: "ACTIVE" },
+        destinationLease: { role: "MOVE_DESTINATION", lifecycle: "ACTIVE" },
+        capturedAt: Date.now(),
+        observer,
+        destinations: destinationReader,
+        signer: nodeIdentitySigner,
+        sql: sqlExecutor,
+      };
+      const result: MoveBaselineBindingResult = await captureAndBindMoveBaselines(input);
+      if (!result.ok) return { ok: false, reason: result.reason };
+      return { ok: true, bound: result.binding };
+    },
+
+    loadBaselineBound: async (operationId) => {
+      const evRows = await query(
+        `SELECT source_t0_observation_id::text AS s_t0,
+                destination_t0_observation_id::text AS d_t0
+           FROM move_observation_evidence WHERE operation_id = $1::uuid`,
+        [operationId],
+      );
+      const ev = evRows[0] as { s_t0: string; d_t0: string } | undefined;
+      if (ev === undefined || !ev.s_t0 || !ev.d_t0) return null;
+      const details = await loadMoveDetails(deps.pool, operationId);
+      if (details === null) return null;
+      // Reload T0 projections keyed on the observation's verification classification
+      // (parse_result), not on completed_transaction_text truthiness. A
+      // VERIFIED_GENESIS row is durably NULL-bodied by construction — that NULL is the
+      // genesis baseline itself, not missing evidence.
+      const [srcRows, dstRows] = await Promise.all([
+        query(
+          `SELECT parse_result::text AS parse_result, completed_transaction_text
+             FROM gateway_observations WHERE id = $1::uuid`,
+          [ev.s_t0],
+        ),
+        query(
+          `SELECT parse_result::text AS parse_result, completed_transaction_text
+             FROM gateway_observations WHERE id = $1::uuid`,
+          [ev.d_t0],
+        ),
+      ]);
+      const srcProj = reloadBoundBaselineProjection(srcRows[0] as T0ObservationRow | undefined, details.sourcePublicKey);
+      const dstProj = reloadBoundBaselineProjection(dstRows[0] as T0ObservationRow | undefined, details.destinationPublicKey);
+      if (srcProj === null || dstProj === null) return null;
+      // Load the expected artifact (operation_expected_artifacts; column set matches
+      // STATEMENTS.INSERT_ARTIFACT in core/move-baseline-binding.ts).
+      const artRows = await query(
+        `SELECT id::text AS id, signing_key_id::text AS signing_key_id,
+                preimage_text, preimage_sha256, signature
+           FROM operation_expected_artifacts
+          WHERE operation_id = $1::uuid LIMIT 1`,
+        [operationId],
+      );
+      const ar = artRows[0] as {
+        id: string; signing_key_id: string; preimage_text: string;
+        preimage_sha256: string; signature: string;
+      } | undefined;
+      if (ar === undefined || !ar.signature || !ar.preimage_text) return null;
+      const artifact: PersistedExpectedArtifact = {
+        id: ar.id,
+        operationId,
+        purpose: MOVE_INTERNAL_ARTIFACT_PURPOSE,
+        canonicalVersion: MOVE_INTERNAL_CANONICAL_VERSION,
+        signingKeyId: ar.signing_key_id,
+        preimageText: ar.preimage_text,
+        preimageSha256: ar.preimage_sha256,
+        signature: ar.signature,
+      };
+      return {
+        capture: {
+          operationId,
+          sourceWalletPublicKey: details.sourcePublicKey,
+          destinationWalletPublicKey: details.destinationPublicKey,
+          sourceBaseline: srcProj,
+          destinationBaseline: dstProj,
+          amountZkz: parsePositiveZkzAmount(details.amountZkz),
+          capturedAt: Date.now(),
+        },
+        sourceT0ObservationId: ev.s_t0,
+        destinationT0ObservationId: ev.d_t0,
+        artifact,
+      } as MoveBaselineBound;
+    },
+
+    formInner: async (operationId, bound) => {
+      try {
+        const formed = await formMoveInner({
+          operationId,
+          capture: bound.capture,
+          sourceT0ObservationId: bound.sourceT0ObservationId,
+          destinationT0ObservationId: bound.destinationT0ObservationId,
+          expectedArtifact: bound.artifact,
+          nodeClockMs: Date.now(),
+          formedAt: new Date().toISOString(),
+          persistPort: { commitMoveInnerAttempt: (input) => persistMoveInnerAttemptSql(query, input) },
+        });
+        if (!formed.ok) return { ok: false, reason: formed.reason };
+        return { ok: true, formed: { durable: formed.durable } };
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+    },
+
+    signUnderLeases: async (operationId, leases) => {
+      const signerDeps = resolveSignerBoundaryDeps();
+      if (signerDeps === null)
+        return { ok: false, reason: "signer boundary unavailable" };
+      try {
+        const phaseRows = await query(
+          `SELECT attempt_phase::text AS phase FROM operation_transactions
+            WHERE operation_id = $1::uuid AND attempt_no = 1`,
+          [operationId],
+        );
+        const phase = (phaseRows[0] as { phase: string } | undefined)?.phase;
+        const moveSignerDeps = { ...signerDeps, assertHaltAdmitsKind: deps.moneyPathGates.assertHaltAdmitsKind };
+        let signed;
+        if (phase === "STEP1_SIGNATURE_PERSISTED") {
+          signed = await resumeMoveStep2FromPersistedStep1({
+            operationId,
+            destinationLease: { walletId: leases.destinationWalletId, leaseEpoch: leases.destinationLeaseEpoch },
+            query,
+            signerDeps: moveSignerDeps,
+          });
+        } else {
+          signed = await signMoveStepsUnderLeases({
+            operationId,
+            leases: {
+              source: { walletId: leases.sourceWalletId, leaseEpoch: leases.sourceLeaseEpoch },
+              destination: { walletId: leases.destinationWalletId, leaseEpoch: leases.destinationLeaseEpoch },
+            },
+            query,
+            signerDeps: moveSignerDeps,
+          });
+        }
+        return { ok: true, signed: { signed } };
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+    },
+
+    loadSignedMaterial: async (operationId) => {
+      const rows = await query(
+        `SELECT inner_preimage_text, step_1_signature, step_2_preimage_text,
+                step_2_signature, completed_transaction_text, completed_transaction_sha256
+           FROM operation_transactions
+          WHERE operation_id = $1::uuid AND attempt_no = 1`,
+        [operationId],
+      );
+      const r = rows[0] as Record<string, unknown> | undefined;
+      if (r === undefined || !r.step_2_signature || !r.completed_transaction_text) return null;
+      const step2PreimageText = r.step_2_preimage_text as string;
+      const signed: SignedMoveSteps = {
+        operationId,
+        innerPreimageText: r.inner_preimage_text as string,
+        step1Signature: r.step_1_signature as string,
+        step2PreimageText,
+        step2PreimageSha256: sha256HexUtf8(step2PreimageText),
+        step2Signature: r.step_2_signature as string,
+        completedTransactionText: r.completed_transaction_text as string,
+        completedTransactionSha256: r.completed_transaction_sha256 as string,
+      };
+      return { signed };
+    },
+
+    submitOnce,
+
+    reconcileAndLand: async (operationId, _progress) => {
+      try {
+        const details = await loadMoveDetails(deps.pool, operationId);
+        if (details === null) return { ok: false, reason: "operation not found" };
+
+        const attemptRows = await query(
+          `SELECT completed_transaction_text, completed_transaction_sha256
+             FROM operation_transactions
+            WHERE operation_id = $1::uuid AND attempt_no = 1`,
+          [operationId],
+        );
+        const attempt = attemptRows[0] as Record<string, unknown> | undefined;
+        if (attempt === undefined || !attempt.completed_transaction_text) {
+          return { ok: false, reason: "signed transaction not found", holdReconcile: true };
+        }
+        const expectedBodySha = attempt.completed_transaction_sha256 as string;
+
+        // Build PathObservation for each wallet via the depth-0 landing oracle —
+        // each leg reads and confirms its own head twice; there is no shared read to
+        // observe up front.
+        const [sourceObs, destObs] = await Promise.all([
+          buildPathObservation(details.sourcePublicKey, expectedBodySha, readFreshHead),
+          buildPathObservation(details.destinationPublicKey, expectedBodySha, readFreshHead),
+        ]);
+
+        // Lease state (One-in-flight: at most one active lease per wallet — existence-only check).
+        const [sourceLeaseState, destinationLeaseState] = await Promise.all([
+          deriveLeaseState(query, details.sourceWalletId),
+          deriveLeaseState(query, details.destinationWalletId),
+        ]);
+
+        // Classify the reconcile outcome (oracle for MOVE).
+        const reconcileInput: MoveReconcileInput = {
+          boundary: "POST_SUBMIT",
+          moveAttemptId: operationId,
+          sourceWalletId: details.sourceWalletId,
+          destinationWalletId: details.destinationWalletId,
+          expectedMoveBodySha256: expectedBodySha,
+          sourceLeaseState,
+          destinationLeaseState,
+          sourceObservation: sourceObs,
+          destinationObservation: destObs,
+        };
+        const outcome: MoveReconcileOutcome = classifyMoveReconcile(reconcileInput);
+
+        if (outcome.kind !== "LANDED_VERIFIED") {
+          return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
+        }
+
+        // Persist the landing: the CAS + evidence attach + event append
+        // commit as ONE statement inside persistMoveOutcome, but allocating the event's seq
+        // and hash-chain link needs its own row lock, so the two share one transaction.
+        const client = await deps.pool.connect();
+        try {
+          await client.query("BEGIN");
+          const txQuery = createSqlQueryFn(client);
+
+          const opRows = await txQuery(
+            `SELECT status::text AS status, row_version::text AS rv FROM operations WHERE id = $1::uuid`,
+            [operationId],
+          );
+          const op = opRows[0] as { status: string; rv: string } | undefined;
+          if (op === undefined) {
+            await client.query("ROLLBACK");
+            return { ok: false, reason: "operation not found" };
+          }
+          if (!isKnownMoveOperationStatus(op.status)) {
+            await client.query("ROLLBACK");
+            return { ok: false, reason: `unexpected operation status: ${op.status}`, holdReconcile: true };
+          }
+          const expectedState: "CREATED" | "NEEDS_ATTENTION" = op.status;
+
+          const seqInfo = await lockNextEventSeq(txQuery, deps.nodeId);
+          const nowIso = new Date().toISOString();
+          const dataText = buildMoveLandedEventData(outcome, nowIso);
+          const dataSha256 = sha256HexUtf8(dataText);
+
+          const nodeEventInput: NodeEventInput = {
+            node_id: parseUuid(deps.nodeId),
+            event_id: parseUuid(crypto.randomUUID()),
+            seq: seqInfo.seq.toString(),
+            operation_id: parseUuid(operationId),
+            wallet_id: null,
+            event_type: "internal_move.landed",
+            data_sha256: parseSha256Hex(dataSha256),
+            previous_event_hash: seqInfo.previousEventHash === null ? null : parseSha256Hex(seqInfo.previousEventHash),
+            created_at: nowIso,
+          };
+          const preimage = buildNodeEvent(nodeEventInput);
+          const signed = await nodeIdentitySigner.signWithNodeIdentity(preimage.preimageBytes);
+          const eventHash = computeEventLogNodeEventHash(preimage.preimageText, signed.signature);
+
+          const event: SignedNodeEvent = {
+            seq: nodeEventInput.seq,
+            eventId: nodeEventInput.event_id,
+            nodeId: nodeEventInput.node_id,
+            walletId: null,
+            eventType: "internal_move.landed",
+            dataText,
+            dataSha256,
+            preimageText: preimage.preimageText,
+            preimageSha256: preimage.sha256,
+            signingKeyId: signed.signingKeyId,
+            signature: signed.signature,
+            previousEventHash: seqInfo.previousEventHash,
+            eventHash,
+          };
+
+          const persistResult = await persistMoveOutcome(txQuery, {
+            operationId,
+            expectedState,
+            expectedRowVersion: Number(op.rv),
+            outcome,
+            event,
+            occurredAt: nowIso,
+          });
+
+          if (persistResult.kind !== "PERSISTED") {
+            await client.query("ROLLBACK");
+            return { ok: false, reason: `persist: ${persistResult.kind}`, holdReconcile: true };
+          }
+
+          // Derived wallet_settled_ledger SOURCE + DESTINATION rows.
+          // T0 baselines come from move_observation_evidence (bound at form time).
+          const t0Rows = await txQuery(
+            `SELECT source_t0_observation_id::text AS s_t0,
+                    destination_t0_observation_id::text AS d_t0
+               FROM move_observation_evidence
+              WHERE operation_id = $1::uuid`,
+            [operationId],
+          );
+          const t0 = t0Rows[0] as { s_t0: string; d_t0: string } | undefined;
+          if (t0 === undefined) {
+            await client.query("ROLLBACK");
+            return {
+              ok: false,
+              reason: "move landing: missing move_observation_evidence T0 baselines",
+              holdReconcile: true,
+            };
+          }
+          // Prefer the more-buried path depth when dual paths differ; both must already
+          // be positive landing verdicts (LANDED_VERIFIED gate above).
+          const src = outcome.sourcePath;
+          const dst = outcome.destinationPath;
+          const landingVerdict =
+            src.kind === "LANDED_COMPLETE_PATH" || dst.kind === "LANDED_COMPLETE_PATH"
+              ? ("LANDED_COMPLETE_PATH" as const)
+              : ("LANDED_EXACT" as const);
+          const pathDepth = Math.max(src.depth, dst.depth);
+          const settled = await recordWalletSettledLedger(txQuery, {
+            operationId,
+            landingVerdict,
+            pathDepth,
+            t0ObservationId: t0.s_t0,
+            terminalObservationId: src.freshHeadObservationId,
+            requiredPathCount: 2,
+            verifiedAtIso: nowIso,
+          });
+
+          // Dual lineage paths (SOURCE + DESTINATION) for verification-material.
+          const pathMeta = await txQuery(
+            `SELECT olp.proof_manifest_text, olp.proof_manifest_sha256,
+                    o.source_wallet_id::text AS source_wallet_id,
+                    sw.public_key AS source_public_key,
+                    d.wallet_id::text AS dest_wallet_id,
+                    dw.public_key AS dest_public_key
+               FROM operation_landing_proofs olp
+               INNER JOIN operations o ON o.id = olp.operation_id
+               LEFT JOIN wallets sw ON sw.id = o.source_wallet_id
+               LEFT JOIN destinations d ON d.id = o.destination_id
+               LEFT JOIN wallets dw ON dw.id = d.wallet_id
+              WHERE olp.id = $1::uuid`,
+            [settled.landingProofId],
+          );
+          const meta = pathMeta[0] as
+            | {
+                proof_manifest_text: string;
+                proof_manifest_sha256: string;
+                source_wallet_id: string | null;
+                source_public_key: string | null;
+                dest_wallet_id: string | null;
+                dest_public_key: string | null;
+              }
+            | undefined;
+          if (meta?.source_public_key) {
+            await writeExactHeadLineagePath(txQuery, {
+              operationId,
+              landingProofId: settled.landingProofId,
+              pathRole: "SOURCE",
+              walletId: meta.source_wallet_id,
+              walletPublicKey: meta.source_public_key,
+              t0ObservationId: t0.s_t0,
+              freshHeadObservationId: src.freshHeadObservationId,
+              verdict: src.kind === "LANDED_COMPLETE_PATH" ? "LANDED_COMPLETE_PATH" : "LANDED_EXACT",
+              pathDepth: src.depth,
+              proofManifestText: meta.proof_manifest_text,
+              proofManifestSha256: meta.proof_manifest_sha256,
+              createdAtIso: nowIso,
+            });
+          }
+          if (meta?.dest_public_key) {
+            await writeExactHeadLineagePath(txQuery, {
+              operationId,
+              landingProofId: settled.landingProofId,
+              pathRole: "DESTINATION",
+              walletId: meta.dest_wallet_id,
+              walletPublicKey: meta.dest_public_key,
+              t0ObservationId: t0.d_t0,
+              freshHeadObservationId: dst.freshHeadObservationId,
+              verdict: dst.kind === "LANDED_COMPLETE_PATH" ? "LANDED_COMPLETE_PATH" : "LANDED_EXACT",
+              pathDepth: dst.depth,
+              proofManifestText: meta.proof_manifest_text,
+              proofManifestSha256: meta.proof_manifest_sha256,
+              createdAtIso: nowIso,
+            });
+          }
+
+          await issueLandedAccessWindow(
+            txQuery,
+            operationId,
+            Date.parse(nowIso),
+          );
+
+          await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
+          await client.query("COMMIT");
+          return { ok: true, land: { outcome, persist: persistResult } };
+        } catch (err) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err), holdReconcile: true };
+      }
+    },
+  };
+}
+
+type T0ObservationRow = { parse_result: string; completed_transaction_text: string | null };
+
+/**
+ * Reload one side's T0 baseline projection, keyed on the observation's verification
+ * classification rather than body-text truthiness. `undefined` (the T0 row itself
+ * is gone) is the only "truly absent" case and returns null, matching
+ * MoveBaselineBound.loadBaselineBound's existing contract of null meaning "not yet
+ * reloadable, keep waiting" (move-internal-money-worker.ts FORM case). Evidence that IS
+ * present but cannot be reconstructed into a baseline — wrong/anomalous parse_result, or a
+ * VERIFIED_HEAD body that fails re-verification — is not absent
+ * (INDETERMINATE covers evidence that is "missing, invalid, contradictory, or
+ * insufficient"), so it must not collapse into the same null the caller treats as
+ * wait-forever. Throwing fails closed to the tick loop's existing typed FAILED/step=LOAD
+ * terminal instead of silently retaining leases under an unbounded WAIT.
+ */
+function reloadBoundBaselineProjection(
+  row: T0ObservationRow | undefined,
+  walletPublicKey: string,
+): WalletStateProjection | null {
+  if (row === undefined) return null;
+  if (row.parse_result === "VERIFIED_GENESIS") return GENESIS_PROJECTION;
+  if (row.parse_result === "VERIFIED_HEAD" && row.completed_transaction_text) {
+    const projected = projectionFromBodyText(row.completed_transaction_text, walletPublicKey);
+    if (projected !== null) return projected;
+  }
+  throw new Error(
+    `move baseline reload: T0 observation evidence present but unreconstructable (parse_result=${row.parse_result})`,
+  );
+}
+
+/** Derive a WalletStateProjection from a persisted completed_transaction_text. */
+function projectionFromBodyText(bodyText: string, walletPublicKey: string): WalletStateProjection | null {
+  if (bodyText === "" || bodyText === "genesis") return GENESIS_PROJECTION;
+  try {
+    const envelope = parseGatewayEnvelope(
+      new TextEncoder().encode(`{"status":true,"code":"ok","message":"","data":[${bodyText}]}`),
+    );
+    if (envelope.classification !== "HEAD") return null;
+    const verified = verifySettledTransaction(envelope.parsed, walletPublicKey);
+    if (verified.verdict !== "VERIFIED") return null;
+    return verified.projection;
+  } catch { return null; }
+}

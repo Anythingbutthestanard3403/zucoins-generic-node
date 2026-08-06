@@ -1,0 +1,35 @@
+node_modules/
+.secrets.env
+.env
+dist/
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# vitest --coverage (v8 provider) report output.
+coverage/
+
+# Wallet backups — NEVER commit (a backup file is full wallet control)
+my-secret-zucoins-wallet*
+*wallet-backup*.json
+
+# Recovery-ceremony archives and every ceremony intermediate. The archive carries each
+# wallet's sealed vault envelope, so it is secret-class exactly like a wallet backup
+# (the ceremony runbook destroys these as a HARD step). The operator writes ARCHIVE_OUT
+# under .recovery-ceremony/ — keep both patterns ignored, and see
+# apps/generic-node/test/ops/ceremony-artifacts-ignored.test.ts, which fails if either
+# stops being ignored.
+.recovery-ceremony/
+*.archive.json
+
+# Playwright Test run output (apps/generic-node/admin real-browser suite) —
+# reports/traces/screenshots are reproducible from the e2e run, never committed.
+playwright-report/
+test-results/
+
+# E2E evidence emitted by the vitest run
+apps/generic-node/test/.artifacts/
+
+# Local env overrides
+.env.local
+.env.*.local

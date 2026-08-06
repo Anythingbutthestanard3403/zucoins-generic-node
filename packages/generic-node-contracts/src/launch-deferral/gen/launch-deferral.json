@@ -1,0 +1,71 @@
+{
+  "IMPORT_DRAIN_DEFERRAL": {
+    "wallet_import": "absent",
+    "imported_drain": "absent",
+    "jointly_deferred": true,
+    "activates_behavior": false
+  },
+  "CUTOVER_GATE": {
+    "reserved_enum_value": "imported",
+    "launch_accepts_key_origins": [
+      "node_generated"
+    ],
+    "jointly_deferred": [
+      "WALLET_IMPORT",
+      "IMPORTED_DRAIN"
+    ],
+    "activates_behavior": false,
+    "requires_explicit_cutover_decision": true,
+    "cutover_decision_ref": null,
+    "cutover_prerequisites": [
+      "drain approval tuple",
+      "two-wallet lease",
+      "signing/submission state machine",
+      "recovery tests",
+      "threat-model update",
+      "exact compatibility fixtures",
+      "coordinated schema/API/security amendment",
+      "live-chain acceptance authorization",
+      "send-source-origin exclusion census — reject key_origin='imported' as an external-send source"
+    ]
+  },
+  "LAUNCH_COMMAND_SURFACE": [],
+  "SCHEMA_WRITER_SURFACE": {
+    "seed": {
+      "writerClass": "WalletSeedWriter",
+      "permitted_key_origins": [
+        "node_generated"
+      ]
+    },
+    "migration": {
+      "writerClass": "SchemaMigrationWriter",
+      "permitted_key_origins": [
+        "node_generated"
+      ]
+    },
+    "vault_writer": {
+      "writerClass": "VaultSealingWriter",
+      "permitted_key_origins": [
+        "node_generated"
+      ]
+    }
+  },
+  "FORBIDDEN_LAUNCH_CAPABILITY_VERBS": [
+    "import",
+    "drain"
+  ],
+  "RUNTIME_OBLIGATIONS": [
+    {
+      "obligation": "boot-time assertion: live registered route table is a subset of frozen PUBLIC_ROUTES ∪ ADMIN_ROUTES and contains no import-substring path",
+      "owner_phase": "node-core runtime"
+    },
+    {
+      "obligation": "database CHECK/trigger: execution paths write only key_origin='node_generated'",
+      "owner_phase": "custody enforcement"
+    },
+    {
+      "obligation": "dependency-boundary scan covers createRequire, require.resolve, and dynamic import()",
+      "owner_phase": "scan gates"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+// OpenAPI freeze surface.
+export {
+  generateOpenApiDocument,
+  openApiRouteInventory,
+  contractRouteInventory,
+  policyRouteInventory,
+  implementedRouteInventory,
+  routeRefKey,
+  moneyMovingCreatePathsInDoc,
+  collectOperationTypeEnums,
+  pathMatchesRetired,
+  createReceiveHasCallbackUrl,
+  openApiScalarConstraintsMatchRuntime,
+  MONEY_MOVING_CREATE_PATHS,
+  OPERATIONAL_PROBE_ROUTES,
+  OPENAPI_VERSION,
+  OPENAPI_TITLE,
+  CREATE_RECEIVE_PROPERTY_NAMES,
+  CREATE_RECEIVE_BODY,
+  BODY_BY_ROUTE,
+  QUERY_BY_ROUTE,
+  OPENAPI_SCALAR_CONSTRAINTS,
+  type OpenApiDocument,
+  type RouteRef,
+  type GenerateOpenApiOptions,
+} from "./generate.js";
+export { renderOpenApiYaml, renderYaml } from "./yaml.js";

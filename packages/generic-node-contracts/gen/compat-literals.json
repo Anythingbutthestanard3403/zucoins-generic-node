@@ -1,0 +1,65 @@
+{
+  "DESTINATION_BLESS_PURPOSE": "zp-destination-bless-v1",
+  "DEVICE_ENROL_PURPOSE": "zp-device-enrol-v1",
+  "LEGACY_REPORTING_DOMAIN_PREFIXES": [
+    "zupay-reporting-v1",
+    "zupay-reporting-transport-v1",
+    "zupay-reporting-handshake-v1"
+  ],
+  "LEGACY_REPORTING_EVENT_DOMAIN": "zupay-reporting-v1",
+  "LEGACY_REPORTING_HANDSHAKE_DOMAIN": "zupay-reporting-handshake-v1",
+  "LEGACY_REPORTING_TRANSPORT_DOMAIN": "zupay-reporting-transport-v1",
+  "LEGACY_ZUPAY_HEADER_NAMES": [
+    "X-ZuPay-Node",
+    "X-ZuPay-Timestamp",
+    "X-ZuPay-Signature"
+  ],
+  "LEGACY_ZUPAY_NODE_HEADER": "X-ZuPay-Node",
+  "LEGACY_ZUPAY_SIGNATURE_HEADER": "X-ZuPay-Signature",
+  "LEGACY_ZUPAY_TIMESTAMP_HEADER": "X-ZuPay-Timestamp",
+  "MOVE_INTERNAL_EXPECTED_PURPOSE": "zp-move-internal-expected-v1",
+  "NODE_EVENT_PURPOSE": "zp-node-event-v1",
+  "RECEIVE_EXPECTED_PURPOSE": "zp-receive-expected-v1",
+  "REPORT_REQUEST_PURPOSE": "zp-report-request-v1",
+  "REPORTING_HEADER_NAMES": [
+    "X-ZP-Reporting-Key-Id",
+    "X-ZP-Reporting-Timestamp",
+    "X-ZP-Reporting-Expires-At",
+    "X-ZP-Reporting-Nonce",
+    "X-ZP-Reporting-Signature"
+  ],
+  "REPORTING_REGISTER_PURPOSE": "zp-reporting-register-v1",
+  "SEND_EXTERNAL_APPROVAL_PURPOSE": "zp-send-external-approval-v1",
+  "SEND_EXTERNAL_EXPECTED_PURPOSE": "zp-send-external-expected-v1",
+  "SOURCE": "canonical retained-literal families; compatibility routes; compat-literal-preservation",
+  "TOTP_HEADER_NAME": "X-ZP-TOTP",
+  "WALLET_HEAD_FINGERPRINT_PURPOSE": "zp-wallet-head-fingerprint-v1",
+  "WALLET_SECRET_AAD_DOMAIN": "zp-wallet-secret-v1",
+  "ZP_HEADER_FAMILY": [
+    "X-ZP-Reporting-Key-Id",
+    "X-ZP-Reporting-Timestamp",
+    "X-ZP-Reporting-Expires-At",
+    "X-ZP-Reporting-Nonce",
+    "X-ZP-Reporting-Signature",
+    "X-ZP-TOTP"
+  ],
+  "ZP_V1_PURPOSES": [
+    "zp-receive-expected-v1",
+    "zp-move-internal-expected-v1",
+    "zp-send-external-expected-v1",
+    "zp-send-external-approval-v1",
+    "zp-destination-bless-v1",
+    "zp-device-enrol-v1",
+    "zp-report-request-v1",
+    "zp-reporting-register-v1",
+    "zp-node-event-v1",
+    "zp-wallet-head-fingerprint-v1"
+  ],
+  "ZP1_RECEIVE_MESSAGE_PATTERN_DESCRIPTION": "zp1:<discriminator>:<anchor>",
+  "ZP1_RECEIVE_MESSAGE_PREFIX": "zp1:",
+  "ZUPAY_COMPAT_NAME": "zupay",
+  "ZUPAY_NODE_DISCOVERY_PATH": "/.well-known/zupay-node",
+  "ZUPAYMENTS_COMPAT_NAME": "zupayments",
+  "ZUPAYMENTS_PACKAGE_SCOPE_PREFIX": "@zupayments/",
+  "ZUPAYMENTS_SDK_ROUTE_PATH": "/sdk/zupayments.js"
+}

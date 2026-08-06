@@ -1,0 +1,101 @@
+{
+  "concern": "no-callback",
+  "governing": {
+    "spec": "api receive surface; operation-flow delivery channels",
+    "decision": "no-callback-removal",
+    "dependsOn": "reporting-tuples"
+  },
+  "rejectedSurfaces": [
+    {
+      "surface": "callback_url_request_field",
+      "location": "api contract: POST /v1/receives",
+      "ground": "scope violation — present only on RECEIVE_EXTERNAL, a checkout-notification leak; the field pointed at no backend"
+    },
+    {
+      "surface": "callback_registration",
+      "location": "operation-flow: callback registration step",
+      "ground": "node-initiated push has no endpoint auth contract (PULL-only, no HMAC/bearer); redundant with the authoritative pull cursor"
+    },
+    {
+      "surface": "node_initiated_delivery_worker",
+      "location": "(never added)",
+      "ground": "outbound HTTP to an operator-supplied URL is a live SSRF/DNS-rebinding/redirect primitive on the key-holding node"
+    },
+    {
+      "surface": "callback_retry_queue",
+      "location": "(never added)",
+      "ground": "push is at-least-once and gap-silent; invariant #6 forbids trusting a node push, so a callback can never be load-bearing"
+    }
+  ],
+  "egressAbsence": {
+    "allowedEgressKind": "configured_splitchain_gateway_only",
+    "operations": [
+      "RECEIVE_EXTERNAL",
+      "MOVE_INTERNAL",
+      "SEND_EXTERNAL"
+    ],
+    "operationEgress": [
+      {
+        "operation": "RECEIVE_EXTERNAL",
+        "nonGatewayEgress": "none"
+      },
+      {
+        "operation": "MOVE_INTERNAL",
+        "nonGatewayEgress": "none"
+      },
+      {
+        "operation": "SEND_EXTERNAL",
+        "nonGatewayEgress": "none"
+      }
+    ]
+  },
+  "soleChannel": {
+    "authoritativeChannels": [
+      {
+        "channel": "pull_events",
+        "route": "GET /v1/events",
+        "egress": "none_node_serves_pull",
+        "role": "authoritative_cursor"
+      },
+      {
+        "channel": "sse_stream",
+        "route": "GET /v1/events/stream",
+        "egress": "none_node_serves_pull",
+        "role": "low_latency_wake_accelerator"
+      },
+      {
+        "channel": "snapshot",
+        "route": "GET /v1/state/snapshot",
+        "egress": "none_node_serves_pull",
+        "role": "bootstrap_reconciliation"
+      }
+    ],
+    "authoritativeEventPurpose": "zp-node-event-v1",
+    "webhookRelocation": {
+      "owner": "implementer_platform_layer",
+      "name": "zupayments_merchant_webhook_projection",
+      "builtFrom": "the_authoritative_pull_stream",
+      "grounds": [
+        "platform_layer_owns_webhooks",
+        "pull_stream_is_sole_authority",
+        "zero_node_egress",
+        "ssrf_url_guard"
+      ]
+    }
+  },
+  "residualGuardrail": {
+    "active": false,
+    "appliesOnlyIf": "operator_overrides_no_callback_removal_to_re_admit_push",
+    "requirements": [
+      "pure_wake_carrying_at_most_the_signed_zp_node_event_v1_envelope",
+      "never_carries_transfer_code_address_amount_or_t0",
+      "never_advances_node_seq_or_any_consumer_cursor",
+      "url_guard_validate_at_registration_and_pin_at_connect",
+      "refuse_or_revalidate_every_redirect_hop",
+      "block_metadata_link_local_rfc1918_loopback",
+      "authenticated_to_implementer_with_event_id_dedup",
+      "bounded_retry_plus_dead_letter_never_blocks_or_alters_operation_state",
+      "carries_explicit_non_authority_statement"
+    ]
+  }
+}

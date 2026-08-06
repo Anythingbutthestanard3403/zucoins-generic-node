@@ -1,0 +1,569 @@
+{
+  "dedup": {
+    "CONSECUTIVE_DEDUP_KEY": "EXACT_RAW_BYTE_EQUALITY",
+    "DIGEST_ROLE": "CANDIDATE_INDEX_NOT_EQUALITY_AUTHORITY",
+    "APPEND_OUTCOMES": [
+      "APPEND",
+      "SUPPRESS_AS_SIGHTING"
+    ],
+    "SUPPRESSION_PRECONDITIONS": [
+      "prior recorded row exists",
+      "prior recorded row was verified",
+      "next capture is verified",
+      "equal raw_response_sha256",
+      "equal raw_response octet length",
+      "exact raw-byte equality"
+    ],
+    "RETENTION_RULE": {
+      "append_only": true,
+      "anomalies_always_append": true,
+      "global_deduplication": false,
+      "recurrence_of_older_state_retained": true,
+      "raw_bytes_storage": "BYTEA_NEVER_JSONB",
+      "raw_bytes_never_reserialized": true
+    }
+  },
+  "enums": {
+    "OBSERVER_DOMAINS": [
+      "NODE",
+      "PLATFORM"
+    ],
+    "OBSERVATION_PARSE_RESULTS": [
+      "VERIFIED_GENESIS",
+      "VERIFIED_HEAD",
+      "TRANSPORT_ERROR",
+      "MALFORMED_ENVELOPE",
+      "MALFORMED_TRANSACTION",
+      "UNVERIFIED_SIGNATURE",
+      "WALLET_ROLE_INVALID"
+    ],
+    "VERIFIED_PARSE_RESULTS": [
+      "VERIFIED_GENESIS",
+      "VERIFIED_HEAD"
+    ],
+    "OBSERVATION_RELATIONSHIPS": [
+      "FIRST",
+      "SUCCESSOR",
+      "COMPLETE_PATH_SUCCESSOR",
+      "DUPLICATE",
+      "EQUIVALENT_STATE_DIFFERENT_ENVELOPE",
+      "REGRESSION",
+      "UNEXPLAINED_JUMP",
+      "GENESIS_AFTER_HISTORY",
+      "SIGNATURE_COLLISION",
+      "NOT_APPLICABLE"
+    ],
+    "WALLET_OBSERVATION_ROLES": [
+      "sender",
+      "receiver",
+      "genesis"
+    ],
+    "OBSERVATION_ANOMALY_KINDS": [
+      "TRANSPORT_ERROR",
+      "MALFORMED_ENVELOPE",
+      "MALFORMED_TRANSACTION",
+      "UNVERIFIED_SIGNATURE",
+      "WALLET_ROLE_INVALID",
+      "REGRESSION",
+      "UNEXPLAINED_JUMP",
+      "GENESIS_AFTER_HISTORY",
+      "SIGNATURE_COLLISION"
+    ]
+  },
+  "invariants": [
+    {
+      "id": "ENUM_DOMAINS",
+      "rule": "parse_result and relationship, and wallet_role when non-null, are members of their frozen vocabularies"
+    },
+    {
+      "id": "FIELD_A_FINGERPRINT_IFF_VERIFIED",
+      "rule": "semantic_fingerprint is non-null exactly when parse_result is VERIFIED_GENESIS or VERIFIED_HEAD"
+    },
+    {
+      "id": "FIELD_B_STATE_CHANGED_IFF_VERIFIED",
+      "rule": "state_changed is non-null exactly when parse_result is verified"
+    },
+    {
+      "id": "FIELD_C_HEAD_MATERIAL_IFF_HEAD",
+      "rule": "inner_preimage_text, step_1_signature, step_2_signature, completed_transaction_text, and completed_transaction_sha256 are all non-null exactly when parse_result is VERIFIED_HEAD"
+    },
+    {
+      "id": "FIELD_D_GENESIS_SHAPE",
+      "rule": "VERIFIED_GENESIS requires wallet_role='genesis', s_signature='', p_signature='', b_amount='0', and null head material"
+    },
+    {
+      "id": "FIELD_E_HEAD_SHAPE",
+      "rule": "VERIFIED_HEAD requires wallet_role in {sender,receiver}, padded s/step_1/step_2 signatures, empty-or-padded p_signature, non-null b_amount, and non-empty inner_preimage_text and completed_transaction_text"
+    },
+    {
+      "id": "FIELD_F_NONVERIFIED_SHAPE",
+      "rule": "a non-verified parse_result requires relationship='NOT_APPLICABLE' and null wallet_role, s_signature, p_signature, b_amount, and all head material"
+    },
+    {
+      "id": "SCALAR_FORMATS",
+      "rule": "endpoint_fingerprint/raw_response_sha256 and any non-null semantic_fingerprint/completed_transaction_sha256 match sha256_hex; wallet_public_key matches padded_base64url_pubkey; any non-null b_amount matches zkz_balance_text; wallet_seq is a positive integer; raw_response_bytes is present"
+    }
+  ],
+  "records": {
+    "RAW_OBSERVATION_CAPTURE_FIELDS": [
+      {
+        "name": "observer_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "observing domain identity; read stream is (observer_id, wallet_public_key)"
+      },
+      {
+        "name": "endpoint_fingerprint",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "the independently configured endpoint selected for this read"
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "queried wallet; external addresses have no wallet_id"
+      },
+      {
+        "name": "observed_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "capture / request timing; never a uniqueness or sequencing key"
+      },
+      {
+        "name": "http_status",
+        "type": "integer",
+        "nullable": true,
+        "note": "transport status; null when no HTTP response arrived"
+      },
+      {
+        "name": "raw_response_bytes",
+        "type": "bytea",
+        "nullable": false,
+        "note": "complete body exactly as received, before UTF-8 decode or JSON parse"
+      },
+      {
+        "name": "raw_response_octets",
+        "type": "integer_nonneg",
+        "nullable": false,
+        "note": "byte length of raw_response_bytes; a consecutive-dedup comparison key"
+      },
+      {
+        "name": "raw_response_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "SHA-256 of raw_response_bytes; a candidate index, not equality authority"
+      }
+    ],
+    "GATEWAY_OBSERVATION_RECORD_FIELDS": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "primary key"
+      },
+      {
+        "name": "observer_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "references observers(id)"
+      },
+      {
+        "name": "endpoint_fingerprint",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "copied per row so later reconfiguration cannot rewrite provenance"
+      },
+      {
+        "name": "wallet_id",
+        "type": "uuid",
+        "nullable": true,
+        "note": "optional projection for a node-owned wallet; null for external addresses"
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "the observed public key"
+      },
+      {
+        "name": "wallet_seq",
+        "type": "bigint_positive",
+        "nullable": false,
+        "note": "per-stream sequence; unique with (observer_id, wallet_public_key)"
+      },
+      {
+        "name": "observed_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "capture time"
+      },
+      {
+        "name": "http_status",
+        "type": "integer",
+        "nullable": true,
+        "note": "transport status"
+      },
+      {
+        "name": "raw_response_bytes",
+        "type": "bytea",
+        "nullable": false,
+        "note": "authoritative evidence; never JSONB; never parse/re-serialized by retention jobs"
+      },
+      {
+        "name": "raw_response_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "candidate index; equality still recomputes length and compares exact bytes"
+      },
+      {
+        "name": "parse_result",
+        "type": "observation_parse_result",
+        "nullable": false,
+        "note": "verification disposition"
+      },
+      {
+        "name": "relationship",
+        "type": "observation_relationship",
+        "nullable": false,
+        "note": "what the fresh response proved at capture; immutable"
+      },
+      {
+        "name": "semantic_fingerprint",
+        "type": "sha256_hex",
+        "nullable": true,
+        "note": "present iff verified (CHECK A); computed only after complete verification"
+      },
+      {
+        "name": "state_changed",
+        "type": "boolean",
+        "nullable": true,
+        "note": "present iff verified (CHECK B)"
+      },
+      {
+        "name": "wallet_role",
+        "type": "wallet_observation_role",
+        "nullable": true,
+        "note": "sender | receiver | genesis; null when non-verified (CHECK F)"
+      },
+      {
+        "name": "s_signature",
+        "type": "text",
+        "nullable": true,
+        "note": "current state signature; empty string at genesis"
+      },
+      {
+        "name": "p_signature",
+        "type": "text",
+        "nullable": true,
+        "note": "previous state signature; empty string permitted"
+      },
+      {
+        "name": "b_amount",
+        "type": "zkz_balance_text",
+        "nullable": true,
+        "note": "role-relative absolute balance; '0' is legal (canonical ZKZ balance domain)"
+      },
+      {
+        "name": "inner_preimage_text",
+        "type": "text",
+        "nullable": true,
+        "note": "exact JSON.stringify(inner) preimage; head only"
+      },
+      {
+        "name": "step_1_signature",
+        "type": "text",
+        "nullable": true,
+        "note": "head only"
+      },
+      {
+        "name": "step_2_signature",
+        "type": "text",
+        "nullable": true,
+        "note": "head only"
+      },
+      {
+        "name": "completed_transaction_text",
+        "type": "text",
+        "nullable": true,
+        "note": "exact complete body, top-level sequence inner, step_1_signature, step_2_signature; head only; never reconstructed from projections"
+      },
+      {
+        "name": "completed_transaction_sha256",
+        "type": "sha256_hex",
+        "nullable": true,
+        "note": "head only; recomputed and byte-compared"
+      },
+      {
+        "name": "previous_recorded_observation_id",
+        "type": "uuid",
+        "nullable": true,
+        "note": "dedup linkage to the immediately prior recorded row; references gateway_observations(id)"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "insertion time; defaults to now()"
+      }
+    ],
+    "WALLET_OBSERVATION_CURSOR_FIELDS": [
+      {
+        "name": "observer_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "primary key part"
+      },
+      {
+        "name": "wallet_id",
+        "type": "uuid",
+        "nullable": true,
+        "note": "optional node-owned wallet projection"
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "primary key part"
+      },
+      {
+        "name": "last_recorded_observation_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "the most recently appended row for this stream"
+      },
+      {
+        "name": "last_raw_response_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "candidate index for the consecutive byte-identical check"
+      },
+      {
+        "name": "last_semantic_fingerprint",
+        "type": "sha256_hex",
+        "nullable": true,
+        "note": "prior verified semantic identity, when the last row was verified"
+      },
+      {
+        "name": "last_seen_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "updated on every sighting, appended or suppressed"
+      },
+      {
+        "name": "consecutive_repeat_count",
+        "type": "bigint_nonneg",
+        "nullable": false,
+        "note": "count of suppressed byte-identical verified repeats since the last appended row"
+      },
+      {
+        "name": "next_wallet_seq",
+        "type": "bigint_positive",
+        "nullable": false,
+        "note": "allocator for the next appended row's wallet_seq"
+      }
+    ],
+    "OBSERVATION_ANOMALY_RECORD_FIELDS": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "primary key"
+      },
+      {
+        "name": "observation_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "unique; references the appended gateway_observations row"
+      },
+      {
+        "name": "observer_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "references observers(id)"
+      },
+      {
+        "name": "wallet_id",
+        "type": "uuid",
+        "nullable": true,
+        "note": "optional node-owned wallet projection"
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "the observed public key"
+      },
+      {
+        "name": "kind",
+        "type": "observation_anomaly_kind",
+        "nullable": false,
+        "note": "anomaly classification"
+      },
+      {
+        "name": "prior_observation_id",
+        "type": "uuid",
+        "nullable": true,
+        "note": "the prior accepted state this anomaly was judged against, when applicable"
+      },
+      {
+        "name": "details",
+        "type": "text",
+        "nullable": false,
+        "note": "human-readable anomaly detail"
+      },
+      {
+        "name": "detected_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "detection time"
+      }
+    ]
+  },
+  "relationship": {
+    "COMPARISON_LADDER": [
+      "raw byte length, digest, then exact bytes decide suppress vs append (the byte-dedup primitive)",
+      "among appended verified rows, an equal semantic fingerprint is EQUIVALENT_STATE_DIFFERENT_ENVELOPE (envelope change, not state change)",
+      "a differing semantic fingerprint is a state transition classified by backlink and state-signature comparison"
+    ],
+    "RELATIONSHIP_CLASSIFICATION_RULES": [
+      {
+        "conditionId": "NO_PRIOR",
+        "condition": "no prior accepted state",
+        "relationship": "FIRST",
+        "stateChanged": true,
+        "action": "establish cursor; operation policy decides usability"
+      },
+      {
+        "conditionId": "SEMANTIC_FINGERPRINT_EQUAL",
+        "condition": "raw bytes differ, semantic fingerprint equal to prior",
+        "relationship": "EQUIVALENT_STATE_DIFFERENT_ENVELOPE",
+        "stateChanged": false,
+        "action": "retain; no chain transition"
+      },
+      {
+        "conditionId": "BACKLINK_TO_PRIOR",
+        "condition": "new P equals prior S and new S differs from prior S",
+        "relationship": "SUCCESSOR",
+        "stateChanged": true,
+        "action": "accepted direct advance"
+      },
+      {
+        "conditionId": "SAME_S_FINGERPRINT_DIFFERS",
+        "condition": "new S equals prior S but semantic fingerprint differs",
+        "relationship": "SIGNATURE_COLLISION",
+        "stateChanged": true,
+        "action": "anomaly; quarantine/fail closed"
+      },
+      {
+        "conditionId": "GENESIS_AFTER_HISTORY",
+        "condition": "new genesis after prior non-genesis history",
+        "relationship": "GENESIS_AFTER_HISTORY",
+        "stateChanged": true,
+        "action": "anomaly; quarantine/fail closed"
+      },
+      {
+        "conditionId": "RECURRENCE_OF_OLDER_S",
+        "condition": "new S equals an accepted S below current",
+        "relationship": "REGRESSION",
+        "stateChanged": true,
+        "action": "anomaly; quarantine/fail closed"
+      },
+      {
+        "conditionId": "DIFFERENT_S_NO_BACKLINK",
+        "condition": "new state differs and new P does not equal prior S",
+        "relationship": "UNEXPLAINED_JUMP",
+        "stateChanged": true,
+        "action": "anomaly; quarantine/fail closed"
+      }
+    ],
+    "CLASSIFIER_OUTPUT_RELATIONSHIPS": [
+      "FIRST",
+      "EQUIVALENT_STATE_DIFFERENT_ENVELOPE",
+      "SUCCESSOR",
+      "SIGNATURE_COLLISION",
+      "GENESIS_AFTER_HISTORY",
+      "REGRESSION",
+      "UNEXPLAINED_JUMP"
+    ],
+    "NON_CLASSIFIER_RELATIONSHIPS": {
+      "DUPLICATE": "diagnostic only; a byte-identical verified repeat is suppressed by the byte-dedup primitive and has no row",
+      "COMPLETE_PATH_SUCCESSOR": "derived only by a complete-path adjudication, never at capture",
+      "NOT_APPLICABLE": "non-verified rows only; set by the record contract, not the classifier"
+    },
+    "STATE_UNCHANGED_RELATIONSHIP": "EQUIVALENT_STATE_DIFFERENT_ENVELOPE"
+  },
+  "scalars": {
+    "SHA256_HEX_PATTERN": "^[0-9a-f]{64}$",
+    "PADDED_BASE64URL_PUBKEY_PATTERN": "^[A-Za-z0-9_-]{43}=$",
+    "PADDED_BASE64URL_PUBKEY_LENGTH": 44,
+    "PADDED_BASE64URL_SIGNATURE_PATTERN": "^[A-Za-z0-9_-]{86}==$",
+    "PADDED_BASE64URL_SIGNATURE_LENGTH": 88,
+    "ZKZ_BALANCE_TEXT_PATTERN": "^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+  },
+  "sequences": {
+    "GOLDEN_SEQUENCES": [
+      {
+        "name": "AA_BYTE_IDENTICAL",
+        "description": "byte-identical verified A,A appends once and increments the sighting counter",
+        "appendedRows": 1,
+        "anomalyRows": 0,
+        "suppressedSightings": 1,
+        "relationships": [
+          "FIRST"
+        ]
+      },
+      {
+        "name": "AA_PRIME_WRAPPER",
+        "description": "same verified head with a byte-different envelope A,A' appends twice",
+        "appendedRows": 2,
+        "anomalyRows": 0,
+        "suppressedSightings": 0,
+        "relationships": [
+          "FIRST",
+          "EQUIVALENT_STATE_DIFFERENT_ENVELOPE"
+        ]
+      },
+      {
+        "name": "ABCA_REGRESSION",
+        "description": "A,B,C,A appends four; the final A is a REGRESSION and quarantines",
+        "appendedRows": 4,
+        "anomalyRows": 1,
+        "suppressedSightings": 0,
+        "relationships": [
+          "FIRST",
+          "SUCCESSOR",
+          "SUCCESSOR",
+          "REGRESSION"
+        ]
+      },
+      {
+        "name": "MALFORMED_XX",
+        "description": "identical malformed bytes twice appends twice with two anomalies",
+        "appendedRows": 2,
+        "anomalyRows": 2,
+        "suppressedSightings": 0,
+        "relationships": [
+          "NOT_APPLICABLE",
+          "NOT_APPLICABLE"
+        ]
+      },
+      {
+        "name": "DIGEST_COLLISION",
+        "description": "two verified bodies with a forced-equal digest and length but different bytes still append",
+        "appendedRows": 2,
+        "anomalyRows": 0,
+        "suppressedSightings": 0,
+        "relationships": [
+          "FIRST",
+          "EQUIVALENT_STATE_DIFFERENT_ENVELOPE"
+        ]
+      }
+    ],
+    "SEQUENCE_PROPERTIES": [
+      "restart: resuming from a returned cursor yields the identical continuation transcript",
+      "concurrent: each read stream folds an independent cursor with its own contiguous wallet_seq",
+      "append-only: a row count never decreases and a suppressed sighting never removes a row"
+    ]
+  }
+}

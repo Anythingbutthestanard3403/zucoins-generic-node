@@ -1,0 +1,31 @@
+{
+  "FORBIDDEN_ALIAS_EXCEPTIONS": {
+    "executionPhaseOnly": "SUBMIT_STARTED",
+    "afterLandingKindOnly": "HOLD"
+  },
+  "FORBIDDEN_EVENT_ALIASES": [
+    "transfer.confirmed",
+    "transfer.finalised",
+    "sweep.settled",
+    "outbound.settled"
+  ],
+  "FORBIDDEN_EVENT_GLOBS": [
+    "reservation.*",
+    "payment.*",
+    "checkout.*",
+    "refund.*"
+  ],
+  "FORBIDDEN_STATE_ALIASES": [
+    "RESERVED",
+    "OBSERVED",
+    "CONFIRMED",
+    "FINALISED",
+    "PAID",
+    "HELD",
+    "REFUNDED",
+    "SUBMITTED",
+    "FAILED",
+    "SETTLED"
+  ],
+  "SOURCE": "forbidden state/event aliases; compat-literal-preservation"
+}

@@ -1,0 +1,29 @@
+{
+  "artifact": "zp-backup-wallet-export-v1",
+  "canonical_version": 1,
+  "concern": "recovery-drill",
+  "signing_role": "wallet",
+  "signing_note": "REAL seal fixture: the vault ciphertext is a genuine AES-256-GCM seal of the 64-byte Ed25519 wallet secret under the HKDF-derived DEK (frozen six-field AAD); export_proof_signature is a genuine Ed25519 signature by that wallet key over the suite-tuple preimage. Wallet seed byte 0x11.",
+  "wallet_id": "aaaaaaaa-0000-4000-8000-000000000001",
+  "wallet_public_key_b64": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "artifact_digest_sha256": "62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44",
+  "source": {
+    "schema": "signing-custody-security: wallet export section",
+    "preimage_construction": "the suite-tuple preimage rule (purpose + LF + JSON.stringify(payload))",
+    "decision": "backup-archive-freeze"
+  },
+  "files": {
+    "zp-backup-wallet-export-v1.preimage.txt": {
+      "sha256": "62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44",
+      "note": "exact export preimage bytes (purpose + LF + JSON.stringify(payload)); its own sha256 equals artifact_digest_sha256"
+    },
+    "zp-backup-wallet-export-v1.digest.hex": {
+      "sha256": "7ec0132968e1cecb5c9303bbf4dbdf4a261133516360c90c328a61e863e58dbc",
+      "content_equals": "artifact_digest_sha256"
+    },
+    "zp-backup-wallet-export-v1.sig.b64": {
+      "sha256": "0396b761eb3d4507e32a5ddc2132e30f9ef8e01e1f80637e3ce5f9e0325843f1",
+      "note": "Ed25519 detached signature over the export preimage, padded base64url, signed by the wallet key (seed byte 0x11)"
+    }
+  }
+}

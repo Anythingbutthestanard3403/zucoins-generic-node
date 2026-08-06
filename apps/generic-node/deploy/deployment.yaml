@@ -1,0 +1,177 @@
+# Reference deployment manifest for the v2 generic node.
+# Production backup policy + durable encrypted-backup sink.
+#
+# Conventions this manifest enforces:
+# - Nonroot container, read-only root filesystem, all capabilities dropped.
+# - Stage-2 runtime secrets from the platform store only — never baked in:
+#   DATABASE_URL + VAULT_MASTER_KEY + BACKUP_MASTER_KEY. The vault and backup
+#   roots are separate custody domains; NODE_IDENTITY is minted and sealed by
+#   the node on first leadership, never supplied by this manifest.
+# - Production scheduled encrypted backups: dedicated KEK,
+#   durable PVC destination outside the pod + primary-DB failure domain, RPO
+#   24h / retention 14d. Backup bytes never traverse HTTP (the key-custody rule).
+# - Continuity markers live on the durable backup volume AND must also be
+#   copied off-cluster (an external trusted source). The volume alone
+#   is not that external source.
+# - Liveness and readiness are genuinely separate probes:
+#   /health stays 200 while a dependency is down; /health/ready 503s until
+#   migrations complete and the live database probe succeeds.
+# - strategy: Recreate (not RollingUpdate). The backup sink is ReadWriteOnce;
+#   maxSurge:1 would surge a second pod that cannot attach the PVC and stick
+#   the rollout. replicas:1 + Recreate tears down the old pod first so the
+#   volume re-attaches cleanly. Migrations still run at boot; signer leadership
+#   lock — not the deployment — decides which instance signs when scaled.
+# - terminationGracePeriodSeconds exceeds the graceful-stop bounded drain
+#   (DEFAULT_GRACEFUL_STOP_TIMEOUT_MS = 10s) so the platform never hard-kills
+#   the process mid-signature before the lock is released.
+# - Resource limits make a runaway process degrade visibly (feeding the safety-alert evaluator's
+#   metrics/alerts) rather than starving the host.
+
+---
+# Durable sink for encrypted ZBKP artifacts + continuity markers.
+# Operator must bind storageClassName to media that does NOT share the primary
+# Postgres volume's failure domain (different PD / zone / object-store CSI).
+# emptyDir is forbidden here — pod replace must not destroy RPO evidence.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zunode-backups
+  labels:
+    app: zunode
+    component: durable-backup
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  # storageClassName: REPLACE_WITH_OFFSITE_CLASS
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zunode
+  labels:
+    app: zunode
+spec:
+  replicas: 1
+  # Recreate — RWO PVC zunode-backups cannot multi-attach. RollingUpdate
+  # maxSurge:1/maxUnavailable:0 would stick redeploy after first attach.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: zunode
+  template:
+    metadata:
+      labels:
+        app: zunode
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: node
+          image: zunode:REPLACE_WITH_RELEASE_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            # --- Non-secret deployment configuration (first-boot fields) ---
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "8080"
+            - name: BIND_HOST
+              value: "::"
+            # Mandatory gateway transport boundary. No default and no
+            # sandbox fallback; comma-separate explicitly approved failovers.
+            - name: SPLITCHAIN_GATEWAY_URLS
+              value: "REPLACE_WITH_GATEWAY_URLS"
+            # Public node origin and stable identity are explicit first-boot
+            # values. The placeholders intentionally fail schema validation
+            # until the operator substitutes an HTTPS URL and lowercase UUID.
+            - name: PUBLIC_BASE_URL
+              value: "https://REPLACE_WITH_PUBLIC_BASE"
+            - name: NODE_ID
+              value: "REPLACE_WITH_NODE_UUID"
+            # --- Production backup policy ---
+            # Required on this reference deploy. Scheduler constructs in
+            # Stage-1 (stage1-main) and Stage-2 (main) when enabled.
+            - name: BACKUP_SCHEDULE_ENABLED
+              value: "true"
+            - name: BACKUP_OUTPUT_DIR
+              value: "/var/lib/generic-node/backups"
+            - name: BACKUP_CONTINUITY_MARKERS_PATH
+              value: "/var/lib/generic-node/backups/continuity-markers.json"
+            - name: BACKUP_RETENTION_DAYS
+              value: "14"
+            - name: BACKUP_SCHEDULE_INTERVAL_MS
+              value: "86400000"
+            # --- Secrets: platform-injected, never baked in ---
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: zunode-secrets
+                  key: database-url
+            # Stage-2 custody root (from the secret store only).
+            # Generate >=32 random characters. MUST differ from the dedicated
+            # backup KEK below; it never belongs in source or a ConfigMap.
+            - name: VAULT_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: zunode-secrets
+                  key: vault-master-key
+            # Dedicated backup KEK. MUST differ from any vault/signing
+            # material. Generate ≥32 chars; rotate via dr/cli key-rotation.
+            - name: BACKUP_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: zunode-secrets
+                  key: backup-master-key
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            # Writable scratch for the read-only root filesystem (ephemeral).
+            - name: tmp
+              mountPath: /tmp
+            # Durable encrypted-backup sink — OUTSIDE the emptyDir failure domain.
+            - name: backups
+              mountPath: /var/lib/generic-node/backups
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: backups
+          persistentVolumeClaim:
+            claimName: zunode-backups

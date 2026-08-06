@@ -1,0 +1,28 @@
+{
+  "dimensions": {
+    "operationRole": [
+      "RECEIVE_WINDOW",
+      "MOVE_DESTINATION",
+      "SEND_SOURCE",
+      "MOVE_SOURCE"
+    ],
+    "leaseLifecycle": [
+      "ACTIVE",
+      "RELEASED"
+    ],
+    "flag": [
+      false,
+      true
+    ],
+    "storedState": [
+      "AVAILABLE",
+      "PINNED",
+      "QUARANTINED",
+      "RETIRED"
+    ]
+  },
+  "invariants": {
+    "noLeasedWalletSelected": "A wallet with an active operation lease is never receive-selectable, under any quarantine / retirement / recovery combination.",
+    "noLeasedWalletSilentlyReleased": "A wallet with an active operation lease is never AVAILABLE (PINNED, or QUARANTINED when operator-quarantined); boot audit repairs AVAILABLE->PINNED only, never releases a lease and never clears quarantine."
+  }
+}

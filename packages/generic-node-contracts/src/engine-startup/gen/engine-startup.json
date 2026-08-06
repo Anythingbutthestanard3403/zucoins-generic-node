@@ -1,0 +1,171 @@
+{
+  "ENGINE_REGISTRY": [
+    {
+      "id": "SIGNER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "SUBMITTER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "RECEIVE_EXECUTION_WORKER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "INTERNAL_MOVE_WORKER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "EXTERNAL_SEND_WORKER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "POOL_MINT_WORKER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "RECONCILER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "VAULT_ROTATION_WORKER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "SETTLEMENT_MONITOR",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "BOOT_RECOVERY_CLASSIFIER",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "OPERATOR_MUTATION_SERVICE",
+      "leadershipRequirement": "LEADER_REQUIRED",
+      "economicStateWriter": true,
+      "followerAllowedOperations": []
+    },
+    {
+      "id": "API_INGRESS",
+      "leadershipRequirement": "FOLLOWER_SAFE",
+      "economicStateWriter": false,
+      "followerAllowedOperations": [
+        "ADMIT_BOUNDED_QUEUE",
+        "SERVE_ADMIN_QUERIES"
+      ]
+    },
+    {
+      "id": "OBSERVATION_SERVICE",
+      "leadershipRequirement": "FOLLOWER_SAFE",
+      "economicStateWriter": false,
+      "followerAllowedOperations": [
+        "SERVE_READS"
+      ]
+    },
+    {
+      "id": "REPORTING_SERVICE",
+      "leadershipRequirement": "FOLLOWER_SAFE",
+      "economicStateWriter": false,
+      "followerAllowedOperations": [
+        "SERVE_READS",
+        "SERVE_ADMIN_QUERIES"
+      ]
+    },
+    {
+      "id": "EXACT_PARTIAL_SERVER",
+      "leadershipRequirement": "FOLLOWER_SAFE",
+      "economicStateWriter": false,
+      "followerAllowedOperations": [
+        "SERVE_EXACT_PARTIAL"
+      ]
+    },
+    {
+      "id": "HEALTH_REPORTER",
+      "leadershipRequirement": "FOLLOWER_SAFE",
+      "economicStateWriter": false,
+      "followerAllowedOperations": [
+        "REPORT_HEALTH"
+      ]
+    }
+  ],
+  "LEADER_GATED_ENGINE_IDS": [
+    "SIGNER",
+    "SUBMITTER",
+    "RECEIVE_EXECUTION_WORKER",
+    "INTERNAL_MOVE_WORKER",
+    "EXTERNAL_SEND_WORKER",
+    "POOL_MINT_WORKER",
+    "RECONCILER",
+    "VAULT_ROTATION_WORKER",
+    "SETTLEMENT_MONITOR",
+    "BOOT_RECOVERY_CLASSIFIER",
+    "OPERATOR_MUTATION_SERVICE"
+  ],
+  "FOLLOWER_SAFE_ENGINE_IDS": [
+    "API_INGRESS",
+    "OBSERVATION_SERVICE",
+    "REPORTING_SERVICE",
+    "EXACT_PARTIAL_SERVER",
+    "HEALTH_REPORTER"
+  ],
+  "ENGINE_STARTUP_SEQUENCE": [
+    "REBUILD_QUEUES",
+    "START_RECONCILER",
+    "START_MUTATION_WORKERS",
+    "ARM_SIGNER_AUTHORITY"
+  ],
+  "STARTUP_INVARIANTS": {
+    "runs_only_on_leader": true,
+    "starts_after_boot_recovery_classify": true,
+    "queues_rebuilt_before_mutation_workers": true,
+    "signer_authority_armed_last": true
+  },
+  "LEADERSHIP_LOSS_SHUTDOWN_SEQUENCE": [
+    "MARK_LEADERSHIP_LOST",
+    "STOP_ADMITTING_NEW_WORK",
+    "QUIESCE_IN_FLIGHT_UNDER_C02_LEASE",
+    "GRACEFUL_EXIT_FOR_RESTART"
+  ],
+  "SHUTDOWN_INVARIANTS": {
+    "marks_leadership_lost_first": true,
+    "stops_new_work_immediately": true,
+    "in_flight_completes_under_c02_lease": true,
+    "never_force_releases_lease": true,
+    "never_re_sequences_lease": true,
+    "never_second_authority": true
+  },
+  "NO_SPLIT_BRAIN_INVARIANT": {
+    "at_most_one_leader_holds_lock": true,
+    "follower_leader_gated_engines_cannot_economic_write": true,
+    "db_single_in_flight_per_wallet_backstop": true,
+    "wallet_sequencing_authority": "C-02_UNIVERSAL_LEASE"
+  },
+  "TAKEOVER_BOUNDARY": {
+    "old_leader_quiesces_before_new_acquires_lock": true,
+    "lock_is_the_single_serialisation_point": true,
+    "new_leader_runs_boot_recovery_before_engines": true,
+    "new_leader_arms_authority_last": true,
+    "residual_tcp_death_window_backstopped_by_c02": true
+  }
+}

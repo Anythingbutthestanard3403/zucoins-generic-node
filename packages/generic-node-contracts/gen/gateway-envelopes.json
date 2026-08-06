@@ -1,0 +1,48 @@
+{
+  "GATEWAY_ACTION_FIELD_SEQUENCE": [
+    "action_name",
+    "action_data"
+  ],
+  "GATEWAY_ENVELOPE_MUTATION_RULE": {
+    "preimageVerificationAffected": false,
+    "changedBytesRetainedAsDistinctEvidence": true,
+    "unchangedSemanticHeadClassification": "EQUIVALENT_STATE_DIFFERENT_ENVELOPE"
+  },
+  "GATEWAY_ENVELOPES_CONTRACT_VERSION": 1,
+  "GATEWAY_EVIDENCE_CONTRACT": {
+    "captureRawBytesBeforeDecode": true,
+    "retainedWith": [
+      "raw_body_bytes",
+      "sha256_digest",
+      "transport_metadata"
+    ],
+    "signedBlob": false,
+    "byteClass": "unsigned-evidence",
+    "signatureNeverAuthenticates": [
+      "HTTP status",
+      "gateway envelope fields",
+      "whitespace",
+      "field formatting outside the signed transaction",
+      "transport metadata"
+    ]
+  },
+  "GATEWAY_FORM_BODY_PARAM": "v",
+  "GATEWAY_FORM_BODY_TEMPLATE": "v=<encodeURIComponent(JSON.stringify({action_name,action_data}))>",
+  "GATEWAY_NO_PROVEN_NOT_LANDED": true,
+  "GATEWAY_RESPONSE_FIELD_SEQUENCE": [
+    "status",
+    "code",
+    "message",
+    "data"
+  ],
+  "GATEWAY_SUBMIT_OUTCOME_CATEGORIES": [
+    "deterministic_rejection",
+    "receipt_acknowledgement",
+    "indeterminate_transport",
+    "verified_exact_landing",
+    "verified_complete_path_landing",
+    "incomplete_or_conflicting_or_resource_exhausted",
+    "regression_or_gap_or_unrelated_or_unverifiable"
+  ],
+  "SOURCE": "gateway response evidence and transport boundary; frozen form-transport rule"
+}

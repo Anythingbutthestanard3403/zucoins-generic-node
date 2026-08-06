@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "generator": "scratch one-shot mutation script (deleted after freeze); every fixture is a single documented mutation of the frozen golden gen/target.settled.json",
+    "construction": "insertion-ordered objects serialized only with JSON.stringify; re-signing uses the public test-only filled-byte seeds 02/03/05 (golden keys are never live keys)",
+    "source": "offline mutation of the frozen goldens; no gateway capture, import, live submit, or live-chain switch",
+    "purpose": "frozen adversarial suite attacking the envelope parser and the transaction verifier; proves unknown or malformed authoritative fields fail closed before state promotion"
+  },
+  "checklist_sources": [
+    "protocol-foundation adversarial checklist, vector 7",
+    "observation-verification rejection checklist, item 2",
+    "observation-verification rejection checklist, item 4"
+  ],
+  "baseline_settled_sha256": "5554ffa03050cb94173406a85a50aa72c4eca604ab630f0511e61bec7969aebf",
+  "public_keys": {
+    "seed_02": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+    "seed_03": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=",
+    "seed_05": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E="
+  },
+  "role_rejection_detail": "queried wallet is neither or both of the transaction's step_1/step_2 keys",
+  "vectors": [
+    {
+      "name": "invalid-utf8",
+      "file": "invalid-utf8.envelope.bin",
+      "stage": "envelope",
+      "checklist_item": "invalid UTF-8",
+      "defect": "one byte of the golden head envelope is an invalid UTF-8 sequence",
+      "mutation": "byte index 60 (the closing quote of the inner field name) replaced with 0xFF",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "utf8_decode_failed" },
+      "corrupt_byte_index": 60,
+      "replacement_byte": 255,
+      "sha256": "3c9b6268d7f9f3c732a53d6232cd9e646272dbea03f5680def398484476dd61f"
+    },
+    {
+      "name": "duplicate-entries",
+      "file": "duplicate-entries.envelope.json",
+      "stage": "envelope",
+      "checklist_item": "duplicate/multiple-entry envelope",
+      "defect": "the data array carries the golden settled transaction twice",
+      "mutation": "data = [golden, golden]",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "not_exactly_one_complete_settled_transaction" },
+      "sha256": "9b43d04806148f8772aeb83bedf7a1dcc97e5a3ba91780b4ab213250d6a57925"
+    },
+    {
+      "name": "wrong-action-wrapper",
+      "file": "wrong-action-wrapper.envelope.json",
+      "stage": "envelope",
+      "checklist_item": "wrong action schema",
+      "defect": "the wrapper field set deviates from the frozen get_transaction__v1 shape",
+      "mutation": "wrapper key data renamed to result",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "envelope_shape_invalid" },
+      "sha256": "5121acbb5c0ebf76d3132514390ff47a8d4e7fc66993d4abe257af64726961d6"
+    },
+    {
+      "name": "wrong-action-data",
+      "file": "wrong-action-data.envelope.json",
+      "stage": "envelope",
+      "checklist_item": "wrong action schema",
+      "defect": "a valid wrapper carries a foreign action payload in data",
+      "mutation": "data = {\"available_balance\":\"10\"} (a balance-query shape, not a settled-transaction array)",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "not_exactly_one_complete_settled_transaction" },
+      "sha256": "6055532f3ec278cd946c4208e145fb3c0a11639316ca2db07ad32042ef6dac47"
+    },
+    {
+      "name": "partial-entry-missing-step-2",
+      "file": "partial-entry-missing-step-2.envelope.json",
+      "stage": "envelope",
+      "checklist_item": "partial settled entry",
+      "defect": "the settled entry omits the step_2_signature field",
+      "mutation": "entry = {inner, step_1_signature}",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "not_exactly_one_complete_settled_transaction" },
+      "sha256": "f5c41a416f2102d388bf5c977fc0cb14ca40a3e5808ec5d35dbbee2bb3746b7d"
+    },
+    {
+      "name": "partial-entry-empty-step-2",
+      "file": "partial-entry-empty-step-2.envelope.json",
+      "stage": "envelope",
+      "checklist_item": "partial settled entry",
+      "defect": "the settled entry carries an empty step_2_signature",
+      "mutation": "step_2_signature = \"\"",
+      "expected": { "classification": "MALFORMED_ENVELOPE", "reason": "not_exactly_one_complete_settled_transaction" },
+      "sha256": "7f05975d251941c4dac72f1d2509a990abb0c798ba0d2e4b9d53f2c9fc9d296b"
+    },
+    {
+      "name": "unknown-inner-field",
+      "file": "unknown-inner-field.settled.json",
+      "stage": "verifier",
+      "checklist_item": "unknown top-level inner field",
+      "defect": "the inner carries a field outside the closed 14-field shape",
+      "mutation": "inner + extra_field:\"x\" (original signatures retained; rejection fires before any signature byte is read)",
+      "expected": { "verdict": "MALFORMED_TRANSACTION", "rejection_reason": "unexpected_inner_shape" },
+      "fails_before": "signature_verification",
+      "query_key_seed": "03",
+      "sha256": "c437024129c409b9b1225c2698a0e2e290968c95c7322d8b4527bef27274c52b"
+    },
+    {
+      "name": "key-reorder",
+      "file": "key-reorder.settled.json",
+      "stage": "verifier",
+      "checklist_item": "key reorder",
+      "defect": "the leading type field is moved to the last position, breaking the canonical insertion sequence",
+      "mutation": "inner key insertion sequence rotated so type is last (original signatures retained; rejection fires before any signature byte is read)",
+      "expected": { "verdict": "MALFORMED_TRANSACTION", "rejection_reason": "unexpected_inner_shape" },
+      "fails_before": "signature_verification",
+      "query_key_seed": "03",
+      "reordered_key_sequence": [
+        "version",
+        "unix_time_secs",
+        "signer_steps",
+        "step_1_signer",
+        "step_2_signer",
+        "step_1_key_public__base64urlsafe",
+        "step_2_key_public__base64urlsafe",
+        "step_1_state",
+        "step_2_state",
+        "previous_step_1_state_signature",
+        "previous_step_2_state_signature",
+        "expiry__unix_time_secs",
+        "message",
+        "type"
+      ],
+      "sha256": "4b5d0454701087704fd24bde9db5ff556bbc0e7b4349250d09930071f78ca24b"
+    },
+    {
+      "name": "whitespace-preimage",
+      "file": "whitespace-preimage.settled.json",
+      "stage": "verifier",
+      "checklist_item": "whitespace insertion in the inner preimage",
+      "defect": "the inner preimage bytes carry inserted whitespace; validly re-signed over those exact bytes so the byte-exactness rule is the sole defect",
+      "mutation": "inner serialized with JSON.stringify(inner, null, 1) and re-signed under seeds 02 (step 1) and 03 (step 2)",
+      "expected": { "verdict": "UNVERIFIED_SIGNATURE", "failed_step": 1 },
+      "fails_before": "role_determination",
+      "query_key_seed": "03",
+      "step_1_preimage_sha256": "0b33c1ebabf7272f6d12c5ddef35e6ceb2202268be3f4de7f778fe7e08747f5d",
+      "sha256": "e198e0014bacca53fd40d6f70ae2d5d43dbc055ce2144dd9f8c39fbb906e7ca6"
+    },
+    {
+      "name": "numeric-amount",
+      "file": "numeric-amount.settled.json",
+      "stage": "verifier",
+      "checklist_item": "numeric amount",
+      "defect": "step_1_state.amount is a JSON number; amounts are string-only on the wire",
+      "mutation": "step_1_state = {amount: 7.75} (a JSON number; rejection fires before any signature byte is read)",
+      "expected": { "verdict": "MALFORMED_TRANSACTION", "rejection_reason": "invalid_scalar", "scalar_kind": "ZkzBalance", "scalar_reason": "wrong_type" },
+      "fails_before": "signature_verification",
+      "query_key_seed": "03",
+      "sha256": "7e68e3a03eb83fc0de46e1220d1eecd00b37fa5398693a3e1eda1eb68a01d723"
+    },
+    {
+      "name": "unpadded-key",
+      "file": "unpadded-key.settled.json",
+      "stage": "verifier",
+      "checklist_item": "unpadded key",
+      "defect": "the step-1 wallet public key drops its trailing pad character",
+      "mutation": "step_1_key_public__base64urlsafe = seed_02 key with the trailing = stripped (rejection fires before any signature byte is read)",
+      "expected": { "verdict": "MALFORMED_TRANSACTION", "rejection_reason": "invalid_scalar", "scalar_kind": "WalletPublicKey", "scalar_reason": "invalid_format" },
+      "fails_before": "signature_verification",
+      "query_key_seed": "03",
+      "sha256": "ff11f3893bf04698961b072c811522d5a2178e756fa6460ece6b2419302222f7"
+    },
+    {
+      "name": "malformed-key",
+      "file": "malformed-key.settled.json",
+      "stage": "verifier",
+      "checklist_item": "malformed key",
+      "defect": "the step-1 wallet public key uses the standard base64 alphabet instead of base64url",
+      "mutation": "step_1_key_public__base64urlsafe = seed_02 key with - replaced by + and _ replaced by / (rejection fires before any signature byte is read)",
+      "expected": { "verdict": "MALFORMED_TRANSACTION", "rejection_reason": "invalid_scalar", "scalar_kind": "WalletPublicKey", "scalar_reason": "invalid_format" },
+      "fails_before": "signature_verification",
+      "query_key_seed": "03",
+      "sha256": "16b46187a90a102703e0579111406d4e4f0fe93669c56767581d7d419a3448c1"
+    },
+    {
+      "name": "mutated-step-1-signature",
+      "file": "mutated-step-1-signature.settled.json",
+      "stage": "verifier",
+      "checklist_item": "signature mutation (step 1)",
+      "defect": "one in-alphabet character of the step-1 signature is flipped",
+      "mutation": "step_1_signature leading character w replaced by x",
+      "expected": { "verdict": "UNVERIFIED_SIGNATURE", "failed_step": 1 },
+      "fails_before": "role_determination",
+      "query_key_seed": "03",
+      "sha256": "7519581658dc86fc206b85ee0c632e7e97fd19105190cf721852d39a2b37f1f8"
+    },
+    {
+      "name": "mutated-step-2-signature",
+      "file": "mutated-step-2-signature.settled.json",
+      "stage": "verifier",
+      "checklist_item": "signature mutation (step 2)",
+      "defect": "one in-alphabet character of the step-2 signature is flipped",
+      "mutation": "step_2_signature leading character u replaced by v",
+      "expected": { "verdict": "UNVERIFIED_SIGNATURE", "failed_step": 2 },
+      "fails_before": "role_determination",
+      "query_key_seed": "03",
+      "sha256": "05ad11821b195ccd500dbeba651931aca7adfc2e49f98c91d0e54f4ebbb1cb4c"
+    },
+    {
+      "name": "wrong-signer-key",
+      "file": "wrong-signer-key.settled.json",
+      "stage": "verifier",
+      "checklist_item": "wrong signer key",
+      "defect": "the seed-05 key is claimed as the step-1 signer while the golden seed-02 signature is attached",
+      "mutation": "step_1_key_public__base64urlsafe = seed_05 key (both signatures unchanged)",
+      "expected": { "verdict": "UNVERIFIED_SIGNATURE", "failed_step": 1 },
+      "fails_before": "role_determination",
+      "query_key_seed": "03",
+      "sha256": "b0dd029799412a18d5e472ba91c357c946089d9b319872792e031ba2c9cc0f05"
+    },
+    {
+      "name": "self-transfer",
+      "file": "self-transfer.settled.json",
+      "stage": "verifier",
+      "checklist_item": "self-transfer (v2 rejects)",
+      "defect": "both step keys are the same wallet; validly re-signed so both signature checks pass and only the role stage rejects",
+      "mutation": "step_2_key_public__base64urlsafe = seed_02 key, re-signed under seed 02 for both steps",
+      "expected": { "verdict": "WALLET_ROLE_INVALID" },
+      "fails_before": "state_promotion",
+      "query_key_seed": "02",
+      "sha256": "8eff65a67585368190e0101291afe25c1db44023e07b2e8af17f9d49ce63e911"
+    },
+    {
+      "name": "absent-wallet",
+      "file": "../gen/target.settled.json",
+      "stage": "verifier",
+      "checklist_item": "absent-wallet query",
+      "defect": "the queried wallet is neither the step-1 nor the step-2 key of the unmodified golden",
+      "mutation": "none (baseline golden bytes); the queried seed-05 key is absent from both step positions",
+      "expected": { "verdict": "WALLET_ROLE_INVALID" },
+      "fails_before": "state_promotion",
+      "query_key_seed": "05",
+      "sha256": "5554ffa03050cb94173406a85a50aa72c4eca604ab630f0511e61bec7969aebf"
+    }
+  ]
+}

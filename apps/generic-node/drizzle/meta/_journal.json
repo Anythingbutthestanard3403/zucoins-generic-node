@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1784500000000,
+      "tag": "0000_reporting_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784500000001,
+      "tag": "0001_fix_lifecycle_deferred_new_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784500000002,
+      "tag": "0002_admin_and_operations_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784500000003,
+      "tag": "0003_operator_setup_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784500000004,
+      "tag": "0004_operator_vault_master_seal",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784500000005,
+      "tag": "0005_pwa_installed",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784500000006,
+      "tag": "0006_operator_recovery_pack_prove_lockout",
+      "breakpoints": true
+    }
+  ]
+}

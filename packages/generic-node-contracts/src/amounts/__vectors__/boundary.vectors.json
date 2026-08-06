@@ -1,0 +1,206 @@
+[
+  {
+    "input": "0",
+    "kind": "zero",
+    "balance": {
+      "ok": true,
+      "canonical": "0"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_not_positive"
+    }
+  },
+  {
+    "input": "0.00000000000000000000000000000001",
+    "kind": "smallest-unit",
+    "balance": {
+      "ok": true,
+      "canonical": "0.00000000000000000000000000000001"
+    },
+    "operation": {
+      "ok": true,
+      "canonical": "0.00000000000000000000000000000001"
+    }
+  },
+  {
+    "input": "99999999.99999999999999999999999999999999",
+    "kind": "greatest-below-bound",
+    "balance": {
+      "ok": true,
+      "canonical": "99999999.99999999999999999999999999999999"
+    },
+    "operation": {
+      "ok": true,
+      "canonical": "99999999.99999999999999999999999999999999"
+    }
+  },
+  {
+    "input": "99999999",
+    "kind": "greatest-integer",
+    "balance": {
+      "ok": true,
+      "canonical": "99999999"
+    },
+    "operation": {
+      "ok": true,
+      "canonical": "99999999"
+    }
+  },
+  {
+    "input": "2.5",
+    "kind": "normal",
+    "balance": {
+      "ok": true,
+      "canonical": "2.5"
+    },
+    "operation": {
+      "ok": true,
+      "canonical": "2.5"
+    }
+  },
+  {
+    "input": "100000000",
+    "kind": "exact-bound",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "100000000.1",
+    "kind": "above-bound",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "100000001",
+    "kind": "above-bound-integer",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "1e5",
+    "kind": "exponent",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "01",
+    "kind": "leading-zero",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "00.1",
+    "kind": "leading-zero-fraction",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "1.",
+    "kind": "trailing-dot",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "-1",
+    "kind": "negative",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "-0",
+    "kind": "negative-zero",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "0.111111111111111111111111111111111",
+    "kind": "excess-precision",
+    "balance": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_grammar_violation"
+    }
+  },
+  {
+    "input": "2.50",
+    "kind": "non-canonical",
+    "balance": {
+      "ok": false,
+      "reason": "amount_not_canonical"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_not_canonical"
+    }
+  },
+  {
+    "input": "0.0",
+    "kind": "non-canonical-zero",
+    "balance": {
+      "ok": false,
+      "reason": "amount_not_canonical"
+    },
+    "operation": {
+      "ok": false,
+      "reason": "amount_not_canonical"
+    }
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "name": "@zucoins/generic-node-consumer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@zucoins/generic-node-contracts": "workspace:*",
+    "@zucoins/node-core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.6"
+  }
+}

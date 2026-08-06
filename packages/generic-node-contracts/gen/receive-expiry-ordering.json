@@ -1,0 +1,18 @@
+{
+  "order": [
+    "hold_lease",
+    "retain_evidence",
+    "reconcile_first",
+    "resolve_or_release"
+  ],
+  "dispositions": [
+    "RECEIVE_LANDED",
+    "INDETERMINATE"
+  ],
+  "forbiddenShortcuts": {
+    "post_boundary_release_on_reconcile": "Releasing a post-boundary receive at all, even on a reconcile-first, T0-unchanged, fully-acked read — no post-boundary release is permitted; a head-unchanged snapshot is not proof a signed tx will never land.",
+    "evidence_disposal_on_expiry": "Discarding persisted evidence when a receive expires (post-boundary must retain all evidence).",
+    "lease_drop_before_disposition": "Dropping the lease before a disposition (RECEIVE_LANDED / INDETERMINATE) is reached."
+  },
+  "evidenceDisposalOnExpiryAllowed": false
+}

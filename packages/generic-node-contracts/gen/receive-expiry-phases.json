@@ -1,0 +1,56 @@
+{
+  "phases": [
+    {
+      "phase": "unassigned",
+      "maxTxPhase": null,
+      "pastBoundary": false,
+      "expiry": "terminal"
+    },
+    {
+      "phase": "pre_arm",
+      "maxTxPhase": null,
+      "pastBoundary": false,
+      "expiry": "terminal"
+    },
+    {
+      "phase": "post_arm",
+      "maxTxPhase": null,
+      "pastBoundary": false,
+      "expiry": "terminal"
+    },
+    {
+      "phase": "candidate_persisted",
+      "maxTxPhase": "STEP1_SIGNATURE_PERSISTED",
+      "pastBoundary": true,
+      "expiry": "held"
+    },
+    {
+      "phase": "pre_sign",
+      "maxTxPhase": "STEP2_PREIMAGE_PERSISTED",
+      "pastBoundary": true,
+      "expiry": "held"
+    },
+    {
+      "phase": "post_sign",
+      "maxTxPhase": "STEP2_SIGNATURE_PERSISTED",
+      "pastBoundary": true,
+      "expiry": "held"
+    },
+    {
+      "phase": "ambiguous_submit",
+      "maxTxPhase": "STEP2_SIGNATURE_PERSISTED",
+      "pastBoundary": true,
+      "expiry": "held"
+    },
+    {
+      "phase": "landed_before_read",
+      "maxTxPhase": "STEP2_SIGNATURE_PERSISTED",
+      "pastBoundary": true,
+      "expiry": "held"
+    }
+  ],
+  "invariants": {
+    "boundaryFromOperationTransactions": "Each phase's pre/post-boundary classification derives from EXISTS(operation_transactions) at STEP1_SIGNATURE_PERSISTED, never execution_phase.",
+    "postBoundaryNeverTerminalExpiry": "No post-boundary phase permits terminal expiry; a restart re-reads the durable operation_transactions phase and stays post-boundary."
+  }
+}

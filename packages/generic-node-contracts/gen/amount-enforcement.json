@@ -1,0 +1,66 @@
+{
+  "fieldRoles": {
+    "request_transfer_amount": {
+      "authorship": "node",
+      "layer": "operation"
+    },
+    "operation_amount_zkz": {
+      "authorship": "node",
+      "layer": "operation"
+    },
+    "expected_artifact_amount": {
+      "authorship": "node",
+      "layer": "operation"
+    },
+    "approval_amount": {
+      "authorship": "node",
+      "layer": "operation"
+    },
+    "node_post_transfer_state": {
+      "authorship": "node",
+      "layer": "balance"
+    },
+    "derived_balance": {
+      "authorship": "node",
+      "layer": "balance"
+    },
+    "node_head_amount": {
+      "authorship": "node",
+      "layer": "balance"
+    },
+    "genesis_amount": {
+      "authorship": "node",
+      "layer": "balance"
+    },
+    "payer_signed_step_amount": {
+      "authorship": "foreign",
+      "layer": null
+    },
+    "recipient_signed_step_amount": {
+      "authorship": "foreign",
+      "layer": null
+    },
+    "observed_onchain_step_state": {
+      "authorship": "foreign",
+      "layer": null
+    }
+  },
+  "dbCheckDomainByRole": {
+    "operation_amount_zkz": "zkz_amount_positive_text",
+    "expected_artifact_amount": "zkz_amount_positive_text",
+    "approval_amount": "zkz_amount_positive_text",
+    "node_post_transfer_state": "zkz_balance_text",
+    "derived_balance": "zkz_balance_text",
+    "node_head_amount": "zkz_balance_text",
+    "genesis_amount": "zkz_balance_text",
+    "payer_signed_step_amount": "foreign_no_reject",
+    "recipient_signed_step_amount": "foreign_no_reject",
+    "observed_onchain_step_state": "foreign_no_reject"
+  },
+  "writeViolationPolicy": {
+    "sqlstate": "23514",
+    "disposition": "operator_hold_quarantine",
+    "neverCrashLoop": true,
+    "neverResubmit": true
+  }
+}

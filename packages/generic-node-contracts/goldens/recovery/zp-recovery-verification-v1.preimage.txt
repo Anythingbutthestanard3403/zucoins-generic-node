@@ -1,0 +1,2 @@
+zp-recovery-verification-v1
+{"purpose":"zp-recovery-verification-v1","canonical_version":1,"node_id":"11111111-1111-4111-8111-111111111111","wallet_id":"aaaaaaaa-0000-4000-8000-000000000001","public_key":"0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=","key_version":1,"export_id":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","export_sha256":"62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44","ceremony_id":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","ceremony_nonce":"d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3c=","issued_at":"2026-07-20T01:00:00.000Z"}

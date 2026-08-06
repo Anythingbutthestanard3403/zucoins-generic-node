@@ -1,0 +1,92 @@
+{
+  "concern": "event-sequencing",
+  "governing": {
+    "spec": "data-model node_events; signed node-event tuple; events cursor api",
+    "decisions": [
+      "gapless-counter-allocation",
+      "cursor-tracks-dedicated-sequence"
+    ],
+    "dependsOn": "reporting-tuples"
+  },
+  "allocation": {
+    "model": {
+      "source": "per_node_gapless_counter_allocated_pre_sign",
+      "storage": "dedicated_single_row_counter_table_per_node",
+      "serialization": "same_transaction_as_event_insert",
+      "monotonic": true,
+      "gapless": true,
+      "rollbackSafe": true,
+      "durableBeforeVisible": true,
+      "countersPerNode": 1
+    },
+    "rejected": [
+      {
+        "mechanism": "generated_always_as_identity",
+        "reason": "allocates at insert; a rolled-back txn burns the value → permanent gap"
+      },
+      {
+        "mechanism": "bigserial",
+        "reason": "same rollback-gap failure as identity"
+      },
+      {
+        "mechanism": "serial",
+        "reason": "same rollback-gap failure as identity"
+      },
+      {
+        "mechanism": "uuid_or_random",
+        "reason": "not monotonically increasing; no gapless cursor"
+      },
+      {
+        "mechanism": "per_tenant_counter",
+        "reason": "fragments the node-global hash chain"
+      },
+      {
+        "mechanism": "audit_log_id",
+        "reason": "payload metadata only; the cursor tracks the dedicated seq"
+      }
+    ],
+    "stepOrder": [
+      "lock_and_increment_counter",
+      "read_previous_event_hash",
+      "construct_exact_preimage_with_seq_and_prev_hash",
+      "sign",
+      "insert_event_row"
+    ],
+    "bindSteps": [
+      "lock_and_increment_counter",
+      "read_previous_event_hash"
+    ],
+    "signStep": "sign",
+    "coherentUnit": [
+      "allocation",
+      "previous_hash",
+      "signing",
+      "state_transition",
+      "insertion"
+    ]
+  },
+  "cursor": {
+    "requestCursorField": "after_seq",
+    "requestCursorExclusive": true,
+    "responseWatermarkField": "watermark_seq",
+    "responseNextCursorField": "next_after_seq",
+    "applyRule": "strictly_after_watermark",
+    "tracks": "dedicated_gapless_sequence",
+    "monotonic": true,
+    "checkpoint": "consumer_durable_cursor_position"
+  },
+  "restart": {
+    "resumesFrom": "durable_high_water_mark",
+    "resetsToZero": false,
+    "reusesSeq": false,
+    "uncommittedSeqRolledBack": true,
+    "phantomGapPossible": false
+  },
+  "gapDetection": {
+    "counterScope": "node_global",
+    "tenantViewSparse": true,
+    "skippedSeqMeaning": "another_tenants_event_not_a_gap",
+    "authoritativeGapDetector": "previous_event_hash_chain",
+    "seqContiguityIsGapDetector": false
+  }
+}

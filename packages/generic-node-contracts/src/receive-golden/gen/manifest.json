@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "generator": "packages/generic-node-contracts/scripts/emit-receive-golden.ts",
+    "construction": "insertion-ordered objects serialized only with JSON.stringify",
+    "key_material": "test-only 32-byte filled Ed25519 seeds 02, 03, and 05",
+    "source": "offline canonical constructor; no gateway capture, import, or submission"
+  },
+  "boundary": {
+    "wallet_seed": "05",
+    "preflight_balance": "10",
+    "prior_head_s": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ==",
+    "limitation": "pre-existing funded fixture boundary; earlier ancestry is outside this finite vector and no genesis-to-positive lineage is claimed"
+  },
+  "public_keys": {
+    "seed_02": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+    "seed_03": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=",
+    "seed_05": "bnoc3Smwt4_ROvTFWY_v9O8qlxZuPKby5Pv8zYBQW_E="
+  },
+  "predecessor": {
+    "step_1_sha256": "9bda00a6bbb423a2ea3a9ee2660742dded80562ad58acde106097e2be0583bec",
+    "step_1_signature": "MsWTpjUtoofWFb13BCpLqLB6tgYiasFakfd2hufS2V2dHg7N2PdRe8n-wrqQhJKc3-Bml7xK6jUfEv2BBiPxAA==",
+    "step_2_sha256": "07c6dd592f1dd3aa4e70c58f6ab2f92beaa4153d988ae240e6266c41afa22ce5",
+    "step_2_signature": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+    "settled_sha256": "51dd611df7564d3cac3bdf8a3415ce9326ee29b920daa1338447c57a4c78505b",
+    "role_relative_projection": {
+      "seed_05_sender": {
+        "S": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+        "P": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQ==",
+        "B": "0"
+      },
+      "seed_02_receiver": {
+        "S": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+        "P": "",
+        "B": "10"
+      }
+    }
+  },
+  "target": {
+    "step_1_sha256": "ce0741df9ed652b25d0294746c67acd6d9ecb4e3318c3691582fc2acdd52be51",
+    "step_1_signature": "wpAPEHD-wRRyfdoLM5FUgwS5OhCVwkQBV5w-XFDSx_VK19QiW5szD6Cuy1ogiNlIlvWtx4LlZPIdAm81eKX0BA==",
+    "step_2_sha256": "163d8ef498c09a58d621ed2673c50ed89e79272fcfd14251661c36940e1bb9d0",
+    "step_2_signature": "uP0HeCG-ZT1svQK-drwexhc1mrxx4QLBdfgFlw8nqRrwwvcJcPazgcPxp8aMdz7iJricO75II0bUzvwlBUUDDw==",
+    "settled_sha256": "5554ffa03050cb94173406a85a50aa72c4eca604ab630f0511e61bec7969aebf",
+    "role_relative_projection": {
+      "seed_02_sender": {
+        "S": "uP0HeCG-ZT1svQK-drwexhc1mrxx4QLBdfgFlw8nqRrwwvcJcPazgcPxp8aMdz7iJricO75II0bUzvwlBUUDDw==",
+        "P": "IfsGs-NrmBAQ6VWohtlXDcyrd830Agx1IzW8rcHiqYqndeGLoG8b297PjqC-grrIXFrl3GgDcV2qi6xJBlerCQ==",
+        "B": "7.75"
+      },
+      "seed_03_receiver": {
+        "S": "uP0HeCG-ZT1svQK-drwexhc1mrxx4QLBdfgFlw8nqRrwwvcJcPazgcPxp8aMdz7iJricO75II0bUzvwlBUUDDw==",
+        "P": "",
+        "B": "2.25"
+      }
+    },
+    "receiver_terminal_head": {
+      "preimage_sha256": "d03a98b770684e577667f9bde01276b196b98db31663f23b0900623d6dffca2a",
+      "fingerprint": "d03a98b770684e577667f9bde01276b196b98db31663f23b0900623d6dffca2a"
+    }
+  },
+  "preserved_d9_2": {
+    "receive": "f49635f02d8de86c5b4324f13520cc38c094d79ee2c0df5df60547c590ede498",
+    "move": "ad964723e07ca2aef3356f1e02990e07b90be49b5387a7095091398a10944a14",
+    "send": "f094f981f833c908fae1fa661cb6d9f6c3cdf29bab792f2660b866c588f22cb5",
+    "approval": "d7c03561bd9bc87e302c533f03741c34d44058fc0aaf1b59b17a4f28f8022146",
+    "transfer_code_sha256": "104eb00c3bda958b82b7ce5a24e582dd9efa3e63d2192838fe26b5b23dcb2bab"
+  }
+}

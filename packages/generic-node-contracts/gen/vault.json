@@ -1,0 +1,668 @@
+{
+  "aad": {
+    "AAD_DOMAIN": "zp-wallet-secret-v1",
+    "AAD_BINDING": {
+      "domain": "zp-wallet-secret-v1",
+      "input_fields": [
+        "node_id",
+        "wallet_id",
+        "key_version",
+        "public_key",
+        "key_origin"
+      ],
+      "reconstructed_at_open": true,
+      "stored_as_column": false,
+      "binds_key_version": true,
+      "binds_key_origin": true,
+      "exact_serialization_owner": "vault.2"
+    },
+    "SUBSTITUTION_CONTROL": {
+      "primary": "DECRYPT_DERIVE_PUBKEY_ASSERT_EQ_WALLETS_PUBLIC_KEY",
+      "aad_role": "DEFENSE_IN_DEPTH",
+      "key_origin_smuggle_fails_closed": true
+    },
+    "SUPERSEDED_DRAFT_AAD": {
+      "input_fields": [
+        "domain",
+        "node_id",
+        "wallet_id",
+        "public_key"
+      ],
+      "serialization": "NEWLINE_JOINED_UTF8",
+      "stored_as_column": true
+    }
+  },
+  "canonicalization": {
+    "CANONICAL_FIELD_PINS": {
+      "node_id": {
+        "pin": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "note": "lowercase hyphenated UUID"
+      },
+      "wallet_id": {
+        "pin": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "note": "lowercase hyphenated UUID"
+      },
+      "key_version": {
+        "pin": "^[1-9][0-9]*$",
+        "note": "minimal base-10, no leading zero, strictly positive"
+      },
+      "public_key": {
+        "pin": "^[A-Za-z0-9_-]{43}=$",
+        "note": "padded base64url with no +/; byte-identical to wallets.public_key"
+      },
+      "key_origin": {
+        "pin": "^(node_generated|imported)$",
+        "note": "exact lowercase enum; write-once"
+      }
+    },
+    "AAD_SOURCE_INJECTIVITY": {
+      "source_fields": [
+        "node_id",
+        "wallet_id",
+        "key_version",
+        "public_key",
+        "key_origin"
+      ],
+      "each_not_null": true,
+      "each_ascii_lf_free": true,
+      "encoding_injective": true,
+      "wallets_side_columns_owned_by_custody_concern": [
+        "node_id",
+        "public_key",
+        "key_origin"
+      ]
+    },
+    "LABEL_FIELD_COUPLING": [
+      {
+        "label": "zp-wallet-secret-v1",
+        "purpose": "AAD",
+        "field_count": 6
+      },
+      {
+        "label": "zp-wallet-dek-v1",
+        "purpose": "HKDF_INFO",
+        "field_count": 4
+      }
+    ],
+    "LABEL_VERSION_RULE": "A FIELD-SET CHANGE REQUIRES A NEW -vN LABEL; NEVER APPEND A FIELD UNDER AN EXISTING LABEL"
+  },
+  "compatibility": {
+    "CARRIED_FORWARD_INVARIANTS": [
+      "AES-256-GCM",
+      "ENV_MASTER_KEY",
+      "PLAINTEXT_KEY_MATERIAL_IN_MEMORY_ONLY",
+      "ZEROED_AFTER_USE",
+      "SINGLE_WRITER_FOR_MUTATIONS",
+      "PLATFORM_ZERO_KEY_CUSTODY"
+    ],
+    "KEY_VERSION_SEMANTICS": {
+      "v1": "APPEND_COUNTER_NEVER_BUMPS_ON_MASTER_ROTATION",
+      "v2": "PER_ROW_EPOCH_BUMPS_ON_ROTATION"
+    },
+    "SEALED_STORE_CENSUS": [
+      {
+        "store": "WALLET_KEYS",
+        "derivation": "PER_WALLET_HKDF",
+        "nonce": "FRESH_PER_SEAL"
+      },
+      {
+        "store": "NODE_SIGNING_AND_EVENT_KEYS",
+        "derivation": "PER_STORE_HKDF",
+        "nonce": "FRESH_PER_SEAL"
+      },
+      {
+        "store": "TOTP_D8119",
+        "derivation": "PER_STORE_HKDF",
+        "nonce": "FRESH_PER_SEAL"
+      },
+      {
+        "store": "WEBHOOK_SECRET_D826",
+        "derivation": "PER_STORE_HKDF",
+        "nonce": "FRESH_PER_SEAL"
+      }
+    ],
+    "ZEROIZATION": {
+      "buffer_type": "LIBSODIUM_SECURE_UINT8ARRAY",
+      "never_js_string": true,
+      "wipe": "SODIUM_MEMZERO_POST_SIGN",
+      "core_dumps": "DISABLED",
+      "keys_logged": false
+    },
+    "DEFERRED_SUBCONTRACTS": {
+      "vault.2": [
+        "exact PBKDF2 salt and root byte derivation",
+        "exact HKDF info-string encoding",
+        "exact 6-field AAD byte serialization",
+        "active key_version selection",
+        "concrete vault column schema, types, and CHECK constraints",
+        "sealing and signer API signatures and failure codes"
+      ],
+      "vault.3": [
+        "rotation journal and cutover format",
+        "backup behaviour during mixed-version rotation",
+        "threat matrices: row substitution, nonce reuse, wrong AAD or key, truncated ciphertext, concurrent rotation, crash recovery, stale process, logs, dumps, and restore"
+      ]
+    }
+  },
+  "crypto": {
+    "KEY_DERIVATION": {
+      "root": {
+        "algorithm": "PBKDF2-SHA256",
+        "iterations": 600000,
+        "applies": "ONCE_AT_BOOT",
+        "source_env_name": "VAULT_MASTER_KEY",
+        "output": "ROOT"
+      },
+      "wallet_dek": {
+        "algorithm": "HKDF-SHA256",
+        "input": "ROOT",
+        "info_binds": [
+          "node_id",
+          "wallet_id",
+          "key_version"
+        ],
+        "output": "DEK_WALLET",
+        "exact_info_encoding_owner": "vault.2"
+      },
+      "seal": {
+        "algorithm": "AES-256-GCM",
+        "nonce_bits": 96,
+        "nonce_source": "CSPRNG_FRESH_PER_SEAL",
+        "tag_bits": 128,
+        "sealed_material": "ED25519_SECRET_64_BYTES"
+      }
+    },
+    "KEY_ISOLATION": {
+      "per_wallet_dek": true,
+      "cross_wallet_nonce_collision_harmless": true,
+      "structural_nonce_reuse_guard": "UNIQUE(key_version, nonce)"
+    }
+  },
+  "failure": {
+    "VAULT_OPEN_FAILURE_CODES": [
+      "LENGTH_MISMATCH",
+      "UNSUPPORTED_VERSION",
+      "NON_CANONICAL_PUBLIC_KEY",
+      "AUTH_TAG_FAILURE",
+      "AAD_MISMATCH",
+      "PUBLIC_KEY_MISMATCH"
+    ],
+    "NO_HYBRID_FALLBACK": {
+      "every_failure_fails_closed": true,
+      "fallback_to_shared_key_path": false,
+      "fallback_to_single_blob_path": false
+    }
+  },
+  "interfaces": {
+    "SEALING_API": {
+      "seal": {
+        "name": "sealWalletSecret",
+        "inputs": [
+          "node_id",
+          "wallet_id",
+          "key_version",
+          "public_key",
+          "key_origin",
+          "ed25519_secret"
+        ],
+        "output": "vault_envelope_row",
+        "derives_dek_via": "HKDF_PER_WALLET",
+        "binds_aad": true
+      },
+      "open": {
+        "name": "openWalletSecret",
+        "inputs": [
+          "vault_row",
+          "authoritative_wallet_fields"
+        ],
+        "output": "ed25519_secret_in_secure_buffer",
+        "reconstructs_aad_from": "AUTHORITATIVE_FIELDS_NEVER_STORED_COLUMN",
+        "substitution_check": "DERIVE_PUBKEY_ASSERT_EQ_WALLETS_PUBLIC_KEY"
+      }
+    },
+    "SIGNER_BOUNDARY": {
+      "capability_fields": [
+        "walletId",
+        "operationId",
+        "leaseEpoch",
+        "purpose",
+        "preimageText",
+        "expectedPreimageSha256"
+      ],
+      "purposes": [
+        "SPLITCHAIN_STEP_1",
+        "SPLITCHAIN_STEP_2"
+      ],
+      "rereads_lease_before_decrypt": true,
+      "no_vault_row_lock": true,
+      "returns_only_signature_and_digest": true,
+      "never_returns_or_logs_private_key": true
+    },
+    "LEADERSHIP_RULES": {
+      "mutations_single_writer": true,
+      "rotation_is_sole_all_envelope_writer": true,
+      "wallet_ordering_authority": "C-02_UNIVERSAL_LEASE",
+      "no_hybrid_fallback": true
+    },
+    "ZEROIZATION_INTERFACE": {
+      "buffer": "SECURE_UINT8ARRAY",
+      "never_js_string": true,
+      "lifecycle": [
+        "ALLOCATE",
+        "DECRYPT_INTO",
+        "SIGN",
+        "WIPE"
+      ],
+      "wipe": "SODIUM_MEMZERO_MANDATORY_POST_SIGN"
+    }
+  },
+  "lifecycle": {
+    "ROTATION_STATES": [
+      "STABLE",
+      "ROTATING",
+      "ROTATION_COMPLETE"
+    ],
+    "ROTATION_TRANSITIONS": [
+      {
+        "from": "STABLE",
+        "to": "ROTATING",
+        "guard": "operator initiates master-key rotation; old KEK and root are retained"
+      },
+      {
+        "from": "ROTATING",
+        "to": "ROTATING",
+        "guard": "resume after a crash; boot key-ring reads the mixed key_version population and re-rewraps unresolved rows"
+      },
+      {
+        "from": "ROTATING",
+        "to": "ROTATION_COMPLETE",
+        "guard": "every row rewrapped and pubkey-derivation-verified; a committed rotation-complete marker is written"
+      },
+      {
+        "from": "ROTATION_COMPLETE",
+        "to": "STABLE",
+        "guard": "old ciphertext garbage-collected only post-complete; old KEK and root decommissioned"
+      }
+    ],
+    "ROTATION_INVARIANTS": {
+      "crash_safe_resumable": true,
+      "old_key_retained_until_committed_marker": true,
+      "boot_reads_mixed_version_via_key_ring": true,
+      "unreadable_or_failed_pubkey_row_aborts_without_advancing_writer_version": true,
+      "old_ciphertext_gc_only_post_complete": true
+    },
+    "SIGNING_CONCURRENCY": {
+      "vault_read_access": "READ_ONLY_BY_PRIMARY_KEY",
+      "vault_row_lock_held_across_signing": false,
+      "wallet_ordering_authority": "C-02_UNIVERSAL_LEASE",
+      "rotation_writer": "QUIESCES_SIGNING_LOCKS_CANONICAL_WALLET_ID_SEQUENCE"
+    },
+    "RECOVERY": {
+      "recovery_verified_at_scope": "PER_WALLET",
+      "monotonic": true,
+      "cleared_by_rotation": false,
+      "key_replacement_in_place": false,
+      "key_replacement_path": "MINT_NEW_WALLET_MOVE_VIA_BLESSED_SINK_RETIRE_OLD"
+    }
+  },
+  "schema": {
+    "VAULT_COLUMNS": [
+      {
+        "name": "wallet_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "primary key; references wallets(id)"
+      },
+      {
+        "name": "key_version",
+        "type": "integer",
+        "nullable": false,
+        "note": "per-row epoch (frozen precursor name); CHECK > 0"
+      },
+      {
+        "name": "ciphertext",
+        "type": "bytea",
+        "nullable": false,
+        "note": "AES-256-GCM sealed 64-byte Ed25519 secret"
+      },
+      {
+        "name": "nonce",
+        "type": "bytea",
+        "nullable": false,
+        "note": "96-bit CSPRNG nonce; octet_length = 12"
+      },
+      {
+        "name": "auth_tag",
+        "type": "bytea",
+        "nullable": false,
+        "note": "128-bit GCM tag; octet_length = 16"
+      },
+      {
+        "name": "ciphertext_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "digest of ciphertext for integrity indexing"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "row creation; defaults to now()"
+      },
+      {
+        "name": "rotated_at",
+        "type": "timestamptz",
+        "nullable": true,
+        "note": "last rewrap time; null until first rotation"
+      }
+    ],
+    "VAULT_CONSTRAINTS": {
+      "table": "vault",
+      "primary_key": [
+        "wallet_id"
+      ],
+      "unique": [
+        [
+          "key_version",
+          "nonce"
+        ]
+      ],
+      "checks": [
+        "key_version > 0",
+        "octet_length(nonce) = 12",
+        "octet_length(auth_tag) = 16"
+      ],
+      "foreign_keys": [
+        {
+          "column": "wallet_id",
+          "references": "wallets(id)"
+        }
+      ],
+      "no_aad_text_column": true
+    },
+    "VAULT_KEY_IDENTITY": [
+      "wallet_id",
+      "key_version"
+    ]
+  },
+  "serialization": {
+    "AAD_SERIALIZATION": {
+      "status": "FROZEN",
+      "decision": "AAD/HKDF encoding decision 2026-07-19 (confirmed)",
+      "method": "NEWLINE_JOINED_UTF8",
+      "domain": "zp-wallet-secret-v1",
+      "field_sequence": [
+        "domain",
+        "node_id",
+        "wallet_id",
+        "key_version",
+        "public_key",
+        "key_origin"
+      ]
+    },
+    "AAD_FULL_FIELD_SEQUENCE": [
+      "domain",
+      "node_id",
+      "wallet_id",
+      "key_version",
+      "public_key",
+      "key_origin"
+    ],
+    "AAD_GOLDEN": {
+      "inputs": {
+        "nodeId": "11111111-1111-4111-8111-111111111111",
+        "walletId": "22222222-2222-4222-8222-222222222222",
+        "keyVersion": "1",
+        "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "keyOrigin": "node_generated"
+      },
+      "aad_text": "zp-wallet-secret-v1\n11111111-1111-4111-8111-111111111111\n22222222-2222-4222-8222-222222222222\n1\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\nnode_generated",
+      "aad_sha256": "a88fa5bc689d90bd4d6b76b4bf6678b181864bf979b7fb9627117aca109f0e84"
+    },
+    "HKDF_DEK_LABEL": "zp-wallet-dek-v1",
+    "HKDF_INFO_ENCODING": {
+      "status": "FROZEN",
+      "decision": "AAD/HKDF encoding decision 2026-07-19 (amended)",
+      "method": "NEWLINE_JOINED_UTF8",
+      "domain_prefixed": true,
+      "domain": "zp-wallet-dek-v1",
+      "field_sequence": [
+        "domain",
+        "node_id",
+        "wallet_id",
+        "key_version"
+      ]
+    },
+    "HKDF_PARAMS": {
+      "algorithm": "HKDF-SHA256",
+      "output_length_bytes": 32,
+      "salt": "EMPTY",
+      "salt_per_row": false,
+      "ikm": "ROOT"
+    },
+    "CROSS_STORE_LABEL_SEPARATION": {
+      "requirement": "GLOBALLY_UNIQUE_HKDF_LABEL_PER_STORE",
+      "this_store_label": "zp-wallet-dek-v1",
+      "sibling_store_labels_owned_elsewhere": true,
+      "rationale": "under a shared root the label is the only thing stopping two stores deriving the same AES key"
+    },
+    "HKDF_INFO_GOLDEN": {
+      "inputs": {
+        "nodeId": "11111111-1111-4111-8111-111111111111",
+        "walletId": "22222222-2222-4222-8222-222222222222",
+        "keyVersion": "1"
+      },
+      "info_text": "zp-wallet-dek-v1\n11111111-1111-4111-8111-111111111111\n22222222-2222-4222-8222-222222222222\n1",
+      "info_sha256": "ee42fe8ff3a40e33625244d9331a90e153e7198867ac0fc7c922e93917a8c431"
+    }
+  },
+  "storage": {
+    "VAULT_STORAGE_GRAIN": "PER_WALLET_ENVELOPE_ROW",
+    "VAULT_TABLE_NAME": "vault",
+    "VAULT_PRIMARY_KEY": "wallet_id",
+    "VAULT_VERSION_COLUMN": "key_version",
+    "STORAGE_RESOLUTION": {
+      "v2_grain": "PER_WALLET_ENVELOPE_ROW",
+      "v1_grain": "SINGLE_VAULT_ROW",
+      "hybrid_permitted": false,
+      "migration_shim": false,
+      "v1_v2_disjoint": true
+    },
+    "ENVELOPE_STRUCTURE": {
+      "sealed_material": "ED25519_SECRET_64_BYTES",
+      "cipher": "AES-256-GCM",
+      "nonce_bits": 96,
+      "tag_bits": 128,
+      "version_field": "key_version",
+      "carries": [
+        "key_version",
+        "nonce",
+        "ciphertext",
+        "tag"
+      ],
+      "structural_unique": [
+        "key_version",
+        "nonce"
+      ],
+      "stored_aad_column": false
+    },
+    "REQUIRED_VAULT_MODEL": {
+      "grain": "PER_WALLET_ENVELOPE_ROW",
+      "hybridPermitted": false,
+      "keyDerivation": "PER_WALLET_HKDF",
+      "nonceSource": "CSPRNG_FRESH_PER_SEAL",
+      "aadSource": "RECONSTRUCTED_AT_OPEN",
+      "rotation": "CRASH_SAFE_RESUMABLE_KEY_RING"
+    },
+    "REJECTED_DRAFT_DESCRIPTOR": {
+      "grain": "PER_WALLET_ENVELOPE_ROW",
+      "table": "wallet_secrets",
+      "version_column": "vault_key_version",
+      "hybridPermitted": false,
+      "keyDerivation": "NAKED_MASTER_KEY",
+      "nonceSource": "RANDOM_SHARED",
+      "aadSource": "STORED_COLUMN",
+      "rotation": "UNDEFINED_KEY_RING"
+    }
+  },
+  "threats": {
+    "THREAT_MATRIX": [
+      {
+        "id": "SUBSTITUTION_CROSS_WALLET",
+        "guard": "GUARD_2",
+        "family": "SUBSTITUTION",
+        "control": "AAD binds wallet_id; decrypt-derive-pubkey-match backstop",
+        "control_source": [
+          "AAD_BINDING",
+          "SUBSTITUTION_CONTROL"
+        ],
+        "caught_outcome": "AAD_MISMATCH"
+      },
+      {
+        "id": "SUBSTITUTION_CROSS_VERSION",
+        "guard": "GUARD_2",
+        "family": "SUBSTITUTION",
+        "control": "AAD binds key_version (per-row epoch)",
+        "control_source": [
+          "AAD_BINDING"
+        ],
+        "caught_outcome": "AAD_MISMATCH"
+      },
+      {
+        "id": "SUBSTITUTION_CROSS_ORIGIN",
+        "guard": "GUARD_2",
+        "family": "SUBSTITUTION",
+        "control": "AAD binds key_origin",
+        "control_source": [
+          "AAD_BINDING"
+        ],
+        "caught_outcome": "AAD_MISMATCH"
+      },
+      {
+        "id": "KEY_SMUGGLE_ORIGIN_FLIP",
+        "guard": "GUARD_2",
+        "family": "SUBSTITUTION",
+        "control": "AAD binds key_origin; imported->node_generated flip fails decrypt",
+        "control_source": [
+          "AAD_BINDING",
+          "SUBSTITUTION_CONTROL"
+        ],
+        "caught_outcome": "AAD_MISMATCH"
+      },
+      {
+        "id": "AAD_STRIP_REORDER",
+        "guard": "GUARD_2",
+        "family": "SUBSTITUTION",
+        "control": "AAD reconstructed at open in the frozen field sequence, never from a stored column",
+        "control_source": [
+          "AAD_BINDING",
+          "AAD_FULL_FIELD_SEQUENCE"
+        ],
+        "caught_outcome": "AAD_MISMATCH"
+      },
+      {
+        "id": "STORED_AAD_DOWNGRADE",
+        "guard": "GUARD_2",
+        "family": "AAD_PROVENANCE",
+        "control": "no aad_text column; open reconstructs from authoritative fields only",
+        "control_source": [
+          "ENVELOPE_STRUCTURE",
+          "SEALING_API"
+        ],
+        "caught_outcome": "RECONSTRUCT_ONLY"
+      },
+      {
+        "id": "NONCE_REUSE",
+        "guard": "GUARD_1",
+        "family": "NONCE",
+        "control": "structural UNIQUE(key_version, nonce) plus per-wallet DEK isolation",
+        "control_source": [
+          "KEY_ISOLATION",
+          "VAULT_CONSTRAINTS"
+        ],
+        "caught_outcome": "WRITE_ABORT"
+      },
+      {
+        "id": "TRUNCATED_CIPHERTEXT",
+        "guard": "OPEN_INTEGRITY",
+        "family": "OPEN_INTEGRITY",
+        "control": "octet-length check plus AES-256-GCM tag verification",
+        "control_source": [
+          "VAULT_CONSTRAINTS",
+          "VAULT_OPEN_FAILURE_CODES"
+        ],
+        "caught_outcome": "LENGTH_OR_TAG_FAILURE"
+      },
+      {
+        "id": "ROTATION_CRASH_WINDOW",
+        "guard": "GUARD_3",
+        "family": "ROTATION",
+        "control": "old key retained until committed marker; failed row aborts without advancing writer",
+        "control_source": [
+          "ROTATION_INVARIANTS"
+        ],
+        "caught_outcome": "RESUME_BEFORE_DECOMMISSION"
+      },
+      {
+        "id": "RESTORE_WITH_STALE_VAULT",
+        "guard": "GUARD_3",
+        "family": "ROTATION",
+        "control": "old key retained until marker; boot key-ring reads mixed key_version",
+        "control_source": [
+          "ROTATION_INVARIANTS"
+        ],
+        "caught_outcome": "MIXED_VERSION_RESUME"
+      },
+      {
+        "id": "SIGNING_DURING_ROTATION",
+        "guard": "GUARD_4",
+        "family": "CONCURRENCY",
+        "control": "signing holds no vault row lock; rotation quiesces signing under the lease",
+        "control_source": [
+          "SIGNING_CONCURRENCY"
+        ],
+        "caught_outcome": "SIGNING_QUIESCED"
+      },
+      {
+        "id": "KEY_DISCLOSURE_LOGS_DUMPS",
+        "guard": "GUARD_5",
+        "family": "MEMORY_HYGIENE",
+        "control": "keys never logged; core dumps disabled",
+        "control_source": [
+          "ZEROIZATION",
+          "SIGNER_BOUNDARY"
+        ],
+        "caught_outcome": "WIPED_NEVER_LOGGED"
+      },
+      {
+        "id": "STALE_PROCESS_HOLDS_KEY",
+        "guard": "GUARD_5",
+        "family": "MEMORY_HYGIENE",
+        "control": "secure buffer wiped with sodium_memzero immediately after signing",
+        "control_source": [
+          "ZEROIZATION",
+          "ZEROIZATION_INTERFACE"
+        ],
+        "caught_outcome": "WIPED_POST_SIGN"
+      },
+      {
+        "id": "CROSS_STORE_KEY_DERIVATION_COLLISION",
+        "guard": "GUARD_1",
+        "family": "KEY_DERIVATION",
+        "control": "distinct globally-unique HKDF domain label per sealed store",
+        "control_source": [
+          "HKDF_INFO_ENCODING",
+          "CROSS_STORE_LABEL_SEPARATION"
+        ],
+        "caught_outcome": "DISTINCT_DERIVED_KEY"
+      }
+    ],
+    "D9_11_GUARDS": [
+      "GUARD_1",
+      "GUARD_2",
+      "GUARD_3",
+      "GUARD_4",
+      "GUARD_5"
+    ]
+  }
+}

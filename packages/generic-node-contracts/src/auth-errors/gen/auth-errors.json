@@ -1,0 +1,126 @@
+{
+  "concern": "auth-errors",
+  "ticket": "auth-errors-vocabulary",
+  "governing": {
+    "spec": "API error envelope and authentication classes; operations recovery",
+    "decision": "non-oracular-auth-errors"
+  },
+  "codes": [
+    {
+      "code": "invalid_api_key",
+      "http": 401
+    },
+    {
+      "code": "not_found",
+      "http": 404
+    }
+  ],
+  "rejected": [
+    {
+      "code": "forbidden",
+      "http": 403,
+      "reason": "reintroduces the scope oracle the frozen error vocabulary closed; scope denial is the generic 401"
+    },
+    {
+      "code": "insufficient_scope",
+      "http": 403,
+      "reason": "names scope denial distinctly from an unknown key; must collapse to invalid_api_key"
+    },
+    {
+      "code": "wrong_tenant",
+      "http": 404,
+      "reason": "distinguishes a cross-tenant object from an absent one; must collapse to not_found"
+    }
+  ],
+  "envelopeFieldOrder": [
+    "code",
+    "message",
+    "request_id",
+    "details"
+  ],
+  "requestIdPlaceholder": "00000000-0000-0000-0000-000000000000",
+  "messages": {
+    "invalid_api_key": "Invalid API key.",
+    "not_found": "Not found."
+  },
+  "stateToCode": {
+    "MISSING_CREDENTIAL": "invalid_api_key",
+    "MALFORMED_CREDENTIAL": "invalid_api_key",
+    "UNKNOWN_KEY": "invalid_api_key",
+    "EXPIRED_KEY": "invalid_api_key",
+    "REVOKED_KEY": "invalid_api_key",
+    "OUT_OF_SCOPE": "invalid_api_key",
+    "ABSENT_OBJECT": "not_found",
+    "CROSS_TENANT_OBJECT": "not_found"
+  },
+  "checkOrder": [
+    {
+      "step": 1,
+      "name": "authenticate_credential",
+      "failsWith": "invalid_api_key"
+    },
+    {
+      "step": 2,
+      "name": "authorize_scope",
+      "failsWith": "invalid_api_key"
+    },
+    {
+      "step": 3,
+      "name": "resolve_object_with_tenant_predicate",
+      "failsWith": "not_found"
+    }
+  ],
+  "authErrorHeaders": {
+    "content-type": "application/json; charset=utf-8"
+  },
+  "bodies": {
+    "invalid_api_key": "{\"error\":{\"code\":\"invalid_api_key\",\"message\":\"Invalid API key.\",\"request_id\":\"00000000-0000-0000-0000-000000000000\",\"details\":{}}}",
+    "not_found": "{\"error\":{\"code\":\"not_found\",\"message\":\"Not found.\",\"request_id\":\"00000000-0000-0000-0000-000000000000\",\"details\":{}}}"
+  },
+  "bodyDigests": {
+    "invalid_api_key": "44fa5568b442479b191887b617c06c3d37ccb8c97f8c1c5d063362c540961e7e",
+    "not_found": "949585168d1c03d64520afd562f8c1f8a11e7ddf7ee7133fad8d6bab1064d147"
+  },
+  "reportingRejectionCodes": [
+    "missing_reporting_headers",
+    "invalid_reporting_headers",
+    "invalid_request_target",
+    "not_found",
+    "request_too_large",
+    "invalid_idempotency_key",
+    "unsupported_content_encoding",
+    "rate_limited",
+    "invalid_reporting_window",
+    "reporting_request_expired",
+    "reporting_request_not_yet_valid",
+    "unknown_reporting_key",
+    "tenant_binding_mismatch",
+    "reporting_key_not_active",
+    "reporting_auth_hold",
+    "invalid_signature",
+    "nonce_replay",
+    "idempotency_conflict",
+    "internal_error"
+  ],
+  "reportingRejectionStatus": {
+    "missing_reporting_headers": 401,
+    "invalid_reporting_headers": 400,
+    "invalid_request_target": 400,
+    "not_found": 404,
+    "request_too_large": 400,
+    "invalid_idempotency_key": 400,
+    "unsupported_content_encoding": 400,
+    "rate_limited": 429,
+    "invalid_reporting_window": 401,
+    "reporting_request_expired": 401,
+    "reporting_request_not_yet_valid": 401,
+    "unknown_reporting_key": 401,
+    "tenant_binding_mismatch": 401,
+    "reporting_key_not_active": 401,
+    "reporting_auth_hold": 401,
+    "invalid_signature": 401,
+    "nonce_replay": 401,
+    "idempotency_conflict": 409,
+    "internal_error": 500
+  }
+}

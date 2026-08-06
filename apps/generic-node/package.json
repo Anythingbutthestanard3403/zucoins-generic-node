@@ -1,0 +1,46 @@
+{
+  "name": "@zucoins/generic-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint src test",
+    "start": "node dist/main.js",
+    "start:stage1": "node dist/stage1-main.js",
+    "smoke:deployment-image": "node deploy/smoke-image.mjs",
+    "db:migrate": "node dist/db/migrate.js",
+    "dr": "node dist/dr/cli.js",
+    "test": "vitest run",
+    "build:ui": "pnpm --filter @zucoins/generic-node-ui build",
+    "build:all": "pnpm run build:ui && pnpm run build",
+    "generate-secrets": "node ./scripts/generate-secrets.mjs",
+    "test:generate-secrets": "vitest run scripts/generate-secrets.test.mjs"
+  },
+  "dependencies": {
+    "@libpg-query/parser": "^17.6.10",
+    "@noble/hashes": "^2.2.0",
+    "@zucoins/node-core": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "js-yaml": "4.3.0",
+    "pg": "^8.13.0",
+    "@zucoins/generic-node-contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.31.10",
+    "http_ece": "1.2.1"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./dr": {
+      "types": "./dist/dr/index.d.ts",
+      "import": "./dist/dr/index.js"
+    }
+  }
+}

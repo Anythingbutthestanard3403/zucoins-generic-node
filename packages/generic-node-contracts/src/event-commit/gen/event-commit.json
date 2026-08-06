@@ -1,0 +1,97 @@
+{
+  "concern": "event-commit",
+  "ticket": "events.2",
+  "governing": {
+    "spec": "data-model: node_events; canonical-fields: event signing; state-event reference: event serving; api-contract: event pull",
+    "decisions": [
+      "signed-event-log",
+      "sealed-store",
+      "reporting-channel"
+    ],
+    "dependsOn": "events.1"
+  },
+  "commit": {
+    "stepOrder": [
+      "lock_and_increment_counter",
+      "read_previous_event_hash",
+      "construct_exact_preimage_with_seq_and_prev_hash",
+      "sign",
+      "insert_event_row",
+      "update_operation_state",
+      "enqueue_outbox_delivery"
+    ],
+    "signStep": "sign",
+    "insertEventStep": "insert_event_row",
+    "unit": [
+      "allocation",
+      "previous_hash",
+      "signing",
+      "state_transition",
+      "insertion",
+      "outbox_enqueue"
+    ],
+    "atomicity": {
+      "transaction": "single_guarded_transaction",
+      "semantics": "all_or_nothing",
+      "partialFailure": "rolls_back_whole_unit",
+      "rollbackBurnsSeq": false,
+      "unsignedGapPossible": false
+    }
+  },
+  "outbox": {
+    "decoupling": {
+      "enqueuedInsideTransaction": true,
+      "deliveryAfterCommit": true,
+      "visibleOnlyPostCommit": true,
+      "deliveryFailureMutatesCommittedUnit": false
+    },
+    "idempotentRedelivery": {
+      "dedupKeys": [
+        "event_id",
+        "event_hash",
+        "seq"
+      ],
+      "redeliveryReSigns": false,
+      "redeliveryReSequences": false,
+      "consumerDedup": "by_event_id_or_event_hash"
+    }
+  },
+  "concurrency": {
+    "serializedOn": "lock_and_increment_counter",
+    "oneWinnerPerSeq": true,
+    "distinctSeqPerCommittedEvent": true,
+    "loserProceedsOnNextSeq": true,
+    "contiguousUnderContention": true,
+    "concurrentReaderObservesHalfBuiltEvent": false
+  },
+  "restart": {
+    "uncommittedCommitLeavesEvent": false,
+    "uncommittedCommitLeavesOutboxEntry": false,
+    "uncommittedCommitTransitionsOperation": false,
+    "uncommittedCommitBurnsSeq": false,
+    "counterResumesFrom": "durable_high_water_mark",
+    "reusesSeq": false,
+    "committedUndeliveredOutboxRedelivered": true,
+    "redeliveryReSigns": false
+  },
+  "keyRotation": {
+    "resetsCounter": false,
+    "seqMonotonicAcrossRotation": true,
+    "reSignsCommittedEvents": false,
+    "preimageTupleChangedByRotation": false,
+    "keyIdInSignedPreimage": false,
+    "hashChainContinuousAcrossRotation": true,
+    "priorKeyRetiredBy": "seq_cursor",
+    "rejectedRetirement": "first_batch_verified"
+  },
+  "ddlConstraints": {
+    "eventAndStateSameTransaction": true,
+    "outboxEnqueuedInSameTransaction": true,
+    "outboxSeparateFromNeutralTruth": true,
+    "seqSource": "dedicated_per_node_counter",
+    "seqRejectedSource": "generated_always_as_identity",
+    "uniqueEventId": true,
+    "uniqueEventHash": true,
+    "eventsInsertOnly": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "ABSENT_CAPABILITIES": {
+    "WALLET_IMPORT": "absent",
+    "IMPORTED_DRAIN": "absent"
+  },
+  "CORE_CAPABILITIES": [
+    "NODE_IDENTITY",
+    "DISCOVERY",
+    "EXPECTED_ARTIFACT_VERIFICATION"
+  ],
+  "LAUNCH_EXCLUSIONS": [
+    "imported wallets and imported-wallet drain",
+    "arbitrary workflows or more than one automatic child move",
+    "batch external-send approval",
+    "M-of-N operator approval",
+    "multi-asset or asset-exchange behavior",
+    "cross-node internal movement",
+    "platform or browser custody",
+    "retrospective proof reconstruction after the live verification window",
+    "any automatic recovery action that would create a second possibly competing transaction"
+  ],
+  "SOURCE": "core capabilities and launch exclusions"
+}

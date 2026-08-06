@@ -1,0 +1,276 @@
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Client, Pool, type PoolClient } from "pg";
+
+import { SqlAdminIdempotencyStore } from "../src/ops/admin-idempotency.js";
+import { createAtomicAdminMutationExecutor } from "../src/ops/atomic-admin-mutation.js";
+
+const PG_TEST_TIMEOUT_MS = 120_000;
+const PG_HOST = process.env.PGHOST ?? "127.0.0.1";
+const PG_PORT = Number(process.env.PGPORT ?? "5432");
+const PG_USER = process.env.PGUSER ?? process.env.USER ?? "postgres";
+
+function hasClientTool(name: string): boolean {
+  try {
+    execFileSync(name, ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HAS_CREATEDB = hasClientTool("createdb");
+const HAS_DROPDB = hasClientTool("dropdb");
+const PG_AVAILABLE = (() => {
+  try {
+    if (hasClientTool("pg_isready")) {
+      execFileSync(
+        "pg_isready",
+        ["-q", "-h", PG_HOST, "-p", String(PG_PORT), "-U", PG_USER],
+        { stdio: "ignore" },
+      );
+      return true;
+    }
+  } catch {
+    // Fall through to the direct driver probe.
+  }
+  try {
+    execFileSync(
+      "node",
+      [
+        "-e",
+        `const {Client}=require("pg");const c=new Client({host:${JSON.stringify(PG_HOST)},port:${PG_PORT},user:${JSON.stringify(PG_USER)},database:"postgres",password:process.env.PGPASSWORD,connectionTimeoutMillis:1500});c.connect().then(()=>c.end()).then(()=>process.exit(0)).catch(()=>process.exit(1))`,
+      ],
+      { stdio: "ignore", env: process.env },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+function adminConfig(database = "postgres") {
+  return {
+    host: PG_HOST,
+    port: PG_PORT,
+    user: PG_USER,
+    database,
+    password: process.env.PGPASSWORD,
+  };
+}
+
+function assertSafeDbName(name: string): void {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) throw new Error(`unsafe database name: ${name}`);
+}
+
+async function createDatabase(name: string): Promise<void> {
+  assertSafeDbName(name);
+  if (HAS_CREATEDB) {
+    execFileSync("createdb", ["-h", PG_HOST, "-p", String(PG_PORT), "-U", PG_USER, name], {
+      env: process.env,
+    });
+    return;
+  }
+  const admin = new Client(adminConfig());
+  await admin.connect();
+  try {
+    await admin.query(`CREATE DATABASE ${name}`);
+  } finally {
+    await admin.end();
+  }
+}
+
+async function dropDatabase(name: string): Promise<void> {
+  assertSafeDbName(name);
+  if (HAS_DROPDB) {
+    execFileSync(
+      "dropdb",
+      ["-h", PG_HOST, "-p", String(PG_PORT), "-U", PG_USER, "--if-exists", name],
+      { env: process.env, stdio: "ignore" },
+    );
+    return;
+  }
+  const admin = new Client(adminConfig());
+  await admin.connect();
+  try {
+    await admin.query(
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+      [name],
+    );
+    await admin.query(`DROP DATABASE IF EXISTS ${name}`);
+  } finally {
+    await admin.end();
+  }
+}
+
+interface EffectPorts {
+  insertEffect(value: string): Promise<void>;
+}
+
+function portsFor(client: PoolClient): EffectPorts {
+  return {
+    async insertEffect(value) {
+      await client.query("INSERT INTO atomic_admin_mutation_child_effects (value) VALUES ($1)", [value]);
+    },
+  };
+}
+
+function fingerprint(bodySha256 = "a".repeat(64)) {
+  return { method: "POST", rawTarget: "/admin/v1/halt", bodySha256 };
+}
+
+describe.skipIf(!PG_AVAILABLE)("atomic REQUIRED admin mutation (disposable PG)", () => {
+  const dbName = `atomic_admin_mutation_${process.pid}_${Date.now()}`;
+  const nodeId = randomUUID();
+  let pool: Pool;
+
+  beforeAll(async () => {
+    await createDatabase(dbName);
+    pool = new Pool(adminConfig(dbName));
+    await pool.query("CREATE DOMAIN sha256_hex AS text CHECK (VALUE ~ '^[0-9a-f]{64}$')");
+    await pool.query("CREATE TABLE nodes (id uuid PRIMARY KEY)");
+    await pool.query("INSERT INTO nodes (id) VALUES ($1::uuid)", [nodeId]);
+    await pool.query(
+      "CREATE TABLE atomic_admin_mutation_child_effects (seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, value text NOT NULL)",
+    );
+    // ensureSchema is a deliberate no-op (DDL owned exclusively by migrate.ts, see
+    // apps/generic-node/drizzle/0002_admin_and_operations_ownership.sql). This suite uses a
+    // disposable per-run database with a hand-rolled minimal prerequisite schema (nodes,
+    // sha256_hex domain, atomic_admin_mutation_child_effects above) rather than running the full migration
+    // pack — that is this codebase's established convention for every non-migrator PG test
+    // (only test/db/migrate-guards.test.ts, which tests the migrator itself, runs migrate()).
+    // Column list below is byte-parity with 0002's admin_mutation_idempotency definition.
+    await pool.query(`CREATE TABLE admin_mutation_idempotency (
+      id uuid PRIMARY KEY,
+      node_id uuid NOT NULL REFERENCES nodes(id),
+      route_id text NOT NULL,
+      idempotency_key text NOT NULL CHECK (idempotency_key ~ '^[!-~]{16,255}$'),
+      method text NOT NULL,
+      raw_target text NOT NULL,
+      body_sha256 sha256_hex NOT NULL,
+      response_status integer NOT NULL CHECK (response_status BETWEEN 100 AND 599),
+      response_bytes bytea NOT NULL,
+      completed_at timestamptz NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (node_id, route_id, idempotency_key)
+    )`);
+    await new SqlAdminIdempotencyStore(pool).ensureSchema();
+  }, PG_TEST_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await pool?.end().catch(() => {});
+    await dropDatabase(dbName).catch(() => {});
+  }, PG_TEST_TIMEOUT_MS);
+
+  it("commits the child effect and exact response together, then a fresh executor replays after restart", async () => {
+    const store = new SqlAdminIdempotencyStore(pool);
+    const execute = createAtomicAdminMutationExecutor({ pool, idempotencyStore: store, portsFor });
+    const mutation = {
+      nodeId,
+      routeId: "admin_halt",
+      idempotencyKey: `atomic-admin-mutation-restart-${randomUUID()}`,
+      fingerprint: fingerprint(),
+    };
+    const first = await execute(mutation, async (ports) => {
+      await ports.insertEffect("restart-once");
+      return { outcome: "commit" as const, status: 201, responseBody: { z: 1, a: "exact" } };
+    });
+    expect(first.outcome).toBe("committed");
+    if (first.outcome !== "committed") return;
+    expect(first.responseBytes.toString("utf8")).toBe('{"z":1,"a":"exact"}');
+
+    const restarted = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor,
+    });
+    const replay = await restarted(mutation, async () => {
+      throw new Error("replay must not execute child effect");
+    });
+    expect(replay).toMatchObject({ outcome: "replay", status: 201 });
+    if (replay.outcome === "replay") expect(replay.responseBytes).toEqual(first.responseBytes);
+    const effects = await pool.query("SELECT value FROM atomic_admin_mutation_child_effects WHERE value = 'restart-once'");
+    expect(effects.rows).toHaveLength(1);
+  });
+
+  it("serializes two instances on the same key: one effect, one exact replay", async () => {
+    const mutation = {
+      nodeId,
+      routeId: "admin_destination_bless",
+      idempotencyKey: `atomic-admin-mutation-concurrent-${randomUUID()}`,
+      fingerprint: fingerprint("b".repeat(64)),
+    };
+    let actionCalls = 0;
+    const action = async (ports: EffectPorts) => {
+      actionCalls += 1;
+      await ports.insertEffect("concurrent-once");
+      return { outcome: "commit" as const, status: 200, responseBody: { blessed: true } };
+    };
+    const one = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor,
+    });
+    const two = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor,
+    });
+    const results = await Promise.all([one(mutation, action), two(mutation, action)]);
+    expect(results.map((result) => result.outcome).sort()).toEqual(["committed", "replay"]);
+    expect(actionCalls).toBe(1);
+    const bytes = results.map((result) =>
+      result.outcome === "committed" || result.outcome === "replay" ? result.responseBytes.toString("utf8") : "",
+    );
+    expect(new Set(bytes)).toEqual(new Set(['{"blessed":true}']));
+    const effects = await pool.query("SELECT value FROM atomic_admin_mutation_child_effects WHERE value = 'concurrent-once'");
+    expect(effects.rows).toHaveLength(1);
+  });
+
+  it("returns conflict for the same key with a changed fingerprint without executing the child", async () => {
+    const idempotencyKey = `atomic-admin-mutation-conflict-${randomUUID()}`;
+    const execute = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor,
+    });
+    const base = { nodeId, routeId: "admin_api_keys_revoke", idempotencyKey };
+    await execute({ ...base, fingerprint: fingerprint("c".repeat(64)) }, async (ports) => {
+      await ports.insertEffect("conflict-winner");
+      return { outcome: "commit" as const, status: 200, responseBody: { revoked: true } };
+    });
+    const conflict = await execute(
+      { ...base, fingerprint: fingerprint("d".repeat(64)) },
+      async () => { throw new Error("conflict must not execute child"); },
+    );
+    expect(conflict).toEqual({ outcome: "conflict" });
+  });
+
+  it("rolls back the child effect when completed-response persistence fails", async () => {
+    const store = new SqlAdminIdempotencyStore(pool);
+    const execute = createAtomicAdminMutationExecutor({ pool, idempotencyStore: store, portsFor });
+    await pool.query("ALTER TABLE admin_mutation_idempotency RENAME TO admin_mutation_idempotency_offline");
+    try {
+      await expect(
+        execute(
+          {
+            nodeId,
+            routeId: "admin_halt",
+            idempotencyKey: `atomic-admin-mutation-db-failure-${randomUUID()}`,
+            fingerprint: fingerprint("e".repeat(64)),
+          },
+          async (ports) => {
+            await ports.insertEffect("must-roll-back");
+            return { outcome: "commit" as const, status: 200, responseBody: { engaged: true } };
+          },
+        ),
+      ).rejects.toMatchObject({ code: "42P01" });
+    } finally {
+      await pool.query("ALTER TABLE admin_mutation_idempotency_offline RENAME TO admin_mutation_idempotency");
+    }
+    const effects = await pool.query("SELECT value FROM atomic_admin_mutation_child_effects WHERE value = 'must-roll-back'");
+    expect(effects.rows).toHaveLength(0);
+  });
+});

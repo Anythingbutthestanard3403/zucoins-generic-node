@@ -1,0 +1,132 @@
+{
+  "ORIGIN_CLASSES": [
+    "node-origin",
+    "implementer-controlled-origin",
+    "platform-hosted"
+  ],
+  "ORIGIN_CLASS_CLAIMS": [
+    {
+      "originClass": "node-origin",
+      "canEverClaimSubstitutionProof": true,
+      "requiresIndependentPinToClaimSubstitutionProof": true,
+      "platformControlsOriginContent": false
+    },
+    {
+      "originClass": "implementer-controlled-origin",
+      "canEverClaimSubstitutionProof": true,
+      "requiresIndependentPinToClaimSubstitutionProof": true,
+      "platformControlsOriginContent": false
+    },
+    {
+      "originClass": "platform-hosted",
+      "canEverClaimSubstitutionProof": false,
+      "requiresIndependentPinToClaimSubstitutionProof": false,
+      "platformControlsOriginContent": true
+    }
+  ],
+  "DISCOVERY_PATH": "/.well-known/zupay-node",
+  "PIN_REJECT_REASONS": [
+    "key_id_mismatch",
+    "pubkey_mismatch",
+    "fingerprint_mismatch",
+    "pin_not_yet_valid",
+    "pin_expired",
+    "underlying_key_not_accepted"
+  ],
+  "CAPABILITY_IDS": [
+    "ARTIFACT_VERIFICATION",
+    "IDENTITY_PIN_CHECK",
+    "PROOF_MATERIAL_ACCESS"
+  ],
+  "CAPABILITY_MANIFEST": [
+    {
+      "id": "ARTIFACT_VERIFICATION",
+      "status": "FROZEN_AVAILABLE",
+      "ownerConcern": "artifacts",
+      "exportedSymbols": [
+        "verifyExpectedArtifact",
+        "VerifyInput",
+        "VerifyResult",
+        "VERIFY_REJECT_REASONS",
+        "ArtifactEnvelope",
+        "ArtifactVerificationCrypto"
+      ],
+      "description": "Pure, stateless verification of the three signed expected-action artifacts against a resolved node identity key, with the wallet-libsodium Ed25519/SHA-256 crypto dependency-injected by the caller."
+    },
+    {
+      "id": "IDENTITY_PIN_CHECK",
+      "status": "FROZEN_AVAILABLE",
+      "ownerConcern": "identity-pin",
+      "exportedSymbols": [
+        "verifyIdentityPin",
+        "NodeIdentityPin",
+        "PinVerdict",
+        "PIN_REJECT_REASONS"
+      ],
+      "description": "Pure predicate binding an implementer's independently-established node identity pin to a resolved key, defeating the compromised-platform substitution scenario."
+    },
+    {
+      "id": "PROOF_MATERIAL_ACCESS",
+      "status": "DEFERRED",
+      "ownerConcern": "landing-proof",
+      "exportedSymbols": [],
+      "description": "Any-depth landed-operation proof manifests. Reserved capability category only — landing-proof is not an instruction-origin dependency and has not merged onto this freeze base; no interface is fabricated here."
+    }
+  ],
+  "NON_CAPABILITIES": [
+    "CUSTOMER_INSTRUCTION_UI",
+    "ORIGIN_POLICY_DECISION",
+    "PIN_DISTRIBUTION_CHANNEL",
+    "KEY_ROTATION_UX"
+  ],
+  "PRESENTATION_HANDOFF_FIELDS": [
+    "operationId",
+    "artifactPurpose",
+    "artifactEnvelope",
+    "nodeIdentityPin",
+    "discoveryPath",
+    "originClass"
+  ],
+  "SUBSTITUTION_THREAT_TABLE": [
+    {
+      "scenario": "a compromised platform substitutes a different, otherwise-valid instruction on a platform-hosted page",
+      "originClass": "platform-hosted",
+      "independentPinVerified": false,
+      "nodeArtifactValid": true,
+      "substitutionProof": false,
+      "rationale": "Platform-controlled code controls both what is shown and the check itself; a valid node artifact alone never proves the presented instruction is genuine (R-07)."
+    },
+    {
+      "scenario": "same substitution attempt on a platform-hosted page that ALSO performs its own pin check",
+      "originClass": "platform-hosted",
+      "independentPinVerified": true,
+      "nodeArtifactValid": true,
+      "substitutionProof": false,
+      "rationale": "platform-hosted is frozen non-substitution-proof unconditionally: the platform still controls the pin check itself, so a pin check IT performs proves nothing about independence."
+    },
+    {
+      "scenario": "instruction presented on a node-controlled origin with an independently verified pin",
+      "originClass": "node-origin",
+      "independentPinVerified": true,
+      "nodeArtifactValid": true,
+      "substitutionProof": true,
+      "rationale": "An origin the platform cannot silently alter, plus a key check against a pin established outside the platform's control, defeats the substitution."
+    },
+    {
+      "scenario": "instruction presented on an implementer-controlled origin with an independently verified pin",
+      "originClass": "implementer-controlled-origin",
+      "independentPinVerified": true,
+      "nodeArtifactValid": true,
+      "substitutionProof": true,
+      "rationale": "Same defense as node-origin: an origin the platform cannot alter, plus an independent pin check."
+    },
+    {
+      "scenario": "node-controlled origin, but the pin was never independently verified",
+      "originClass": "node-origin",
+      "independentPinVerified": false,
+      "nodeArtifactValid": true,
+      "substitutionProof": false,
+      "rationale": "Origin control alone is insufficient; without a verified pin a substituted key is undetectable."
+    }
+  ]
+}

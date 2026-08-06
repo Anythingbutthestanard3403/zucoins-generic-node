@@ -1,0 +1,235 @@
+{
+  "ARTIFACT_ENVELOPE_FIELD_SEQUENCE": [
+    "key_id",
+    "preimage_text",
+    "preimage_sha256",
+    "signature"
+  ],
+  "CEREMONY_WINDOW_RULE": {
+    "maxSeconds": 300,
+    "lowerBoundExclusiveSeconds": 0,
+    "checkedAgainst": "signed issued_at, never receipt time",
+    "deploymentMayTighten": true,
+    "permanentCeremonyMustNotBeLooserThanApproval": true
+  },
+  "DEFERRED_IMPLEMENTER_TUPLES": [
+    {
+      "purpose": "zp-implementer-event-v1",
+      "disposition": "deferred-c4"
+    },
+    {
+      "purpose": "zp-implementer-checkpoint-v1",
+      "disposition": "deferred-c4"
+    },
+    {
+      "purpose": "zp-implementer-keyrotation-v1",
+      "disposition": "deferred-c4"
+    }
+  ],
+  "DESTINATION_BLESS_TUPLE": {
+    "purpose": "zp-destination-bless-v1",
+    "canonicalVersion": 1,
+    "signingKeyRole": "device",
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "destination_id",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "wallet_id",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "wallet_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false
+      },
+      {
+        "name": "nonce",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "issued_at",
+        "type": "canonical_timestamp",
+        "nullable": false
+      },
+      {
+        "name": "expires_at",
+        "type": "canonical_timestamp",
+        "nullable": false
+      }
+    ]
+  },
+  "DEVICE_ENROL_LABEL_RULES": {
+    "minScalars": 1,
+    "maxScalars": 80,
+    "maxUtf8Bytes": 320,
+    "normalization": "none",
+    "internalWhitespacePermitted": "U+0020 only",
+    "leadingTrailingSpace": "reject",
+    "denylistedCategories": [
+      "C0/C1 controls (U+0000-U+001F, U+007F-U+009F)",
+      "surrogates (U+D800-U+DFFF)",
+      "noncharacters (U+FDD0-U+FDEF, U+xFFFE/xFFFF)",
+      "line/paragraph separators (U+2028/U+2029)",
+      "BOM/ZWNBSP (U+FEFF)",
+      "BiDi/zero-width format controls (U+200B-U+200D, U+202A-U+202E, U+2066-U+2069)"
+    ],
+    "malformedUtf8": "reject (overlong, truncated, lone surrogate)",
+    "unicodeVersionPin": "17.0"
+  },
+  "DEVICE_ENROL_TUPLE": {
+    "purpose": "zp-device-enrol-v1",
+    "canonicalVersion": 1,
+    "signingKeyRole": "device",
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "new_device_key_id",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "new_device_public_key",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false
+      },
+      {
+        "name": "label",
+        "type": "unicode_label",
+        "nullable": false
+      },
+      {
+        "name": "nonce",
+        "type": "uuid",
+        "nullable": false
+      },
+      {
+        "name": "issued_at",
+        "type": "canonical_timestamp",
+        "nullable": false
+      },
+      {
+        "name": "expires_at",
+        "type": "canonical_timestamp",
+        "nullable": false
+      }
+    ]
+  },
+  "REPORT_REQUEST_WINDOW_MAX_SECONDS": 60,
+  "SOURCE": "suite tuples A.3.4, A.4.2, A.4.3, A.6, A.7; artifacts-freeze",
+  "SUITE_TUPLE_FIELD_TYPES": [
+    "purpose_literal",
+    "canonical_version_literal",
+    "uuid",
+    "ed25519_pubkey_padded",
+    "external_address_padded",
+    "unicode_label",
+    "canonical_timestamp",
+    "state_kind_literal",
+    "signature_padded_or_empty",
+    "signature_padded_nullable",
+    "zkz_balance_string",
+    "sha256_hex_nullable"
+  ],
+  "SUITE_TUPLES_CONTRACT_VERSION": 1,
+  "WALLET_HEAD_FINGERPRINT_EXCLUSIONS": [
+    "gateway envelope",
+    "endpoint",
+    "observation time",
+    "HTTP status",
+    "raw-response hash"
+  ],
+  "WALLET_HEAD_FINGERPRINT_TUPLE": {
+    "purpose": "zp-wallet-head-fingerprint-v1",
+    "canonicalVersion": 1,
+    "signed": false,
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false
+      },
+      {
+        "name": "state_kind",
+        "type": "state_kind_literal",
+        "nullable": false
+      },
+      {
+        "name": "s_signature",
+        "type": "signature_padded_or_empty",
+        "nullable": false
+      },
+      {
+        "name": "p_signature",
+        "type": "signature_padded_or_empty",
+        "nullable": false
+      },
+      {
+        "name": "b_amount",
+        "type": "zkz_balance_string",
+        "nullable": false
+      },
+      {
+        "name": "inner_sha256",
+        "type": "sha256_hex_nullable",
+        "nullable": true
+      },
+      {
+        "name": "step_1_signature",
+        "type": "signature_padded_nullable",
+        "nullable": true
+      },
+      {
+        "name": "step_2_signature",
+        "type": "signature_padded_nullable",
+        "nullable": true
+      }
+    ]
+  }
+}

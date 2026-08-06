@@ -1,0 +1,8 @@
+{
+  "LITERAL_KINDS": [
+    "signed-purpose",
+    "wire-prefix",
+    "header",
+    "name"
+  ]
+}

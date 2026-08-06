@@ -1,0 +1,28 @@
+{
+  "artifact": "zp-move-internal-expected-v1",
+  "canonical_version": 1,
+  "signing_role": "node",
+  "artifact_digest_sha256": "ad964723e07ca2aef3356f1e02990e07b90be49b5387a7095091398a10944a14",
+  "verification_pubkey_b64": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+  "source": {
+    "schema_fields": "canonical fields A.3.2",
+    "preimage_bytes": "canonical fields A.8.2",
+    "digest_and_signature": "canonical fields A.8 (expected machine-generated outputs table)",
+    "fixture_identifiers": "canonical fields A.8",
+    "decision": "artifacts-freeze"
+  },
+  "files": {
+    "zp-move-internal-expected-v1.preimage.txt": {
+      "sha256": "ad964723e07ca2aef3356f1e02990e07b90be49b5387a7095091398a10944a14",
+      "note": "exact preimage bytes (purpose + LF + JSON.stringify(payload)); its own sha256 equals artifact_digest_sha256"
+    },
+    "zp-move-internal-expected-v1.digest.hex": {
+      "sha256": "cdb975c40bd68f9585b3285c403585fbebb73551638faa668ea78259636b0472",
+      "content_equals": "artifact_digest_sha256"
+    },
+    "zp-move-internal-expected-v1.sig.b64": {
+      "sha256": "62b5fcccdc4d7d17ee48a9e416bca4f64db5d62b9d482c026134db98eb8bf0d0",
+      "note": "Ed25519 detached signature over the preimage, padded base64url, signed by the node key"
+    }
+  }
+}

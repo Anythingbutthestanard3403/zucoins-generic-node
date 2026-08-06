@@ -1,0 +1,178 @@
+{
+  "concern": "reporting-behavior",
+  "ticket": "reporting.3",
+  "governing": {
+    "spec": "canonical-fields: register tuple, event signing; api-contract: signed reporting",
+    "decisions": [
+      "reporting-ingest-auth",
+      "signed-event-log",
+      "sealed-store",
+      "reporting-channel"
+    ],
+    "dependsOn": [
+      "reporting.1",
+      "reporting.2"
+    ]
+  },
+  "requestMaxWindowMs": 60000,
+  "requestClockSkewMs": 0,
+  "dimensions": [
+    "request",
+    "rotation",
+    "event_stream",
+    "restore",
+    "cutover"
+  ],
+  "matrix": [
+    {
+      "dimension": "request",
+      "scenario": "fresh",
+      "outcome": "ACCEPT"
+    },
+    {
+      "dimension": "request",
+      "scenario": "duplicate_nonce",
+      "outcome": "REJECT_REPLAY"
+    },
+    {
+      "dimension": "request",
+      "scenario": "expired",
+      "outcome": "REJECT_EXPIRED"
+    },
+    {
+      "dimension": "request",
+      "scenario": "not_yet_valid",
+      "outcome": "REJECT_NOT_YET_VALID"
+    },
+    {
+      "dimension": "request",
+      "scenario": "at_issued_boundary",
+      "outcome": "ACCEPT"
+    },
+    {
+      "dimension": "request",
+      "scenario": "at_expires_boundary",
+      "outcome": "ACCEPT"
+    },
+    {
+      "dimension": "request",
+      "scenario": "zero_length_window",
+      "outcome": "REJECT_WINDOW"
+    },
+    {
+      "dimension": "request",
+      "scenario": "negative_window",
+      "outcome": "REJECT_WINDOW"
+    },
+    {
+      "dimension": "request",
+      "scenario": "window_over_60s",
+      "outcome": "REJECT_WINDOW"
+    },
+    {
+      "dimension": "request",
+      "scenario": "method_mutated",
+      "outcome": "REJECT_METHOD_MUTATED"
+    },
+    {
+      "dimension": "request",
+      "scenario": "target_mutated",
+      "outcome": "REJECT_TARGET_MUTATED"
+    },
+    {
+      "dimension": "request",
+      "scenario": "target_mutated_nonce_seen",
+      "outcome": "REJECT_TARGET_MUTATED"
+    },
+    {
+      "dimension": "request",
+      "scenario": "body_mutated",
+      "outcome": "REJECT_BODY_MUTATED"
+    },
+    {
+      "dimension": "request",
+      "scenario": "wrong_tenant",
+      "outcome": "REJECT_WRONG_TENANT"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "current_active",
+      "outcome": "ACCEPT_CURRENT"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "prior_overlap",
+      "outcome": "ACCEPT_PRIOR_OVERLAP"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "prior_retired_post_cutover",
+      "outcome": "REJECT_RETIRED"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "revoked_current",
+      "outcome": "REJECT_REVOKED"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "unknown_key",
+      "outcome": "REJECT_UNKNOWN"
+    },
+    {
+      "dimension": "rotation",
+      "scenario": "revoke_to_zero",
+      "outcome": "ALARM_NO_ACTIVE_KEY"
+    },
+    {
+      "dimension": "event_stream",
+      "scenario": "tenant_seq_sparse_jump",
+      "outcome": "ACCEPT_ADVANCE"
+    },
+    {
+      "dimension": "event_stream",
+      "scenario": "tenant_seq_reorder",
+      "outcome": "REJECT_REORDER_OR_REPLAY"
+    },
+    {
+      "dimension": "event_stream",
+      "scenario": "chain_intact",
+      "outcome": "ACCEPT_CHAIN"
+    },
+    {
+      "dimension": "event_stream",
+      "scenario": "chain_break",
+      "outcome": "HARD_STOP_CHAIN_BREAK"
+    },
+    {
+      "dimension": "restore",
+      "scenario": "same_epoch_chain_intact",
+      "outcome": "ACCEPT"
+    },
+    {
+      "dimension": "restore",
+      "scenario": "same_epoch_chain_break",
+      "outcome": "HARD_STOP_CHAIN_BREAK"
+    },
+    {
+      "dimension": "restore",
+      "scenario": "epoch_regression",
+      "outcome": "REJECT_EPOCH_REGRESSION"
+    },
+    {
+      "dimension": "restore",
+      "scenario": "post_restore_new_epoch",
+      "outcome": "ACCEPT"
+    },
+    {
+      "dimension": "cutover",
+      "scenario": "activate_before_retire",
+      "outcome": "VALID"
+    },
+    {
+      "dimension": "cutover",
+      "scenario": "retire_before_activate",
+      "outcome": "INVALID"
+    }
+  ]
+}

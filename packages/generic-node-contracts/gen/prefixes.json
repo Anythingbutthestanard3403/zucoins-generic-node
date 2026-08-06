@@ -1,0 +1,29 @@
+{
+  "COMPATIBILITY_LITERALS_OWNER": "src/compat-literals",
+  "PREFIXES_CONTRACT_VERSION": 1,
+  "RECEIVE_ANCHOR_PATTERN": "^[A-Za-z0-9_-]{1,96}$",
+  "RECEIVE_MESSAGE_DISCRIMINATOR": "operation UUID (lowercase canonical, fixed-width)",
+  "RECEIVE_MESSAGE_FORMAT": "\"zp1:\" + discriminator + \":\" + anchor",
+  "RECEIVE_MESSAGE_MAX_SCALARS": 256,
+  "RECEIVE_MESSAGE_PREFIX": "zp1:",
+  "SOURCE": "suite prefixes A.1.1, A.2, A.9; compatibility-literals",
+  "SUITE_DOMAIN_SEPARATOR": {
+    "preimageTextConstruction": "purpose + \"\\n\" + payload_json",
+    "separatorByte": "0x0a",
+    "separatorCharCount": 1,
+    "trailingNewline": false,
+    "purposeAppearsAsPrefixAndField1": true,
+    "noBom": true,
+    "noInsignificantWhitespace": true,
+    "noKeySorting": true,
+    "noUnicodeNormalization": true
+  },
+  "TRANSFER_CODE_DIGEST_FORBIDDEN_PREPROCESSING": [
+    "newline insertion",
+    "URL decode",
+    "base64 decode",
+    "padding repair",
+    "JSON parse"
+  ],
+  "TRANSFER_CODE_DIGEST_RULE": "lowercase_hex(SHA256(UTF8(exact_transfer_code_string)))"
+}

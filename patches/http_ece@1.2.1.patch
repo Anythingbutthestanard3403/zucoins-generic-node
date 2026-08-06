@@ -1,0 +1,28 @@
+diff --git a/ece.js b/ece.js
+index e0d344fb95ec54bc3b7e523a8919d5a317f9dd59..0000000000000000000000000000000000000000 100644
+--- a/ece.js
++++ b/ece.js
+@@ -28,9 +28,4 @@
+-var keylog;
+-if (process.env.ECE_KEYLOG === '1') {
+-  keylog = function(m, k) {
+-    console.warn(m + ' [' + k.length + ']: ' + k.toString('base64url'));
+-    return k;
+-  };
+-} else {
+-  keylog = function(m, k) { return k; };
+-}
++// Repository security patch: key logging must be impossible for every consumer.
++// Keep the internal identity hook so cryptographic behavior stays byte-for-byte unchanged.
++function keylog(m, k) { return k; }
++var keylogIdentity = keylog;
+@@ -525,4 +520,8 @@
+ module.exports = {
+   decrypt: decrypt,
+-  encrypt: encrypt
++  encrypt: encrypt,
++  verifyKeylogDisabled: function(challenge) {
++    // Bind the integrity proof to the exact internal hook used by every crypto call.
++    return keylog === keylogIdentity ? keylog('integrity', challenge) : undefined;
++  }
+ };

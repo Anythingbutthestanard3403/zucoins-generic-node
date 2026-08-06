@@ -1,0 +1,49 @@
+{
+  "name": "@zucoins/generic-node-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./amounts": "./dist/amounts/index.js",
+    "./api-schema": "./dist/api-schema/index.js",
+    "./auth-errors": "./dist/auth-errors/index.js",
+    "./observation": "./dist/observation/index.js",
+    "./route-policy": "./dist/route-policy/index.js",
+    "./wallet-state": "./dist/wallet-state/index.js",
+    "./operations/events": "./dist/operations/events.contract.js",
+    "./transfer-code": "./dist/transfer-code/index.js",
+    "./testkit": "./dist/testkit/index.js",
+    "./operations": "./dist/operations/index.js",
+    "./custody": "./dist/custody/index.js",
+    "./enums": "./dist/enums/index.js",
+    "./vault": "./dist/vault/index.js",
+    "./instruction-origin": "./dist/instruction-origin/index.js",
+    "./implementer-events": "./dist/implementer-events/index.js",
+    "./landing-proof": "./dist/landing-proof/index.js",
+    "./artifacts": "./dist/artifacts/index.js",
+    "./crypto-goldens": "./dist/crypto-goldens/index.js",
+    "./machine-manifests": "./dist/machine-manifests/index.js",
+    "./no-callback": "./dist/no-callback/index.js",
+    "./receive-expiry": "./dist/receive-expiry/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint src",
+    "emit-json": "node scripts/emit-json.ts",
+    "emit-recovery": "node scripts/emit-recovery-golden.ts",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "bignumber.js": "9.1.0",
+    "libsodium-wrappers": "^0.7.15",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers": "^0.7.14",
+    "fast-check": "^4.9.0",
+    "vitest": "^3.2.6"
+  }
+}

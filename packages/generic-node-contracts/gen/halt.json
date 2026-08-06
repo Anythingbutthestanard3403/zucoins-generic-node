@@ -1,0 +1,79 @@
+{
+  "ALL_OPERATION_KINDS_SCOPED": [
+    "RECEIVE_EXTERNAL",
+    "MOVE_INTERNAL",
+    "SEND_EXTERNAL"
+  ],
+  "HALT_ADMIN_ROUTES": [
+    {
+      "method": "GET",
+      "path": "/admin/v1/halt",
+      "authMode": "operator_session"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/halt",
+      "authMode": "operator_session_totp"
+    }
+  ],
+  "HALT_EXEMPT_OPERATION_KINDS": [
+    "RECEIVE_EXTERNAL"
+  ],
+  "HALT_GATED_OPERATION_KINDS": [
+    "MOVE_INTERNAL",
+    "SEND_EXTERNAL"
+  ],
+  "HALT_GATED_RECOVERY_ACTIONS": [
+    "REBUILD_INTERNAL_MOVE"
+  ],
+  "HALT_KINDS": [
+    "OPERATOR_PAUSE"
+  ],
+  "HALT_NEVER_GATED_INTERNAL_PATHS": [
+    "OBSERVATION_SERVICE_READS",
+    "RECOVERY_CLASSIFICATION",
+    "BOOT_RECOVERY_CLASSIFICATION"
+  ],
+  "HALT_NEVER_GATED_RECOVERY_ACTIONS": [
+    "RETRY_OBSERVATION",
+    "REDELIVER_EXACT_PARTIAL",
+    "CONTINUE_EXTERNAL_WAIT",
+    "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+    "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    "RELEASE_EXPIRED_RECEIVE",
+    "QUARANTINE_WALLETS",
+    "ACKNOWLEDGE_KEEP_PINNED"
+  ],
+  "HALT_PERSISTENCE": {
+    "storage": "single-durable-record",
+    "schemaMigrationRequired": false,
+    "restoredBeforeMoneyEnginesStart": true,
+    "freshNodeDefault": false
+  },
+  "HALT_TOGGLE_AUTH": {
+    "engage": "operator_session_totp",
+    "disengage": "operator_session_totp"
+  },
+  "OPERATOR_RECOVERY_ACTIONS": [
+    "RETRY_OBSERVATION",
+    "REDELIVER_EXACT_PARTIAL",
+    "CONTINUE_EXTERNAL_WAIT",
+    "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+    "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    "REBUILD_INTERNAL_MOVE",
+    "RELEASE_EXPIRED_RECEIVE",
+    "QUARANTINE_WALLETS",
+    "ACKNOWLEDGE_KEEP_PINNED"
+  ],
+  "OUT_OF_SCOPE_HALT_MECHANISMS": [
+    "TOTAL_HALT_SCALE_TO_ZERO"
+  ],
+  "RECOVERY_ACTION_REAUTHORIZED_FORMATION": {
+    "REBUILD_INTERNAL_MOVE": "MOVE_INTERNAL"
+  },
+  "RESERVED_RECOVERY_ACTIONS": [
+    "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    "REBUILD_INTERNAL_MOVE"
+  ],
+  "SOURCE": "operator-kill-switch; scale-to-zero (exclusion only); operations recovery; guarded CAS mutation"
+}

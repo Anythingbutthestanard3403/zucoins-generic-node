@@ -1,0 +1,14 @@
+{
+  "SOURCE": "version literals A.1.1, A.1.2, A.9; artifacts-freeze",
+  "SPLITCHAIN_INNER_TYPE": "unique_combinable",
+  "SPLITCHAIN_INNER_VERSION": "2",
+  "SPLITCHAIN_SIGNER_STEPS": 2,
+  "SUITE_CANONICAL_VERSION": 1,
+  "SUITE_PURPOSE_SUFFIX": "-v1",
+  "VERSION_EVOLUTION_RULE": {
+    "inPlaceEditOfV1Surface": false,
+    "changeRequiresNewPurposeAndReviewedGoldens": true,
+    "enumMembershipChangeIsContractVersionChange": true
+  },
+  "VERSIONS_CONTRACT_VERSION": 1
+}

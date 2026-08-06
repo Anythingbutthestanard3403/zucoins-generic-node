@@ -1,0 +1,54 @@
+{
+  "name": "@zucoins/node-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./api": "./dist/api/index.js",
+    "./core": "./dist/core/index.js",
+    "./credential": "./dist/credential/index.js",
+    "./data": "./dist/data/index.js",
+    "./gateway": "./dist/gateway/index.js",
+    "./http": "./dist/http/index.js",
+    "./net": "./dist/net/index.js",
+    "./observability": "./dist/observability/index.js",
+    "./totp": "./dist/totp/index.js",
+    "./observation": "./dist/observation/index.js",
+    "./operator": "./dist/operator/index.js",
+    "./move": "./dist/move/index.js",
+    "./proof-body": "./dist/proof-body/index.js",
+    "./protocol": "./dist/protocol/index.js",
+    "./push": "./dist/push/index.js",
+    "./reporting": "./dist/reporting/index.js",
+    "./signing-keys": "./dist/signing-keys/index.js",
+    "./vault": "./dist/vault/index.js",
+    "./verifier": "./dist/verifier/index.js",
+    "./verifier/consumer": "./dist/verifier/consumer/index.js",
+    "./verifier/consumer/pinning": "./dist/verifier/consumer/pinning/index.js",
+    "./workers": "./dist/workers/index.js",
+    "./event-log": "./dist/event-log/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b && node scripts/copy-schema-sql.mjs",
+    "lint": "eslint src test",
+    "emit-openapi": "node ./scripts/emit-openapi.mjs",
+    "test": "vitest run --config vitest.config.ts",
+    "test:schema-census": "vitest run --config vitest.config.ts test/schema-census/schema-census.test.ts",
+    "schema-census": "node ../../scripts/check-schema-census.mjs"
+  },
+  "dependencies": {
+    "@zucoins/generic-node-contracts": "workspace:*",
+    "bcryptjs": "3.0.3",
+    "bignumber.js": "9.1.0",
+    "http_ece": "1.2.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "fast-check": "^4.9.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.6"
+  }
+}

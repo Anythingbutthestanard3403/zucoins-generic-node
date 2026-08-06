@@ -1,0 +1,15 @@
+{
+  "CHILD_LINK": {
+    "parent": "RECEIVE_EXTERNAL",
+    "spawns": "MOVE_INTERNAL",
+    "via": "spawned_from_operation_id",
+    "maxChildrenPerReceive": 1
+  },
+  "OPERATION_KINDS": [
+    "RECEIVE_EXTERNAL",
+    "MOVE_INTERNAL",
+    "SEND_EXTERNAL"
+  ],
+  "SOURCE": "core operation model: three public money operations",
+  "WORKFLOW_GRAPH_SUPPORTED": false
+}

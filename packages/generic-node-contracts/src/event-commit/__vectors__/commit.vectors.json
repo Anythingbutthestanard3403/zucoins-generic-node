@@ -1,0 +1,271 @@
+{
+  "concern": "event-commit",
+  "ticket": "events.2",
+  "governing": {
+    "spec": "data-model: node_events; canonical-fields: event signing; state-event reference: event serving; api-contract: event pull",
+    "decisions": ["signed-event-log", "sealed-store", "reporting-channel"]
+  },
+  "note": "Executable rollback/concurrency/restart/rotation vectors. Each vector's model is fed to the class verifier; `expect` is the required verdict. The sequence-recovery slice (events.3) consumes the same verifiers for the runtime race/crash/replay proof.",
+  "vectors": [
+    {
+      "id": "concurrency-one-winner-gapless",
+      "class": "concurrency",
+      "expect": true,
+      "model": {
+        "serializedOn": "lock_and_increment_counter",
+        "oneWinnerPerSeq": true,
+        "distinctSeqPerCommittedEvent": true,
+        "loserProceedsOnNextSeq": true,
+        "contiguousUnderContention": true,
+        "concurrentReaderObservesHalfBuiltEvent": false
+      }
+    },
+    {
+      "id": "concurrency-two-events-share-seq-rejected",
+      "class": "concurrency",
+      "expect": false,
+      "model": {
+        "serializedOn": "lock_and_increment_counter",
+        "oneWinnerPerSeq": true,
+        "distinctSeqPerCommittedEvent": false,
+        "loserProceedsOnNextSeq": true,
+        "contiguousUnderContention": true,
+        "concurrentReaderObservesHalfBuiltEvent": false
+      }
+    },
+    {
+      "id": "concurrency-half-built-visible-rejected",
+      "class": "concurrency",
+      "expect": false,
+      "model": {
+        "serializedOn": "lock_and_increment_counter",
+        "oneWinnerPerSeq": true,
+        "distinctSeqPerCommittedEvent": true,
+        "loserProceedsOnNextSeq": true,
+        "contiguousUnderContention": true,
+        "concurrentReaderObservesHalfBuiltEvent": true
+      }
+    },
+    {
+      "id": "rollback-no-burned-seq",
+      "class": "rollback",
+      "expect": true,
+      "model": {
+        "transaction": "single_guarded_transaction",
+        "semantics": "all_or_nothing",
+        "partialFailure": "rolls_back_whole_unit",
+        "rollbackBurnsSeq": false,
+        "unsignedGapPossible": false
+      }
+    },
+    {
+      "id": "rollback-burns-seq-rejected",
+      "class": "rollback",
+      "expect": false,
+      "model": {
+        "transaction": "single_guarded_transaction",
+        "semantics": "all_or_nothing",
+        "partialFailure": "rolls_back_whole_unit",
+        "rollbackBurnsSeq": true,
+        "unsignedGapPossible": false
+      }
+    },
+    {
+      "id": "restart-resumes-gapless-redelivers",
+      "class": "restart",
+      "expect": true,
+      "model": {
+        "uncommittedCommitLeavesEvent": false,
+        "uncommittedCommitLeavesOutboxEntry": false,
+        "uncommittedCommitTransitionsOperation": false,
+        "uncommittedCommitBurnsSeq": false,
+        "counterResumesFrom": "durable_high_water_mark",
+        "reusesSeq": false,
+        "committedUndeliveredOutboxRedelivered": true,
+        "redeliveryReSigns": false
+      }
+    },
+    {
+      "id": "restart-uncommitted-burns-seq-rejected",
+      "class": "restart",
+      "expect": false,
+      "model": {
+        "uncommittedCommitLeavesEvent": false,
+        "uncommittedCommitLeavesOutboxEntry": false,
+        "uncommittedCommitTransitionsOperation": false,
+        "uncommittedCommitBurnsSeq": true,
+        "counterResumesFrom": "durable_high_water_mark",
+        "reusesSeq": false,
+        "committedUndeliveredOutboxRedelivered": true,
+        "redeliveryReSigns": false
+      }
+    },
+    {
+      "id": "restart-reuses-seq-rejected",
+      "class": "restart",
+      "expect": false,
+      "model": {
+        "uncommittedCommitLeavesEvent": false,
+        "uncommittedCommitLeavesOutboxEntry": false,
+        "uncommittedCommitTransitionsOperation": false,
+        "uncommittedCommitBurnsSeq": false,
+        "counterResumesFrom": "durable_high_water_mark",
+        "reusesSeq": true,
+        "committedUndeliveredOutboxRedelivered": true,
+        "redeliveryReSigns": false
+      }
+    },
+    {
+      "id": "rotation-no-resign-chain-continuous",
+      "class": "rotation",
+      "expect": true,
+      "model": {
+        "resetsCounter": false,
+        "seqMonotonicAcrossRotation": true,
+        "reSignsCommittedEvents": false,
+        "preimageTupleChangedByRotation": false,
+        "keyIdInSignedPreimage": false,
+        "hashChainContinuousAcrossRotation": true,
+        "priorKeyRetiredBy": "seq_cursor"
+      }
+    },
+    {
+      "id": "rotation-resigns-committed-rejected",
+      "class": "rotation",
+      "expect": false,
+      "model": {
+        "resetsCounter": false,
+        "seqMonotonicAcrossRotation": true,
+        "reSignsCommittedEvents": true,
+        "preimageTupleChangedByRotation": false,
+        "keyIdInSignedPreimage": false,
+        "hashChainContinuousAcrossRotation": true,
+        "priorKeyRetiredBy": "seq_cursor"
+      }
+    },
+    {
+      "id": "rotation-resets-counter-rejected",
+      "class": "rotation",
+      "expect": false,
+      "model": {
+        "resetsCounter": true,
+        "seqMonotonicAcrossRotation": true,
+        "reSignsCommittedEvents": false,
+        "preimageTupleChangedByRotation": false,
+        "keyIdInSignedPreimage": false,
+        "hashChainContinuousAcrossRotation": true,
+        "priorKeyRetiredBy": "seq_cursor"
+      }
+    },
+    {
+      "id": "rotation-keyid-in-preimage-rejected",
+      "class": "rotation",
+      "expect": false,
+      "model": {
+        "resetsCounter": false,
+        "seqMonotonicAcrossRotation": true,
+        "reSignsCommittedEvents": false,
+        "preimageTupleChangedByRotation": true,
+        "keyIdInSignedPreimage": true,
+        "hashChainContinuousAcrossRotation": true,
+        "priorKeyRetiredBy": "seq_cursor"
+      }
+    },
+    {
+      "id": "rotation-retire-by-first-batch-rejected",
+      "class": "rotation",
+      "expect": false,
+      "model": {
+        "resetsCounter": false,
+        "seqMonotonicAcrossRotation": true,
+        "reSignsCommittedEvents": false,
+        "preimageTupleChangedByRotation": false,
+        "keyIdInSignedPreimage": false,
+        "hashChainContinuousAcrossRotation": true,
+        "priorKeyRetiredBy": "first_batch_verified"
+      }
+    },
+    {
+      "id": "ddl-enforces-atomic-commit",
+      "class": "ddl",
+      "expect": true,
+      "model": {
+        "eventAndStateSameTransaction": true,
+        "outboxEnqueuedInSameTransaction": true,
+        "outboxSeparateFromNeutralTruth": true,
+        "seqSource": "dedicated_per_node_counter",
+        "uniqueEventId": true,
+        "uniqueEventHash": true,
+        "eventsInsertOnly": true
+      }
+    },
+    {
+      "id": "ddl-outbox-not-separate-rejected",
+      "class": "ddl",
+      "expect": false,
+      "model": {
+        "eventAndStateSameTransaction": true,
+        "outboxEnqueuedInSameTransaction": true,
+        "outboxSeparateFromNeutralTruth": false,
+        "seqSource": "dedicated_per_node_counter",
+        "uniqueEventId": true,
+        "uniqueEventHash": true,
+        "eventsInsertOnly": true
+      }
+    },
+    {
+      "id": "ddl-identity-seq-source-rejected",
+      "class": "ddl",
+      "expect": false,
+      "model": {
+        "eventAndStateSameTransaction": true,
+        "outboxEnqueuedInSameTransaction": true,
+        "outboxSeparateFromNeutralTruth": true,
+        "seqSource": "generated_always_as_identity",
+        "uniqueEventId": true,
+        "uniqueEventHash": true,
+        "eventsInsertOnly": true
+      }
+    },
+    {
+      "id": "state-transition-bound-with-insertion",
+      "class": "state_transition",
+      "expect": true,
+      "model": {
+        "unit": ["allocation", "previous_hash", "signing", "state_transition", "insertion", "outbox_enqueue"]
+      }
+    },
+    {
+      "id": "event-insert-without-state-transition-rejected",
+      "class": "state_transition",
+      "expect": false,
+      "model": {
+        "unit": ["allocation", "previous_hash", "signing", "insertion", "outbox_enqueue"]
+      }
+    },
+    {
+      "id": "previous-hash-genesis-null-matches",
+      "class": "previous_hash",
+      "expect": true,
+      "model": { "builtOnHash": null, "chainHeadHash": null }
+    },
+    {
+      "id": "previous-hash-binds-current-head",
+      "class": "previous_hash",
+      "expect": true,
+      "model": {
+        "builtOnHash": "3b1f0c8e9a2d4b6f8c0e1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+        "chainHeadHash": "3b1f0c8e9a2d4b6f8c0e1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+      }
+    },
+    {
+      "id": "previous-hash-mixed-stale-head-rejected",
+      "class": "previous_hash",
+      "expect": false,
+      "model": {
+        "builtOnHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "chainHeadHash": "3b1f0c8e9a2d4b6f8c0e1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+      }
+    }
+  ]
+}

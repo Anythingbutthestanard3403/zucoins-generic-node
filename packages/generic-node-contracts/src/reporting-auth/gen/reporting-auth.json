@@ -1,0 +1,209 @@
+{
+  "concern": "reporting-auth",
+  "ticket": "reporting.1",
+  "governing": {
+    "spec": "canonical-fields: suite serializer, register tuple, event signing; signing-custody: keys and signing matrix; api-contract: signed reporting",
+    "decisions": [
+      "reporting-ingest-auth",
+      "signed-event-log",
+      "sealed-store",
+      "reporting-channel",
+      "reporting-key-enrolment"
+    ],
+    "dependsOn": "B-03"
+  },
+  "keyClasses": [
+    {
+      "key": "reporting",
+      "owner": "implementer",
+      "algorithm": "ed25519",
+      "nodeStores": "public_only"
+    },
+    {
+      "key": "node_event",
+      "owner": "node",
+      "algorithm": "ed25519",
+      "nodeStores": "private_and_public"
+    }
+  ],
+  "keySeparation": {
+    "reportingKeyAllowedPurposes": [
+      "zp-reporting-register-v1",
+      "zp-report-request-v1"
+    ],
+    "nodeEventKeyAllowedPurposes": [
+      "zp-node-event-v1"
+    ],
+    "crossPurposeForbidden": [
+      "splitchain-inner",
+      "zp-receive-expected-v1",
+      "zp-move-internal-expected-v1",
+      "zp-send-external-expected-v1",
+      "zp-send-external-approval-v1",
+      "zp-destination-bless-v1",
+      "zp-device-enrol-v1"
+    ]
+  },
+  "credentialMechanisms": {
+    "allowed": [
+      "ed25519_signed_tuple"
+    ],
+    "forbidden": [
+      "hmac",
+      "bearer_ik",
+      "bearer_sh",
+      "basic",
+      "cookie_session"
+    ]
+  },
+  "separationFromLegacy": {
+    "v2Purposes": [
+      "zp-reporting-register-v1",
+      "zp-report-request-v1",
+      "zp-node-event-v1"
+    ],
+    "legacyPushPurposes": [
+      "zupay-reporting-v1",
+      "zupay-reporting-transport-v1",
+      "zupay-reporting-handshake-v1"
+    ]
+  },
+  "registerTuple": {
+    "purpose": "zp-reporting-register-v1",
+    "canonicalVersion": 1,
+    "enrolWindowSecs": 300,
+    "fieldOrder": [
+      "purpose",
+      "canonical_version",
+      "node_id",
+      "implementer_id",
+      "new_reporting_key_id",
+      "new_reporting_public_key",
+      "supersedes_key_id",
+      "nonce",
+      "issued_at",
+      "expires_at"
+    ],
+    "goldenPreimage": "zp-reporting-register-v1\n{\"purpose\":\"zp-reporting-register-v1\",\"canonical_version\":1,\"node_id\":\"11111111-1111-4111-8111-111111111111\",\"implementer_id\":\"22222222-2222-4222-8222-222222222222\",\"new_reporting_key_id\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"new_reporting_public_key\":\"ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw=\",\"supersedes_key_id\":null,\"nonce\":\"99999999-9999-4999-8999-999999999999\",\"issued_at\":\"2026-07-18T00:00:00.000Z\",\"expires_at\":\"2026-07-18T00:05:00.000Z\"}",
+    "goldenPreimageSha256": "98fba788ad4ba2141dc400f1cd0f58db3a03b34a00b5a04ecdcfe239e9912e7e",
+    "goldenProofOfPossessionSignature": "mSzq0luyM9AubD8PrVDBeoSwljM8SGXmUTsXVhVaLJiX0bPQgHKzFwBwIDkGTpm-2CdsINIQObzjOvHvCMCuDA==",
+    "goldenReportingPubkey": "ypOsFwUYcHHWe4PH_w7-gQjo7EUwV113JoeTM9vavnw="
+  },
+  "registerProofVerifier": {
+    "stages": [
+      "structural_register_preimage",
+      "public_key_padded_base64url_decode_32_byte_length_exact_reencode",
+      "public_key_canonical_compressed_encoding_y_less_than_p_and_negative_zero_reject",
+      "public_key_exact_eight_torsion_reject",
+      "signature_padded_base64url_decode_64_byte_length_exact_reencode",
+      "injected_full_public_key_point_validation",
+      "proof_of_possession_detached_verification"
+    ],
+    "publicKeyBytes": {
+      "encoding": "padded_base64url",
+      "decodedLengthBytes": 32,
+      "exactReencodeRequired": true,
+      "canonicalCompressedEncoding": {
+        "yLessThanFieldPrime": true,
+        "negativeZeroRejected": true
+      },
+      "rejectedTorsionEncodingsHex": [
+        "0100000000000000000000000000000000000000000000000000000000000000",
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000080",
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85",
+        "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05",
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"
+      ]
+    },
+    "signatureBytes": {
+      "encoding": "padded_base64url",
+      "decodedLengthBytes": 64,
+      "exactReencodeRequired": true
+    },
+    "pointCallback": {
+      "required": true,
+      "requirements": [
+        "canonical_encoding",
+        "on_curve",
+        "main_prime_order_subgroup",
+        "nonidentity",
+        "nonsmall_order"
+      ],
+      "successReturn": "literal_true_only",
+      "calledBeforeProofOfPossession": true,
+      "anyOtherReturnOrThrow": "fail_closed_without_proof_of_possession"
+    },
+    "verifyDetachedCallback": {
+      "argumentShape": "named_object_publicKey_preimage_signature",
+      "calledOnlyAfterPointValidationSuccess": true,
+      "successReturn": "literal_true_only",
+      "anyOtherReturnOrThrow": "fail_closed",
+      "preimageBytes": "original_exact_utf8"
+    },
+    "callbackBytes": "fresh_copies",
+    "bytePrevalidationClaim": "canonical_prevalidated_bytes_only",
+    "runtimeCompletePointValidationClaim": false
+  },
+  "lifecycle": {
+    "states": [
+      "PENDING",
+      "ACTIVE",
+      "RETIRED",
+      "REVOKED"
+    ],
+    "terminalStates": [
+      "RETIRED",
+      "REVOKED"
+    ],
+    "transitions": [
+      {
+        "from": "PENDING",
+        "to": "ACTIVE"
+      },
+      {
+        "from": "ACTIVE",
+        "to": "RETIRED"
+      },
+      {
+        "from": "ACTIVE",
+        "to": "REVOKED"
+      }
+    ],
+    "verifierOrder": [
+      "key_status",
+      "tenant_equality",
+      "signature"
+    ],
+    "rotationModel": {
+      "slots": [
+        "current",
+        "prior"
+      ],
+      "reportingKeyOverlap": "current_plus_prior",
+      "reportingKeyRotationAnchor": "supersedes_key_id",
+      "reportingKeyOverlapWindowHours": 24,
+      "eventKeyRetirementTrigger": "seq_cursor_past_last_prior_signed_seq",
+      "revokeCurrentReactivatesPrior": false,
+      "revokeToZero": "ALARMED_FAIL_CLOSED_NO_ACTIVE_KEY"
+    },
+    "restoreGuard": {
+      "monotonicMarker": "reporting_epoch_high_water_mark",
+      "hashChainBreakOnIngest": "HARD_STOP_RECONCILE"
+    },
+    "bootstrapTrustRoot": {
+      "trigger": "supersedes_key_id === null",
+      "status": "PERMANENT",
+      "decidedBy": "bootstrap-enrolment-trust-root (Option A)",
+      "grantsLiveReportingAuthority": true,
+      "implementerIdSource": "authenticated_caller_never_body",
+      "requiresAll": [
+        "authenticated_onboarding_credential",
+        "node_origin_operator_approval",
+        "proof_of_possession"
+      ]
+    }
+  }
+}

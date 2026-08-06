@@ -1,0 +1,39 @@
+{
+  "states": [
+    "AVAILABLE",
+    "PINNED",
+    "QUARANTINED",
+    "RETIRED"
+  ],
+  "leaseRoles": [
+    "RECEIVE_WINDOW",
+    "MOVE_DESTINATION",
+    "SEND_SOURCE",
+    "MOVE_SOURCE",
+    "RECONCILIATION"
+  ],
+  "operationLeaseRoles": [
+    "RECEIVE_WINDOW",
+    "MOVE_DESTINATION",
+    "SEND_SOURCE",
+    "MOVE_SOURCE"
+  ],
+  "leaseLifecycleStates": [
+    "ACTIVE",
+    "RELEASED"
+  ],
+  "leaseEvents": [
+    "LEASE_ACQUIRED",
+    "LEASE_RELEASED",
+    "QUARANTINE_FLAGGED",
+    "QUARANTINE_CLEARED",
+    "RETIRED_FLAGGED"
+  ],
+  "invariants": {
+    "projectionIsSoleSource": "Public wallet state is a projection of lease reality (C-02); it is never an independently mutable column.",
+    "leasedIsNeverAvailable": "Any wallet with an active operation lease projects PINNED, never AVAILABLE (resolves the boot vs move/send tension).",
+    "oneInFlightPerWallet": "At most one active operation lease per wallet (the one-in-flight-per-wallet rule); more than one is a breach.",
+    "noStateChangeWithoutLeaseEvent": "Every wallet-state transition is caused by a lease/flag event; there is no spontaneous transition.",
+    "leaseHoldPrecedenceOverExpiry": "A post-candidate RECEIVE_WINDOW lease is not released by expiry; the wallet stays PINNED, held (the receive-expiry rule)."
+  }
+}

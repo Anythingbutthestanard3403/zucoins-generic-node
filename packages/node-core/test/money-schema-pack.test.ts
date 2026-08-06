@@ -1,0 +1,294 @@
+/**
+ * Money schema pack unit gate (no live DB).
+ * Proves: ordered MigrationFile names, receive barrier CREATE presence,
+ * catalog-strip removes redeclared domains/types/functions, pack completeness
+ * vs disk, reporting-prefix ownership hand-off keeps standalone slice 0 whole.
+ */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { parseMigrationName } from "../src/data/migrations.ts";
+import {
+  MONEY_SCHEMA_DIR,
+  MONEY_SCHEMA_PACK_EXCLUDED_AFTER_REPORTING,
+  MONEY_SCHEMA_PACK_ORDER,
+  MONEY_SCHEMA_PACK_VERSION_BASE,
+  REPORTING_PREFIX_OWNED_CATALOG,
+  catalogSetsSeededFromReportingPrefix,
+  collectCatalogObjectNames,
+  emptyCatalogObjectSets,
+  extractInlineForeignKeys,
+  findCreateTableStatements,
+  listSchemaSqlFiles,
+  loadMoneySchemaMigrations,
+  missingForeignKeys,
+  registerCatalogObjects,
+  stripAlreadySeenCatalogObjects,
+  stripRedeclaredCatalogObjects,
+} from "../src/schema/money-schema-pack.ts";
+
+describe("money schema pack", () => {
+  it("loads a densely versioned MigrationFile[] starting at VERSION_BASE", () => {
+    const files = loadMoneySchemaMigrations();
+    expect(files).toHaveLength(MONEY_SCHEMA_PACK_ORDER.length);
+    for (let i = 0; i < files.length; i += 1) {
+      const parsed = parseMigrationName(files[i].fileName);
+      expect(parsed.version).toBe(MONEY_SCHEMA_PACK_VERSION_BASE + i);
+      expect(files[i].sql.length).toBeGreaterThan(50);
+    }
+  });
+
+  it("includes CREATE TABLE for the three receive barriers", () => {
+    const corpus = MONEY_SCHEMA_PACK_ORDER.map((slice) =>
+      readFileSync(join(MONEY_SCHEMA_DIR, `${slice}.sql`), "utf8"),
+    ).join("\n");
+    expect(corpus).toMatch(/CREATE TABLE receive_codes\b/);
+    expect(corpus).toMatch(/CREATE TABLE receive_arms\b/);
+    expect(corpus).toMatch(/CREATE TABLE receive_release_proofs\b/);
+  });
+
+  it("pack order places receive_codes before receive_arms and release after arms", () => {
+    const iCodes = MONEY_SCHEMA_PACK_ORDER.indexOf("receive-codes");
+    const iArms = MONEY_SCHEMA_PACK_ORDER.indexOf("receive-arms");
+    const iRelease = MONEY_SCHEMA_PACK_ORDER.indexOf("receive-expiry-release");
+    expect(iCodes).toBeGreaterThan(-1);
+    expect(iArms).toBeGreaterThan(iCodes);
+    expect(iRelease).toBeGreaterThan(iArms);
+  });
+
+  it("strips redeclared CREATE DOMAIN/TYPE while preserving CREATE TABLE", () => {
+    const sample = `
+CREATE DOMAIN sha256_hex AS text
+  CHECK (VALUE ~ '^[0-9a-f]{64}$');
+CREATE TYPE operation_kind AS ENUM (
+  'RECEIVE_EXTERNAL',
+  'MOVE_INTERNAL'
+);
+CREATE TABLE receive_codes (operation_id uuid PRIMARY KEY);
+`;
+    const stripped = stripRedeclaredCatalogObjects(sample);
+    expect(stripped).not.toMatch(/CREATE DOMAIN/);
+    expect(stripped).not.toMatch(/CREATE TYPE/);
+    expect(stripped).toMatch(/CREATE TABLE receive_codes/);
+  });
+
+  it("every pack slice file exists and excluded-after-reporting are on disk but not in pack", () => {
+    const onDisk = new Set(listSchemaSqlFiles());
+    for (const slice of MONEY_SCHEMA_PACK_ORDER) {
+      expect(onDisk.has(`${slice}.sql`)).toBe(true);
+    }
+    for (const excluded of MONEY_SCHEMA_PACK_EXCLUDED_AFTER_REPORTING) {
+      expect(onDisk.has(excluded)).toBe(true);
+      expect(MONEY_SCHEMA_PACK_ORDER).not.toContain(excluded.replace(/\.sql$/, ""));
+    }
+    // signing-key-registry is pack-owned (node_signing_keys absent from reporting 0000).
+    expect(MONEY_SCHEMA_PACK_ORDER).toContain("signing-key-registry");
+    expect(MONEY_SCHEMA_PACK_EXCLUDED_AFTER_REPORTING).not.toContain(
+      "signing-key-registry.sql",
+    );
+  });
+
+  it("contracts for receive-codes and receive-arms pin the CREATE file names", () => {
+    const codes = readFileSync(join(MONEY_SCHEMA_DIR, "receive-codes.contract.ts"), "utf8");
+    const arms = readFileSync(join(MONEY_SCHEMA_DIR, "receive-arms.contract.ts"), "utf8");
+    expect(codes).toContain('RECEIVE_CODES_SCHEMA_FILE = "receive-codes.sql"');
+    expect(arms).toContain('RECEIVE_ARMS_SCHEMA_FILE = "receive-arms.sql"');
+  });
+});
+
+describe("catalog ownership + strip", () => {
+  it("standalone pack keeps shared domains in slice 0 and strips later redeclares", () => {
+    const files = loadMoneySchemaMigrations();
+    const base = files[0].sql;
+    expect(base).toMatch(/CREATE DOMAIN sha256_hex\b/);
+    expect(base).toMatch(/CREATE DOMAIN zkz_balance_text\b/);
+    expect(base).toMatch(/CREATE TYPE operation_kind\b/);
+    expect(base).toMatch(/CREATE FUNCTION reporting_logical_fingerprint\b/);
+
+    // Later money slices re-declare sha256_hex for greenfield-alone; must not on combined pack.
+    for (let i = 1; i < files.length; i += 1) {
+      expect(files[i].sql).not.toMatch(/CREATE DOMAIN sha256_hex\b/);
+      expect(files[i].sql).not.toMatch(/CREATE DOMAIN padded_base64url_pubkey\b/);
+    }
+  });
+
+  it("afterReportingPrefix strips reporting-owned catalog from slice 0 but keeps money-only floor", () => {
+    const files = loadMoneySchemaMigrations({ afterReportingPrefix: true });
+    const base = files[0].sql;
+    for (const name of REPORTING_PREFIX_OWNED_CATALOG.domains) {
+      expect(base).not.toMatch(new RegExp(`CREATE DOMAIN ${name}\\b`));
+    }
+    for (const name of REPORTING_PREFIX_OWNED_CATALOG.types) {
+      expect(base).not.toMatch(new RegExp(`CREATE TYPE ${name}\\b`));
+    }
+    for (const name of REPORTING_PREFIX_OWNED_CATALOG.functions) {
+      expect(base).not.toMatch(new RegExp(`CREATE (?:OR REPLACE )?FUNCTION ${name}\\b`));
+    }
+    // Money-only floor still materialises on combined boot.
+    expect(base).toMatch(/CREATE DOMAIN zkz_balance_text\b/);
+    expect(base).toMatch(/CREATE DOMAIN zkz_amount_positive_text\b/);
+    expect(base).toMatch(/CREATE TYPE operation_kind\b/);
+    expect(base).toMatch(/CREATE TYPE wallet_state\b/);
+
+    // signing-key-registry keeps node_signing_keys; drops implementer_reporting_keys
+    // (already owned by reporting 0000).
+    const signingIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("signing-key-registry");
+    expect(files[signingIdx].sql).toMatch(/CREATE TABLE node_signing_keys\b/);
+    expect(files[signingIdx].sql).not.toMatch(/CREATE TABLE implementer_reporting_keys\b/);
+  });
+
+  it("cumulative strip drops redeclared functions across pack slices", () => {
+    const files = loadMoneySchemaMigrations();
+    // event-ledger is first pack owner of reporting_reject_immutable_change.
+    const eventIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("event-ledger");
+    expect(files[eventIdx].sql).toMatch(
+      /CREATE FUNCTION reporting_reject_immutable_change\b/,
+    );
+    for (let i = eventIdx + 1; i < files.length; i += 1) {
+      expect(files[i].sql).not.toMatch(
+        /CREATE FUNCTION reporting_reject_immutable_change\b/,
+      );
+    }
+  });
+
+  it("AUDIT: every pack/reporting CREATE DOMAIN|TYPE|FUNCTION overlap is listed in REPORTING_PREFIX_OWNED_CATALOG", () => {
+    // reporting prefix (drizzle twin on disk under node-core schema)
+    const reportingSql = readFileSync(
+      join(MONEY_SCHEMA_DIR, "reporting-persistence.sql"),
+      "utf8",
+    );
+    const reporting = collectCatalogObjectNames(reportingSql);
+
+    const packCreates = emptyCatalogObjectSets();
+    for (const slice of MONEY_SCHEMA_PACK_ORDER) {
+      registerCatalogObjects(
+        packCreates,
+        readFileSync(join(MONEY_SCHEMA_DIR, `${slice}.sql`), "utf8"),
+      );
+    }
+
+    const domainOverlap = [...reporting.domains].filter((d) => packCreates.domains.has(d));
+    const typeOverlap = [...reporting.types].filter((t) => packCreates.types.has(t));
+    const functionOverlap = [...reporting.functions].filter((f) =>
+      packCreates.functions.has(f),
+    );
+
+    expect(new Set(domainOverlap)).toEqual(
+      new Set(REPORTING_PREFIX_OWNED_CATALOG.domains),
+    );
+    expect(new Set(typeOverlap)).toEqual(new Set(REPORTING_PREFIX_OWNED_CATALOG.types));
+    // Catalog list may intentionally include reporting-only helpers that no pack
+    // slice re-declares; asserted overlap ⊆ owned and every true overlap is covered.
+    for (const name of functionOverlap) {
+      expect(REPORTING_PREFIX_OWNED_CATALOG.functions).toContain(name);
+    }
+    expect(functionOverlap).toEqual(
+      expect.arrayContaining([
+        "reporting_logical_fingerprint",
+        "reporting_reject_immutable_change",
+      ]),
+    );
+  });
+
+  it("stripAlreadySeenCatalogObjects is a pure projection of the seen set", () => {
+    const sample = `
+CREATE DOMAIN sha256_hex AS text CHECK (VALUE ~ '^[0-9a-f]{64}$');
+CREATE DOMAIN zkz_balance_text AS text CHECK (VALUE ~ '^[0-9]+$');
+CREATE TYPE reporting_key_state AS ENUM ('PENDING', 'ACTIVE');
+CREATE TYPE operation_kind AS ENUM ('RECEIVE_EXTERNAL');
+CREATE FUNCTION reporting_logical_fingerprint(p text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$ SELECT p; $$;
+CREATE FUNCTION custody_reject_wallet_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$;
+CREATE TABLE wallets (id uuid PRIMARY KEY);
+`;
+    const seen = catalogSetsSeededFromReportingPrefix();
+    const stripped = stripAlreadySeenCatalogObjects(sample, seen);
+    expect(stripped).not.toMatch(/CREATE DOMAIN sha256_hex\b/);
+    expect(stripped).toMatch(/CREATE DOMAIN zkz_balance_text\b/);
+    expect(stripped).not.toMatch(/CREATE TYPE reporting_key_state\b/);
+    expect(stripped).toMatch(/CREATE TYPE operation_kind\b/);
+    expect(stripped).not.toMatch(/CREATE FUNCTION reporting_logical_fingerprint\b/);
+    expect(stripped).toMatch(/CREATE FUNCTION custody_reject_wallet_mutation\b/);
+    expect(stripped).toMatch(/CREATE TABLE wallets\b/);
+  });
+
+  it("lease-foundation emits FK wire-up and never creates orphan eligibility fn", () => {
+    const files = loadMoneySchemaMigrations();
+    const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
+    const sql = files[leaseIdx].sql;
+    expect(sql).not.toMatch(/CREATE TABLE wallet_active_leases\b/);
+    expect(sql).toMatch(/wallet_active_leases_membership_id_fkey/);
+    expect(sql).toMatch(/REFERENCES wallet_lease_memberships/);
+    expect(sql).toMatch(/wallet_active_leases_lease_group_id_fkey/);
+    expect(sql).toMatch(/REFERENCES lease_groups/);
+    expect(sql).not.toMatch(
+      /CREATE FUNCTION lease_foundation_reject_ineligible_lease\b/,
+    );
+    expect(sql).not.toMatch(/CREATE TRIGGER wallet_active_leases_eligibility_guard\b/);
+  });
+
+  it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {
+    const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
+    const ackIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-acknowledgements");
+    const landingIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("landing-proof-verifications");
+    expect(lineageIdx).toBeGreaterThan(landingIdx);
+    expect(ackIdx).toBeGreaterThan(lineageIdx);
+    const files = loadMoneySchemaMigrations();
+    expect(files[lineageIdx]!.sql).toMatch(/CREATE TABLE lineage_path_proofs\b/);
+    expect(files[lineageIdx]!.sql).toMatch(/CREATE TABLE lineage_path_bodies\b/);
+    expect(files[ackIdx]!.sql).toMatch(/CREATE TABLE verification_acknowledgements\b/);
+    expect(files[ackIdx]!.sql).toMatch(/CREATE TABLE verification_ack_wallet_evidence\b/);
+    expect(files[ackIdx]!.sql).toMatch(/reporting_acks_immutable/);
+  });
+
+  it("AUDIT: multi-slice tables are body-equal OR later owns FK wire-up / first is FK-superset", () => {
+    const byTable = new Map<string, { slice: string; full: string }[]>();
+    for (const slice of MONEY_SCHEMA_PACK_ORDER) {
+      const raw = readFileSync(join(MONEY_SCHEMA_DIR, `${slice}.sql`), "utf8");
+      for (const t of findCreateTableStatements(raw)) {
+        const list = byTable.get(t.name) ?? [];
+        list.push({ slice, full: t.full });
+        byTable.set(t.name, list);
+      }
+    }
+    const multi = [...byTable.entries()].filter(([, v]) => v.length > 1);
+    expect(multi.map(([n]) => n).sort()).toEqual(
+      [
+        "operation_expected_artifacts",
+        "operator_device_keys",
+        "wallet_active_leases",
+      ].sort(),
+    );
+
+    const files = loadMoneySchemaMigrations();
+    for (const [table, owners] of multi) {
+      const first = owners[0];
+      for (let i = 1; i < owners.length; i += 1) {
+        const later = owners[i];
+        if (first.full === later.full) continue; // byte-equal OK
+        const missing = missingForeignKeys(
+          extractInlineForeignKeys(first.full),
+          extractInlineForeignKeys(later.full),
+        );
+        if (missing.length === 0) {
+          // Later does not add FKs (first is FK-superset or equal refs) — OK.
+          continue;
+        }
+        // Later owns FK wire-up: its pack slice SQL must emit the constraints.
+        const sliceIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(
+          later.slice as (typeof MONEY_SCHEMA_PACK_ORDER)[number],
+        );
+        const emitted = files[sliceIdx].sql;
+        for (const fk of missing) {
+          for (const col of fk.columns) {
+            expect(emitted).toMatch(
+              new RegExp(`${table}_${col}_fkey|REFERENCES ${fk.refTable}`, "i"),
+            );
+          }
+        }
+      }
+    }
+  });
+});

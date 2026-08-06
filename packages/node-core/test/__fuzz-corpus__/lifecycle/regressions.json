@@ -1,0 +1,73 @@
+{
+  "note": "Saved regression corpus. Seed-independent replay: each entry is a self-contained shrunk counterexample re-executed directly by lifecycle-fuzz-corpus.test.ts (never via fast-check sampling). Add an entry whenever a fuzz run discovers a counterexample: record the fast-check seed/path plus the shrunk input and the now-expected outcome. INVARIANT_BREACH captures carry full reproduction state.",
+  "entries": [
+    {
+      "id": "lease-released-during-send-reconcile-001",
+      "seed": 368002,
+      "path": "0:0",
+      "kind": "reconcile-send",
+      "governing": "a lease must be active for the whole reconcile",
+      "input": {
+        "boundary": "DELIVERED",
+        "sendAttemptId": "att-1",
+        "sourceWalletId": "w-src",
+        "sourceLeaseState": "RELEASED",
+        "transferCodeSha256": "code-1",
+        "sourceObservation": { "result": "NO_SUCCESSOR" }
+      },
+      "expected": { "kind": "INVARIANT_BREACH", "reasonSource": "LEASE_NOT_ACTIVE_DURING_RECONCILE" }
+    },
+    {
+      "id": "move-one-leg-released-002",
+      "seed": 368002,
+      "path": "3:1",
+      "kind": "reconcile-move",
+      "governing": "a move reconciles only while both legs hold their leases",
+      "input": {
+        "boundary": "POST_SUBMIT",
+        "moveAttemptId": "mv-1",
+        "sourceWalletId": "w-src",
+        "destinationWalletId": "w-dst",
+        "expectedMoveBodySha256": "body-1",
+        "sourceLeaseState": "ACTIVE",
+        "destinationLeaseState": "RELEASED",
+        "sourceObservation": { "result": "NO_SUCCESSOR" },
+        "destinationObservation": { "result": "NO_SUCCESSOR" }
+      },
+      "expected": { "kind": "INVARIANT_BREACH" }
+    },
+    {
+      "id": "receive-postsubmit-never-rebuilds-003",
+      "seed": 368002,
+      "path": "1:2",
+      "kind": "reconcile-receive",
+      "governing": "external inbound is never rebuilt; an anomalous head is indeterminate",
+      "input": {
+        "boundary": "POST_SUBMIT",
+        "receiveAttemptId": "att-1",
+        "receiverWalletId": "w-1",
+        "receiverLeaseState": "ACTIVE",
+        "receiverObservation": { "result": "ANOMALY", "anomaly": "UNEXPLAINED_JUMP" }
+      },
+      "expected": { "kind": "INDETERMINATE" }
+    },
+    {
+      "id": "send-reserved-needs-attention-to-rejected-004",
+      "seed": 368002,
+      "path": "n/a",
+      "kind": "transition-send",
+      "governing": "RESERVED transition: no oracle authorises it",
+      "observed": { "from": "NEEDS_ATTENTION", "to": "REJECTED" },
+      "expected": { "verdict": "RESERVED_TRANSITION_FIRED" }
+    },
+    {
+      "id": "move-reserved-needs-attention-to-created-005",
+      "seed": 368002,
+      "path": "n/a",
+      "kind": "transition-move",
+      "governing": "RESERVED transition: there is no PROVEN_NOT_LANDED oracle",
+      "observed": { "from": "NEEDS_ATTENTION", "to": "CREATED" },
+      "expected": { "verdict": "RESERVED_TRANSITION_FIRED" }
+    }
+  ]
+}

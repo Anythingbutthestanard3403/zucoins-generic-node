@@ -1,0 +1,1002 @@
+{
+  "failClosed": {
+    "LANDING_DETERMINATIONS": [
+      "LANDED_EXACT",
+      "LANDED_COMPLETE_PATH",
+      "INDETERMINATE"
+    ],
+    "INDETERMINATE_CAUSES": [
+      "FRESH_HEAD_UNAVAILABLE",
+      "ENDPOINT_CONFLICT",
+      "WORK_BUDGET_EXHAUSTED",
+      "INDEX_COLLISION",
+      "WALK_AMBIGUOUS_HOP",
+      "WALK_MISSING_HOP",
+      "WALK_CYCLE",
+      "EXPECTED_BODY_ABSENT_FROM_PATH",
+      "REVERIFY_REJECTED",
+      "PREDICATE_UNVERIFIABLE",
+      "INVARIANT_ANOMALY"
+    ],
+    "INDETERMINATE_CAUSE_TAXONOMY": [
+      {
+        "cause": "FRESH_HEAD_UNAVAILABLE",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "no fresh authoritative signature-verified head to anchor at depth 0 (read failure / stale / unverifiable)",
+        "source": "the landing-proof rule; anomaly actions (transport/read failure -> keep lease, verification indeterminate)"
+      },
+      {
+        "cause": "ENDPOINT_CONFLICT",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "two independently configured gateway endpoints disagree on the wallet head",
+        "source": "the landing-proof rule (conflict / contradictory wallet path); anomaly actions (endpoints disagree -> INDETERMINATE, oracle incident)"
+      },
+      {
+        "cause": "WORK_BUDGET_EXHAUSTED",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "the walk hit its bounded step budget before reaching genesis (the index/walk INCOMPLETE_BUDGET_EXHAUSTED) — a pathologically long or over-budget chain, never silently truncated to a shorter 'complete' path",
+        "source": "the landing-proof rule (verifier resource/budget exhaustion); bounded read; over-budget evidence; the index/walk WALK_OUTCOMES"
+      },
+      {
+        "cause": "INDEX_COLLISION",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a hop's (wallet, step-2 signature) key holds two conflicting exact bodies (a surfaced index collision)",
+        "source": "the landing-proof rule (conflict); SIGNATURE_COLLISION anomaly -> fail closed"
+      },
+      {
+        "cause": "WALK_AMBIGUOUS_HOP",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a predecessor state signature resolves to more than one candidate body (the index/walk INCOMPLETE_AMBIGUOUS_HOP)",
+        "source": "the landing-proof rule (conflict/anomaly); relationship anomaly classes; the index/walk WALK_OUTCOMES"
+      },
+      {
+        "cause": "WALK_MISSING_HOP",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a body needed to extend the contiguous chain is absent from the index (unobserved body / missed poll / gap / index gap / unknown completed send) (the index/walk INCOMPLETE_MISSING_HOP)",
+        "source": "the landing-proof rule (missing bodies / gap); absent back-link; omission -> indeterminate; the index/walk WALK_OUTCOMES"
+      },
+      {
+        "cause": "WALK_CYCLE",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a predecessor pointer resolves back to an entry already on the walk (a state-signature cycle or self-loop) so no genesis-terminating chain exists (the index/walk INCOMPLETE_CYCLE)",
+        "source": "the landing-proof rule (duplicate/cycle yields INDETERMINATE); cycle anomaly -> fail closed; the index/walk WALK_OUTCOMES"
+      },
+      {
+        "cause": "EXPECTED_BODY_ABSENT_FROM_PATH",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "the reconstructable/contiguous path does not contain the expected body as its terminal; absence is not evidence of non-landing (a stale head or a sibling branch remains possible)",
+        "source": "the landing-proof rule (no PROVEN_NOT_LANDED); indeterminate—not not-landed"
+      },
+      {
+        "cause": "REVERIFY_REJECTED",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a manifest was constructed but the manifest builder's standalone re-verifier returned REJECTED (corrupt/tampered body, broken back-link, gap, duplicate/cycle, wrong claim, ...); a rejected proof proves nothing",
+        "source": "the landing-proof rule (invalid preimage/back-link, duplicate/cycle); bridges MANIFEST_REVERIFY_FAILURES"
+      },
+      {
+        "cause": "PREDICATE_UNVERIFIABLE",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "an attested per-body predicate the standalone re-verifier cannot itself re-run (both Ed25519 signatures, strict scalar/role, operation-artifact + economic against T0) could not be established at construction",
+        "source": "the landing-proof rule (invalid signature/role/economic predicate); the observation verification predicates"
+      },
+      {
+        "cause": "INVARIANT_ANOMALY",
+        "layer": "EVIDENCE_INSUFFICIENCY",
+        "producedBy": "a custody/invariant anomaly incompatible with a clean determination (unexplained jump, regression, genesis-after-history, or an unattributed deep successor while the wallet remains actively leased)",
+        "source": "the landing-proof rule (anomaly; unattributed deep successor = invariant/custody breach); do not infer landing/non-landing"
+      }
+    ],
+    "FRESH_HEAD_STATUSES": [
+      "AUTHORITATIVE",
+      "STALE_OR_UNVERIFIED",
+      "ENDPOINT_CONFLICT"
+    ],
+    "DETERMINATION_AUTHORITY": {
+      "LANDED_EXACT": {
+        "mayConcludeLanded": true,
+        "mayConcludeNotLanded": false,
+        "mayRetryRebuildResubmit": false,
+        "mayReleaseLeaseOrReuse": false,
+        "mustHoldLeaseAndAwaitNewObservations": false
+      },
+      "LANDED_COMPLETE_PATH": {
+        "mayConcludeLanded": true,
+        "mayConcludeNotLanded": false,
+        "mayRetryRebuildResubmit": false,
+        "mayReleaseLeaseOrReuse": false,
+        "mustHoldLeaseAndAwaitNewObservations": false
+      },
+      "INDETERMINATE": {
+        "mayConcludeLanded": false,
+        "mayConcludeNotLanded": false,
+        "mayRetryRebuildResubmit": false,
+        "mayReleaseLeaseOrReuse": false,
+        "mustHoldLeaseAndAwaitNewObservations": true
+      }
+    },
+    "REWALK_SEMANTICS": {
+      "indeterminateIsNotTerminal": true,
+      "onlyNewObservationsCanChangeOutcome": true,
+      "identicalEvidenceYieldsIdenticalOutcome": true,
+      "indeterminateNeverDefaultsToLanded": true,
+      "indeterminateNeverDefaultsToNotLanded": true,
+      "noTimeBasedFoldToTerminal": true,
+      "source": "the landing-proof rule and the receive-expiry prevention rule (no PROVEN_NOT_LANDED, no fold-out)"
+    },
+    "FAIL_CLOSED_INVARIANTS": {
+      "provenNotLandedExists": false,
+      "determinationSpaceSize": 3,
+      "positiveMembersAreClassifications": true,
+      "indeterminateConfersZeroAuthority": true,
+      "noOutcomeAuthorizesConcludingNotLanded": true,
+      "causeVocabularyDisjointFromReverifyFailures": true,
+      "reverifyRejectedIsTheSoleBridge": true,
+      "reverifyFailureVocabularySize": 14,
+      "source": "the landing-proof rule; the landing wire-vocabulary correction; the observation-verification completeness/anomaly rules; the api contract landing fields"
+    },
+    "LANDING_WIRE_CLASSIFICATIONS": [
+      "EXPECTED_AT_HEAD",
+      "EXPECTED_ANCESTOR"
+    ],
+    "LANDING_DETERMINATION_TO_WIRE": {
+      "LANDED_EXACT": "EXPECTED_AT_HEAD",
+      "LANDED_COMPLETE_PATH": "EXPECTED_ANCESTOR"
+    },
+    "DEPTH_ONE_LANDING_IS_LANDED_COMPLETE_PATH": true,
+    "WIRE_INDETERMINATE_REASONS": [
+      "MISSING_BODY",
+      "LINK_GAP",
+      "ANOMALY",
+      "FRESH_HEAD_MISMATCH",
+      "BUDGET_EXCEEDED"
+    ],
+    "INDETERMINATE_CAUSE_TO_WIRE_REASON": {
+      "FRESH_HEAD_UNAVAILABLE": "FRESH_HEAD_MISMATCH",
+      "ENDPOINT_CONFLICT": "ANOMALY",
+      "WORK_BUDGET_EXHAUSTED": "BUDGET_EXCEEDED",
+      "INDEX_COLLISION": "ANOMALY",
+      "WALK_AMBIGUOUS_HOP": "LINK_GAP",
+      "WALK_MISSING_HOP": "LINK_GAP",
+      "WALK_CYCLE": "ANOMALY",
+      "EXPECTED_BODY_ABSENT_FROM_PATH": "MISSING_BODY",
+      "REVERIFY_REJECTED": "ANOMALY",
+      "PREDICATE_UNVERIFIABLE": "ANOMALY",
+      "INVARIANT_ANOMALY": "ANOMALY"
+    }
+  },
+  "goldenFixtures": {
+    "A": {
+      "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+      "wallet_role": "receiver",
+      "s_signature": "q0rqDmQXm20sFXipEJ861OUR3KCmPu5c7ldDF2W8EcgQ4h9daRmx2CKTD2gl7ocSD6ys22LeZDGWBTFcGIpOnw==",
+      "p_signature": "",
+      "step_1_signature": "6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==",
+      "step_2_signature": "f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==",
+      "completed_transaction_text": "{\"inner\":{\"seq\":\"A\",\"t0\":\"1700000000\"},\"step_1_signature\":\"6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==\",\"step_2_signature\":\"f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==\"}",
+      "completed_transaction_sha256": "e9864702a6b659902dddc1fedfdb1ae3968241200b6d8cab2752bf60f7a15a8e"
+    },
+    "B": {
+      "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+      "wallet_role": "receiver",
+      "s_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+      "p_signature": "q0rqDmQXm20sFXipEJ861OUR3KCmPu5c7ldDF2W8EcgQ4h9daRmx2CKTD2gl7ocSD6ys22LeZDGWBTFcGIpOnw==",
+      "step_1_signature": "whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==",
+      "step_2_signature": "nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==",
+      "completed_transaction_text": "{\"inner\":{\"seq\":\"B\",\"t0\":\"1700000100\"},\"step_1_signature\":\"whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==\",\"step_2_signature\":\"nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==\"}",
+      "completed_transaction_sha256": "e901c85a2d0344357c5f0aa7887f9ce8252cf8704f1d47201e504bb6bb0d48f3"
+    },
+    "C": {
+      "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+      "wallet_role": "receiver",
+      "s_signature": "S-X3J2yK3mj0sdyFJ7AfV421A_sVV_R3_5ND3BLBlbDn5SqGNfT5OW0t4YWGu9tkIQbRZsiz4VNdobv4E2rxYw==",
+      "p_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+      "step_1_signature": "C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==",
+      "step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+      "completed_transaction_text": "{\"inner\":{\"seq\":\"C\",\"t0\":\"1700000200\"},\"step_1_signature\":\"C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==\",\"step_2_signature\":\"l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==\"}",
+      "completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835"
+    },
+    "T_SENDER": {
+      "wallet_public_key": "Dluq06UmUqcD-Cd7ZNIJdRxnjy4YMrOMSouTR98Ca_M=",
+      "wallet_role": "sender",
+      "s_signature": "WOqyLhgvP5py3WhNoPuWvUR4-6q-VcdOHUgI6uN0zSNz6DyuNQGuuf7hV1TYqtxIiJvh8lDFEMk47j3Yist5SQ==",
+      "p_signature": "",
+      "step_1_signature": "du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==",
+      "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+      "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+      "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf"
+    },
+    "T_RECEIVER": {
+      "wallet_public_key": "dcA14epgmH_8zqL5dfB_qneBpMZd_7jbPLyeNTS3dkE=",
+      "wallet_role": "receiver",
+      "s_signature": "lqNMI3D0U3_ky9d9o5G98dlpIuzTfS5OkKS9qDOVqYRaz8SmnZ5qrv_kRpkL00AmY-oaV06rP6iNGa9rPw6wjA==",
+      "p_signature": "",
+      "step_1_signature": "du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==",
+      "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+      "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+      "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf"
+    },
+    "A_NORMALIZED": {
+      "completed_transaction_text": "{\n  \"inner\": {\n    \"seq\": \"A\",\n    \"t0\": \"1700000000\"\n  },\n  \"step_1_signature\": \"6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==\",\n  \"step_2_signature\": \"f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==\"\n}",
+      "stored_sha256_of_original_A": "e9864702a6b659902dddc1fedfdb1ae3968241200b6d8cab2752bf60f7a15a8e",
+      "actual_sha256": "970ee3f70f93c9874ba0fbcbb7704b11311d62212032b4b2185bd7a67877fa62"
+    }
+  },
+  "goldenManifests": {
+    "GOLDEN_COMPLETE_PATH_MANIFEST": {
+      "manifest_version": "landing-proof-manifest/v1",
+      "operation": {
+        "operation_id": "00000000-0000-4000-8000-00000000recX",
+        "operation_kind": "RECEIVE_EXTERNAL",
+        "queried_wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+        "wallet_role": "receiver"
+      },
+      "classification": "LANDED_COMPLETE_PATH",
+      "claimed_landed": {
+        "step_2_signature": "f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==",
+        "completed_transaction_text": "{\"inner\":{\"seq\":\"A\",\"t0\":\"1700000000\"},\"step_1_signature\":\"6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==\",\"step_2_signature\":\"f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==\"}",
+        "completed_transaction_sha256": "e9864702a6b659902dddc1fedfdb1ae3968241200b6d8cab2752bf60f7a15a8e",
+        "depth": 2
+      },
+      "head_read": {
+        "source_observation_id": "00000000-0000-4000-8000-00000000head",
+        "observer_id": "00000000-0000-4000-8000-0000000000ob",
+        "endpoint_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "wallet_seq": 1,
+        "observed_at": "2026-07-19T00:00:00.000Z",
+        "head_step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+        "head_completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835",
+        "head_body_matches_authoritative_read": true
+      },
+      "hop_chain": [
+        {
+          "depth": 0,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+          "s_signature": "S-X3J2yK3mj0sdyFJ7AfV421A_sVV_R3_5ND3BLBlbDn5SqGNfT5OW0t4YWGu9tkIQbRZsiz4VNdobv4E2rxYw==",
+          "p_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+          "step_1_signature": "C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"C\",\"t0\":\"1700000200\"},\"step_1_signature\":\"C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==\",\"step_2_signature\":\"l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==\"}",
+          "completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835"
+        },
+        {
+          "depth": 1,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==",
+          "s_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+          "p_signature": "q0rqDmQXm20sFXipEJ861OUR3KCmPu5c7ldDF2W8EcgQ4h9daRmx2CKTD2gl7ocSD6ys22LeZDGWBTFcGIpOnw==",
+          "step_1_signature": "whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"B\",\"t0\":\"1700000100\"},\"step_1_signature\":\"whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==\",\"step_2_signature\":\"nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==\"}",
+          "completed_transaction_sha256": "e901c85a2d0344357c5f0aa7887f9ce8252cf8704f1d47201e504bb6bb0d48f3"
+        },
+        {
+          "depth": 2,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==",
+          "s_signature": "q0rqDmQXm20sFXipEJ861OUR3KCmPu5c7ldDF2W8EcgQ4h9daRmx2CKTD2gl7ocSD6ys22LeZDGWBTFcGIpOnw==",
+          "p_signature": "",
+          "step_1_signature": "6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"A\",\"t0\":\"1700000000\"},\"step_1_signature\":\"6GY4udHpOwyXG_1WfjNcgeoJFF71xDNAePM3HcWn-Kcj0s1gxWbk1fbcNmAaj0CfnCQ6MCaTzBgKp39-v2Py1g==\",\"step_2_signature\":\"f4aqh6Z1XQKGWuQXDv8iOdzwZCbJzeALHbMS-Qu42gjzfFIKw0VQS9N5oYEj2yWeLOq2eVu8d7bKkANH6TqUPw==\"}",
+          "completed_transaction_sha256": "e9864702a6b659902dddc1fedfdb1ae3968241200b6d8cab2752bf60f7a15a8e"
+        }
+      ],
+      "verification": {
+        "economic_evaluation_basis": "EXPECTED_BODY_T0",
+        "head_anchored_at_verification_time": true,
+        "intermediate_bodies_untrusted_until_verified": true,
+        "declared_per_body_predicates": [
+          "EXACT_PREIMAGE",
+          "BOTH_SIGNATURES",
+          "ROLE",
+          "BACKLINK",
+          "ECONOMIC"
+        ]
+      }
+    },
+    "GOLDEN_COMPLETE_PATH_PREFIX_MANIFEST": {
+      "manifest_version": "landing-proof-manifest/v1",
+      "operation": {
+        "operation_id": "00000000-0000-4000-8000-00000000recY",
+        "operation_kind": "RECEIVE_EXTERNAL",
+        "queried_wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+        "wallet_role": "receiver"
+      },
+      "classification": "LANDED_COMPLETE_PATH",
+      "claimed_landed": {
+        "step_2_signature": "nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==",
+        "completed_transaction_text": "{\"inner\":{\"seq\":\"B\",\"t0\":\"1700000100\"},\"step_1_signature\":\"whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==\",\"step_2_signature\":\"nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==\"}",
+        "completed_transaction_sha256": "e901c85a2d0344357c5f0aa7887f9ce8252cf8704f1d47201e504bb6bb0d48f3",
+        "depth": 1
+      },
+      "head_read": {
+        "source_observation_id": "00000000-0000-4000-8000-00000000head",
+        "observer_id": "00000000-0000-4000-8000-0000000000ob",
+        "endpoint_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "wallet_seq": 1,
+        "observed_at": "2026-07-19T00:00:00.000Z",
+        "head_step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+        "head_completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835",
+        "head_body_matches_authoritative_read": true
+      },
+      "hop_chain": [
+        {
+          "depth": 0,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+          "s_signature": "S-X3J2yK3mj0sdyFJ7AfV421A_sVV_R3_5ND3BLBlbDn5SqGNfT5OW0t4YWGu9tkIQbRZsiz4VNdobv4E2rxYw==",
+          "p_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+          "step_1_signature": "C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"C\",\"t0\":\"1700000200\"},\"step_1_signature\":\"C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==\",\"step_2_signature\":\"l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==\"}",
+          "completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835"
+        },
+        {
+          "depth": 1,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==",
+          "s_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+          "p_signature": "q0rqDmQXm20sFXipEJ861OUR3KCmPu5c7ldDF2W8EcgQ4h9daRmx2CKTD2gl7ocSD6ys22LeZDGWBTFcGIpOnw==",
+          "step_1_signature": "whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"B\",\"t0\":\"1700000100\"},\"step_1_signature\":\"whbK3Cl_-1atE6LtFibwZ1-CmauA8Kk9IIj3cywjPQfs3aXNTcYLWC-YZVGm6xxTnvfjrSmECqWAhNS_186jBQ==\",\"step_2_signature\":\"nsKrIAcRErBUuOeuC7CCpB6ELQuVfWLWdv7Bwwasc6O0IXi39peS68_uFx_eTg7W0nwsEXXPWxNEv-O4uMhSDg==\"}",
+          "completed_transaction_sha256": "e901c85a2d0344357c5f0aa7887f9ce8252cf8704f1d47201e504bb6bb0d48f3"
+        }
+      ],
+      "verification": {
+        "economic_evaluation_basis": "EXPECTED_BODY_T0",
+        "head_anchored_at_verification_time": true,
+        "intermediate_bodies_untrusted_until_verified": true,
+        "declared_per_body_predicates": [
+          "EXACT_PREIMAGE",
+          "BOTH_SIGNATURES",
+          "ROLE",
+          "BACKLINK",
+          "ECONOMIC"
+        ]
+      }
+    },
+    "GOLDEN_EXACT_MANIFEST": {
+      "manifest_version": "landing-proof-manifest/v1",
+      "operation": {
+        "operation_id": "00000000-0000-4000-8000-00000000recZ",
+        "operation_kind": "RECEIVE_EXTERNAL",
+        "queried_wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+        "wallet_role": "receiver"
+      },
+      "classification": "LANDED_EXACT",
+      "claimed_landed": {
+        "step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+        "completed_transaction_text": "{\"inner\":{\"seq\":\"C\",\"t0\":\"1700000200\"},\"step_1_signature\":\"C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==\",\"step_2_signature\":\"l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==\"}",
+        "completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835",
+        "depth": 0
+      },
+      "head_read": {
+        "source_observation_id": "00000000-0000-4000-8000-00000000head",
+        "observer_id": "00000000-0000-4000-8000-0000000000ob",
+        "endpoint_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "wallet_seq": 1,
+        "observed_at": "2026-07-19T00:00:00.000Z",
+        "head_step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+        "head_completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835",
+        "head_body_matches_authoritative_read": true
+      },
+      "hop_chain": [
+        {
+          "depth": 0,
+          "wallet_public_key": "81ZErkG0GqsJQR8bMCxaqkD1AT3yuNtdCXx0BwIb6bU=",
+          "wallet_role": "receiver",
+          "step_2_signature": "l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==",
+          "s_signature": "S-X3J2yK3mj0sdyFJ7AfV421A_sVV_R3_5ND3BLBlbDn5SqGNfT5OW0t4YWGu9tkIQbRZsiz4VNdobv4E2rxYw==",
+          "p_signature": "AYyb-tdAQQGib-uBVTYxSU8FanD_1ROqbBiw0qogognZuVw7jLSPjaiaRtjf_h7HxlM6ZZTf3CQ5gQfVav1U3g==",
+          "step_1_signature": "C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"C\",\"t0\":\"1700000200\"},\"step_1_signature\":\"C0ZvZUbGovb55X265L1IaVIjWVGAQNm52UYk2fGW8zf8_4QG9VzO4i-fyXzD0-zskj7B20--CDjY5l1dfayxPA==\",\"step_2_signature\":\"l0pWRITZMkk2AJWpT9NUQItqYD_kkm7XrN3I2EVxi1UKWe7VrnNK9a4sueyC12oN9_u3xMvSo5V6UWIdydfj0w==\"}",
+          "completed_transaction_sha256": "d0170374e6ee74ea9a77a1c8420eb75e6c8bf64791097b8ea8985c875e691835"
+        }
+      ],
+      "verification": {
+        "economic_evaluation_basis": "EXPECTED_BODY_T0",
+        "head_anchored_at_verification_time": true,
+        "intermediate_bodies_untrusted_until_verified": true,
+        "declared_per_body_predicates": [
+          "EXACT_PREIMAGE",
+          "BOTH_SIGNATURES",
+          "ROLE",
+          "BACKLINK",
+          "ECONOMIC"
+        ]
+      }
+    },
+    "GOLDEN_MOVE_MANIFEST": {
+      "manifest_version": "landing-proof-manifest/v1",
+      "operation": {
+        "operation_id": "00000000-0000-4000-8000-0000000movE",
+        "operation_kind": "MOVE_INTERNAL",
+        "queried_wallet_public_key": "Dluq06UmUqcD-Cd7ZNIJdRxnjy4YMrOMSouTR98Ca_M=",
+        "wallet_role": "sender"
+      },
+      "classification": "LANDED_EXACT",
+      "move_step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+      "source_path": {
+        "manifest_version": "landing-proof-manifest/v1",
+        "operation": {
+          "operation_id": "00000000-0000-4000-8000-0000000movE",
+          "operation_kind": "MOVE_INTERNAL",
+          "queried_wallet_public_key": "Dluq06UmUqcD-Cd7ZNIJdRxnjy4YMrOMSouTR98Ca_M=",
+          "wallet_role": "sender"
+        },
+        "classification": "LANDED_EXACT",
+        "claimed_landed": {
+          "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+          "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf",
+          "depth": 0
+        },
+        "head_read": {
+          "source_observation_id": "00000000-0000-4000-8000-0000000senD",
+          "observer_id": "00000000-0000-4000-8000-0000000000ob",
+          "endpoint_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "wallet_seq": 1,
+          "observed_at": "2026-07-19T00:00:00.000Z",
+          "head_step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+          "head_completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf",
+          "head_body_matches_authoritative_read": true
+        },
+        "hop_chain": [
+          {
+            "depth": 0,
+            "wallet_public_key": "Dluq06UmUqcD-Cd7ZNIJdRxnjy4YMrOMSouTR98Ca_M=",
+            "wallet_role": "sender",
+            "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+            "s_signature": "WOqyLhgvP5py3WhNoPuWvUR4-6q-VcdOHUgI6uN0zSNz6DyuNQGuuf7hV1TYqtxIiJvh8lDFEMk47j3Yist5SQ==",
+            "p_signature": "",
+            "step_1_signature": "du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==",
+            "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+            "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf"
+          }
+        ],
+        "verification": {
+          "economic_evaluation_basis": "EXPECTED_BODY_T0",
+          "head_anchored_at_verification_time": true,
+          "intermediate_bodies_untrusted_until_verified": true,
+          "declared_per_body_predicates": [
+            "EXACT_PREIMAGE",
+            "BOTH_SIGNATURES",
+            "ROLE",
+            "BACKLINK",
+            "ECONOMIC"
+          ]
+        }
+      },
+      "destination_path": {
+        "manifest_version": "landing-proof-manifest/v1",
+        "operation": {
+          "operation_id": "00000000-0000-4000-8000-0000000movE",
+          "operation_kind": "MOVE_INTERNAL",
+          "queried_wallet_public_key": "dcA14epgmH_8zqL5dfB_qneBpMZd_7jbPLyeNTS3dkE=",
+          "wallet_role": "receiver"
+        },
+        "classification": "LANDED_EXACT",
+        "claimed_landed": {
+          "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+          "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+          "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf",
+          "depth": 0
+        },
+        "head_read": {
+          "source_observation_id": "00000000-0000-4000-8000-0000000recV",
+          "observer_id": "00000000-0000-4000-8000-0000000000ob",
+          "endpoint_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "wallet_seq": 1,
+          "observed_at": "2026-07-19T00:00:00.000Z",
+          "head_step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+          "head_completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf",
+          "head_body_matches_authoritative_read": true
+        },
+        "hop_chain": [
+          {
+            "depth": 0,
+            "wallet_public_key": "dcA14epgmH_8zqL5dfB_qneBpMZd_7jbPLyeNTS3dkE=",
+            "wallet_role": "receiver",
+            "step_2_signature": "LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==",
+            "s_signature": "lqNMI3D0U3_ky9d9o5G98dlpIuzTfS5OkKS9qDOVqYRaz8SmnZ5qrv_kRpkL00AmY-oaV06rP6iNGa9rPw6wjA==",
+            "p_signature": "",
+            "step_1_signature": "du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==",
+            "completed_transaction_text": "{\"inner\":{\"seq\":\"T\",\"t0\":\"1700000200\"},\"step_1_signature\":\"du_4LQ9GQ53gRLWkRIaoGVj_Rt5QCc1vRbZWf7F00MzZ4i5F866jb0UUQOI_T4dglWLZfJvC9dWg-KOuzXLv3Q==\",\"step_2_signature\":\"LNqa9r74HeKJRopF7IUff_0MduGhZfxbhAaizyLEcRXClsykUzxFdXGAF1sCQEyOHMkleuqtawiYkncs_eXinQ==\"}",
+            "completed_transaction_sha256": "ea3aea7b1e461592be89979df97eb165c2592aef13e9340a8c05e7478a294baf"
+          }
+        ],
+        "verification": {
+          "economic_evaluation_basis": "EXPECTED_BODY_T0",
+          "head_anchored_at_verification_time": true,
+          "intermediate_bodies_untrusted_until_verified": true,
+          "declared_per_body_predicates": [
+            "EXACT_PREIMAGE",
+            "BOTH_SIGNATURES",
+            "ROLE",
+            "BACKLINK",
+            "ECONOMIC"
+          ]
+        }
+      },
+      "verification": {
+        "economic_evaluation_basis": "EXPECTED_BODY_T0",
+        "head_anchored_at_verification_time": true,
+        "intermediate_bodies_untrusted_until_verified": true,
+        "declared_per_body_predicates": [
+          "EXACT_PREIMAGE",
+          "BOTH_SIGNATURES",
+          "ROLE",
+          "BACKLINK",
+          "ECONOMIC"
+        ]
+      }
+    }
+  },
+  "index": {
+    "ANCESTRY_INDEX_KEY_FIELDS": [
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "the role-view wallet stream; a MOVE indexes under both the sender and receiver keys"
+      },
+      {
+        "name": "step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the completing (second) transaction signature; the body's identity within a wallet role-view"
+      }
+    ],
+    "ANCESTRY_INDEX_ENTRY_FIELDS": [
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "key part; the role-view wallet stream"
+      },
+      {
+        "name": "step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "key part; the body identity"
+      },
+      {
+        "name": "wallet_role",
+        "type": "wallet_observation_role",
+        "nullable": false,
+        "note": "sender | receiver; the role-relative view (genesis is a terminal, never an entry)"
+      },
+      {
+        "name": "completed_transaction_text",
+        "type": "text",
+        "nullable": false,
+        "note": "the EXACT signed body, byte-for-byte as observed; never normalized or reformatted (the byte-exact signing rule)"
+      },
+      {
+        "name": "completed_transaction_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "SHA-256 of completed_transaction_text; recomputed and byte-compared on ingest"
+      },
+      {
+        "name": "s_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "this role-view's current state signature; the target a successor's predecessor pointer resolves to"
+      },
+      {
+        "name": "p_signature",
+        "type": "text",
+        "nullable": false,
+        "note": "role-relative PREDECESSOR: the previous state signature; empty string iff the predecessor is genesis (walk root)"
+      },
+      {
+        "name": "step_1_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the initiating (first) transaction signature"
+      },
+      {
+        "name": "source_observation_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "provenance: the gateway_observations row this entry was populated from"
+      }
+    ],
+    "INDEXABILITY_RULE": {
+      "requiredParseResult": "VERIFIED_HEAD",
+      "requiresEmptyRecordViolations": true,
+      "requiresCompletedTransactionText": true,
+      "requiresStepTwoSignature": true,
+      "genesisIsTerminalNotEntry": true,
+      "nonVerifiedNeverIndexed": true
+    }
+  },
+  "linkage": {
+    "LINKAGE_RULE": {
+      "predecessorPointer": "p_signature",
+      "resolvesAgainst": "s_signature",
+      "sameWalletRoleView": true,
+      "headDepth": 0,
+      "genesisRootPredecessor": "",
+      "backlinkSource": "SUCCESSOR backlink (new P equals prior S)"
+    },
+    "EXACT_BODY_RULE": {
+      "storedVerbatim": true,
+      "digestField": "completed_transaction_sha256",
+      "digestAlgo": "sha256",
+      "normalizedBodyRejected": true,
+      "reason": "the signed bytes are the identity; a reformatted body is a different, unverifiable object"
+    },
+    "COLLISION_RULE": {
+      "keyMapsToExactlyOneBody": true,
+      "identicalBytesIdempotent": true,
+      "differingBytesIsCollision": true,
+      "collisionSurfacedNeverMerged": true
+    },
+    "INGEST_OUTCOMES": [
+      "INDEXED",
+      "IDEMPOTENT",
+      "COLLISION",
+      "REJECTED_DIGEST_MISMATCH",
+      "REJECTED_NOT_INDEXABLE"
+    ],
+    "WALK_OUTCOMES": [
+      "COMPLETE_CONTIGUOUS",
+      "INCOMPLETE_MISSING_HOP",
+      "INCOMPLETE_AMBIGUOUS_HOP",
+      "INCOMPLETE_CYCLE",
+      "INCOMPLETE_BUDGET_EXHAUSTED"
+    ],
+    "WALK_COMPLETENESS": {
+      "headDepth": 0,
+      "completeRequiresContiguousExactChain": true,
+      "terminatesAtGenesisRoot": false,
+      "boundedExpectedToHeadPrefixSufficient": true,
+      "incompleteConfersNoLandedConclusion": true,
+      "gatewayRemainsHeadOnly": true,
+      "observationsNotAssumedCompleteHistory": true,
+      "walkAlwaysTerminates": true,
+      "terminationGuards": [
+        "visited-set cycle guard",
+        "bounded step budget"
+      ],
+      "failClosedTaxonomyOwner": "fail-closed-determination"
+    },
+    "WALK_STEP_BUDGET_DEFAULT": 1000000
+  },
+  "manifest": {
+    "LANDING_PROOF_MANIFEST_VERSION": "landing-proof-manifest/v1",
+    "LANDING_CLASSIFICATIONS": [
+      "LANDED_EXACT",
+      "LANDED_COMPLETE_PATH"
+    ],
+    "REQUIRED_PER_BODY_PREDICATES": [
+      "EXACT_PREIMAGE",
+      "BOTH_SIGNATURES",
+      "ROLE",
+      "BACKLINK",
+      "ECONOMIC"
+    ],
+    "ECONOMIC_EVALUATION_BASIS": "EXPECTED_BODY_T0",
+    "DEPTH_SEMANTICS": {
+      "headDepth": 0,
+      "depthCap": null,
+      "unbounded": true,
+      "boundedOrIncompleteHandlingOwner": "fail-closed-determination"
+    },
+    "REVERIFICATION_PREDICATE": {
+      "runsFromManifestAlone": true,
+      "trustsProducingNode": false,
+      "perHopDigestRecomputedAndByteCompared": true,
+      "backlinkRoleRelative": "P(W,T[i]) == S(W,T[i-1])",
+      "headAnchoredAtDepthZero": true,
+      "claimedBodyIsChainTerminal": true,
+      "requiresContiguousGapFreeDuplicateFreeCycleFreeChain": true,
+      "partialPrefixNeverAccepted": true
+    },
+    "MANIFEST_RETENTION": {
+      "permanent": true,
+      "accessWindowDefault": "TERMINAL_PLUS_30_DAYS",
+      "expiryRevokesEndpointAccessOnly": true,
+      "canonicalBodiesNeverReserialized": true,
+      "verdictIsPermanentEvidence": true,
+      "source": "the observation retention rules"
+    },
+    "OPERATION_IDENTITY_FIELDS": [
+      {
+        "name": "operation_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "the node operation this proof is anchored to"
+      },
+      {
+        "name": "operation_kind",
+        "type": "operation_kind",
+        "nullable": false,
+        "note": "the frozen OperationKind domain (the operations concern OPERATION_KINDS); consumed here, never redeclared"
+      },
+      {
+        "name": "queried_wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "the wallet role-view the single-path chain is walked under"
+      },
+      {
+        "name": "wallet_role",
+        "type": "wallet_observation_role",
+        "nullable": false,
+        "note": "sender | receiver; genesis is a walk terminal, never an operation role-view"
+      }
+    ],
+    "CLAIMED_LANDED_FIELDS": [
+      {
+        "name": "step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the completing signature; the claimed body's identity in the wallet role-view"
+      },
+      {
+        "name": "completed_transaction_text",
+        "type": "text",
+        "nullable": false,
+        "note": "the EXACT signed body, byte-for-byte; never normalized or reformatted (the byte-exact signing rule)"
+      },
+      {
+        "name": "completed_transaction_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "SHA-256 of completed_transaction_text; recomputed and byte-compared on re-verification"
+      },
+      {
+        "name": "depth",
+        "type": "integer_nonneg",
+        "nullable": false,
+        "note": "the claimed body's depth in the hop chain; 0 iff LANDED_EXACT"
+      }
+    ],
+    "HEAD_READ_PROVENANCE_FIELDS": [
+      {
+        "name": "source_observation_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "the gateway_observations row the fresh head was read from"
+      },
+      {
+        "name": "observer_id",
+        "type": "uuid",
+        "nullable": false,
+        "note": "the observing domain identity for the head read"
+      },
+      {
+        "name": "endpoint_fingerprint",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "the independently configured endpoint the head was read from"
+      },
+      {
+        "name": "wallet_seq",
+        "type": "bigint_positive",
+        "nullable": false,
+        "note": "the head row's per-stream sequence"
+      },
+      {
+        "name": "observed_at",
+        "type": "timestamptz",
+        "nullable": false,
+        "note": "the head read's capture time; never a uniqueness or sequencing key"
+      },
+      {
+        "name": "head_step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the depth-0 hop identity; must equal hop_chain[0].step_2_signature"
+      },
+      {
+        "name": "head_completed_transaction_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "the depth-0 hop digest; must equal hop_chain[0].completed_transaction_sha256"
+      },
+      {
+        "name": "head_body_matches_authoritative_read",
+        "type": "boolean",
+        "nullable": false,
+        "note": "true iff the depth-0 body byte-matched the freshly read authoritative head; false is never a landing proof"
+      }
+    ],
+    "MANIFEST_HOP_FIELDS": [
+      {
+        "name": "depth",
+        "type": "integer_nonneg",
+        "nullable": false,
+        "note": "0 = fresh head; contiguous 0..N toward the claimed body"
+      },
+      {
+        "name": "wallet_public_key",
+        "type": "padded_base64url_pubkey",
+        "nullable": false,
+        "note": "the role-view wallet stream; constant across a single-path chain"
+      },
+      {
+        "name": "wallet_role",
+        "type": "wallet_observation_role",
+        "nullable": false,
+        "note": "sender | receiver; constant across a single-path chain"
+      },
+      {
+        "name": "step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the completing signature; this hop's body identity"
+      },
+      {
+        "name": "s_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "this hop's current state signature; the target its successor's predecessor pointer resolves to"
+      },
+      {
+        "name": "p_signature",
+        "type": "text",
+        "nullable": false,
+        "note": "role-relative predecessor state signature; must equal the next-deeper hop's s_signature; empty only permitted on the deepest (claimed) hop"
+      },
+      {
+        "name": "step_1_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the initiating signature"
+      },
+      {
+        "name": "completed_transaction_text",
+        "type": "text",
+        "nullable": false,
+        "note": "the EXACT signed body, byte-for-byte; never normalized (the byte-exact signing rule)"
+      },
+      {
+        "name": "completed_transaction_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "note": "SHA-256 of completed_transaction_text; recomputed and byte-compared per hop on re-verification"
+      }
+    ],
+    "VERIFICATION_SEMANTICS_FIELDS": [
+      {
+        "name": "economic_evaluation_basis",
+        "type": "economic_evaluation_basis",
+        "nullable": false,
+        "note": "must be EXPECTED_BODY_T0; a later-balance basis is rejected"
+      },
+      {
+        "name": "head_anchored_at_verification_time",
+        "type": "boolean",
+        "nullable": false,
+        "note": "the head read was fresh at verification time; the anchor is contemporaneous"
+      },
+      {
+        "name": "intermediate_bodies_untrusted_until_verified",
+        "type": "boolean",
+        "nullable": false,
+        "note": "supplied intermediate bodies are untrusted evidence until the re-verifier confirms each"
+      },
+      {
+        "name": "declared_per_body_predicates",
+        "type": "per_body_predicate[]",
+        "nullable": false,
+        "note": "the frozen predicate classes the producing node evaluated per body; must cover REQUIRED_PER_BODY_PREDICATES"
+      }
+    ],
+    "SINGLE_PATH_MANIFEST_FIELDS": [
+      {
+        "name": "manifest_version",
+        "type": "text",
+        "nullable": false,
+        "note": "LANDING_PROOF_MANIFEST_VERSION; an unknown version is rejected"
+      },
+      {
+        "name": "operation",
+        "type": "operation_identity",
+        "nullable": false,
+        "note": "OPERATION_IDENTITY_FIELDS"
+      },
+      {
+        "name": "classification",
+        "type": "landing_classification",
+        "nullable": false,
+        "note": "LANDED_EXACT | LANDED_COMPLETE_PATH; must match the chain shape"
+      },
+      {
+        "name": "claimed_landed",
+        "type": "claimed_landed",
+        "nullable": false,
+        "note": "CLAIMED_LANDED_FIELDS; must equal the deepest hop"
+      },
+      {
+        "name": "head_read",
+        "type": "head_read_provenance",
+        "nullable": false,
+        "note": "HEAD_READ_PROVENANCE_FIELDS; must equal the depth-0 hop"
+      },
+      {
+        "name": "hop_chain",
+        "type": "manifest_hop[]",
+        "nullable": false,
+        "note": "MANIFEST_HOP_FIELDS; depth 0 (head) .. depth N (claimed body); length 1 iff LANDED_EXACT"
+      },
+      {
+        "name": "verification",
+        "type": "verification_semantics",
+        "nullable": false,
+        "note": "VERIFICATION_SEMANTICS_FIELDS"
+      }
+    ],
+    "MOVE_PROOF_MANIFEST_FIELDS": [
+      {
+        "name": "manifest_version",
+        "type": "text",
+        "nullable": false,
+        "note": "LANDING_PROOF_MANIFEST_VERSION"
+      },
+      {
+        "name": "operation",
+        "type": "operation_identity",
+        "nullable": false,
+        "note": "operation_kind MOVE_INTERNAL"
+      },
+      {
+        "name": "classification",
+        "type": "landing_classification",
+        "nullable": false,
+        "note": "the weaker of the two paths' classifications is not composed; each path carries its own; the envelope classification is the move's overall verdict basis"
+      },
+      {
+        "name": "move_step_2_signature",
+        "type": "padded_base64url_signature",
+        "nullable": false,
+        "note": "the shared expected-move completing signature; both paths' claimed bodies carry it"
+      },
+      {
+        "name": "source_path",
+        "type": "single_path_manifest",
+        "nullable": false,
+        "note": "sender role-view single-path proof; claimed_landed.step_2_signature == move_step_2_signature"
+      },
+      {
+        "name": "destination_path",
+        "type": "single_path_manifest",
+        "nullable": false,
+        "note": "receiver role-view single-path proof; claimed_landed.step_2_signature == move_step_2_signature"
+      },
+      {
+        "name": "verification",
+        "type": "verification_semantics",
+        "nullable": false,
+        "note": "VERIFICATION_SEMANTICS_FIELDS; both economic deltas evaluated against expected body T0"
+      }
+    ],
+    "MANIFEST_REVERIFY_FAILURES": [
+      "UNKNOWN_MANIFEST_VERSION",
+      "EMPTY_HOP_CHAIN",
+      "NON_CONTIGUOUS_DEPTHS",
+      "HOP_DIGEST_MISMATCH",
+      "BROKEN_BACKLINK",
+      "DUPLICATE_OR_CYCLE_HOP",
+      "HEAD_ANCHOR_MISMATCH",
+      "HEAD_NOT_AUTHORITATIVE",
+      "CLAIMED_BODY_NOT_CHAIN_TERMINAL",
+      "CLASSIFICATION_MISMATCH",
+      "ECONOMIC_BASIS_NOT_EXPECTED_BODY_T0",
+      "INCOMPLETE_PER_BODY_PREDICATES",
+      "MOVE_PATH_ROLE_MISMATCH",
+      "MOVE_ANCHOR_MISMATCH"
+    ],
+    "REVERIFY_VERDICTS": [
+      "STRUCTURALLY_REVERIFIED_LANDED_EXACT",
+      "STRUCTURALLY_REVERIFIED_LANDED_COMPLETE_PATH",
+      "REJECTED"
+    ]
+  }
+}

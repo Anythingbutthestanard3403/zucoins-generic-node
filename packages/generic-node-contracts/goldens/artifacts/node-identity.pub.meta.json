@@ -1,0 +1,7 @@
+{
+  "role": "node",
+  "description": "Pinned active node identity verification key. Deterministic test-only key from a 32-byte Ed25519 seed filled with byte 0x00. MUST never be used with live ZKZ.",
+  "source": "canonical fields A.8 (deterministic golden fixture, node identity/event row)",
+  "public_key_b64": "O2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=",
+  "sha256": "8eb7cca2ecabb7fb12e9d6f356ff4c204c64cb94f0db87b0ccad4649f69c7de0"
+}

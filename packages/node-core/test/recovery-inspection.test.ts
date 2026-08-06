@@ -1,0 +1,570 @@
+// Recovery inspection (classification + handlers).
+// Spec: the API contract; operations recovery.
+
+import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+
+import {
+  FORBIDDEN_RECOVERY_ACTIONS,
+  NEEDS_ATTENTION_PATH,
+  NeedsAttentionQuerySchema,
+  OPERATOR_RECOVERY_ACTIONS,
+  RECOVERY_DETAIL_PATH,
+  classifyRecovery,
+  derivePermittedActions,
+  handleGetRecovery,
+  handleNeedsAttention,
+  type RecoveryFacts,
+  type RecoveryInspectionStore,
+  type IssuedRecoveryNonce,
+} from "../src/api/recovery-inspection.js";
+import { findRouteSchema } from "../src/api/route-schemas.js";
+
+const OP = "00000000-0000-4000-8000-000000000001";
+const WALLET = "00000000-0000-4000-8000-000000000099";
+
+function baseFacts(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
+  return {
+    operationId: OP,
+    kind: "SEND_EXTERNAL",
+    status: "NEEDS_ATTENTION",
+    attentionRequired: true,
+    attentionReason: "UNEXPECTED_HEAD_CHANGE",
+    rowVersion: 7,
+    leaseEpoch: 3,
+    heldLeases: [{ walletId: WALLET, leaseEpoch: 3, role: "SOURCE" }],
+    hasLandingProof: false,
+    landingProofVerdict: null,
+    hasObservationAnomaly: false,
+    hasLineageGap: false,
+    invariantBreachNoted: false,
+    evidenceManifest: [
+      {
+        kind: "gateway_observation",
+        id: "00000000-0000-4000-8000-000000000010",
+        role: "SOURCE",
+        digest_sha256: "a".repeat(64),
+        summary: "source head observation",
+      },
+    ],
+    diagnostics: [
+      {
+        at: "2026-07-15T10:00:00.000Z",
+        code: "ATTENTION",
+        message: "parked for operator",
+      },
+    ],
+    receive: null,
+    move: null,
+    send: {
+      hasSignIntent: true,
+      hasSignerCall: true,
+      hasSignature: true,
+      hasDurablePartial: true,
+      hasDelivery: true,
+      protocolExpiredPlusMargin: false,
+      freshHeadEqualsSourceT0: false,
+      completePathExclusionProved: false,
+      hasSignerAudit: true,
+      hasMatchingExactByteRecord: true,
+    },
+    haltEngaged: false,
+    ...patch,
+  };
+}
+
+function receiveFacts(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
+  return baseFacts({
+    kind: "RECEIVE_EXTERNAL",
+    status: "EXPIRED",
+    attentionRequired: true,
+    attentionReason: "POST_EXPIRY_RECONCILING",
+    send: null,
+    receive: {
+      codeExpiredPlusMargin: false,
+      noPersistedLandedProof: true,
+      freshObservationEqualsT0: false,
+      noAnomalyOrSubmitReconcileDebt: true,
+      childAbsentOrTerminal: true,
+      hasT0: true,
+      hasCodeOrArtifactPreimage: true,
+      hasArtifactSignature: true,
+      hasSignerAudit: false,
+      hasMatchingExactByteRecord: true,
+    },
+    ...patch,
+  });
+}
+
+function moveFacts(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
+  return baseFacts({
+    kind: "MOVE_INTERNAL",
+    status: "NEEDS_ATTENTION",
+    send: null,
+    move: {
+      deterministicPreAcceptanceRejection: false,
+      expiredAndBothWalletsUnchangedAtT0: false,
+      submitProvablyNeverStarted: false,
+      positiveNonLandingProofId: null,
+      unexpectedSuccessorOutsideLease: false,
+      hasPreimage: true,
+      hasSignature: true,
+      hasSignerAudit: true,
+      hasMatchingExactByteRecord: true,
+      oneWalletLandedOtherUnconnected: false,
+    },
+    ...patch,
+  });
+}
+
+class MemoryStore implements RecoveryInspectionStore {
+  readonly nonces: string[] = [];
+  constructor(private readonly byId: Map<string, RecoveryFacts>) {}
+
+  async listNeedsAttention(): Promise<readonly RecoveryFacts[]> {
+    return [...this.byId.values()].filter(
+      (f) => f.attentionRequired || f.status === "NEEDS_ATTENTION",
+    );
+  }
+
+  async loadRecoveryFacts(operationId: string): Promise<RecoveryFacts | null> {
+    return this.byId.get(operationId) ?? null;
+  }
+
+  async issueRecoveryNonce(_operationId: string): Promise<IssuedRecoveryNonce> {
+    const nonce = randomUUID();
+    this.nonces.push(nonce);
+    const issued = new Date().toISOString();
+    return {
+      nonce,
+      issued_at: issued,
+      expires_at: new Date(Date.now() + 300_000).toISOString(),
+    };
+  }
+}
+
+describe("recovery route registration", () => {
+  it("registers GET needs-attention and GET recovery detail", () => {
+    const list = findRouteSchema("GET", NEEDS_ATTENTION_PATH);
+    const detail = findRouteSchema("GET", RECOVERY_DETAIL_PATH);
+    expect(list).toBeDefined();
+    expect(list!.requiresIdempotencyKey).toBe(false);
+    expect(list!.querySchema).toBeDefined();
+    expect(detail).toBeDefined();
+    expect(detail!.requiresIdempotencyKey).toBe(false);
+  });
+
+  it("does not invent /admin/recovery/status", () => {
+    expect(findRouteSchema("GET", "/admin/recovery/status")).toBeUndefined();
+  });
+});
+
+describe("NeedsAttentionQuerySchema", () => {
+  it("accepts empty and valid filters", () => {
+    expect(NeedsAttentionQuerySchema.safeParse({}).success).toBe(true);
+    expect(
+      NeedsAttentionQuerySchema.safeParse({ classification: "INVARIANT_BREACH", limit: "10" })
+        .success,
+    ).toBe(true);
+  });
+  it("rejects unknown fields and bad enums", () => {
+    expect(NeedsAttentionQuerySchema.safeParse({ bog: 1 }).success).toBe(false);
+    expect(NeedsAttentionQuerySchema.safeParse({ classification: "NOPE" }).success).toBe(false);
+  });
+});
+
+describe("classifyRecovery + derivePermittedActions (pure)", () => {
+  it("closed action set is exactly nine", () => {
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(9);
+  });
+
+  it("NEVER includes forbidden actions for any fixture", () => {
+    const fixtures: RecoveryFacts[] = [
+      baseFacts(),
+      baseFacts({ invariantBreachNoted: true }),
+      receiveFacts({
+        receive: {
+          codeExpiredPlusMargin: true,
+          noPersistedLandedProof: true,
+          freshObservationEqualsT0: true,
+          noAnomalyOrSubmitReconcileDebt: true,
+          childAbsentOrTerminal: true,
+          hasT0: true,
+          hasCodeOrArtifactPreimage: true,
+          hasArtifactSignature: true,
+          hasSignerAudit: false,
+          hasMatchingExactByteRecord: true,
+        },
+      }),
+      moveFacts({
+        move: {
+          deterministicPreAcceptanceRejection: true,
+          expiredAndBothWalletsUnchangedAtT0: false,
+          submitProvablyNeverStarted: false,
+          positiveNonLandingProofId: "00000000-0000-4000-8000-000000000077",
+          unexpectedSuccessorOutsideLease: false,
+          hasPreimage: true,
+          hasSignature: true,
+          hasSignerAudit: true,
+          hasMatchingExactByteRecord: true,
+          oneWalletLandedOtherUnconnected: false,
+        },
+      }),
+      baseFacts({
+        send: {
+          hasSignIntent: true,
+          hasSignerCall: true,
+          hasSignature: true,
+          hasDurablePartial: true,
+          hasDelivery: true,
+          protocolExpiredPlusMargin: true,
+          freshHeadEqualsSourceT0: true,
+          completePathExclusionProved: false,
+          hasSignerAudit: true,
+          hasMatchingExactByteRecord: true,
+        },
+      }),
+    ];
+    for (const f of fixtures) {
+      const { permittedActions } = derivePermittedActions(f);
+      for (const forbidden of FORBIDDEN_RECOVERY_ACTIONS) {
+        expect(permittedActions as readonly string[]).not.toContain(forbidden);
+      }
+      // Force landed / force release / evidence deletion called out by review indicators.
+      expect(permittedActions as readonly string[]).not.toContain("FORCE_LANDED");
+      expect(permittedActions as readonly string[]).not.toContain("FORCE_RELEASE");
+      expect(permittedActions as readonly string[]).not.toContain("DELETE_EVIDENCE");
+      expect(permittedActions as readonly string[]).not.toContain("RETRY_SUBMIT");
+      expect(permittedActions as readonly string[]).not.toContain("EDIT_TRANSACTION");
+      expect(permittedActions as readonly string[]).not.toContain("NODE_SUBMIT_EXTERNAL_SEND");
+    }
+  });
+
+  it("INVARIANT_BREACH negative path: only QUARANTINE_WALLETS + ACKNOWLEDGE_KEEP_PINNED", () => {
+    const f = baseFacts({ invariantBreachNoted: true });
+    expect(classifyRecovery(f).classification).toBe("INVARIANT_BREACH");
+    const { permittedActions } = derivePermittedActions(f);
+    expect([...permittedActions].sort()).toEqual(
+      ["ACKNOWLEDGE_KEEP_PINNED", "QUARANTINE_WALLETS"].sort(),
+    );
+    // Never a resolving action.
+    for (const resolving of [
+      "RELEASE_EXPIRED_RECEIVE",
+      "REBUILD_INTERNAL_MOVE",
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+      "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+      "CONTINUE_EXTERNAL_WAIT",
+      "REDELIVER_EXACT_PARTIAL",
+      "RETRY_OBSERVATION",
+    ] as const) {
+      expect(permittedActions).not.toContain(resolving);
+    }
+  });
+
+  it("signer audit without exact bytes → INVARIANT_BREACH (receive)", () => {
+    const f = receiveFacts({
+      receive: {
+        codeExpiredPlusMargin: false,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: false,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: false,
+        hasArtifactSignature: false,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: false,
+      },
+    });
+    expect(classifyRecovery(f).classification).toBe("INVARIANT_BREACH");
+    expect(classifyRecovery(f).rationale).toBe("receive_signer_audit_without_exact_bytes");
+  });
+
+  it("positive landing proof wins over mismatched exact-byte facts (LANDED_VERIFIED)", () => {
+    // Store bugs historically set hasMatchingExactByteRecord=false by comparing T0
+    // completed_transaction_sha256 to the expected-artifact preimage. Once a
+    // landing proof exists, classification must still be LANDED_VERIFIED.
+    const f = receiveFacts({
+      hasLandingProof: true,
+      landingProofVerdict: "LANDED_EXACT",
+      status: "RECEIVE_LANDED",
+      attentionRequired: false,
+      receive: {
+        codeExpiredPlusMargin: false,
+        noPersistedLandedProof: false,
+        freshObservationEqualsT0: false,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: false,
+      },
+    });
+    expect(classifyRecovery(f)).toMatchObject({
+      classification: "LANDED_VERIFIED",
+      rationale: "landing_exact",
+    });
+  });
+
+  it("RELEASE_EXPIRED_RECEIVE only when all five predicates hold", () => {
+    const ok = receiveFacts({
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: true,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(classifyRecovery(ok).classification).toBe("PROVEN_NOT_LANDED");
+    expect(derivePermittedActions(ok).permittedActions).toContain("RELEASE_EXPIRED_RECEIVE");
+
+    const missingT0Eq = receiveFacts({
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: false,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(derivePermittedActions(missingT0Eq).permittedActions).not.toContain(
+      "RELEASE_EXPIRED_RECEIVE",
+    );
+  });
+
+  it("REBUILD_INTERNAL_MOVE only with stored positive proof for cases 1/2", () => {
+    const ok = moveFacts({
+      move: {
+        deterministicPreAcceptanceRejection: true,
+        expiredAndBothWalletsUnchangedAtT0: false,
+        submitProvablyNeverStarted: false,
+        positiveNonLandingProofId: "00000000-0000-4000-8000-000000000077",
+        unexpectedSuccessorOutsideLease: false,
+        hasPreimage: true,
+        hasSignature: true,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+        oneWalletLandedOtherUnconnected: false,
+      },
+    });
+    expect(classifyRecovery(ok).classification).toBe("PROVEN_NOT_LANDED");
+    expect(derivePermittedActions(ok).permittedActions).toContain("REBUILD_INTERNAL_MOVE");
+
+    const noProofId = moveFacts({
+      move: {
+        deterministicPreAcceptanceRejection: true,
+        expiredAndBothWalletsUnchangedAtT0: false,
+        submitProvablyNeverStarted: false,
+        positiveNonLandingProofId: null,
+        unexpectedSuccessorOutsideLease: false,
+        hasPreimage: true,
+        hasSignature: true,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+        oneWalletLandedOtherUnconnected: false,
+      },
+    });
+    expect(derivePermittedActions(noProofId).permittedActions).not.toContain(
+      "REBUILD_INTERNAL_MOVE",
+    );
+
+    const halted = moveFacts({
+      haltEngaged: true,
+      move: {
+        deterministicPreAcceptanceRejection: true,
+        expiredAndBothWalletsUnchangedAtT0: false,
+        submitProvablyNeverStarted: false,
+        positiveNonLandingProofId: "00000000-0000-4000-8000-000000000077",
+        unexpectedSuccessorOutsideLease: false,
+        hasPreimage: true,
+        hasSignature: true,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+        oneWalletLandedOtherUnconnected: false,
+      },
+    });
+    expect(derivePermittedActions(halted).permittedActions).not.toContain("REBUILD_INTERNAL_MOVE");
+  });
+
+  it("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED only when two-part oracle holds", () => {
+    const ok = baseFacts({
+      send: {
+        hasSignIntent: true,
+        hasSignerCall: true,
+        hasSignature: true,
+        hasDurablePartial: true,
+        hasDelivery: true,
+        protocolExpiredPlusMargin: true,
+        freshHeadEqualsSourceT0: true,
+        completePathExclusionProved: false,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(classifyRecovery(ok).classification).toBe("PROVEN_NOT_LANDED");
+    expect(derivePermittedActions(ok).permittedActions).toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
+
+    const expiryOnly = baseFacts({
+      send: {
+        hasSignIntent: true,
+        hasSignerCall: true,
+        hasSignature: true,
+        hasDurablePartial: true,
+        hasDelivery: true,
+        protocolExpiredPlusMargin: true,
+        freshHeadEqualsSourceT0: false,
+        completePathExclusionProved: false,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    // Expiry alone never proves non-landing.
+    expect(classifyRecovery(expiryOnly).classification).not.toBe("PROVEN_NOT_LANDED");
+    expect(derivePermittedActions(expiryOnly).permittedActions).not.toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
+  });
+
+  it("WAITING send with unexpired partial admits CONTINUE_EXTERNAL_WAIT + REDELIVER", () => {
+    const f = baseFacts();
+    expect(classifyRecovery(f).classification).toBe("WAITING");
+    const actions = derivePermittedActions(f).permittedActions;
+    expect(actions).toContain("CONTINUE_EXTERNAL_WAIT");
+    expect(actions).toContain("REDELIVER_EXACT_PARTIAL");
+    expect(actions).toContain("RETRY_OBSERVATION");
+    expect(actions).toContain("ACKNOWLEDGE_KEEP_PINNED");
+  });
+
+  it("CLOSE_NEVER_STARTED_EXTERNAL_SEND requires APPROVED + PROVEN_NOT_STARTED", () => {
+    const f = baseFacts({
+      status: "APPROVED",
+      attentionRequired: false,
+      send: {
+        hasSignIntent: false,
+        hasSignerCall: false,
+        hasSignature: false,
+        hasDurablePartial: false,
+        hasDelivery: false,
+        protocolExpiredPlusMargin: false,
+        freshHeadEqualsSourceT0: false,
+        completePathExclusionProved: false,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(classifyRecovery(f).classification).toBe("PROVEN_NOT_STARTED");
+    expect(derivePermittedActions(f).permittedActions).toContain(
+      "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+    );
+  });
+
+  it("LANDED_VERIFIED strips resolving close/release/rebuild actions", () => {
+    const f = baseFacts({
+      hasLandingProof: true,
+      landingProofVerdict: "LANDED_EXACT",
+    });
+    expect(classifyRecovery(f).classification).toBe("LANDED_VERIFIED");
+    const actions = derivePermittedActions(f).permittedActions;
+    expect(actions).not.toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
+    expect(actions).not.toContain("REBUILD_INTERNAL_MOVE");
+    expect(actions).not.toContain("RELEASE_EXPIRED_RECEIVE");
+  });
+});
+
+describe("handleNeedsAttention / handleGetRecovery", () => {
+  it("lists parked ops with freshly derived actions and P0 on breach", async () => {
+    const store = new MemoryStore(
+      new Map([
+        [OP, baseFacts()],
+        [
+          "00000000-0000-4000-8000-000000000002",
+          baseFacts({
+            operationId: "00000000-0000-4000-8000-000000000002",
+            invariantBreachNoted: true,
+            kind: "MOVE_INTERNAL",
+            send: null,
+            move: {
+              deterministicPreAcceptanceRejection: false,
+              expiredAndBothWalletsUnchangedAtT0: false,
+              submitProvablyNeverStarted: false,
+              positiveNonLandingProofId: null,
+              unexpectedSuccessorOutsideLease: false,
+              hasPreimage: true,
+              hasSignature: true,
+              hasSignerAudit: true,
+              hasMatchingExactByteRecord: true,
+              oneWalletLandedOtherUnconnected: false,
+            },
+          }),
+        ],
+      ]),
+    );
+    const result = await handleNeedsAttention(store, {});
+    expect(result.operations).toHaveLength(2);
+    expect(result.summary.total).toBe(2);
+    expect(result.summary.p0_invariant_breach).toBe(1);
+    const breach = result.operations.find((o) => o.classification === "INVARIANT_BREACH");
+    expect(breach?.severity).toBe("P0");
+    expect(breach?.permitted_actions).toEqual([
+      "QUARANTINE_WALLETS",
+      "ACKNOWLEDGE_KEEP_PINNED",
+    ]);
+  });
+
+  it("detail returns classification, evidence, row_version, lease_epoch, diagnostics", async () => {
+    const store = new MemoryStore(new Map([[OP, baseFacts()]]));
+    const outcome = await handleGetRecovery(store, OP);
+    expect(outcome.status).toBe("ok");
+    if (outcome.status !== "ok") return;
+    expect(outcome.body.operation_id).toBe(OP);
+    expect(outcome.body.classification).toBe("WAITING");
+    expect(outcome.body.row_version).toBe(7);
+    expect(outcome.body.lease_epoch).toBe(3);
+    expect(outcome.body.evidence_manifest).toHaveLength(1);
+    expect(outcome.body.held_leases[0]?.wallet_id).toBe(WALLET);
+    expect(outcome.body.diagnostics).toHaveLength(1);
+    expect(outcome.body.recovery_nonce).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(outcome.body.permitted_actions.length).toBeGreaterThan(0);
+  });
+
+  it("nonce freshness: two consecutive GET recovery calls issue two different nonces", async () => {
+    const store = new MemoryStore(new Map([[OP, baseFacts()]]));
+    const a = await handleGetRecovery(store, OP);
+    const b = await handleGetRecovery(store, OP);
+    expect(a.status).toBe("ok");
+    expect(b.status).toBe("ok");
+    if (a.status !== "ok" || b.status !== "ok") return;
+    expect(a.body.recovery_nonce).not.toBe(b.body.recovery_nonce);
+    expect(store.nonces).toHaveLength(2);
+    expect(new Set(store.nonces).size).toBe(2);
+  });
+
+  it("returns not_found for unknown operation", async () => {
+    const store = new MemoryStore(new Map());
+    const outcome = await handleGetRecovery(store, OP);
+    expect(outcome).toEqual({ status: "not_found", operation_id: OP });
+  });
+
+  it("is read-only: listing does not issue nonces", async () => {
+    const store = new MemoryStore(new Map([[OP, baseFacts()]]));
+    await handleNeedsAttention(store, {});
+    expect(store.nonces).toHaveLength(0);
+  });
+});

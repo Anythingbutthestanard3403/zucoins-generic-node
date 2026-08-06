@@ -1,0 +1,1767 @@
+---
+openapi: 3.0.3
+info:
+  title: ZuPayments Generic Node API
+  version: 1.0.0-frozen
+  description: "Frozen OpenAPI contract for the generic node (Layer 1). Governing spec:. Generated from reviewed manifests (PUBLIC_ROUTES, ROUTE_POLICIES, ROUTE_SCHEMAS). Do not hand-edit — regenerate via packages/node-core/scripts/emit-openapi.mjs."
+servers:
+  - url: "http://localhost:3100"
+    description: Local node
+tags:
+  - name: Operations
+    description: Layer-1 create/query (exactly three operation kinds).
+  - name: Actions
+    description: "Arm, verification-complete, verification-material."
+  - name: Destinations
+    description: Node-generated wallet destinations.
+  - name: Events
+    description: "Implementer events, snapshot, subscription."
+  - name: Admin
+    description: Operator session endpoints.
+  - name: Discovery
+    description: Public node identity.
+  - name: Health
+    description: Liveness and readiness probes.
+paths:
+  /.well-known/zupay-node:
+    get:
+      tags:
+        - Discovery
+      operationId: getWellknownZupaynode
+      summary: Public node identity discovery
+      security: []
+      responses:
+        "200":
+          description: Node identity document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResponse"
+      x-zupay-auth-classes:
+        - PUBLIC
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/admin/v1/destinations/{destination_id}/bless":
+    post:
+      tags:
+        - Admin
+      operationId: postAdminV1DestinationsDestinationidBless
+      summary: Bless a destination
+      security:
+        - operatorSession: []
+      parameters:
+        - name: destination_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: destination id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  "/admin/v1/destinations/{destination_id}/retire":
+    post:
+      tags:
+        - Admin
+      operationId: postAdminV1DestinationsDestinationidRetire
+      summary: Retire a destination
+      security:
+        - operatorSession: []
+      parameters:
+        - name: destination_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: destination id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  "/admin/v1/external-sends/{operation_id}/approval-challenge":
+    get:
+      tags:
+        - Admin
+      operationId: getAdminV1ExternalsendsOperationidApprovalchallenge
+      summary: Fetch approval challenge
+      security:
+        - operatorSession: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/admin/v1/external-sends/{operation_id}/approve":
+    post:
+      tags:
+        - Admin
+      operationId: postAdminV1ExternalsendsOperationidApprove
+      summary: Approve external send
+      security:
+        - operatorSession: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - challenge_nonce
+                - expected_row_version
+                - preimage_sha256
+                - device_key_id
+                - device_signature
+              properties:
+                challenge_nonce:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                expected_row_version:
+                  type: integer
+                  minimum: 1
+                preimage_sha256:
+                  type: string
+                  pattern: "^[0-9a-f]{64}$"
+                  description: Lowercase hex SHA-256 digest.
+                device_key_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                  nullable: true
+                device_signature:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  "/admin/v1/external-sends/{operation_id}/reject":
+    post:
+      tags:
+        - Admin
+      operationId: postAdminV1ExternalsendsOperationidReject
+      summary: Reject external send
+      security:
+        - operatorSession: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - expected_row_version
+                - reason
+              properties:
+                expected_row_version:
+                  type: integer
+                  minimum: 1
+                reason:
+                  type: string
+                  maxLength: 512
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  /admin/v1/operations/needs-attention:
+    get:
+      tags:
+        - Admin
+      operationId: getAdminV1OperationsNeedsattention
+      summary: List operations needing attention
+      security:
+        - operatorSession: []
+      parameters:
+        - name: classification
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - LANDED_VERIFIED
+              - PROVEN_NOT_STARTED
+              - PROVEN_NOT_LANDED
+              - WAITING
+              - INDETERMINATE
+              - INVARIANT_BREACH
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - RECEIVE_EXTERNAL
+              - MOVE_INTERNAL
+              - SEND_EXTERNAL
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/admin/v1/operations/{operation_id}/recovery":
+    get:
+      tags:
+        - Admin
+      operationId: getAdminV1OperationsOperationidRecovery
+      summary: Read recovery options
+      security:
+        - operatorSession: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/admin/v1/operations/{operation_id}/recovery-actions":
+    post:
+      tags:
+        - Admin
+      operationId: postAdminV1OperationsOperationidRecoveryactions
+      summary: Apply a recovery action
+      security:
+        - operatorSession: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - action
+                - expected_row_version
+                - recovery_nonce
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - RETRY_OBSERVATION
+                    - REDELIVER_EXACT_PARTIAL
+                    - CONTINUE_EXTERNAL_WAIT
+                    - CLOSE_NEVER_STARTED_EXTERNAL_SEND
+                    - CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED
+                    - REBUILD_INTERNAL_MOVE
+                    - RELEASE_EXPIRED_RECEIVE
+                    - QUARANTINE_WALLETS
+                    - ACKNOWLEDGE_KEEP_PINNED
+                expected_row_version:
+                  type: integer
+                  minimum: 1
+                recovery_nonce:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                proof_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                  nullable: true
+                operator_note:
+                  type: string
+                  maxLength: 1024
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - OPERATOR_SESSION
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  /health:
+    get:
+      tags:
+        - Health
+      operationId: getHealth
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LivenessResponse"
+      x-zupay-auth-classes:
+        - PUBLIC
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  /health/ready:
+    get:
+      tags:
+        - Health
+      operationId: getHealthReady
+      summary: Readiness probe
+      security: []
+      responses:
+        "200":
+          description: Node is ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/destinations:
+    post:
+      tags:
+        - Destinations
+      operationId: postV1Destinations
+      summary: Create a destination
+      security:
+        - implementerBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - label
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 256
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "destination:create"
+      x-zupay-idempotency: REQUIRED
+    get:
+      tags:
+        - Destinations
+      operationId: getV1Destinations
+      summary: List destinations
+      security:
+        - implementerBearer: []
+        - signedReportingCredential: []
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - PENDING
+              - BLESSED
+              - RETIRED
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            description: Lowercase canonical UUID (RFC 4122 hex form).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: "destination:read"
+      x-zupay-idempotency: NA
+  /v1/events:
+    get:
+      tags:
+        - Events
+      operationId: getV1Events
+      summary: Read implementer events page
+      security:
+        - signedReportingCredential: []
+      parameters:
+        - name: after_implementer_seq
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+            description: Non-negative integer decimal string (implementer_seq / cursor).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: wait_seconds
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 30
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  /v1/events/stream:
+    get:
+      tags:
+        - Events
+      operationId: getV1EventsStream
+      summary: SSE implementer event stream
+      security:
+        - signedReportingCredential: []
+      parameters:
+        - name: after_implementer_seq
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^(0|[1-9][0-9]*)$"
+            description: Non-negative integer decimal string (implementer_seq / cursor).
+      responses:
+        "200":
+          description: text/event-stream of implementer events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  /v1/external-sends:
+    post:
+      tags:
+        - Operations
+      operationId: postV1Externalsends
+      summary: Create a SEND_EXTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - source_wallet_id
+                - destination_address
+                - amount_zkz
+              properties:
+                source_wallet_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                destination_address:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{43}=$"
+                  description: "SplitChain wallet public key — padded base64url, 44 chars (43 body + '=')."
+                amount_zkz:
+                  type: string
+                  pattern: "^(?=.*[1-9])(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+                  description: "Positive ZKZ decimal string: canonical grammar ^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$ with exclusive upper bound < 1e8, ≤32 dp, and numerically > 0 (zeros rejected)."
+                references_operation_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                client_reference:
+                  type: string
+                  maxLength: 256
+                description:
+                  type: string
+                  maxLength: 512
+      responses:
+        "201":
+          description: SEND_EXTERNAL created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalSendResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "send:create"
+      x-zupay-idempotency: REQUIRED
+  "/v1/external-sends/{operation_id}":
+    get:
+      tags:
+        - Operations
+      operationId: getV1ExternalsendsOperationid
+      summary: Query a SEND_EXTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Current SEND_EXTERNAL representation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalSendResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "send:read"
+      x-zupay-idempotency: NA
+  /v1/internal-moves:
+    post:
+      tags:
+        - Operations
+      operationId: postV1Internalmoves
+      summary: Create a MOVE_INTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - source_wallet_id
+                - destination_id
+                - amount_zkz
+              properties:
+                source_wallet_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                destination_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+                amount_zkz:
+                  type: string
+                  pattern: "^(?=.*[1-9])(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+                  description: "Positive ZKZ decimal string: canonical grammar ^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$ with exclusive upper bound < 1e8, ≤32 dp, and numerically > 0 (zeros rejected)."
+      responses:
+        "201":
+          description: MOVE_INTERNAL created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalMoveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "move:create"
+      x-zupay-idempotency: REQUIRED
+  "/v1/internal-moves/{operation_id}":
+    get:
+      tags:
+        - Operations
+      operationId: getV1InternalmovesOperationid
+      summary: Query a MOVE_INTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Current MOVE_INTERNAL representation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InternalMoveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "move:read"
+      x-zupay-idempotency: NA
+  "/v1/operations/{operation_id}/armed":
+    post:
+      tags:
+        - Actions
+      operationId: postV1OperationsOperationidArmed
+      summary: Arm a receive (release transfer code)
+      security:
+        - signedReportingCredential: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - expected_row_version
+                - t0
+                - opened_cursor
+              properties:
+                expected_row_version:
+                  type: integer
+                  minimum: 1
+                t0:
+                  type: object
+                  additionalProperties: false
+                  required:
+                    - observation_id
+                    - projection
+                  properties:
+                    observation_id:
+                      type: string
+                      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                      description: Lowercase canonical UUID (RFC 4122 hex form).
+                    projection:
+                      type: object
+                      additionalProperties: false
+                      required:
+                        - s
+                        - p
+                        - b_zkz
+                      properties:
+                        s:
+                          type: string
+                        p:
+                          type: string
+                        b_zkz:
+                          type: string
+                opened_cursor:
+                  type: string
+                  pattern: "^(0|[1-9][0-9]*)$"
+                  description: Non-negative integer decimal string (implementer_seq / cursor).
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  "/v1/operations/{operation_id}/subscribe":
+    get:
+      tags:
+        - Events
+      operationId: getV1OperationsOperationidSubscribe
+      summary: Browser subscription status
+      security:
+        - subscriptionHandle: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - SUBSCRIPTION_HANDLE
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/v1/operations/{operation_id}/verification-complete":
+    post:
+      tags:
+        - Actions
+      operationId: postV1OperationsOperationidVerificationcomplete
+      summary: Submit verification verdict
+      security:
+        - signedReportingCredential: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - expected_row_version
+                - consumed_cursor
+                - verdict
+                - wallet_evidence
+              properties:
+                expected_row_version:
+                  type: integer
+                  minimum: 1
+                consumed_cursor:
+                  type: string
+                  pattern: "^(0|[1-9][0-9]*)$"
+                  description: Non-negative integer decimal string (implementer_seq / cursor).
+                verdict:
+                  type: string
+                  enum:
+                    - VERIFIED
+                    - REJECTED
+                    - INDETERMINATE
+                wallet_evidence:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - wallet_id
+                      - role
+                      - t0
+                      - terminal
+                      - landing_proof
+                    properties:
+                      wallet_id:
+                        type: string
+                        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        description: Lowercase canonical UUID (RFC 4122 hex form).
+                      role:
+                        type: string
+                        enum:
+                          - RECEIVER
+                          - SOURCE
+                          - DESTINATION
+                      t0:
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - observation_id
+                          - projection
+                        properties:
+                          observation_id:
+                            type: string
+                            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            description: Lowercase canonical UUID (RFC 4122 hex form).
+                          projection:
+                            type: object
+                            additionalProperties: false
+                            required:
+                              - s
+                              - p
+                              - b_zkz
+                            properties:
+                              s:
+                                type: string
+                              p:
+                                type: string
+                              b_zkz:
+                                type: string
+                      terminal:
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - observation_id
+                          - projection
+                        properties:
+                          observation_id:
+                            type: string
+                            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                            description: Lowercase canonical UUID (RFC 4122 hex form).
+                          projection:
+                            type: object
+                            additionalProperties: false
+                            required:
+                              - s
+                              - p
+                              - b_zkz
+                            properties:
+                              s:
+                                type: string
+                              p:
+                                type: string
+                              b_zkz:
+                                type: string
+                      landing_proof:
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - classification
+                          - fresh_head_step_2_signature
+                          - fresh_head_transaction_sha256
+                          - path_manifest_sha256
+                        properties:
+                          classification:
+                            type: string
+                            enum:
+                              - EXPECTED_AT_HEAD
+                              - EXPECTED_ANCESTOR
+                          fresh_head_step_2_signature:
+                            type: string
+                          fresh_head_transaction_sha256:
+                            type: string
+                            pattern: "^[0-9a-f]{64}$"
+                            description: Lowercase hex SHA-256 digest.
+                          path_manifest_sha256:
+                            type: string
+                            pattern: "^[0-9a-f]{64}$"
+                            description: Lowercase hex SHA-256 digest.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: REQUIRED
+  "/v1/operations/{operation_id}/verification-material":
+    get:
+      tags:
+        - Actions
+      operationId: getV1OperationsOperationidVerificationmaterial
+      summary: Read verification material
+      security:
+        - signedReportingCredential: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  /v1/receives:
+    post:
+      tags:
+        - Operations
+      operationId: postV1Receives
+      summary: Create a RECEIVE_EXTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - amount_zkz
+                - anchor
+                - after_landing
+              properties:
+                amount_zkz:
+                  type: string
+                  pattern: "^(?=.*[1-9])(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+                  description: "Positive ZKZ decimal string: canonical grammar ^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$ with exclusive upper bound < 1e8, ≤32 dp, and numerically > 0 (zeros rejected)."
+                anchor:
+                  type: string
+                  pattern: "^[A-Za-z0-9_-]{1,96}$"
+                  description: Opaque implementer anchor bound into the expected artifact.
+                expires_in_seconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 59999880
+                  description: Optional TTL hint; node-clamped to RECEIVE_TTL_MIN/MAX. Hard ceiling is SPLITCHAIN_FUTURE_TIME_CEILING_SECS — matches CreateReceiveBody Zod max.
+                after_landing:
+                  oneOf:
+                    - type: object
+                      additionalProperties: false
+                      required:
+                        - kind
+                        - destination_id
+                      properties:
+                        kind:
+                          type: string
+                          const: HOLD
+                        destination_id:
+                          type: "null"
+                    - type: object
+                      additionalProperties: false
+                      required:
+                        - kind
+                        - destination_id
+                      properties:
+                        kind:
+                          type: string
+                          const: INTERNAL_MOVE
+                        destination_id:
+                          type: string
+                          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          description: Lowercase canonical UUID (RFC 4122 hex form).
+      responses:
+        "201":
+          description: Wallet assigned and T0 formed synchronously
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiveResponse"
+        "202":
+          description: Accepted into bounded receive queue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "receive:create"
+      x-zupay-idempotency: REQUIRED
+  "/v1/receives/{operation_id}":
+    get:
+      tags:
+        - Operations
+      operationId: getV1ReceivesOperationid
+      summary: Query a RECEIVE_EXTERNAL operation
+      security:
+        - implementerBearer: []
+      parameters:
+        - name: operation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          description: operation id
+      responses:
+        "200":
+          description: Current RECEIVE_EXTERNAL representation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: "receive:read"
+      x-zupay-idempotency: NA
+  /v1/state/snapshot:
+    get:
+      tags:
+        - Events
+      operationId: getV1StateSnapshot
+      summary: Read implementer state snapshot
+      security:
+        - signedReportingCredential: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - REPORTING_CREDENTIAL
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+components:
+  securitySchemes:
+    implementerBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: "implementer bearer key. Scopes are resource:action pairs (receive:create, …)."
+    signedReportingCredential:
+      type: apiKey
+      in: header
+      name: X-ZP-Reporting-Signature
+      description: "signed reporting credential. Companion headers: X-ZP-Reporting-Key-Id, X-ZP-Reporting-Timestamp, X-ZP-Reporting-Expires-At, X-ZP-Reporting-Nonce."
+    subscriptionHandle:
+      type: apiKey
+      in: header
+      name: X-ZP-Subscription-Handle
+      description: single-operation browser subscription handle.
+    operatorSession:
+      type: apiKey
+      in: cookie
+      name: zp_operator_session
+      description: operator session. Mutations may additionally require TOTP / device signature.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 255
+        pattern: "^[ -~]+$"
+      description: Mandatory on every POST mutation. 16–255 visible ASCII chars (IdempotencyKeySchema).
+  schemas:
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+            - code
+            - message
+            - request_id
+            - details
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid_api_key
+                - not_found
+                - unknown_field
+                - invalid_scalar
+                - malformed_json
+                - duplicate_json_key
+                - invalid_utf8
+                - request_too_large
+                - nesting_too_deep
+                - invalid_idempotency_key
+                - cursor_mismatch
+                - idempotency_conflict
+                - idempotency_key_reused
+                - idempotency_in_progress
+                - wallet_busy
+                - operation_version_conflict
+                - t0_mismatch
+                - operation_not_armable
+                - verification_material_not_ready
+                - verification_material_expired
+                - protocol_predicate_failed
+                - rate_limited
+                - receive_queue_full
+                - signer_unavailable
+                - service_unavailable
+            message:
+              type: string
+              description: Diagnostic only — clients branch on code.
+            request_id:
+              type: string
+              pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            details:
+              type: object
+              additionalProperties: true
+    OperationObject:
+      type: object
+      additionalProperties: false
+      required:
+        - operation_id
+        - operation_type
+        - state
+        - amount_zkz
+        - row_version
+        - attention_required
+        - attention_reason
+        - created_at
+        - updated_at
+        - terminal_at
+        - verification_material_available_until
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        operation_type:
+          type: string
+          enum:
+            - RECEIVE_EXTERNAL
+            - MOVE_INTERNAL
+            - SEND_EXTERNAL
+          description: Exactly three Layer-1 verbs.
+        state:
+          type: string
+        amount_zkz:
+          type: string
+          pattern: "^(?=.*[1-9])(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+          description: Operation amount (PositiveZkzAmount).
+        row_version:
+          type: integer
+          minimum: 1
+        attention_required:
+          type: boolean
+        attention_reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        terminal_at:
+          type: string
+          format: date-time
+          nullable: true
+        verification_material_available_until:
+          type: string
+          format: date-time
+          nullable: true
+    ExpectedArtifact:
+      type: object
+      additionalProperties: false
+      required:
+        - key_id
+        - preimage_text
+        - preimage_sha256
+        - signature
+      properties:
+        key_id:
+          type: string
+          format: uuid
+        preimage_text:
+          type: string
+        preimage_sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        signature:
+          type: string
+    ReceiveResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operation
+        - receiver_pubkey
+        - discriminator
+        - expires_at
+        - after_landing
+        - code_status
+        - transfer_code
+        - expected_artifact
+        - t0
+        - subscription_handle
+      properties:
+        operation:
+          $ref: "#/components/schemas/OperationObject"
+        receiver_pubkey:
+          type: string
+          nullable: true
+        discriminator:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        after_landing:
+          type: object
+          additionalProperties: true
+        code_status:
+          type: string
+          enum:
+            - NOT_CREATED
+            - AWAITING_ARM
+            - RELEASED
+            - EXPIRED
+        transfer_code:
+          type: string
+          nullable: true
+        expected_artifact:
+          oneOf:
+            - $ref: "#/components/schemas/ExpectedArtifact"
+            - type: "null"
+        t0:
+          type: object
+          nullable: true
+          additionalProperties: true
+        subscription_handle:
+          type: string
+          nullable: true
+    InternalMoveResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operation
+        - source_wallet_id
+        - destination_id
+        - spawned_from_operation_id
+        - lease_status
+        - expected_artifact
+      properties:
+        operation:
+          $ref: "#/components/schemas/OperationObject"
+        source_wallet_id:
+          type: string
+          format: uuid
+        destination_id:
+          type: string
+          format: uuid
+        spawned_from_operation_id:
+          type: string
+          format: uuid
+          nullable: true
+        lease_status:
+          type: string
+          enum:
+            - WAITING
+            - HELD
+            - RELEASED
+            - PINNED_FOR_ATTENTION
+        expected_artifact:
+          oneOf:
+            - $ref: "#/components/schemas/ExpectedArtifact"
+            - type: "null"
+    ExternalSendResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - operation
+        - source_wallet_id
+        - destination_address
+        - references_operation_id
+        - approval_status
+        - transfer_code
+        - transfer_code_sha256
+        - available_until
+        - expected_artifact
+      properties:
+        operation:
+          $ref: "#/components/schemas/OperationObject"
+        source_wallet_id:
+          type: string
+          format: uuid
+        destination_address:
+          type: string
+        references_operation_id:
+          type: string
+          format: uuid
+          nullable: true
+        approval_status:
+          type: string
+          enum:
+            - PENDING
+            - CONSUMED
+            - REJECTED
+        transfer_code:
+          type: string
+          nullable: true
+        transfer_code_sha256:
+          type: string
+          nullable: true
+        available_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Derived redemption-expiry projection; null until post-approval sign intent forms.
+        expected_artifact:
+          oneOf:
+            - $ref: "#/components/schemas/ExpectedArtifact"
+            - type: "null"
+    DiscoveryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - node_id
+        - api_version
+        - supported_operation_types
+        - event_signing_public_keys
+        - expected_artifact_public_keys
+        - canonical_suite_versions
+        - key_validity_intervals
+      properties:
+        node_id:
+          type: string
+          format: uuid
+        api_version:
+          type: string
+        supported_operation_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - RECEIVE_EXTERNAL
+              - MOVE_INTERNAL
+              - SEND_EXTERNAL
+        event_signing_public_keys:
+          type: array
+          items:
+            type: object
+        expected_artifact_public_keys:
+          type: array
+          items:
+            type: object
+        canonical_suite_versions:
+          type: array
+          items:
+            type: string
+        key_validity_intervals:
+          type: array
+          items:
+            type: object
+    LivenessResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - version
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum:
+            - alive
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+    ReadinessResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - version
+        - timestamp
+        - checks
+      properties:
+        status:
+          type: string
+          enum:
+            - ready
+            - not_ready
+            - degraded
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+              - ready
+              - gating
+            properties:
+              name:
+                type: string
+              ready:
+                type: boolean
+              gating:
+                type: boolean
+    CreateReceiveBody:
+      type: object
+      additionalProperties: false
+      required:
+        - amount_zkz
+        - anchor
+        - after_landing
+      properties:
+        amount_zkz:
+          type: string
+          pattern: "^(?=.*[1-9])(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$"
+          description: "Positive ZKZ decimal string: canonical grammar ^(0|[1-9][0-9]{0,7})(\\.[0-9]{1,32})?$ with exclusive upper bound < 1e8, ≤32 dp, and numerically > 0 (zeros rejected)."
+        anchor:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,96}$"
+          description: Opaque implementer anchor bound into the expected artifact.
+        expires_in_seconds:
+          type: integer
+          minimum: 1
+          maximum: 59999880
+          description: Optional TTL hint; node-clamped to RECEIVE_TTL_MIN/MAX. Hard ceiling is SPLITCHAIN_FUTURE_TIME_CEILING_SECS — matches CreateReceiveBody Zod max.
+        after_landing:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required:
+                - kind
+                - destination_id
+              properties:
+                kind:
+                  type: string
+                  const: HOLD
+                destination_id:
+                  type: "null"
+            - type: object
+              additionalProperties: false
+              required:
+                - kind
+                - destination_id
+              properties:
+                kind:
+                  type: string
+                  const: INTERNAL_MOVE
+                destination_id:
+                  type: string
+                  pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  description: Lowercase canonical UUID (RFC 4122 hex form).
+  responses:
+    BadRequest:
+      description: "Malformed JSON, invalid scalar, unknown field, or impossible shape."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Unauthorized:
+      description: Missing/invalid/expired authentication. Scope denial collapses to the same 401 (no 403).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    NotFound:
+      description: Object absent or outside the authenticated tenant.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Conflict:
+      description: Idempotency or concurrent-state conflict.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Gone:
+      description: Verification-material access window expired.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    UnprocessableEntity:
+      description: Well-formed request fails a custody/protocol predicate.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    TooManyRequests:
+      description: Principal rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    ServiceUnavailable:
+      description: "Bounded queue full, signer leadership unavailable, or required gateway evidence unavailable."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+x-zupay-frozen:
+  operation_kinds:
+    - RECEIVE_EXTERNAL
+    - MOVE_INTERNAL
+    - SEND_EXTERNAL
+  retired_routes:
+    - "/v1/reservations*"
+    - "/v1/outbound-requests*"
+    - "/v1/payments*"
+    - "/v1/refunds*"
+    - "/admin/v1/drains*"
+  retired_routes_non_path_category: any import endpoint
+  public_route_count: 17
+  admin_route_count: 8
+  money_moving_create_paths:
+    - /v1/receives
+    - /v1/internal-moves
+    - /v1/external-sends

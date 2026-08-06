@@ -1,0 +1,539 @@
+{
+  "ARTIFACT_FIELD_ROLES": [
+    "IDENTITY",
+    "PARTY",
+    "AMOUNT",
+    "REFERENCE",
+    "POLICY",
+    "BINDING",
+    "EXPIRY"
+  ],
+  "ARTIFACT_FIELD_TYPES": [
+    "purpose_literal",
+    "canonical_version_literal",
+    "uuid",
+    "operation_uuid",
+    "ed25519_pubkey_padded",
+    "external_address_padded",
+    "zkz_amount_positive",
+    "anchor",
+    "sha256_hex",
+    "integer_string_nullable",
+    "after_landing_object",
+    "source_selector_object",
+    "uuid_nullable"
+  ],
+  "ARTIFACT_SIGNING_KEY_ROLE": "node_identity",
+  "CANONICAL_VERSION": 1,
+  "EXPECTED_ARTIFACT_PURPOSES": [
+    "zp-receive-expected-v1",
+    "zp-move-internal-expected-v1",
+    "zp-send-external-expected-v1"
+  ],
+  "EXPECTED_ARTIFACTS": [
+    {
+      "purpose": "zp-receive-expected-v1",
+      "canonicalVersion": 1,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "fields": [
+        {
+          "name": "purpose",
+          "type": "purpose_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "canonical_version",
+          "type": "canonical_version_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "node_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "implementer_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "operation_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "receiver_wallet_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "receiver_pubkey",
+          "type": "ed25519_pubkey_padded",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "amount_zkz",
+          "type": "zkz_amount_positive",
+          "nullable": false,
+          "role": "AMOUNT"
+        },
+        {
+          "name": "discriminator",
+          "type": "operation_uuid",
+          "nullable": false,
+          "role": "REFERENCE"
+        },
+        {
+          "name": "anchor",
+          "type": "anchor",
+          "nullable": false,
+          "role": "BINDING"
+        },
+        {
+          "name": "receiver_t0_fingerprint",
+          "type": "sha256_hex",
+          "nullable": false,
+          "role": "BINDING"
+        },
+        {
+          "name": "expiry_unix_time_secs",
+          "type": "integer_string_nullable",
+          "nullable": true,
+          "role": "EXPIRY"
+        },
+        {
+          "name": "after_landing",
+          "type": "after_landing_object",
+          "nullable": false,
+          "role": "POLICY"
+        },
+        {
+          "name": "transfer_code_sha256",
+          "type": "sha256_hex",
+          "nullable": false,
+          "role": "BINDING"
+        }
+      ]
+    },
+    {
+      "purpose": "zp-move-internal-expected-v1",
+      "canonicalVersion": 1,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "fields": [
+        {
+          "name": "purpose",
+          "type": "purpose_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "canonical_version",
+          "type": "canonical_version_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "node_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "implementer_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "operation_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "source_wallet_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "source_pubkey",
+          "type": "ed25519_pubkey_padded",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "destination_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "destination_wallet_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "destination_pubkey",
+          "type": "ed25519_pubkey_padded",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "amount_zkz",
+          "type": "zkz_amount_positive",
+          "nullable": false,
+          "role": "AMOUNT"
+        },
+        {
+          "name": "spawned_from_operation_id",
+          "type": "uuid_nullable",
+          "nullable": true,
+          "role": "REFERENCE"
+        },
+        {
+          "name": "references_operation_id",
+          "type": "uuid_nullable",
+          "nullable": true,
+          "role": "REFERENCE"
+        }
+      ]
+    },
+    {
+      "purpose": "zp-send-external-expected-v1",
+      "canonicalVersion": 1,
+      "signingKeyRole": "node_identity",
+      "serializer": "suite",
+      "fields": [
+        {
+          "name": "purpose",
+          "type": "purpose_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "canonical_version",
+          "type": "canonical_version_literal",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "node_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "implementer_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "operation_id",
+          "type": "uuid",
+          "nullable": false,
+          "role": "IDENTITY"
+        },
+        {
+          "name": "source_selector",
+          "type": "source_selector_object",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "source_pubkey",
+          "type": "ed25519_pubkey_padded",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "destination_address",
+          "type": "external_address_padded",
+          "nullable": false,
+          "role": "PARTY"
+        },
+        {
+          "name": "amount_zkz",
+          "type": "zkz_amount_positive",
+          "nullable": false,
+          "role": "AMOUNT"
+        },
+        {
+          "name": "references_operation_id",
+          "type": "uuid_nullable",
+          "nullable": true,
+          "role": "REFERENCE"
+        }
+      ]
+    }
+  ],
+  "MOVE_INTERNAL_EXPECTED": {
+    "purpose": "zp-move-internal-expected-v1",
+    "canonicalVersion": 1,
+    "signingKeyRole": "node_identity",
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "implementer_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "operation_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "source_wallet_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "source_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "destination_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "destination_wallet_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "destination_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "amount_zkz",
+        "type": "zkz_amount_positive",
+        "nullable": false,
+        "role": "AMOUNT"
+      },
+      {
+        "name": "spawned_from_operation_id",
+        "type": "uuid_nullable",
+        "nullable": true,
+        "role": "REFERENCE"
+      },
+      {
+        "name": "references_operation_id",
+        "type": "uuid_nullable",
+        "nullable": true,
+        "role": "REFERENCE"
+      }
+    ]
+  },
+  "RECEIVE_EXPECTED": {
+    "purpose": "zp-receive-expected-v1",
+    "canonicalVersion": 1,
+    "signingKeyRole": "node_identity",
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "implementer_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "operation_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "receiver_wallet_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "receiver_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "amount_zkz",
+        "type": "zkz_amount_positive",
+        "nullable": false,
+        "role": "AMOUNT"
+      },
+      {
+        "name": "discriminator",
+        "type": "operation_uuid",
+        "nullable": false,
+        "role": "REFERENCE"
+      },
+      {
+        "name": "anchor",
+        "type": "anchor",
+        "nullable": false,
+        "role": "BINDING"
+      },
+      {
+        "name": "receiver_t0_fingerprint",
+        "type": "sha256_hex",
+        "nullable": false,
+        "role": "BINDING"
+      },
+      {
+        "name": "expiry_unix_time_secs",
+        "type": "integer_string_nullable",
+        "nullable": true,
+        "role": "EXPIRY"
+      },
+      {
+        "name": "after_landing",
+        "type": "after_landing_object",
+        "nullable": false,
+        "role": "POLICY"
+      },
+      {
+        "name": "transfer_code_sha256",
+        "type": "sha256_hex",
+        "nullable": false,
+        "role": "BINDING"
+      }
+    ]
+  },
+  "SEND_EXTERNAL_EXPECTED": {
+    "purpose": "zp-send-external-expected-v1",
+    "canonicalVersion": 1,
+    "signingKeyRole": "node_identity",
+    "serializer": "suite",
+    "fields": [
+      {
+        "name": "purpose",
+        "type": "purpose_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "canonical_version",
+        "type": "canonical_version_literal",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "node_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "implementer_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "operation_id",
+        "type": "uuid",
+        "nullable": false,
+        "role": "IDENTITY"
+      },
+      {
+        "name": "source_selector",
+        "type": "source_selector_object",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "source_pubkey",
+        "type": "ed25519_pubkey_padded",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "destination_address",
+        "type": "external_address_padded",
+        "nullable": false,
+        "role": "PARTY"
+      },
+      {
+        "name": "amount_zkz",
+        "type": "zkz_amount_positive",
+        "nullable": false,
+        "role": "AMOUNT"
+      },
+      {
+        "name": "references_operation_id",
+        "type": "uuid_nullable",
+        "nullable": true,
+        "role": "REFERENCE"
+      }
+    ]
+  },
+  "SOURCE": "expected-artifact byte contract A.1, A.3, goldens A.8-A.9; artifacts freeze",
+  "SUITE_PREIMAGE_CONSTRUCTION": {
+    "payloadObject": "object built in the exact field sequence below",
+    "payloadJson": "JSON.stringify(payload_object)",
+    "preimageText": "purpose + \"\\n\" + payload_json",
+    "preimageBytes": "UTF8(preimage_text)",
+    "digest": "lowercase_hex(SHA256(preimage_bytes))",
+    "signature": "padded_base64url(Ed25519.sign(preimage_bytes, node_identity_key))",
+    "domainSeparationPrefix": "purpose",
+    "purposeAppearsAsPrefixAndField1": true,
+    "splitchainNativeSharesBytes": false
+  }
+}

@@ -1,0 +1,329 @@
+{
+  "concern": "route-policy",
+  "ticket": "route-policy-freeze",
+  "governing": {
+    "spec": "API contract: wire conventions, authentication classes, retired paths",
+    "decision": "non-oracular-auth-errors",
+    "dependsOn": "auth-errors-freeze"
+  },
+  "authClasses": [
+    {
+      "name": "IMPLEMENTER_BEARER",
+      "authFailureStatus": 401,
+      "authFailureCode": "invalid_api_key",
+      "tenantResolutionCode": "not_found",
+      "nonOracularFrozen": true
+    },
+    {
+      "name": "REPORTING_CREDENTIAL",
+      "authFailureStatus": 401,
+      "authFailureCode": "invalid_api_key",
+      "tenantResolutionCode": "not_found",
+      "nonOracularFrozen": true
+    },
+    {
+      "name": "SUBSCRIPTION_HANDLE",
+      "authFailureStatus": 401,
+      "authFailureCode": "invalid_api_key",
+      "tenantResolutionCode": "not_found",
+      "nonOracularFrozen": true
+    },
+    {
+      "name": "OPERATOR_SESSION",
+      "authFailureStatus": 401,
+      "authFailureCode": null,
+      "tenantResolutionCode": "not_found",
+      "nonOracularFrozen": false
+    },
+    {
+      "name": "PUBLIC",
+      "authFailureStatus": null,
+      "authFailureCode": null,
+      "tenantResolutionCode": null,
+      "nonOracularFrozen": false
+    }
+  ],
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/v1/receives",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "receive:create",
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/receives/:operation_id",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "receive:read",
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/internal-moves",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "move:create",
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/internal-moves/:operation_id",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "move:read",
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/external-sends",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "send:create",
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/external-sends/:operation_id",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "send:read",
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/destinations",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": "destination:create",
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/destinations",
+      "authClass": "IMPLEMENTER_BEARER",
+      "authClasses": [
+        "IMPLEMENTER_BEARER",
+        "REPORTING_CREDENTIAL"
+      ],
+      "scope": "destination:read",
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events/stream",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/state/snapshot",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/operations/:operation_id/subscribe",
+      "authClass": "SUBSCRIPTION_HANDLE",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/operations/:operation_id/armed",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/operations/:operation_id/verification-complete",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/operations/:operation_id/verification-material",
+      "authClass": "REPORTING_CREDENTIAL",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/external-sends/:operation_id/approval-challenge",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/external-sends/:operation_id/approve",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/external-sends/:operation_id/reject",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/destinations/:destination_id/bless",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/destinations/:destination_id/retire",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/operations/needs-attention",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/admin/v1/operations/:operation_id/recovery",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
+      "method": "POST",
+      "path": "/admin/v1/operations/:operation_id/recovery-actions",
+      "authClass": "OPERATOR_SESSION",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "REQUIRED"
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/zupay-node",
+      "authClass": "PUBLIC",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "authClass": "PUBLIC",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    }
+  ],
+  "forbiddenRoutePrefixes": [
+    "/v1/reservations",
+    "/v1/outbound-requests",
+    "/v1/payments",
+    "/v1/refunds",
+    "/admin/v1/drains"
+  ],
+  "deferredUnfrozenRoutes": [
+    {
+      "concern": "exact proof-body intake",
+      "blocker": "intake contract not yet frozen",
+      "owner": "proof-body-intake"
+    }
+  ],
+  "pipeline": [
+    {
+      "order": 1,
+      "name": "assign_request_id",
+      "failsWith": null,
+      "deferredTo": null
+    },
+    {
+      "order": 2,
+      "name": "authenticate_credential",
+      "failsWith": "invalid_api_key",
+      "deferredTo": null
+    },
+    {
+      "order": 3,
+      "name": "authorize_scope",
+      "failsWith": "invalid_api_key",
+      "deferredTo": null
+    },
+    {
+      "order": 4,
+      "name": "enforce_idempotency",
+      "failsWith": null,
+      "deferredTo": "idempotency-key-contract"
+    },
+    {
+      "order": 5,
+      "name": "resolve_object_with_tenant_predicate",
+      "failsWith": "not_found",
+      "deferredTo": null
+    },
+    {
+      "order": 6,
+      "name": "handler",
+      "failsWith": null,
+      "deferredTo": null
+    },
+    {
+      "order": 7,
+      "name": "audit_record",
+      "failsWith": null,
+      "deferredTo": "audit-record-contract"
+    },
+    {
+      "order": 8,
+      "name": "emit_error_envelope",
+      "failsWith": null,
+      "deferredTo": null
+    }
+  ],
+  "authStageSequence": [
+    "authenticate_credential",
+    "authorize_scope",
+    "resolve_object_with_tenant_predicate"
+  ],
+  "pipelineInvariants": [
+    "every response — 2xx and non-2xx — carries the request_id assigned at stage 1",
+    "authorization (scope) runs before any object lookup, so an unauthorized caller cannot probe object existence",
+    "every non-2xx body is rendered through the canonical error envelope; no route emits a bespoke error shape",
+    "no stage emits a 403 for a scope denial; scope denial is the generic 401",
+    "audit records are server-side only and never appear in the response status, body, or headers",
+    "idempotency replay returns the original status/body with Idempotency-Replayed: true, never a fresh oracle"
+  ]
+}

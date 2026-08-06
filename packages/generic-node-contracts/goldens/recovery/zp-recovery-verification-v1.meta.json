@@ -1,0 +1,32 @@
+{
+  "artifact": "zp-recovery-verification-v1",
+  "canonical_version": 1,
+  "concern": "recovery-drill",
+  "signing_role": "wallet",
+  "signing_note": "CHAINED golden: field 8 `export_sha256` IS the zp-backup-wallet-export-v1 golden's digest (recorded below as chained_export_digest). Signed by the same wallet key the fresh probe recovers by opening the real seal. This is a recovery-lane purpose only — it cannot parse as a SplitChain inner and no money path can mint it (the fresh-probe rules). Wallet seed byte 0x11.",
+  "wallet_id": "aaaaaaaa-0000-4000-8000-000000000001",
+  "wallet_public_key_b64": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "artifact_digest_sha256": "f5c08d42c72656b056445f9c3d559fd2cc767e10abf56494de355bc665a7dd8a",
+  "chained_export_digest": "62055b5120268032d64e94e5a9210e3693fa7d4f143978cc00769ce4b6d44e44",
+  "chain_invariant": "probe payload field 8 (export_sha256) === zp-backup-wallet-export-v1.digest.hex content",
+  "ceremony_nonce_b64url": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3c=",
+  "source": {
+    "schema": "signing-custody-security: recovery-verification probe",
+    "preimage_construction": "the suite-tuple preimage rule (purpose + LF + JSON.stringify(payload))",
+    "decision": "recovery-verification-probe-freeze"
+  },
+  "files": {
+    "zp-recovery-verification-v1.preimage.txt": {
+      "sha256": "f5c08d42c72656b056445f9c3d559fd2cc767e10abf56494de355bc665a7dd8a",
+      "note": "exact probe preimage bytes (purpose + LF + JSON.stringify(payload)); its own sha256 equals artifact_digest_sha256"
+    },
+    "zp-recovery-verification-v1.digest.hex": {
+      "sha256": "188903c11e074e9d093d884dcd38f579dc386ab1ded178047ea32b70bf81cb94",
+      "content_equals": "artifact_digest_sha256"
+    },
+    "zp-recovery-verification-v1.sig.b64": {
+      "sha256": "a8d14c8697da790588ca7bfc0f95caf9ac215f05577d0aae3d94bf9790d2a8bc",
+      "note": "Ed25519 detached signature over the probe preimage, padded base64url, signed by the wallet key (seed byte 0x11)"
+    }
+  }
+}

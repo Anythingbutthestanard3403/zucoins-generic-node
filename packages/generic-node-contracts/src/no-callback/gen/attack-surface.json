@@ -1,0 +1,103 @@
+{
+  "concern": "no-callback",
+  "governing": {
+    "spec": "api receive surface; operation-flow delivery channels",
+    "decisions": [
+      "no-callback-removal",
+      "reporting-channel",
+      "ssrf-url-guard"
+    ],
+    "dependsOn": [
+      "no-callback",
+      "reporting-behavior",
+      "event-sequencing"
+    ]
+  },
+  "transportAttacks": [
+    {
+      "attack": "ssrf",
+      "classicVector": "node_fetches_operator_callback_url",
+      "neutralizedBy": "egress_absence_no_operator_url_request"
+    },
+    {
+      "attack": "dns_rebinding",
+      "classicVector": "callback_host_reresolves_to_internal_ip_after_validation",
+      "neutralizedBy": "egress_absence_no_operator_url_request"
+    },
+    {
+      "attack": "redirect_follow",
+      "classicVector": "callback_302_redirects_node_to_internal_target",
+      "neutralizedBy": "egress_absence_no_operator_url_request"
+    },
+    {
+      "attack": "private_range",
+      "classicVector": "callback_url_targets_loopback_link_local_or_rfc1918",
+      "neutralizedBy": "egress_absence_no_operator_url_request"
+    },
+    {
+      "attack": "tls_failure",
+      "classicVector": "callback_tls_downgrade_or_cert_bypass",
+      "neutralizedBy": "egress_absence_no_operator_url_request"
+    }
+  ],
+  "replayAttacks": [
+    {
+      "attack": "duplicate_delivery",
+      "classicVector": "same_event_delivered_twice",
+      "neutralizedBy": "pull_cursor_authoritative_delivery_is_not_truth"
+    },
+    {
+      "attack": "restart_regap",
+      "classicVector": "delivery_worker_restart_reorders_or_skips",
+      "neutralizedBy": "pull_cursor_authoritative_delivery_is_not_truth"
+    },
+    {
+      "attack": "stale_event",
+      "classicVector": "late_event_arrives_after_cursor_advanced",
+      "neutralizedBy": "pull_cursor_authoritative_delivery_is_not_truth"
+    },
+    {
+      "attack": "permanent_failure",
+      "classicVector": "delivery_never_succeeds",
+      "neutralizedBy": "pull_cursor_authoritative_delivery_is_not_truth"
+    }
+  ],
+  "nonGatewayDestinationClasses": [
+    {
+      "class": "operator_http_url",
+      "exampleHost": "operator.example.com"
+    },
+    {
+      "class": "operator_https_url",
+      "exampleHost": "hooks.merchant.example"
+    },
+    {
+      "class": "dns_rebinding_resolved_ip",
+      "exampleHost": "10.0.0.5"
+    },
+    {
+      "class": "redirect_target_host",
+      "exampleHost": "internal.svc.cluster.local"
+    },
+    {
+      "class": "loopback",
+      "exampleHost": "127.0.0.1"
+    },
+    {
+      "class": "link_local",
+      "exampleHost": "169.254.0.1"
+    },
+    {
+      "class": "cloud_metadata",
+      "exampleHost": "169.254.169.254"
+    },
+    {
+      "class": "rfc1918_private",
+      "exampleHost": "192.168.1.1"
+    }
+  ],
+  "cursorAuthority": {
+    "authoritativeCursorRole": "authoritative_cursor",
+    "sseAcceleratorRole": "low_latency_wake_accelerator"
+  }
+}

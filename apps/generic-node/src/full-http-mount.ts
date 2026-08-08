@@ -351,10 +351,14 @@ export interface ProductionSurfaceConfig {
   readonly deviceStore?: AdminRouteDeps["deviceStore"];
   /**
    * Effective dual-control approval mode, already validated by the frozen schema
-   * (DUAL_CONTROL_MODE). Omitted ⇒ single_operator, the schema's documented
-   * "no optional policy configured" default; there is no parse step here.
+   * (DUAL_CONTROL_MODE, which supplies the documented single_operator default when
+   * the operator configured no optional policy). There is no parse step here.
+   *
+   * REQUIRED on purpose: an optional field resolved with `?? "single_operator"` let a
+   * dropped caller wire silently downgrade a two_human deployment with tsc green and
+   * every test passing. Dropping the wire is now a compile error at the call site.
    */
-  readonly dualControlMode?: DualControlMode;
+  readonly dualControlMode: DualControlMode;
   /** Optional readiness probes (node health, backup schedule, break-glass). */
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   /**
@@ -662,11 +666,9 @@ export function createProductionRouteSurface(
   const secondDeviceCeremonyStore = new InMemorySecondDeviceCeremonyStore();
   // Mode comes from the validated schema (config.DUAL_CONTROL_MODE), never from raw
   // env here: an unrecognised value must have already refused boot rather than reach
-  // this constructor as the weaker mode. Omitted only by callers that supply no
-  // policy at all — the same single_operator default the schema documents.
-  const dualControlPolicy = new InMemoryDualControlPolicy(
-    config.dualControlMode ?? "single_operator",
-  );
+  // this constructor as the weaker mode. No `?? "single_operator"` — the schema owns
+  // the default, and a fallback here would re-open the downgrade one level up.
+  const dualControlPolicy = new InMemoryDualControlPolicy(config.dualControlMode);
   const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
   const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();
   // Real sealed auth (not length-only discard). Env OPERATOR_PUSH_SEAL_KEY preferred;

@@ -50,6 +50,8 @@ import {
   runGuardedAdminMutation,
   verifyTotp,
   type AdminSessionConfig,
+  type AdminUser,
+  type AdminUserStore,
   type AuthHttpResult,
   type AuthRequest,
   type BodyValidationResult,
@@ -497,6 +499,134 @@ describe("brute force — per-(IP, username) lockout", () => {
     } finally {
       Date.now = realNow;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Login lockout — the same pair lock applied to the password surface
+// ---------------------------------------------------------------------------
+
+describe("login — per-(IP, username) lockout", () => {
+  const IP = "203.0.113.44";
+  const UA = "Mozilla/5.0 (operator console)";
+  const WRONG = "wrong-password-xx";
+
+  beforeEach(() => {
+    _resetIpLockoutForTests();
+  });
+  afterEach(() => {
+    _resetIpLockoutForTests();
+  });
+
+  function attempt(
+    userStore: AdminUserStore,
+    sessions: ReturnType<typeof createAdminSessionService>,
+    password: string,
+    ip: string | null = IP,
+    username = DEFAULT_ADMIN_USERNAME,
+  ): Promise<AuthHttpResult> {
+    return handleAdminLogin({ userStore, sessions, ip, userAgent: UA }, { username, password });
+  }
+
+  /**
+   * Wraps a seeded store to observe whether the handler reached the bcrypt
+   * compare: passwordHash is read only when building verifyPassword's arguments.
+   */
+  function watchHashReads(users: InMemoryAdminUserStore): {
+    readonly store: AdminUserStore;
+    reads(): number;
+  } {
+    let reads = 0;
+    const store: AdminUserStore = Object.assign(Object.create(users) as AdminUserStore, {
+      async findByUsername(username: string): Promise<AdminUser | null> {
+        const user = await users.findByUsername(username);
+        if (user === null) return null;
+        return new Proxy(user, {
+          get(target, prop, receiver) {
+            if (prop === "passwordHash") reads += 1;
+            return Reflect.get(target, prop, receiver);
+          },
+        });
+      },
+    });
+    return { store, reads: () => reads };
+  }
+
+  it(`locks the pair after ${IP_LOCK_THRESHOLD} failures — the correct password is then refused`, async () => {
+    const { users, service } = await seedClearedPassword();
+
+    for (let i = 0; i < IP_LOCK_THRESHOLD; i++) {
+      expect((await attempt(users, service, WRONG)).status).toBe(401);
+    }
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(true);
+
+    const correct = await attempt(users, service, PASSWORD);
+    expect(correct.status).toBe(401);
+    expect(correct.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("a locked response is byte-identical to a wrong-password response", async () => {
+    const { users, service } = await seedClearedPassword();
+
+    const wrongPw = await attempt(users, service, WRONG);
+    for (let i = 1; i < IP_LOCK_THRESHOLD; i++) await attempt(users, service, WRONG);
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(true);
+
+    const locked = await attempt(users, service, PASSWORD);
+    expect(envelopeBytes(locked)).toBe(envelopeBytes(wrongPw));
+    // No lock oracle smuggled in via a header (no Retry-After, no distinct code).
+    expect(JSON.stringify(locked.headers)).toBe(JSON.stringify(wrongPw.headers));
+  });
+
+  it("a locked attempt still pays exactly one bcrypt compare — no timing oracle", async () => {
+    const { users, service } = await seedClearedPassword();
+    const spy = watchHashReads(users);
+
+    for (let i = 0; i < IP_LOCK_THRESHOLD; i++) await attempt(spy.store, service, WRONG);
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(true);
+
+    const before = spy.reads();
+    expect((await attempt(spy.store, service, PASSWORD)).status).toBe(401);
+    // Short-circuiting on the lock would return before verifyPassword's arguments
+    // are built and leave this counter unchanged.
+    expect(spy.reads()).toBe(before + 1);
+  });
+
+  it("the lock is pair-scoped — another IP and another username are unaffected", async () => {
+    const { users, service } = await seedClearedPassword();
+    for (let i = 0; i < IP_LOCK_THRESHOLD; i++) await attempt(users, service, WRONG);
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(true);
+
+    // Same username from another IP still authenticates.
+    expect((await attempt(users, service, PASSWORD, "198.51.100.7")).status).toBe(200);
+    // Another username from the locked IP carries no lock of its own.
+    expect(isIpPairLocked(IP, "someone-else")).toBe(false);
+  });
+
+  it("a successful login clears the pair counter", async () => {
+    const { users, service } = await seedClearedPassword();
+    for (let i = 0; i < IP_LOCK_THRESHOLD - 1; i++) await attempt(users, service, WRONG);
+
+    expect((await attempt(users, service, PASSWORD)).status).toBe(200);
+
+    // Fresh window after the clear — the full threshold is needed again.
+    for (let i = 0; i < IP_LOCK_THRESHOLD - 1; i++) {
+      expect((await attempt(users, service, WRONG)).status).toBe(401);
+    }
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(false);
+    expect((await attempt(users, service, PASSWORD)).status).toBe(200);
+  });
+
+  it("the issued session records the caller's ip and user agent", async () => {
+    const { users, sessions, service } = await seedClearedPassword();
+
+    const login = await attempt(users, service, PASSWORD);
+    expect(login.status).toBe(200);
+
+    const sessionId = extractSessionIdFromCookie(cookieHeader(login.headers["set-cookie"]!))!;
+    const stored = await sessions.find(sessionId);
+    expect(stored?.ip).toBe(IP);
+    expect(stored?.userAgent).toBe(UA);
   });
 });
 

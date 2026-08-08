@@ -331,6 +331,8 @@ type JsonRouter = (
   rawPath: string,
   rawBody: Uint8Array,
   headers: Record<string, string | undefined>,
+  /** Socket peer address — the only client identity a client cannot forge. */
+  remoteAddress?: string | null,
 ) => Promise<{ status: number; body: string; headers: Record<string, string> }>;
 
 async function handleJsonRoute(
@@ -353,7 +355,15 @@ async function handleJsonRoute(
       return;
     }
     const body = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
-    const result = await router(method, url, body, normalizeHeaders(rawHeaders));
+    const result = await router(
+      method,
+      url,
+      body,
+      normalizeHeaders(rawHeaders),
+      // Optional chain: socket is null on an already-destroyed connection, and
+      // this seam turns any throw into an opaque 503.
+      request.socket?.remoteAddress ?? null,
+    );
     if (metricsHooks !== undefined) {
       if (result.status === 401) metricsHooks.onAuth("rejected");
       else if (result.status >= 500) metricsHooks.onAuth("error");

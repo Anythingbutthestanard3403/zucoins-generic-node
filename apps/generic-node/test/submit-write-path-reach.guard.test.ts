@@ -317,13 +317,6 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
     "@zucoins/node-core:WALLET_CUSTODY_VIEW_FIELDS (allowlist; no submit write call site)",
   "admin-router.ts": "@zucoins/node-core:1 (admin money mount; no submit write call site)",
   "boot/boot-lane.ts": "@zucoins/node-core:57",
-  // The process-level uncaughtException net (ZTR-1185). Value-imports
-  // scrubErrorDetails from the barrel so a fatal is logged through the central
-  // redactor rather than a second hand-rolled one — latent barrel reach only, and
-  // it names no submit factory and no ledger. It runs the entry point's graceful
-  // stop and exits; it cannot submit.
-  "boot/fatal-exception.ts":
-    "@zucoins/node-core:23 (fatal-exception log redaction; no submit write call site)",
   "boot/index.ts": "-> boot/readiness.ts (./readiness.js:1)",
   "boot/readiness.ts": "@zucoins/node-core:11",
   "boot/shutdown-registry.ts": "@zucoins/node-core:34",
@@ -469,12 +462,6 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
     "@zucoins/node-core:1 (reporting list/stream/snapshot + durable subscription handles; no submit write call site)",
   "full-http-mount.ts": "@zucoins/node-core:1 (ROUTE_POLICIES composition; value import of reporting+admin factories — no submit write call site)",
   "runtime-listener.ts": "@zucoins/node-core:16",
-  // The Stage-1 zero-custody entry point. Its ONLY edge into the barrel is the
-  // fatal-exception net above (ZTR-1185) — structural reach through that one
-  // import, not a custody surface. Stage 1 still constructs no vault, no
-  // leadership, no operation store and no money worker, and names no submit
-  // factory or ledger; test/stage1-production.test.ts holds that line.
-  "stage1-main.ts": "-> boot/fatal-exception.ts (./boot/fatal-exception.js:14)",
   "storage-pressure.ts": "@zucoins/node-core:17",
 };
 

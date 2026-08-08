@@ -424,6 +424,10 @@ describe("node-core dependency boundaries", () => {
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/node-core",
         "@zucoins/node-core/data",
+        // scrubErrorDetails for the process-level fatal net. The subpath, not the
+        // barrel: boot/fatal-exception.ts is imported by the zero-custody
+        // stage1-main.ts, which must not reach a vault/signing/submit surface.
+        "@zucoins/node-core/observability",
         "drizzle-orm/node-postgres",
         "drizzle-orm/node-postgres/migrator",
         // aes128gcm decrypt lives in node-core (`decryptWebPushPayload` over

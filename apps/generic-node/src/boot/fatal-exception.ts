@@ -20,7 +20,10 @@
 // Everything is injected (emitter, exit, timers, logger) so tests never signal
 // a real process — same discipline as graceful-stop.ts.
 
-import { scrubErrorDetails } from "@zucoins/node-core";
+// Subpath, not the root barrel: stage1-main.ts imports this module, and the barrel
+// would pull node-core's vault / signing-key / gateway-submit surfaces into the
+// zero-custody entry point's module graph. observability is a leaf.
+import { scrubErrorDetails } from "@zucoins/node-core/observability";
 
 export interface FatalExceptionLogger {
   error(message: string, details?: unknown): void;

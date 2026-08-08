@@ -663,9 +663,13 @@ describe.skipIf(!PG_AVAILABLE)("live ARM offline e2e (real PG)", () => {
       }),
     );
     expect(response.status).toBe(401);
+    // invalid_signature is a credential-state rejection, so the wire carries only the collapsed
+    // non-oracular code; the refusal itself is asserted on the server-side record and on the
+    // untouched code_status below.
     expect(JSON.parse(new TextDecoder().decode(response.bodyBytes)).error.code).toBe(
-      "invalid_signature",
+      "invalid_api_key",
     );
+    expect(response.collapsedRejection?.code).toBe("invalid_signature");
     expect(await codeStatusOf(seeded.operationId)).toBe("AWAITING_ARM");
   }, 60_000);
 

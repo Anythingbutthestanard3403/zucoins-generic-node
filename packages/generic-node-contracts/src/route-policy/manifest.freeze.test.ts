@@ -9,13 +9,23 @@
 import { describe, expect, it } from "vitest";
 
 import golden from "./gen/route-policy.json" with { type: "json" };
-import { AUTH_CHECK_ORDER } from "../auth-errors/index.js";
+import {
+  AUTH_CHECK_ORDER,
+  CANONICAL_AUTH_FAILURE_CODE,
+  REJECTION_STATUS,
+  REPORTING_CREDENTIAL_REJECTION_CODES,
+  REPORTING_REJECTION_CODES,
+  REPORTING_REQUEST_SHAPE_401_CODES,
+  reportingWireCode,
+  type ReportingRejectionCode,
+} from "../auth-errors/index.js";
 import { AUTH_CLASS_POLICY, AUTH_CLASSES, type AuthClassPolicy } from "./auth-classes.js";
 import { ROUTE_POLICIES, routeAuthClasses, type RoutePolicy } from "./routes.js";
 import { AUTH_STAGE_SEQUENCE, REQUEST_PIPELINE } from "./pipeline.js";
 import { buildRoutePolicyManifest } from "./manifest.js";
 import {
   firstOracularRoute,
+  firstReportingTaxonomyLeak,
   fullyFrozenAuthClasses,
   isAuthClassNonOracular,
   isForbiddenRoute,
@@ -179,5 +189,52 @@ describe("route-policy non-oracularity verifier (mandatory negative path)", () =
     );
     if (!destinationsRead) throw new Error("route not found: GET /v1/destinations");
     expect(isRoutePolicyNonOracular(destinationsRead)).toBe(true);
+  });
+});
+
+describe("REPORTING_CREDENTIAL's frozen collapse binds the SERVED rejection taxonomy", () => {
+  // The gap this closes: AUTH_CLASS_POLICY.REPORTING_CREDENTIAL asserted `nonOracularFrozen`
+  // while REJECTION_STATUS served ten distinguishable 401 codes from a module the verifiers
+  // never read. Nothing structurally related the two, which is how they drifted apart.
+  it("the served taxonomy is no wider than the frozen collapse allows", () => {
+    expect(firstReportingTaxonomyLeak()).toBeNull();
+  });
+
+  it("catches the pre-fix taxonomy, where each credential code reached the wire verbatim", () => {
+    // The mandatory negative path: feed the identity mapping the surface used before the
+    // collapse and require the gate to name a credential-state code.
+    const leak = firstReportingTaxonomyLeak((code) => code);
+    expect(leak).not.toBeNull();
+    expect(REPORTING_CREDENTIAL_REJECTION_CODES).toContain(leak as ReportingRejectionCode);
+  });
+
+  it("every 401 code is declared exactly once, as credential state or as request shape", () => {
+    // Totality + disjointness of the partition. A 401 reject reason added later that declares
+    // itself in neither array (or in both) fails here and in firstReportingTaxonomyLeak.
+    const credential = new Set<string>(REPORTING_CREDENTIAL_REJECTION_CODES);
+    const requestShape = new Set<string>(REPORTING_REQUEST_SHAPE_401_CODES);
+    const declared = REPORTING_REJECTION_CODES.filter((code) => REJECTION_STATUS[code] === 401);
+    expect(declared.length).toBe(credential.size + requestShape.size);
+    for (const code of declared) {
+      expect(credential.has(code) !== requestShape.has(code)).toBe(true);
+    }
+  });
+
+  it("collapses exactly the six credential-state codes and no others", () => {
+    // Set equality, so neither a silent removal nor a silent addition passes.
+    expect(new Set(REPORTING_CREDENTIAL_REJECTION_CODES)).toEqual(
+      new Set([
+        "unknown_reporting_key",
+        "tenant_binding_mismatch",
+        "reporting_key_not_active",
+        "reporting_auth_hold",
+        "invalid_signature",
+        "nonce_replay",
+      ]),
+    );
+    for (const code of REPORTING_REJECTION_CODES) {
+      const collapses = (REPORTING_CREDENTIAL_REJECTION_CODES as readonly string[]).includes(code);
+      expect(reportingWireCode(code)).toBe(collapses ? CANONICAL_AUTH_FAILURE_CODE : code);
+    }
   });
 });

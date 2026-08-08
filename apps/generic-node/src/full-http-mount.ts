@@ -906,6 +906,20 @@ export function createProductionRouteSurface(
       nowMs,
       maxBodyBytes: DEFAULT_MAX_BODY_BYTES,
       newRequestId,
+      // The reason the collapsed 401 withholds from the caller, kept where only an operator can
+      // read it: an implementer debugging a signing failure quotes the request id and the
+      // operator resolves it here. Codes and ids only — no key material, no tenant identifiers
+      // beyond what the caller already presented. This is also the signal that replaces the
+      // `reporting_auth_hold` wire code for the platform dark-period detector.
+      recordCollapsedRejection: (rejection) => {
+        console.info(
+          JSON.stringify({
+            event: "reporting_credential_rejection",
+            request_id: rejection.requestId,
+            reason: rejection.code,
+          }),
+        );
+      },
     }),
   );
 

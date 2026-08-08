@@ -14,10 +14,18 @@ export {
 } from "@zucoins/generic-node-contracts/auth-errors";
 
 import {
+  buildAuthErrorBody,
+  reportingWireCode,
+  CANONICAL_AUTH_FAILURE_MESSAGE,
   REJECTION_STATUS,
   type ReportingRejectionCode,
 } from "@zucoins/generic-node-contracts/auth-errors";
 
+// The six credential-state codes share the canonical message verbatim: collapsing the code
+// while leaving "the reporting key id is not registered on this node" in English restates the
+// same distinction and is not a collapse. reportingErrorResponse never reads their entry (it
+// builds those bodies through the frozen emitter), but the map stays total so a direct reader
+// of the taxonomy sees the same single answer.
 const REJECTION_MESSAGES: Readonly<Record<ReportingRejectionCode, string>> = {
   missing_reporting_headers: "The five signed reporting headers are each mandatory exactly once.",
   invalid_reporting_headers: "A signed reporting header value is not in its canonical form.",
@@ -30,12 +38,12 @@ const REJECTION_MESSAGES: Readonly<Record<ReportingRejectionCode, string>> = {
   invalid_reporting_window: "The signed issued_at/expires_at window is not within (0, 60s].",
   reporting_request_expired: "The signed expires_at instant has passed.",
   reporting_request_not_yet_valid: "The signed issued_at instant is in the future.",
-  unknown_reporting_key: "The reporting key id is not registered on this node.",
-  tenant_binding_mismatch: "The signed tenant fields do not equal the key registration binding.",
-  reporting_key_not_active: "The reporting key is not admitted at the current lifecycle head.",
-  reporting_auth_hold: "Reporting authorization is held on this node or lifecycle head.",
-  invalid_signature: "The reporting signature does not verify over the exact request tuple.",
-  nonce_replay: "The reporting nonce was already consumed.",
+  unknown_reporting_key: CANONICAL_AUTH_FAILURE_MESSAGE,
+  tenant_binding_mismatch: CANONICAL_AUTH_FAILURE_MESSAGE,
+  reporting_key_not_active: CANONICAL_AUTH_FAILURE_MESSAGE,
+  reporting_auth_hold: CANONICAL_AUTH_FAILURE_MESSAGE,
+  invalid_signature: CANONICAL_AUTH_FAILURE_MESSAGE,
+  nonce_replay: CANONICAL_AUTH_FAILURE_MESSAGE,
   idempotency_conflict: "The idempotency key was completed with a different request fingerprint.",
   internal_error: "The reporting request failed after authentication; the nonce burn is retained.",
 };
@@ -55,6 +63,17 @@ export interface ReportingHttpResponse {
    * response. Call close on client disconnect so SSE poll timers cannotint leak.
    */
   readonly liveStream?: ReportingLiveStream;
+  /**
+   * Server-side only: the real reason behind a collapsed non-oracular 401, against the
+   * `request_id` this response carries. NEVER serialized — the transport writes `status`,
+   * `headers` and `bodyBytes` and nothing else — so an operator can resolve the reason from the
+   * id the caller quotes while the wire stays a single opaque "no". Set by
+   * reportingErrorResponse alone; the HTTP adapter records it as every response is written.
+   */
+  readonly collapsedRejection?: {
+    readonly requestId: string;
+    readonly code: ReportingRejectionCode;
+  };
 }
 
 export function reportingErrorResponse(
@@ -62,6 +81,26 @@ export function reportingErrorResponse(
   requestId: string,
   message?: string,
 ): ReportingHttpResponse {
+  // The non-oracular collapse, at the single emitter every reporting rejection routes through.
+  // `reportingWireCode` is the frozen served mapping (the contracts-side verifier reads the same
+  // function), so a credential-state code never reaches the wire: status, code, message and
+  // headers are constant across all six and the response answers only "no" — never "that key is
+  // unregistered" vs "that key belongs to someone else" vs "only your signature failed". The
+  // body comes from the frozen auth-error emitter rather than a hand-built envelope that merely
+  // looks the same, so it is byte-identical to the pinned canonical 401 modulo request_id. A
+  // caller-supplied `message` is discarded rather than trusted — a future emitter cannot reopen
+  // the channel by passing one.
+  const wireCode = reportingWireCode(code);
+  if (wireCode !== code) {
+    return {
+      status: REJECTION_STATUS[code],
+      headers: { "content-type": "application/json" },
+      bodyBytes: UTF8.encode(
+        buildAuthErrorBody(wireCode, CANONICAL_AUTH_FAILURE_MESSAGE, requestId),
+      ),
+      collapsedRejection: { requestId, code },
+    };
+  }
   const envelope = {
     error: {
       code,

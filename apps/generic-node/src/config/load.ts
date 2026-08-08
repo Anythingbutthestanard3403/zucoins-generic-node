@@ -30,7 +30,7 @@ export class NodeConfigurationError extends Error {
 //   node initiates no callback surface, so this variable can never take effect.
 // - REPORTING_CLOCK_SKEW_SECONDS: clock skew is frozen at zero; the consumer
 //   owes the whole margin, so this is not a configuration knob.
-const DELETED_ENV_VARS: Readonly<Record<string, string>> = {
+export const DELETED_ENV_VARS: Readonly<Record<string, string>> = {
   POOL_TARGET_AVAILABLE:
     "POOL_TARGET_AVAILABLE was deleted — the receive-pool target is derived from live demand (poolTargetTotal), not configured. Remove this variable; set POOL_CAP_TOTAL if you need to change pool sizing.",
   RECEIVE_QUEUE_CAP:

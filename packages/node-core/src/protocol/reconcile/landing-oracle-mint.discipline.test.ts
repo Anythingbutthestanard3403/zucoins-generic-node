@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = resolve(here, "../..");
+const testRoot = resolve(srcRoot, "../test");
 
 const ALLOWED_MINT_PRODUCTION_RELATIVE = new Set([
   "protocol/reconcile/landing-oracle-mint.ts",
@@ -71,10 +72,15 @@ describe("landing oracle mint discipline", () => {
     expect(code).toMatch(/revalidateLandingPathProofBindings/);
   });
 
-  it("src tests do not deep-import mint channel (fixture only)", () => {
+  // Both roots: src co-located suites and the package's test/ tree. test/ was unpoliced until
+  // ZTR-1164, which is how a deep-import there survived unnoticed.
+  it("tests do not deep-import mint channel (fixture only)", () => {
     const violations: string[] = [];
-    for (const file of listTsFiles(srcRoot)) {
-      if (!file.endsWith(".test.ts")) continue;
+    const files = [
+      ...listTsFiles(srcRoot).filter((file) => file.endsWith(".test.ts")),
+      ...listTsFiles(testRoot),
+    ];
+    for (const file of files) {
       const code = stripComments(readFileSync(file, "utf8"));
       if (IMPORT_MINT_CHANNEL.test(code)) {
         violations.push(relative(srcRoot, file).replaceAll("\\", "/"));

@@ -30,6 +30,7 @@ import {
   InMemoryAdminUserStore,
   TotpConsumptionLog,
   _resetIpLockoutForTests,
+  _resetLoginRateLimitForTests,
   adminCorsFromAllowlist,
   bootstrapInitialAdmin,
   checkCsrf,
@@ -511,11 +512,16 @@ describe("login — per-(IP, username) lockout", () => {
   const UA = "Mozilla/5.0 (operator console)";
   const WRONG = "wrong-password-xx";
 
+  // This block drives well past LOGIN_RATE_MAX_REQUESTS attempts from one IP inside a
+  // single window — exactly the traffic the ZTR-1201 volume throttle sheds. Reset it
+  // alongside the lockout so each case measures the lockout, not the throttle.
   beforeEach(() => {
     _resetIpLockoutForTests();
+    _resetLoginRateLimitForTests();
   });
   afterEach(() => {
     _resetIpLockoutForTests();
+    _resetLoginRateLimitForTests();
   });
 
   function attempt(

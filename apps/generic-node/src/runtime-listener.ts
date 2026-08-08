@@ -24,6 +24,7 @@ import {
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
   handleOperationSubscribe,
+  InMemoryReportingRateLimiter,
   handleWellKnown,
   matchOperationSubscribeRoute,
   PUSH_RECEIVER_PATH_PREFIX,
@@ -74,6 +75,17 @@ export interface RuntimeListenerLogger {
 const NOOP_RUNTIME_LISTENER_LOGGER: RuntimeListenerLogger = {
   error() {},
 };
+
+// Volume ceiling for the three POST create routes, per authenticated implementer.
+// Deliberately the SAME window and ceiling main.ts gives the signed reporting surface
+// (600/60s) so the node has one number for "too many requests" rather than two.
+// 600/minute is ~10 creates/second sustained from a single implementer; no legitimate
+// caller of a custody node's create surface runs anywhere near that, and a caller that
+// does is already past every downstream money control's own admission checks. Hardcoded,
+// matching the reporting limiter's precedent — no new env knob, so config/env-schema.ts
+// gains nothing to validate.
+export const OPERATION_CREATE_RATE_WINDOW_MS = 60_000;
+export const OPERATION_CREATE_RATE_MAX_REQUESTS = 600;
 
 export interface NodeRuntimeListenerDeps {
   readonly readiness: NodeReadiness;
@@ -516,6 +528,14 @@ export function createNodeRuntimeListener(
     store: operationStore,
     auth: operationAuth,
     newRequestId,
+    createThrottle: {
+      limiter: new InMemoryReportingRateLimiter(
+        OPERATION_CREATE_RATE_WINDOW_MS,
+        OPERATION_CREATE_RATE_MAX_REQUESTS,
+      ),
+      nodeId: deps.nodeId ?? "",
+      retryAfterSeconds: OPERATION_CREATE_RATE_WINDOW_MS / 1000,
+    },
   });
 
   const destinationsRouter =

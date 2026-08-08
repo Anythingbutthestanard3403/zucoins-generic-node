@@ -21,6 +21,7 @@ import {
   type PipelineRequest,
 } from "./pipeline.js";
 import { findRouteSchema } from "./route-schemas.js";
+import type { ReportingRateLimiter } from "../reporting/store.js";
 import {
   handleCreateReceive,
   handleGetReceive,
@@ -45,6 +46,24 @@ export interface OperationRouterDeps {
   readonly auth: OperationAuthBinding;
   readonly newRequestId: PipelineConfig["newRequestId"];
   readonly strictJson?: PipelineConfig["strictJson"];
+  /**
+   * Request-volume throttle for the three POST create routes, keyed on the
+   * AUTHENTICATED implementer. It wraps admission and nothing else: it runs after the
+   * pipeline has fully authenticated and authorized the caller, and before any handler
+   * is dispatched, so no money-path transaction, lease, or ledger write is touched or
+   * resequenced by it. Reads are never shed.
+   *
+   * The three fields travel together so a composition cannot half-wire the control.
+   * Omitted → no throttle (fixture and backward-compatible compositions).
+   */
+  readonly createThrottle?: {
+    /** The node's one general-purpose limiter shape — never a second, differently-shaped one. */
+    readonly limiter: ReportingRateLimiter;
+    /** Bucket namespace: the custody node uuid. */
+    readonly nodeId: string;
+    /** Advertised on the shed 429 — the limiter's window, in seconds. */
+    readonly retryAfterSeconds: number;
+  };
 }
 
 export interface RouterResponse {
@@ -140,6 +159,7 @@ export function createOperationRouter(deps: OperationRouterDeps): OperationRoute
   const store = deps.store;
   const auth = deps.auth;
   const newRequestId = deps.newRequestId;
+  const createThrottle = deps.createThrottle;
   assertOperationAuthComposition(store, auth);
 
   // Production wire: install resolveCredential from implementer-bearer
@@ -183,6 +203,35 @@ export function createOperationRouter(deps: OperationRouterDeps): OperationRoute
     const outcome = await runValidationPipeline(config, request, routeSchema);
     if (!outcome.ok) {
       return errorResponse(outcome.error);
+    }
+
+    // Volume throttle around admission, for the three create routes only. It sits
+    // strictly between "the caller is authenticated and in scope" and "a handler
+    // runs", so a caller must already hold a valid, correctly-scoped credential for
+    // this branch to be reachable at all — a 429 therefore tells an unauthenticated
+    // prober nothing a 401 did not already tell them, and it does not distinguish a
+    // known key from an unknown one or an in-scope key from an out-of-scope one.
+    // Every one of the six routes is tenantScoped, so `principal` is always bound
+    // here; the guard is a type narrowing, not a fail-open path.
+    if (createThrottle !== undefined && routeSchema.method === "POST") {
+      const principal = outcome.context.principal;
+      if (
+        principal !== undefined &&
+        !(await createThrottle.limiter.consume(
+          createThrottle.nodeId,
+          principal.implementerId,
+          Date.now(),
+        ))
+      ) {
+        return errorResponse(
+          apiErrorResponse(
+            "rate_limited",
+            outcome.context.requestId,
+            undefined,
+            createThrottle.retryAfterSeconds,
+          ),
+        );
+      }
     }
 
     // The store handler runs exactly once — no retry, no catch-and-resubmit.

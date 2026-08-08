@@ -110,6 +110,14 @@ export {
 } from "./ip-lockout.js";
 export type { IpFailureResult } from "./ip-lockout.js";
 
+// Per-source-IP login volume throttle — the spray-facing complement to the pair lock above.
+export {
+  LOGIN_RATE_MAX_REQUESTS,
+  LOGIN_RATE_WINDOW_MS,
+  _resetLoginRateLimitForTests,
+  consumeLoginAttempt,
+} from "./login-rate-limit.js";
+
 export {
   gateMoneyMutation,
   isUsableLabTotp,

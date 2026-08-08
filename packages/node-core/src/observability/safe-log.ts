@@ -5,6 +5,12 @@
 export const REDACTED = "[redacted]" as const;
 export const ELLIPSIS = "…" as const;
 export const MAX_REDACT_DEPTH = 8;
+/**
+ * Emitted in place of anything nested past MAX_REDACT_DEPTH. Distinct from
+ * REDACTED on purpose: REDACTED means "inspected and censored", this means
+ * "never inspected", and assertDumpSecretFree refuses to certify the latter.
+ */
+export const MAX_DEPTH_MARKER = "[max-depth]" as const;
 
 /** Lowercase + strip separators so VAULT_MASTER_KEY / vaultMasterKey / vault-master-key match. */
 export function normalizeKey(key: string): string {
@@ -59,10 +65,62 @@ export function truncate(kind: TruncateKind, value: string): string {
   return value.length <= 16 ? value : `${value.slice(0, 16)}${ELLIPSIS}`;
 }
 
+/**
+ * `key=value` / `key: value` assignments inside **free text** — a log message,
+ * an `Error.message`, a formatted failure cause. The key class stops at
+ * whitespace and quotes, so a JSON fragment (`"password":"…"`) never matches:
+ * structured payloads are redacted by field name through redactLogFields.
+ *
+ * The value class deliberately consumes `"` and `'`. It has to. Free text
+ * arrives truncated — the runtime listener cuts a cause at 200 characters —
+ * so `pwd="secret` with no closing quote is the ordinary shape, not the exotic
+ * one, and a class that stopped at the opening quote emitted the plaintext.
+ *
+ * That is safe only because this scrubber is never run over serialized JSON.
+ * A quote-consuming class run across a JSON line eats string terminators; a
+ * quote-avoiding one leaks truncated values. One pattern cannot do both jobs,
+ * so it only does this one — redactValue scrubs each string *before*
+ * serialization and the logger adapter re-redacts a JSON line structurally
+ * rather than textually (apps/generic-node/src/boot/safe-logger.ts).
+ *
+ * `]` is not a terminator, which is what makes the scrub idempotent: the class
+ * consumes `[redacted]` whole, so a second pass rewrites it to itself. Stopping
+ * at `]` instead both grew a `]` per pass and let `pwd=[redacted]still-secret`
+ * — a value the caller controls — keep its tail.
+ */
+const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)}]+)/g;
+
+/**
+ * Free-text counterpart of the field-name redactor, for strings that were
+ * already formatted before anyone could redact them structurally — log
+ * messages, `Error.message`, `Error.stack`.
+ *
+ * ponytail: assignment-shaped fragments only. A secret pasted as a bare token,
+ * or embedded in a URL credential (`postgres://u:p@h`), is not matched — widen
+ * the pattern here, never at a call site, if that turns out to be reachable.
+ */
+export function scrubText(text: string): string {
+  return text.replace(TEXT_ASSIGNMENT, (match, key: string, separator: string) =>
+    isNeverLog(normalizeKey(key)) ? `${key}${separator}${REDACTED}` : match,
+  );
+}
+
 function redactValue(value: unknown, seen: WeakSet<object>, depth: number): unknown {
-  if (depth > MAX_REDACT_DEPTH) return value;
+  // Fail-closed, like every other decision in this file: past the recursion
+  // bound emit the marker, never the caller's value. Returning the raw subtree
+  // here made the depth limit a secret-shaped hole — the inputs that exceed
+  // eight levels (wrapped driver errors, nested config) are the ones worth
+  // worrying about.
+  if (depth > MAX_REDACT_DEPTH) return MAX_DEPTH_MARKER;
   if (value instanceof Error) {
-    return { type: value.name, message: value.message, stack: value.stack };
+    // `stack` repeats `message` and can carry formatter-injected argument
+    // values; `message` itself is where drivers and crypto quote the offending
+    // input. Both go through the same never-log rules as a field name would.
+    return {
+      type: value.name,
+      message: scrubText(value.message),
+      stack: value.stack === undefined ? undefined : scrubText(value.stack),
+    };
   }
   if (Array.isArray(value)) {
     if (seen.has(value)) return "[circular]";
@@ -78,6 +136,12 @@ function redactValue(value: unknown, seen: WeakSet<object>, depth: number): unkn
     seen.delete(value);
     return out;
   }
+  // Free text held in an ordinarily-named field — a formatted cause, a driver
+  // message someone copied into `detail` — carries assignments no field-name
+  // rule can see. Scrub it here, before the caller serializes: that is what
+  // makes the emitted JSON both clean and parseable, because nobody has to run
+  // a text pattern across the serialized line afterwards.
+  if (typeof value === "string") return scrubText(value);
   return value;
 }
 
@@ -153,26 +217,39 @@ export function notFoundErrorBody(requestId?: string): {
 }
 
 /**
- * Fail-closed census: return keys whose values still look like they carried
- * secret classes after redaction (should be empty).
+ * Fail-closed census: return the paths of values this scan will not certify —
+ * a secret-classed key that is not REDACTED, or a subtree the redactor stopped
+ * at (MAX_DEPTH_MARKER), which was never inspected at all.
+ *
+ * Depth-unlimited by design. Sharing MAX_REDACT_DEPTH with the redactor made
+ * the census blind over exactly the range the redactor leaked, so the two
+ * defects cancelled each other's detection and the assertion came back green.
+ * Cycles are handled by `seen` instead; arrays are walked as index-keyed
+ * objects, so `rows.0.private_key` is reachable.
  */
 export function findUnredactedSecretKeys(
   fields: Record<string, unknown>,
-  depth = 0,
+  seen: WeakSet<object> = new WeakSet(),
 ): string[] {
-  if (depth > MAX_REDACT_DEPTH) return [];
   const hits: string[] = [];
   for (const [key, value] of Object.entries(fields)) {
     const name = normalizeKey(key);
     if (isNeverLog(name) && value !== REDACTED) {
       hits.push(key);
     }
-    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    if (value === MAX_DEPTH_MARKER) {
+      hits.push(key);
+      continue;
+    }
+    if (value !== null && typeof value === "object") {
+      if (seen.has(value)) continue;
+      seen.add(value);
       hits.push(
-        ...findUnredactedSecretKeys(value as Record<string, unknown>, depth + 1).map(
+        ...findUnredactedSecretKeys(value as Record<string, unknown>, seen).map(
           (k) => `${key}.${k}`,
         ),
       );
+      seen.delete(value);
     }
   }
   return hits;
@@ -181,11 +258,16 @@ export function findUnredactedSecretKeys(
 /**
  * Backup/export dump scan: assert no plaintext secret-class keys appear under root.
  * Ciphertext under truncateKind fields is allowed in truncated form only after redact.
+ *
+ * A dump nested past MAX_REDACT_DEPTH is refused rather than passed: the
+ * redactor stopped there, so no evidence exists either way, and certifying
+ * bytes that were never read is the green assertion this census exists to
+ * prevent. Flatten the dump or raise MAX_REDACT_DEPTH deliberately.
  */
 export function assertDumpSecretFree(dump: Record<string, unknown>): void {
   const redacted = redactLogFields(dump);
   const leaks = findUnredactedSecretKeys(redacted);
   if (leaks.length > 0) {
-    throw new Error(`secret-classed keys survived redaction: ${leaks.join(",")}`);
+    throw new Error(`dump failed the secret census (uncensored or uninspected): ${leaks.join(",")}`);
   }
 }

@@ -2,6 +2,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ELLIPSIS,
+  MAX_DEPTH_MARKER,
+  MAX_REDACT_DEPTH,
   REDACTED,
   assertDumpSecretFree,
   findUnredactedSecretKeys,
@@ -10,9 +13,17 @@ import {
   notFoundErrorBody,
   redactLogFields,
   scrubErrorDetails,
+  scrubText,
   truncate,
   truncateKind,
 } from "../src/observability/index.js";
+
+/** `{ l1: { l2: … } }` wrapping `leaf`, so `leaf`'s own keys sit at level+1. */
+function nest(levels: number, leaf: Record<string, unknown>): Record<string, unknown> {
+  let node: Record<string, unknown> = leaf;
+  for (let level = levels; level >= 1; level -= 1) node = { [`l${level}`]: node };
+  return node;
+}
 
 describe("normalizeKey / classifiers", () => {
   it("normalizes separators so all private-key spellings match", () => {
@@ -115,6 +126,115 @@ describe("error body scrub + uniform 404", () => {
   });
 });
 
+describe("recursion bound is fail-closed", () => {
+  it("censors a never-log field nested at depth 12 instead of emitting it raw", () => {
+    const deep = nest(11, { privateKey: "DEEP-UNIQUE-VALUE", note: "ordinary" });
+    const json = JSON.stringify(redactLogFields(deep));
+    expect(json).not.toContain("DEEP-UNIQUE-VALUE");
+    expect(json).toContain(MAX_DEPTH_MARKER);
+  });
+
+  it("emits the marker, never the caller's value, past MAX_REDACT_DEPTH", () => {
+    // One level inside the bound is still inspected normally; one past it is not.
+    const inside = redactLogFields(nest(MAX_REDACT_DEPTH, { plain: "VISIBLE-UNIQUE" }));
+    expect(JSON.stringify(inside)).toContain("VISIBLE-UNIQUE");
+    const past = redactLogFields(nest(MAX_REDACT_DEPTH + 2, { plain: "HIDDEN-UNIQUE" }));
+    expect(JSON.stringify(past)).not.toContain("HIDDEN-UNIQUE");
+  });
+
+  it("marker is distinct from REDACTED — censored and never-inspected differ", () => {
+    expect(MAX_DEPTH_MARKER).not.toBe(REDACTED);
+  });
+});
+
+describe("Error values carry no verbatim stack or message", () => {
+  it("scrubs never-log assignments out of both message and stack", () => {
+    const err = new Error("connect failed password=hunter2 host=db.internal");
+    const out = redactLogFields({ err }) as {
+      err: { type: string; message: string; stack?: string };
+    };
+    expect(out.err.type).toBe("Error");
+    expect(out.err.message).toBe(`connect failed password=${REDACTED} host=db.internal`);
+    // The stack's header line repeats the message — the same rules must reach it.
+    expect(out.err.stack).toBeDefined();
+    expect(String(out.err.stack)).not.toContain("hunter2");
+    expect(err.message).toBe("connect failed password=hunter2 host=db.internal");
+  });
+
+  it("scrubText leaves a JSON fragment parseable and non-secret text alone", () => {
+    expect(scrubText('{"password":"hunter2"}')).toBe('{"password":"hunter2"}');
+    expect(scrubText("reason: bad_sig count=3")).toBe("reason: bad_sig count=3");
+    expect(scrubText("VAULT_MASTER_KEY=abc123")).toBe(`VAULT_MASTER_KEY=${REDACTED}`);
+    expect(scrubText("totpSecret: 123456")).toBe(`totpSecret: ${REDACTED}`);
+  });
+});
+
+// The free-text scrubber's fail-open, pinned where the pattern lives rather than
+// only at the app composition. Causes reach it truncated — the runtime listener
+// cuts at 200 characters — so a value whose opening quote is never closed is the
+// ordinary shape, not the exotic one. A value class that stopped at that opening
+// quote matched no alternative at all and emitted the plaintext verbatim.
+describe("scrubText redacts every quote shape free text arrives in", () => {
+  const SHAPES: ReadonlyArray<readonly [string, string, string]> = [
+    ["unbalanced double quote", 'db auth failed pwd="PW-UNIQUE-VALUE', "PW-UNIQUE-VALUE"],
+    ["unbalanced single quote", "db auth failed pwd='PW-UNIQUE-VALUE", "PW-UNIQUE-VALUE"],
+    ["unbalanced escaped quote", 'db auth failed pwd=\\"PW-UNIQUE-VALUE', "PW-UNIQUE-VALUE"],
+    ["truncation-shaped value", `db auth failed pwd="PW-UNIQUE-VALUE${ELLIPSIS}`, "PW-UNIQUE-VALUE"],
+    ["balanced double quote", 'db auth failed pwd="PW-UNIQUE-VALUE"', "PW-UNIQUE-VALUE"],
+    ["bare unquoted value", "db auth failed pwd=PW-UNIQUE-VALUE", "PW-UNIQUE-VALUE"],
+    ["key only scrubText nets", 'session rejected sessionToken="ST-UNIQUE-VALUE', "ST-UNIQUE-VALUE"],
+  ];
+
+  for (const [label, input, secret] of SHAPES) {
+    it(`redacts a ${label}`, () => {
+      const out = scrubText(input);
+      expect(out).not.toContain(secret);
+      expect(out).toContain(REDACTED);
+    });
+  }
+
+  it("is idempotent — the adapter scrubs a line that was already scrubbed", () => {
+    for (const [, input] of SHAPES) {
+      const once = scrubText(input);
+      expect(scrubText(once)).toBe(once);
+    }
+    expect(scrubText(`pwd=${REDACTED}`)).toBe(`pwd=${REDACTED}`);
+  });
+
+  it("does not stop at the marker when a live value follows it", () => {
+    expect(scrubText(`pwd=${REDACTED}PW-UNIQUE-VALUE`)).not.toContain("PW-UNIQUE-VALUE");
+  });
+
+  it("scrubs free text held in an ordinarily-named field, before serialization", () => {
+    const out = redactLogFields({
+      cause_message: 'db auth failed pwd="PW-UNIQUE-VALUE',
+      detail: { note: "vault unlock failed vaultMasterKey=MK-UNIQUE-VALUE" },
+      amount: "1.00",
+    }) as { cause_message: string; detail: { note: string }; amount: string };
+    expect(out.cause_message).toBe(`db auth failed pwd=${REDACTED}`);
+    expect(out.detail.note).toBe(`vault unlock failed vaultMasterKey=${REDACTED}`);
+    // No assignment shape, no change — a money-path string stays byte-exact.
+    expect(out.amount).toBe("1.00");
+  });
+});
+
+describe("redaction never mutates the caller's object", () => {
+  it("deep-copies every level, including past the recursion bound", () => {
+    const input = { outer: { inner: { password: "p@ss", amount: "1.00" } } };
+    const out = redactLogFields(input) as { outer: { inner: Record<string, unknown> } };
+    expect(out.outer).not.toBe(input.outer);
+    expect(out.outer.inner).not.toBe(input.outer.inner);
+    expect(out.outer.inner.password).toBe(REDACTED);
+    // Byte-exact source intact — a money-path value routed through a log line.
+    expect(input.outer.inner.password).toBe("p@ss");
+    expect(input.outer.inner.amount).toBe("1.00");
+
+    const deep = nest(11, { privateKey: "DEEP-UNIQUE-VALUE" });
+    redactLogFields(deep);
+    expect(JSON.stringify(deep)).toContain("DEEP-UNIQUE-VALUE");
+  });
+});
+
 describe("backup/export dump census", () => {
   it("assertDumpSecretFree accepts ciphertext field names after redact path", () => {
     const dump = {
@@ -125,5 +245,28 @@ describe("backup/export dump census", () => {
     expect(() => assertDumpSecretFree(dump)).not.toThrow();
     const redacted = redactLogFields(dump);
     expect(redacted.private_key).toBe(REDACTED);
+  });
+
+  // The regression gate for the two-defects-cancelling-out problem: the census
+  // used to share MAX_REDACT_DEPTH with the redactor, so the one range the
+  // redactor leaked was the one range the census could not see.
+  it("assertDumpSecretFree throws for a secret nested deeper than eight levels", () => {
+    expect(() => assertDumpSecretFree(nest(11, { privateKey: "DEEP-UNIQUE-VALUE" }))).toThrow(
+      /uncensored or uninspected/,
+    );
+  });
+
+  it("findUnredactedSecretKeys reaches a secret-classed key past the old depth limit", () => {
+    const hits = findUnredactedSecretKeys(nest(11, { privateKey: "DEEP-UNIQUE-VALUE" }));
+    expect(hits).toEqual(["l1.l2.l3.l4.l5.l6.l7.l8.l9.l10.l11.privateKey"]);
+  });
+
+  it("walks arrays and terminates on cycles", () => {
+    expect(findUnredactedSecretKeys({ rows: [{ private_key: "x" }] })).toEqual([
+      "rows.0.private_key",
+    ]);
+    const cyclic: Record<string, unknown> = { id: "1" };
+    cyclic.self = cyclic;
+    expect(findUnredactedSecretKeys(cyclic)).toEqual([]);
   });
 });

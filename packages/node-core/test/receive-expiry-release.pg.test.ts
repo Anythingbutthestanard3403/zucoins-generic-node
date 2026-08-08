@@ -44,6 +44,8 @@ const OWNER = "30000000-0000-4000-8000-000000000006";
 const OBSERVER = "30000000-0000-4000-8000-000000000007";
 const SHA = "a".repeat(64);
 const PUBKEY = `${"P".repeat(43)}=`;
+const SIG = `${"S".repeat(86)}==`;
+const SIGNING_KEY = "30000000-0000-4000-8000-000000000008";
 
 let dbName = "";
 let dbUrl = "";
@@ -122,6 +124,7 @@ async function seedServiceReady(n: number): Promise<{
   const t0 = operationId(300 + n);
   const fresh = operationId(400 + n);
   const recovery = operationId(500 + n);
+  const artifact = operationId(950 + n);
   const pubkey = `${"Q".repeat(41)}${n.toString(36).padStart(2, "0")}=`;
   const nowMs = Date.now();
   psqlMust(
@@ -149,9 +152,6 @@ async function seedServiceReady(n: number): Promise<{
      INSERT INTO operation_wallets (
        operation_id, wallet_id, operation_role, t0_observation_id
      ) VALUES ('${op}', '${wallet}', 'RECEIVER', '${t0}');
-     INSERT INTO receive_codes (operation_id, code_status, expiry_unix_time_secs)
-       VALUES ('${op}', 'AWAITING_ARM', '1');
-     INSERT INTO operation_expected_artifacts (operation_id) VALUES ('${op}');
      INSERT INTO gateway_observations (
        id, observer_id, wallet_id, wallet_public_key, s_signature, p_signature,
        b_amount, parse_result, relationship, observed_at
@@ -159,7 +159,23 @@ async function seedServiceReady(n: number): Promise<{
        ('${t0}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
         'VERIFIED_HEAD', 'FIRST', to_timestamp(0)),
        ('${fresh}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
-        'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0));`,
+        'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0));
+     INSERT INTO operation_expected_artifacts (
+       id, operation_id, purpose, canonical_version, signing_key_id,
+       preimage_text, preimage_sha256, signature
+     ) VALUES (
+       '${artifact}', '${op}', 'zp-receive-expected-v1', 1, '${SIGNING_KEY}',
+       '{}', '${SHA}', '${SIG}'
+     );
+     INSERT INTO receive_codes (
+       operation_id, receiver_wallet_id, t0_observation_id, expected_artifact_id,
+       discriminator, anchor, expiry_unix_time_secs, transfer_code_text,
+       transfer_code_sha256, code_status, ready_at
+     ) VALUES (
+       '${op}', '${wallet}', '${t0}', '${artifact}', '${op}',
+       'release-race-code-${n}', '1', 'release-race-code-${n}', '${SHA}',
+       'AWAITING_ARM', now()
+     );`,
   );
   await withTx(dbUrl, async (tx) => {
     const leaseGroupId = await createLeaseGroup(tx, op);
@@ -207,8 +223,8 @@ describe("receive expiry/release PostgreSQL drills", () => {
       resolve(SCHEMA, "receive-codes.sql"),
       "utf8",
     );
-    const receiveArms = readFileSync(
-      resolve(SCHEMA, "receive-arms.sql"),
+    const expectedArtifacts = readFileSync(
+      resolve(SCHEMA, "expected-artifacts.sql"),
       "utf8",
     );
     const expiry = readFileSync(
@@ -235,18 +251,14 @@ describe("receive expiry/release PostgreSQL drills", () => {
        ${tableBlock(submit, "gateway_submit_attempts")}`,
     );
     psqlMust(dbUrl, landing);
-    // receive_codes and receive_arms are now frozen slices; use the
-    // byte-exact file contents rather than inline stubs.
+    // Stubs that must exist BEFORE the frozen receive-codes.sql applies:
+    // observers/gateway_observations back its trailing t0_observation_id FK, and
+    // node_signing_keys backs the expected-artifacts.sql signing_key_id FK. The
+    // observation ledger and signing-key registry are not under test here, so the
+    // stubs carry only the referenced keys.
     psqlMust(
       dbUrl,
-      `${receiveCodes}
-       ${receiveArms}
-       ${tableBlock(operations, "operation_expected_artifacts")}
-       CREATE TABLE signer_audit (
-         id uuid PRIMARY KEY,
-         operation_id uuid NOT NULL REFERENCES operations(id)
-       );
-       CREATE TABLE observers (
+      `CREATE TABLE observers (
          id uuid PRIMARY KEY,
          domain text NOT NULL CHECK (domain IN ('NODE','PLATFORM'))
        );
@@ -264,6 +276,32 @@ describe("receive expiry/release PostgreSQL drills", () => {
        );
        CREATE TABLE observation_anomalies (
          observation_id uuid PRIMARY KEY REFERENCES gateway_observations(id)
+       );
+       CREATE TABLE node_signing_keys (id uuid PRIMARY KEY);`,
+    );
+    // operation_expected_artifacts and receive_codes are frozen slices; use the
+    // byte-exact file contents rather than inline stubs. expected-artifacts.sql owns
+    // operation_expected_artifacts and must apply before receive-codes.sql so the
+    // receive_codes.expected_artifact_id FK resolves.
+    psqlMust(
+      dbUrl,
+      `${expectedArtifacts}
+       ${receiveCodes}`,
+    );
+    // receive_arms is only EXISTS-probed by the expiry service and never populated
+    // by this suite; the frozen receive-arms.sql FKs into the reporting-persistence
+    // tables (request nonces, mutation idempotency, fingerprint function,
+    // node_runtime role), so a stub carrying the probed key stands in for the
+    // byte-exact file.
+    psqlMust(
+      dbUrl,
+      `CREATE TABLE receive_arms (
+         id uuid PRIMARY KEY,
+         operation_id uuid NOT NULL UNIQUE REFERENCES receive_codes(operation_id)
+       );
+       CREATE TABLE signer_audit (
+         id uuid PRIMARY KEY,
+         operation_id uuid NOT NULL REFERENCES operations(id)
        );
        CREATE TABLE verification_acknowledgements (
          id uuid PRIMARY KEY,
@@ -285,6 +323,7 @@ describe("receive expiry/release PostgreSQL drills", () => {
       `INSERT INTO nodes (id) VALUES ('${NODE}');
        INSERT INTO implementers (id) VALUES ('${IMPLEMENTER}');
        INSERT INTO observers (id, domain) VALUES ('${OBSERVER}', 'NODE');
+       INSERT INTO node_signing_keys (id) VALUES ('${SIGNING_KEY}');
        INSERT INTO wallets (id, node_id, public_key, key_origin, state)
          VALUES ('${WALLET}', '${NODE}', '${PUBKEY}', 'node_generated', 'AVAILABLE');
        INSERT INTO wallet_recovery_verifications (
@@ -603,10 +642,6 @@ describe("receive expiry/release PostgreSQL drills", () => {
         `INSERT INTO operation_wallets (
            operation_id, wallet_id, operation_role, t0_observation_id
          ) VALUES ('${op}', '${WALLET}', 'RECEIVER', '${T0}');
-         INSERT INTO receive_codes (
-           operation_id, code_status, expiry_unix_time_secs
-         ) VALUES ('${op}', 'AWAITING_ARM', '1');
-         INSERT INTO operation_expected_artifacts (operation_id) VALUES ('${op}');
          INSERT INTO gateway_observations (
            id, observer_id, wallet_id, wallet_public_key,
            s_signature, p_signature, b_amount,
@@ -615,7 +650,23 @@ describe("receive expiry/release PostgreSQL drills", () => {
            ('${T0}', '${OBSERVER}', '${WALLET}', '${PUBKEY}', 'S0', 'P0', '10',
             'VERIFIED_HEAD', 'FIRST', to_timestamp(0)),
            ('${fresh}', '${OBSERVER}', '${WALLET}', '${PUBKEY}', 'S0', 'P0', '10',
-            'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0));`,
+            'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0));
+         INSERT INTO operation_expected_artifacts (
+           id, operation_id, purpose, canonical_version, signing_key_id,
+           preimage_text, preimage_sha256, signature
+         ) VALUES (
+           '${operationId(71)}', '${op}', 'zp-receive-expected-v1', 1, '${SIGNING_KEY}',
+           '{}', '${SHA}', '${SIG}'
+         );
+         INSERT INTO receive_codes (
+           operation_id, receiver_wallet_id, t0_observation_id, expected_artifact_id,
+           discriminator, anchor, expiry_unix_time_secs, transfer_code_text,
+           transfer_code_sha256, code_status, ready_at
+         ) VALUES (
+           '${op}', '${WALLET}', '${T0}', '${operationId(71)}', '${op}',
+           'release-cocommit-code', '1', 'release-cocommit-code', '${SHA}',
+           'AWAITING_ARM', now()
+         );`,
       );
 
       await withTx(dbUrl, async (tx) => {
@@ -692,8 +743,8 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const { op, wallet, fresh } = await seedServiceReady(20);
       psqlMust(
         dbUrl,
-        `DELETE FROM operation_expected_artifacts WHERE operation_id='${op}';
-         DELETE FROM receive_codes WHERE operation_id='${op}';
+        `DELETE FROM receive_codes WHERE operation_id='${op}';
+         DELETE FROM operation_expected_artifacts WHERE operation_id='${op}';
          UPDATE operations
             SET status='CREATED', expiry_unix_time_secs=NULL, row_version=1,
                 receiver_wallet_id=NULL, t0_observation_id=NULL,
@@ -943,10 +994,32 @@ describe("receive expiry/release PostgreSQL drills", () => {
          INSERT INTO operation_wallets (
            operation_id, wallet_id, operation_role, t0_observation_id
          ) VALUES ('${op}', '${wallet}', 'RECEIVER', NULL);
-         INSERT INTO receive_codes (operation_id, code_status, expiry_unix_time_secs)
-           VALUES ('${op}', 'AWAITING_ARM', '1');`,
+         INSERT INTO gateway_observations (
+           id, observer_id, wallet_id, wallet_public_key, s_signature, p_signature,
+           b_amount, parse_result, relationship, observed_at
+         ) VALUES (
+           '${operationId(992)}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
+           'VERIFIED_HEAD', 'FIRST', to_timestamp(0)
+         );
+         INSERT INTO operation_expected_artifacts (
+           id, operation_id, purpose, canonical_version, signing_key_id,
+           preimage_text, preimage_sha256, signature
+         ) VALUES (
+           '${operationId(991)}', '${op}', 'zp-receive-expected-v1', 1, '${SIGNING_KEY}',
+           '{}', '${SHA}', '${SIG}'
+         );
+         INSERT INTO receive_codes (
+           operation_id, receiver_wallet_id, t0_observation_id, expected_artifact_id,
+           discriminator, anchor, expiry_unix_time_secs, transfer_code_text,
+           transfer_code_sha256, code_status, ready_at
+         ) VALUES (
+           '${op}', '${wallet}', '${operationId(992)}', '${operationId(991)}', '${op}',
+           'release-block-code', '1', 'release-block-code', '${SHA}',
+           'AWAITING_ARM', now()
+         );`,
       );
-      // READY requires receiver triple; keep CREATED with a code row as failed-formation shape.
+      // READY requires receiver triple; keep CREATED with code/artifact rows (and the
+      // FK payload the frozen receive_codes columns demand) as failed-formation shape.
       await withTx(dbUrl, async (tx) => {
         const leaseGroupId = await createLeaseGroup(tx, op);
         await acquireLeases(tx, {
@@ -995,25 +1068,29 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const nullExpiryOldOp = operationId(32);
       const alreadyReleasedOp = operationId(33);
 
+      // The frozen operations CHECKs pin the shapes: a RECEIVE_EXTERNAL row with
+      // expiry_unix_time_secs set must carry the READY receiver triple, and
+      // CREATED/EXPIRED rows must carry a NULL expiry (the NULL-expiry candidates
+      // exercise the old-created_at scan path instead).
       psqlMust(
         dbUrl,
         `INSERT INTO operations (
            id, node_id, implementer_id, kind, status, row_version, amount_zkz,
-           after_landing, discriminator, anchor, idempotency_key, request_sha256,
-           expiry_unix_time_secs, created_at
+           receiver_wallet_id, after_landing, discriminator, anchor, idempotency_key,
+           request_sha256, expiry_unix_time_secs, t0_observation_id, created_at
          ) VALUES
-           ('${expiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
-            'HOLD', '${expiredOp}', 'expiryscan-expired', 'expiryscan-idem-30', '${SHA}',
-            '1000000000', to_timestamp(0)),
-           ('${futureOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
-            'HOLD', '${futureOp}', 'expiryscan-future', 'expiryscan-idem-31', '${SHA}',
-            '9999999999', now()),
-           ('${nullExpiryOldOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
-            'HOLD', '${nullExpiryOldOp}', 'expiryscan-null-expiry', 'expiryscan-idem-32', '${SHA}',
-            NULL, to_timestamp(0)),
+           ('${expiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
+            '${WALLET}', 'HOLD', '${expiredOp}', 'expiryscan-expired', 'expiryscan-idem-30', '${SHA}',
+            '1000000000', '${T0}', to_timestamp(0)),
+           ('${futureOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
+            '${WALLET}', 'HOLD', '${futureOp}', 'expiryscan-future', 'expiryscan-idem-31', '${SHA}',
+            '9999999999', '${T0}', now()),
+           ('${nullExpiryOldOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
+            NULL, 'HOLD', '${nullExpiryOldOp}', 'expiryscan-null-expiry', 'expiryscan-idem-32', '${SHA}',
+            NULL, NULL, to_timestamp(0)),
            ('${alreadyReleasedOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'EXPIRED', 1, '1',
-            'HOLD', '${alreadyReleasedOp}', 'expiryscan-released', 'expiryscan-idem-33', '${SHA}',
-            '1000000000', to_timestamp(0));
+            NULL, 'HOLD', '${alreadyReleasedOp}', 'expiryscan-released', 'expiryscan-idem-33', '${SHA}',
+            NULL, NULL, to_timestamp(0));
          UPDATE operations SET receive_release_status = 'RELEASED_T0_UNCHANGED'
           WHERE id = '${alreadyReleasedOp}';`,
       );
@@ -1032,7 +1109,7 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const expiredCandidate = candidates.find((c) => c.operationId === expiredOp);
       expect(expiredCandidate).toBeDefined();
       expect(expiredCandidate!.expiryUnixTimeSecs).toBe("1000000000");
-      expect(expiredCandidate!.status).toBe("CREATED");
+      expect(expiredCandidate!.status).toBe("READY");
     },
   );
 });

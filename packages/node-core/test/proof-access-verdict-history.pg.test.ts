@@ -84,14 +84,23 @@ const PREREQUISITE_SLICES = [
   "node-implementer-registry.sql",
   "custody-eligibility.sql",
   "operations.sql",
+  // gateway_observations must exist before receive-codes.sql / receive-arms.sql
+  //   (t0 / node-T0 observation FKs).
+  "observation-ledger.sql",
+  // node_signing_keys must exist before expected-artifacts.sql (signing_key_id FK).
+  "signing-key-registry.sql",
+  // operation_expected_artifacts lives in its own frozen slice, split out of
+  //   operations.sql; it must precede receive-codes.sql (expected_artifact_id FK).
+  "expected-artifacts.sql",
   // receive_codes is prerequisite-bound on operations(id) / wallets(id) /
   //   gateway_observations(id) / operation_expected_artifacts(id); declared above.
   "receive-codes.sql",
-  // receive_arms is prerequisite-bound on receive_codes(operation_id),
-  //   nodes(id), implementers(id), and the reporting slices declared below.
-  "receive-arms.sql",
-  "observation-ledger.sql",
+  // receive-arms.sql needs the reporting tables, the fingerprint function and the
+  //   node_runtime role, so reporting-persistence.sql precedes it.
   "reporting-persistence.sql",
+  // receive_arms is prerequisite-bound on receive_codes(operation_id),
+  //   nodes(id), implementers(id), and the reporting slices; all declared above.
+  "receive-arms.sql",
   "lease-foundation.sql",
 ] as const;
 

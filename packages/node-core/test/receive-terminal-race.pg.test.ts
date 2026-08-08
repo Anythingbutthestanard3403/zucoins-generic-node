@@ -54,6 +54,7 @@ const OBSERVER = "28100000-0000-4000-8000-000000000007";
 const SHA = "a".repeat(64);
 const PUBKEY = `${"P".repeat(43)}=`;
 const SIG = `${"S".repeat(86)}==`;
+const SIGNING_KEY = "28100000-0000-4000-8000-00000000000e";
 
 let dbName = "";
 let dbUrl = "";
@@ -100,6 +101,7 @@ async function seedLeasedReady(slot: number): Promise<{
   const t0 = id(`t0-${slot}`);
   const fresh = id(`fresh-${slot}`);
   const recovery = id(`recovery-${slot}`);
+  const artifact = id(`artifact-${slot}`);
   const pubkey = `${"Q".repeat(41)}${slot.toString(36).padStart(2, "0")}=`;
   const nowMs = Date.now();
   psqlMust(
@@ -129,10 +131,6 @@ async function seedLeasedReady(slot: number): Promise<{
        operation_id, wallet_id, operation_role, t0_observation_id
      ) VALUES ('${op}', '${wallet}', 'RECEIVER', '${t0}')
        ON CONFLICT DO NOTHING;
-     INSERT INTO receive_codes (operation_id, code_status, expiry_unix_time_secs)
-       VALUES ('${op}', 'AWAITING_ARM', '1') ON CONFLICT DO NOTHING;
-     INSERT INTO operation_expected_artifacts (operation_id) VALUES ('${op}')
-       ON CONFLICT DO NOTHING;
      INSERT INTO gateway_observations (
        id, observer_id, wallet_id, wallet_public_key, s_signature, p_signature,
        b_amount, parse_result, relationship, observed_at
@@ -141,7 +139,23 @@ async function seedLeasedReady(slot: number): Promise<{
         'VERIFIED_HEAD', 'FIRST', to_timestamp(0)),
        ('${fresh}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
         'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0))
-       ON CONFLICT DO NOTHING;`,
+       ON CONFLICT DO NOTHING;
+     INSERT INTO operation_expected_artifacts (
+       id, operation_id, purpose, canonical_version, signing_key_id,
+       preimage_text, preimage_sha256, signature
+     ) VALUES (
+       '${artifact}', '${op}', 'zp-receive-expected-v1', 1, '${SIGNING_KEY}',
+       '{}', '${SHA}', '${SIG}'
+     ) ON CONFLICT DO NOTHING;
+     INSERT INTO receive_codes (
+       operation_id, receiver_wallet_id, t0_observation_id, expected_artifact_id,
+       discriminator, anchor, expiry_unix_time_secs, transfer_code_text,
+       transfer_code_sha256, code_status, ready_at
+     ) VALUES (
+       '${op}', '${wallet}', '${t0}', '${artifact}', '${op}',
+       'receive-terminal-race-code-${slot}', '1', 'receive-terminal-race-code-${slot}',
+       '${SHA}', 'AWAITING_ARM', now()
+     ) ON CONFLICT DO NOTHING;`,
   );
   await withTx(dbUrl, async (tx) => {
     const leaseGroupId = await createLeaseGroup(tx, op);
@@ -319,7 +333,7 @@ describe("receive terminal-race fault injection (real PG)", () => {
     const submit = readFileSync(resolve(SCHEMA, "submit-attempts.sql"), "utf8");
     const landing = readFileSync(resolve(SCHEMA, "receive-external-landing.sql"), "utf8");
     const receiveCodes = readFileSync(resolve(SCHEMA, "receive-codes.sql"), "utf8");
-    const receiveArms = readFileSync(resolve(SCHEMA, "receive-arms.sql"), "utf8");
+    const expectedArtifacts = readFileSync(resolve(SCHEMA, "expected-artifacts.sql"), "utf8");
     const expiry = readFileSync(resolve(SCHEMA, "receive-expiry-release.sql"), "utf8");
 
     psqlMust(dbUrl, base);
@@ -338,17 +352,14 @@ describe("receive terminal-race fault injection (real PG)", () => {
        ${tableBlock(submit, "gateway_submit_attempts")}`,
     );
     psqlMust(dbUrl, landing);
-    // receive_codes and receive_arms are frozen slices; use byte-exact file contents.
+    // Stubs that must exist BEFORE the frozen receive-codes.sql applies:
+    // observers/gateway_observations back its trailing t0_observation_id FK, and
+    // node_signing_keys backs the expected-artifacts.sql signing_key_id FK. The
+    // observation ledger and signing-key registry are not under test here, so the
+    // stubs carry only the referenced keys.
     psqlMust(
       dbUrl,
-      `${receiveCodes}
-       ${receiveArms}
-       ${tableBlock(operations, "operation_expected_artifacts")}
-       CREATE TABLE signer_audit (
-         id uuid PRIMARY KEY,
-         operation_id uuid NOT NULL REFERENCES operations(id)
-       );
-       CREATE TABLE observers (
+      `CREATE TABLE observers (
          id uuid PRIMARY KEY,
          domain text NOT NULL CHECK (domain IN ('NODE','PLATFORM'))
        );
@@ -366,6 +377,30 @@ describe("receive terminal-race fault injection (real PG)", () => {
        );
        CREATE TABLE observation_anomalies (
          observation_id uuid PRIMARY KEY REFERENCES gateway_observations(id)
+       );
+       CREATE TABLE node_signing_keys (id uuid PRIMARY KEY);`,
+    );
+    // operation_expected_artifacts and receive_codes are frozen slices; use byte-exact
+    // file contents. expected-artifacts.sql owns operation_expected_artifacts and must
+    // apply before receive-codes.sql so the expected_artifact_id FK resolves.
+    psqlMust(
+      dbUrl,
+      `${expectedArtifacts}
+       ${receiveCodes}`,
+    );
+    // receive_arms is only EXISTS-probed by the expiry service and never populated by
+    // this suite; the frozen receive-arms.sql FKs into the reporting-persistence tables
+    // (request nonces, mutation idempotency, fingerprint function, node_runtime role),
+    // so a stub carrying the probed key stands in for the byte-exact file.
+    psqlMust(
+      dbUrl,
+      `CREATE TABLE receive_arms (
+         id uuid PRIMARY KEY,
+         operation_id uuid NOT NULL UNIQUE REFERENCES receive_codes(operation_id)
+       );
+       CREATE TABLE signer_audit (
+         id uuid PRIMARY KEY,
+         operation_id uuid NOT NULL REFERENCES operations(id)
        );
        CREATE TABLE verification_acknowledgements (
          id uuid PRIMARY KEY,
@@ -385,7 +420,8 @@ describe("receive terminal-race fault injection (real PG)", () => {
       dbUrl,
       `INSERT INTO nodes (id) VALUES ('${NODE}');
        INSERT INTO implementers (id) VALUES ('${IMPLEMENTER}');
-       INSERT INTO observers (id, domain) VALUES ('${OBSERVER}', 'NODE');`,
+       INSERT INTO observers (id, domain) VALUES ('${OBSERVER}', 'NODE');
+       INSERT INTO node_signing_keys (id) VALUES ('${SIGNING_KEY}');`,
     );
   }, 120_000);
 

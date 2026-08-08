@@ -12,6 +12,16 @@ import {
   type WalletCustodyView,
 } from "@zucoins/node-core";
 
+// The operations list/detail shapes are shared with the operator SPA rather than declared
+// twice: `@zucoins/generic-node-contracts/admin-inventory` is the single wire definition both
+// sides compile against, so a projection that drops a field the console renders fails the build.
+export {
+  OPERATION_INVENTORY_DETAIL_FIELDS,
+  OPERATION_INVENTORY_LIST_FIELDS,
+  type OperationInventoryDetail,
+  type OperationInventoryListItem,
+} from "@zucoins/generic-node-contracts/admin-inventory";
+
 export {
   WALLET_CUSTODY_VIEW_FIELDS,
   WALLET_RECOVERY_EVIDENCE_FIELDS,
@@ -51,33 +61,6 @@ export interface WalletInventoryFilter {
   readonly recovery_verified?: boolean;
   readonly limit?: number;
   readonly after?: string;
-}
-
-export interface OperationInventoryListItem {
-  readonly operation_id: string;
-  readonly operation_type: InventoryOperationKind;
-  readonly status: string;
-  readonly amount_zkz: string;
-  readonly row_version: number;
-  readonly attention_required: boolean;
-  readonly attention_reason: string | null;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly terminal_at: string | null;
-}
-
-export interface OperationInventoryDetail extends OperationInventoryListItem {
-  readonly source_wallet_id: string | null;
-  readonly receiver_wallet_id: string | null;
-  readonly destination_id: string | null;
-  /** Public key only — never a transfer code or private key. */
-  readonly destination_address: string | null;
-  readonly after_landing: string | null;
-  readonly after_landing_destination_id: string | null;
-  readonly formation_state: string;
-  readonly verification_verdict: string;
-  readonly implementer_id: string;
-  readonly client_reference: string | null;
 }
 
 export interface OperationInventoryFilter {
@@ -143,33 +126,6 @@ export const MAX_INVENTORY_LIMIT = 100;
 export const WALLET_INVENTORY_FIELDS = [
   ...WALLET_CUSTODY_VIEW_FIELDS,
   "observed_balance_zkz",
-] as const;
-
-export const OPERATION_INVENTORY_LIST_FIELDS = [
-  "operation_id",
-  "operation_type",
-  "status",
-  "amount_zkz",
-  "row_version",
-  "attention_required",
-  "attention_reason",
-  "created_at",
-  "updated_at",
-  "terminal_at",
-] as const;
-
-export const OPERATION_INVENTORY_DETAIL_FIELDS = [
-  ...OPERATION_INVENTORY_LIST_FIELDS,
-  "source_wallet_id",
-  "receiver_wallet_id",
-  "destination_id",
-  "destination_address",
-  "after_landing",
-  "after_landing_destination_id",
-  "formation_state",
-  "verification_verdict",
-  "implementer_id",
-  "client_reference",
 ] as const;
 
 export const DESTINATION_INVENTORY_FIELDS = [

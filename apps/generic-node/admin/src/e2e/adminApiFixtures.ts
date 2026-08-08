@@ -3,10 +3,15 @@
 // shape consumed by the page. Unknown requests are recorded and fail the test instead of
 // quietly becoming a 404/empty-state that could mask an uncovered workflow dependency.
 import type { Page } from "@playwright/test";
+import {
+  OPERATION_INVENTORY_DETAIL_FIELDS,
+  OPERATION_INVENTORY_LIST_FIELDS,
+} from "@zucoins/generic-node-contracts/admin-inventory";
 
 export const E2E_WALLET_PUBKEY =
   "zkz1qe2emobilewalletpublickey0000000000000000000001";
 export const E2E_OPERATION_ID = "operation-e2e-0000000000000001";
+export const E2E_DESTINATION_ADDRESS = "zkz1qe2edestination00000000000000000000000001";
 
 type SessionMode = "authenticated" | "anonymous" | "setup";
 
@@ -47,7 +52,8 @@ const WALLETS_LIST = {
   next_cursor: null,
 };
 
-const OPERATION = {
+/** Everything the node knows about the e2e operation, in wire vocabulary. */
+const OPERATION_RECORD: Readonly<Record<string, unknown>> = {
   operation_id: E2E_OPERATION_ID,
   operation_type: "SEND_EXTERNAL",
   status: "CREATED",
@@ -58,8 +64,40 @@ const OPERATION = {
   created_at: "2026-07-30T00:00:00.000Z",
   updated_at: "2026-07-30T00:00:00.000Z",
   terminal_at: null,
-  destination_address: "zkz1qe2edestination00000000000000000000000001",
+  destination_address: E2E_DESTINATION_ADDRESS,
+  source_wallet_id: "wallet-e2e-0000000000000000000001",
+  receiver_wallet_id: null,
+  destination_id: "destination-e2e-1",
+  after_landing: null,
+  after_landing_destination_id: null,
+  formation_state: "NOT_REQUIRED",
+  verification_verdict: "PENDING",
+  implementer_id: "implementer-e2e-1",
+  client_reference: null,
 };
+
+/**
+ * Rows are projected through the node's own field allowlists rather than hand-listed here. A
+ * field a projection stops carrying disappears from this payload too, so a screen reading it
+ * goes red — a hand-written row is how a column the server never populated stayed green through
+ * an entire e2e suite.
+ */
+function project(
+  fields: readonly string[],
+  record: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (!(field in record)) {
+      throw new Error(`e2e operation fixture has no value for projected field "${field}"`);
+    }
+    row[field] = record[field];
+  }
+  return row;
+}
+
+const OPERATION = project(OPERATION_INVENTORY_LIST_FIELDS, OPERATION_RECORD);
+const OPERATION_DETAIL = project(OPERATION_INVENTORY_DETAIL_FIELDS, OPERATION_RECORD);
 
 const OPERATIONS_LIST = {
   object: "list",
@@ -83,8 +121,8 @@ const APPROVAL_CHALLENGE = {
   expires_at: "2026-07-30T00:10:00.000Z",
   source_selector: { kind: "wallet_id", wallet_id: WALLET.wallet_id },
   source_pubkey: E2E_WALLET_PUBKEY,
-  destination_address: OPERATION.destination_address,
-  amount_zkz: OPERATION.amount_zkz,
+  destination_address: E2E_DESTINATION_ADDRESS,
+  amount_zkz: OPERATION_RECORD.amount_zkz,
   references_operation_id: null,
 };
 
@@ -162,6 +200,67 @@ const API_KEYS_LIST = {
 
 const HALT_STATE = { engaged: false, reason: null, updated_at: null, updated_by: null };
 
+const READINESS = {
+  object: "readiness_checklist",
+  generated_at: "2026-07-30T00:00:00.000Z",
+  rows: [
+    {
+      id: "node_healthy",
+      status: "ok",
+      title: "Node healthy",
+      detail: "Health and readiness probes are green.",
+      href: null,
+      blocks_ops: [],
+    },
+  ],
+};
+
+const DUAL_CONTROL_POLICY = {
+  mode: "single_operator",
+  short: "Single operator",
+  long: "One operator approves with TOTP and a device signature.",
+  approve_hint: "Approve with your enrolled device.",
+};
+
+const VAULT_MASTER = {
+  phase: "ready",
+  can_generate: false,
+  plaintext_pending_ack: false,
+  offline_backup_acked: true,
+};
+
+/**
+ * Day-0 gate (`RequireAuth` in main.tsx) — every authenticated route reads this before it
+ * paints. An authenticated fixture session is a finished node; the `setup` session is not.
+ */
+const SETUP_STATE_COMPLETE = {
+  object: "setup_state",
+  current_step: "home",
+  complete: true,
+  next_step: "home",
+  ceremony_master_key_blocked: false,
+  pwa_installed: true,
+  password_ok: true,
+  totp_ok: true,
+  device_enrolled: true,
+  recovery_proven: true,
+  vault_ready: true,
+  flags: {},
+  steps: [],
+};
+
+const SETUP_STATE_PENDING = {
+  ...SETUP_STATE_COMPLETE,
+  current_step: "password",
+  complete: false,
+  next_step: "password",
+  password_ok: false,
+  totp_ok: false,
+  device_enrolled: false,
+  recovery_proven: false,
+  vault_ready: false,
+};
+
 export interface AdminFixtureGuard {
   assertNoUnhandledRequests(): void;
 }
@@ -202,6 +301,9 @@ export async function registerAdminApiRoutes(
       }
       return json(session === "setup" ? SETUP_SESSION : SESSION);
     }
+    if (key === "GET /admin/v1/setup-state" || key === "PATCH /admin/v1/setup-state") {
+      return json(session === "setup" ? SETUP_STATE_PENDING : SETUP_STATE_COMPLETE);
+    }
     if (key === "GET /admin/v1/operations/needs-attention") return json(NEEDS_ATTENTION);
     if (key === "GET /admin/v1/wallets") return json(WALLETS_LIST);
     if (key === `GET /admin/v1/wallets/${E2E_WALLET_PUBKEY}`) return json(WALLET);
@@ -215,7 +317,11 @@ export async function registerAdminApiRoutes(
     if (key === `GET /admin/v1/external-sends/${E2E_OPERATION_ID}/approval-challenge`) {
       return json(APPROVAL_CHALLENGE);
     }
+    if (key === `GET /admin/v1/operations/${E2E_OPERATION_ID}`) return json(OPERATION_DETAIL);
     if (key === `GET /admin/v1/operations/${E2E_OPERATION_ID}/recovery`) return json(RECOVERY);
+    if (key === "GET /admin/v1/readiness") return json(READINESS);
+    if (key === "GET /admin/v1/dual-control-policy") return json(DUAL_CONTROL_POLICY);
+    if (key === "GET /admin/v1/vault-master") return json(VAULT_MASTER);
     if (key === "GET /admin/v1/destinations") return json(DESTINATIONS_LIST);
     if (key === "GET /admin/v1/audit") return json(AUDIT_LIST);
     if (key === "GET /admin/v1/api-keys") return json(API_KEYS_LIST);

@@ -421,6 +421,10 @@ describe("node-core dependency boundaries", () => {
         "@noble/hashes/argon2.js",
         // Frozen contracts vocabulary consumed by the lab receive surface.
         "@zucoins/generic-node-contracts",
+        // Operator-console operations list/detail wire shapes. The app projects rows into
+        // the same declaration the SPA renders from, so neither side can invent a field
+        // (ZTR-1202: destination_address was read off a summary row nothing populated).
+        "@zucoins/generic-node-contracts/admin-inventory",
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/node-core",
         "@zucoins/node-core/data",

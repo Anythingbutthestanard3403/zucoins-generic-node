@@ -440,7 +440,8 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
       const result = await sql.query(
         `SELECT o.id, o.kind, o.status, o.amount_zkz, o.row_version,
                 o.attention_required, o.attention_reason,
-                o.created_at, o.updated_at, o.terminal_at
+                o.created_at, o.updated_at, o.terminal_at,
+                o.destination_address
            FROM operations o
           WHERE ${where.join(" AND ")}
           ORDER BY o.created_at DESC, o.id DESC -- contract-allow:order:frozen structural vocabulary
@@ -605,6 +606,9 @@ function mapOpList(row: Record<string, unknown>): OperationInventoryListItem {
     created_at: ts(row.created_at),
     updated_at: ts(row.updated_at),
     terminal_at: tsOrNull(row.terminal_at),
+    // Summary-row field: the operator scanning view renders a destination per row, so the
+    // list SELECT above must keep projecting it (admin-inventory.test.ts pins both).
+    destination_address: row.destination_address == null ? null : String(row.destination_address),
   };
 }
 
@@ -614,7 +618,6 @@ function mapOpDetail(row: Record<string, unknown>): OperationInventoryDetail {
     source_wallet_id: row.source_wallet_id == null ? null : String(row.source_wallet_id),
     receiver_wallet_id: row.receiver_wallet_id == null ? null : String(row.receiver_wallet_id),
     destination_id: row.destination_id == null ? null : String(row.destination_id),
-    destination_address: row.destination_address == null ? null : String(row.destination_address),
     after_landing: row.after_landing == null ? null : String(row.after_landing),
     after_landing_destination_id:
       row.after_landing_destination_id == null ? null : String(row.after_landing_destination_id),

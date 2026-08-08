@@ -24,6 +24,45 @@ invariants require under concurrent access. ZKZ amounts are canonical decimal `t
  — never `real`, `double precision`, or a JavaScript-number-derived `numeric` — so the
 serialization guarantee protects exact bytes, not approximations.
 
+### 1.1 The two accepted money-path mechanisms
+
+The guarantee the money path needs is that no read-then-write it performs can interleave
+with a concurrent one and both commit. `SERIALIZABLE` delivers that for the whole
+transaction. A lock taken inside the transaction delivers it for the rows the lock covers,
+which is sufficient when those rows are the ones the decision is made on. **Both are
+accepted; nothing else is.**
+
+| Mechanism | What qualifies | Obligation it carries |
+|---|---|---|
+| `SERIALIZABLE` | `BEGIN ISOLATION LEVEL SERIALIZABLE` | MUST be wrapped in `withSerializationRetry` under the §2 policy — raising the level is what makes `40001` reachable — and the retried body MUST be idempotent, DB-only, and free of any chain submit |
+| Covering lock | `SELECT … FOR UPDATE`, `pg_advisory_xact_lock`, or a guarded `UPDATE … WHERE <predicate> … RETURNING` | MUST be taken *inside* the transaction, on the **pinned client** that issues every later statement, and MUST cover the rows the decision reads |
+| Immediate constraint | a non-deferrable `UNIQUE` / exclusion constraint that decides the race in the database | acceptable only where losing the race must abort rather than double-apply; name the index |
+
+**The pinned-client condition is not a formality.** `FOR UPDATE` and `FOR SHARE` hold only
+for the life of the enclosing transaction. Issued through a pool in autocommit, the lock is
+taken and released inside the single statement and protects nothing afterwards. A money-path
+transaction therefore checks out one client, issues `BEGIN` on it, and routes every
+statement — including those a node-core store issues through a pass-through
+`withTransaction` — through that same client until `COMMIT`.
+
+**A guarded `UPDATE … RETURNING` counts.** The `UPDATE` takes the row lock itself and
+re-evaluates its `WHERE` against the newly committed row, so under `READ COMMITTED` a
+concurrent loser returns zero rows rather than overwriting the winner. That is the CAS shape
+used across the landing and attention paths, and it is a covering lock for the row it names.
+
+**Choosing between them.** Prefer the covering lock where a lock is already load-bearing —
+the money workers were written that way, and raising the level would put a retry around
+bodies that sign. Prefer `SERIALIZABLE` where the decision spans rows no single lock covers
+(an aggregate read, a `max(seq)` read-then-insert), and only where the body is DB-only.
+
+**Enforcement.** Every transaction-opening `BEGIN` in `apps/generic-node/src` and
+`packages/node-core/src` is classified money-path vs other, with its mechanism, covering
+statement and pinned-client evidence, in
+[`apps/generic-node/test/transaction-isolation.census.test.ts`](../../../../apps/generic-node/test/transaction-isolation.census.test.ts)
+(`TRANSACTION_SITES`). That table is the per-site record this section's rule is applied
+against, and the gate fails the build when a new `BEGIN` appears without a classification or
+when a money-path entry names no mechanism. Adding a transaction means adding a row.
+
 ## 2. Serialization-failure retry
 
 A `SERIALIZABLE` transaction can fail with SQLSTATE `40001` (`serialization_failure`) —

@@ -11,10 +11,28 @@ import {
 import { InMemoryApprovalChallengeIssuerStore } from "./challenge-issuer-store.js";
 
 describe("dual-control policy modes", () => {
-  it("defaults unknown/empty to single_operator", () => {
-    expect(parseDualControlMode(undefined)).toBe("single_operator");
-    expect(parseDualControlMode("")).toBe("single_operator");
+  it("resolves only the exact mode literals", () => {
     expect(parseDualControlMode("two_human")).toBe("two_human");
+    expect(parseDualControlMode("single_operator")).toBe("single_operator");
+  });
+
+  // The fail-open regression this guards: every one of these once resolved to
+  // single_operator, so an operator who typed the setting slightly wrong got no
+  // dual control and no error (ZTR-1148).
+  it.each(["two-human", "TWO_HUMAN", " two_human", "two_human ", "", "TWO-HUMAN", "yes"])(
+    "never resolves a present-but-unrecognised value (%j) to a mode",
+    (raw) => {
+      expect(parseDualControlMode(raw)).toBe("invalid");
+    },
+  );
+
+  // Deliberate and distinct from the above: doc 01 §4.2 makes node policy OPTIONAL,
+  // so absence is "this deployment configured no policy", not a malformed value.
+  // It is documented in .env.example, defaulted in the frozen schema, and readable
+  // at GET /admin/v1/dual-control-policy — the three things the fail-open bug lacked.
+  it("treats an absent setting as the documented no-policy default", () => {
+    expect(parseDualControlMode(undefined)).toBe("single_operator");
+    expect(parseDualControlMode(null)).toBe("single_operator");
   });
 
   it("exposes plain-language copy for both modes", () => {

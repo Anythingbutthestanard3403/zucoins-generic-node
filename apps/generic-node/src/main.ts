@@ -596,6 +596,7 @@ async function main(): Promise<void> {
     metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
     destinationService,
     deviceStore: deviceKeyStore,
+    dualControlMode: config.DUAL_CONTROL_MODE,
     readinessProbe: {
       nodeStatus: () => (readiness.snapshot().ready ? "ready" : "not_ready"),
       backupStatus: () => {

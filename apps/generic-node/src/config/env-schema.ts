@@ -24,6 +24,7 @@
 // secret fields use non-echoing constraints throughout.
 
 import {
+  DUAL_CONTROL_MODES,
   SPLITCHAIN_FUTURE_TIME_CEILING_SECS,
   UUID_PATTERN,
   z,
@@ -324,6 +325,18 @@ export const CONFIG_FIELD_SCHEMAS = {
       "BACKUP_DRILL_TEMPLATE_URL must be a postgres connection URL",
     )
     .optional(),
+
+  // Dual-control approval policy for SEND_EXTERNAL — 01-system-overview.md §4.2:
+  // optional node policy must fail closed. Unset is the "deployment added no
+  // optional policy" case and yields single_operator; a value that is present but
+  // not an exact mode literal (`two-human`, `TWO_HUMAN`, `" two_human"`, `""`) is a
+  // boot refusal here, never a silent downgrade to the weaker mode — an operator
+  // who typos this must find out at boot, not from a send only one human approved.
+  DUAL_CONTROL_MODE: z
+    .enum(DUAL_CONTROL_MODES, {
+      message: `DUAL_CONTROL_MODE must be one of ${DUAL_CONTROL_MODES.join(", ")}`,
+    })
+    .default("single_operator"),
 
   // Admin CORS origin allowlist — 07-signing-custody-security.md: defaults to
   // no cross-origin access; explicit exact origins; `*` is rejected outright.

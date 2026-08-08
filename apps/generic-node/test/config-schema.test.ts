@@ -66,6 +66,7 @@ describe("frozen configuration schema — happy path", () => {
       "https://gateway-entry-1.internal.example/",
     ]);
     expect(config.BACKUP_SCHEDULE_ENABLED).toBe(false);
+    expect(config.DUAL_CONTROL_MODE).toBe("single_operator");
   });
 
   it("requires KEK + durable sink when backup schedule is enabled; rejects /tmp sink", () => {
@@ -95,6 +96,28 @@ describe("frozen configuration schema — happy path", () => {
     );
     expect(ok.BACKUP_SCHEDULE_ENABLED).toBe(true);
     expect(ok.BACKUP_OUTPUT_DIR).toBe("/var/lib/generic-node/backups");
+  });
+
+  // ZTR-1148 / doc 01 §4.2. The regression: every one of these once resolved to
+  // single_operator inside the mount, so a deployment could believe it had
+  // two-human approval, not have it, and get no error and no log line.
+  it.each(["two-human", "TWO_HUMAN", " two_human", "", "enabled"])(
+    "refuses to boot on an unrecognised DUAL_CONTROL_MODE (%j) rather than downgrade",
+    (value) => {
+      const issues = loadIssues(validEnv({ DUAL_CONTROL_MODE: value }));
+      expect(issues.some((i) => i.startsWith("DUAL_CONTROL_MODE:"))).toBe(true);
+      // Error-message discipline: name the field and the constraint, never echo input.
+      expect(issues.join("\n")).toContain("must be one of single_operator, two_human");
+    },
+  );
+
+  it("accepts both exact dual-control modes", () => {
+    expect(loadNodeConfig(validEnv({ DUAL_CONTROL_MODE: "two_human" })).DUAL_CONTROL_MODE).toBe(
+      "two_human",
+    );
+    expect(
+      loadNodeConfig(validEnv({ DUAL_CONTROL_MODE: "single_operator" })).DUAL_CONTROL_MODE,
+    ).toBe("single_operator");
   });
 
   it("parses multiple gateway endpoints in failover order", () => {

@@ -97,7 +97,7 @@ import {
   InMemoryDualControlPolicy,
   InMemoryApprovalChallengeIssuerStore,
   InMemoryOperatorPushSubscriptionStore,
-  parseDualControlMode,
+  type DualControlMode,
 } from "@zucoins/node-core";
 
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
@@ -349,6 +349,16 @@ export interface ProductionSurfaceConfig {
   };
   /** Optional device-key store for dual-control inventory + readiness. */
   readonly deviceStore?: AdminRouteDeps["deviceStore"];
+  /**
+   * Effective dual-control approval mode, already validated by the frozen schema
+   * (DUAL_CONTROL_MODE, which supplies the documented single_operator default when
+   * the operator configured no optional policy). There is no parse step here.
+   *
+   * REQUIRED on purpose: an optional field resolved with `?? "single_operator"` let a
+   * dropped caller wire silently downgrade a two_human deployment with tsc green and
+   * every test passing. Dropping the wire is now a compile error at the call site.
+   */
+  readonly dualControlMode: DualControlMode;
   /** Optional readiness probes (node health, backup schedule, break-glass). */
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   /**
@@ -654,9 +664,11 @@ export function createProductionRouteSurface(
   // Ceremony/issuer/push side-stores are process-local until a durable migration lands
   // (fail-soft / re-issue on restart OK).
   const secondDeviceCeremonyStore = new InMemorySecondDeviceCeremonyStore();
-  const dualControlPolicy = new InMemoryDualControlPolicy(
-    parseDualControlMode(process.env.DUAL_CONTROL_MODE),
-  );
+  // Mode comes from the validated schema (config.DUAL_CONTROL_MODE), never from raw
+  // env here: an unrecognised value must have already refused boot rather than reach
+  // this constructor as the weaker mode. No `?? "single_operator"` — the schema owns
+  // the default, and a fallback here would re-open the downgrade one level up.
+  const dualControlPolicy = new InMemoryDualControlPolicy(config.dualControlMode);
   const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
   const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();
   // Real sealed auth (not length-only discard). Env OPERATOR_PUSH_SEAL_KEY preferred;

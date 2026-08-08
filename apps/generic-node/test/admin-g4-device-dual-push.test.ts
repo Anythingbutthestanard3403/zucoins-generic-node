@@ -32,6 +32,7 @@ import {
 } from "@zucoins/node-core";
 
 import { createAdminRouter } from "../src/admin-router.js";
+import { createTestAdminAtomicDeps } from "./support/admin-atomic.js";
 
 const NODE_ID = "11111111-1111-4111-8111-111111111111";
 const ORIGIN = "https://node.example";
@@ -67,6 +68,16 @@ function makeRouter(opts?: {
       return `zp-op-push-auth-v1.test.${Buffer.from(auth, "utf8").toString("base64")}`;
     });
 
+  const challengeStore = opts?.challengeStoreOverride ?? {
+    findIssuedByOperation: async () => null,
+    findByNonce: async () => null,
+    insertIssued: async () => {},
+    commitApprovalMutation: async () => {
+      throw new Error("unused");
+    },
+  };
+  const loadOperation = opts?.loadOperation ?? (async () => null);
+
   const router = createAdminRouter({
     sessions,
     userStore,
@@ -77,15 +88,11 @@ function makeRouter(opts?: {
     },
     totpLog: new TotpConsumptionLog(),
     nodeId: NODE_ID,
-    challengeStore: opts?.challengeStoreOverride ?? {
-      findIssuedByOperation: async () => null,
-      findByNonce: async () => null,
-      insertIssued: async () => {},
-      commitApprovalMutation: async () => {
-        throw new Error("unused");
-      },
-    },
-    loadOperation: opts?.loadOperation ?? (async () => null),
+    challengeStore,
+    loadOperation,
+    // The approve route runs inside the required atomic idempotency transaction;
+    // without it every approve is 503 before any policy is consulted.
+    ...createTestAdminAtomicDeps({ challengeStore, loadOperation }),
     sendDecisionStore: {
       rejectCreated: async () => {
         throw new Error("unused");
@@ -254,6 +261,94 @@ describe("G4 dual-control policy", () => {
     expect(body.mode).toBe("two_human");
     expect(body.short).toMatch(/Two-human/i);
     expect(body.long).toMatch(/different admin operator/i);
+  });
+
+  // Doc 01 §4.2 wants two things at once: a POLICY refusal must be tellable from
+  // protocol invalidity, while no answer may reveal which authentication factor
+  // failed. Both assertions live here so a refactor cannot satisfy one by breaking
+  // the other (ZTR-1148).
+  describe("policy denial is distinguishable from protocol invalidity", () => {
+    const OP_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const WALLET_ID = "55555555-5555-4555-8555-555555555555";
+
+    const op: ApprovalOperationSnapshot = {
+      operationId: OP_ID,
+      nodeId: NODE_ID,
+      status: "CREATED",
+      rowVersion: 1,
+      sourceWalletId: WALLET_ID,
+      sourcePubkey: "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+      destinationAddress: "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=",
+      amountZkz: "0.01",
+      referencesOperationId: null,
+    };
+
+    async function challengeThenApprove(approveBody: Record<string, unknown>) {
+      const { router, userStore } = makeRouter({
+        dualMode: "two_human",
+        loadOperation: async (id) => (id === OP_ID ? op : null),
+        challengeStoreOverride: new InMemoryApprovalChallengeStore(),
+      });
+      const auth = await login(router, userStore);
+      // Issuing the challenge records this operator as the issuer; approving as the
+      // same session is therefore the two-human refusal.
+      const issued = await router(
+        "GET",
+        `/admin/v1/external-sends/${OP_ID}/approval-challenge`,
+        new Uint8Array(),
+        { cookie: auth.cookie, origin: ORIGIN, "x-csrf-token": auth.csrf },
+      );
+      expect(issued.status).toBe(200);
+      const challenge = JSON.parse(issued.body) as {
+        nonce: string;
+        preimage_sha256: string;
+        row_version: number;
+      };
+      const res = await router(
+        "POST",
+        `/admin/v1/external-sends/${OP_ID}/approve`,
+        Buffer.from(
+          JSON.stringify({
+            challenge_nonce: challenge.nonce,
+            expected_row_version: challenge.row_version,
+            preimage_sha256: challenge.preimage_sha256,
+            device_key_id: null,
+            device_signature: null,
+            ...approveBody,
+          }),
+        ),
+        {
+          cookie: auth.cookie,
+          origin: ORIGIN,
+          "x-csrf-token": auth.csrf,
+          "content-type": "application/json",
+          "idempotency-key": randomUUID(),
+          "x-zp-totp": totpNow(),
+        },
+      );
+      return { status: res.status, body: JSON.parse(res.body) as { error: { code: string } } };
+    }
+
+    it("refuses the challenge issuer with its own code", async () => {
+      const res = await challengeThenApprove({});
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("same_operator_both_sides");
+    });
+
+    it("still collapses a protocol-invalid approve to the opaque code", async () => {
+      const res = await challengeThenApprove({ challenge_nonce: randomUUID() });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("approval_rejected");
+    });
+
+    it("discloses no authentication factor in either answer", async () => {
+      const policy = await challengeThenApprove({});
+      const protocolInvalid = await challengeThenApprove({ challenge_nonce: randomUUID() });
+      expect(policy.body.error.code).not.toBe(protocolInvalid.body.error.code);
+      for (const res of [policy, protocolInvalid]) {
+        expect(JSON.stringify(res.body)).not.toMatch(/totp|device|nonce|preimage|password/i);
+      }
+    });
   });
 });
 

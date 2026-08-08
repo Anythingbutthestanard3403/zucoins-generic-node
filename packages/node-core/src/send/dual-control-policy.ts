@@ -4,7 +4,10 @@
 // - single_operator: same admin_operator may issue the approval-challenge and approve.
 // - two_human: distinct admin_operator on challenge vs approve; same operator both sides → fail closed.
 //
-// Server enforces; SPA copy must match. Default is single_operator (safe for solo ops).
+// Server enforces; SPA copy must match. An unset setting means the deployment added
+// no optional policy — doc 01 §4.2 makes node policy opt-in — which is single_operator.
+// A setting that is PRESENT but unrecognised never resolves to a mode; see
+// parseDualControlMode.
 
 export const DUAL_CONTROL_MODES = ["single_operator", "two_human"] as const;
 export type DualControlMode = (typeof DUAL_CONTROL_MODES)[number];
@@ -34,9 +37,23 @@ export const DUAL_CONTROL_COPY: Readonly<
   },
 };
 
-export function parseDualControlMode(raw: string | null | undefined): DualControlMode {
-  if (raw === "two_human") return "two_human";
-  return "single_operator";
+/**
+ * Resolve a configured dual-control setting, fail closed (doc 01 §4.2).
+ *
+ * Only an exact mode literal selects a mode. Absence selects the documented
+ * "no optional policy" default. Everything else — `two-human`, `TWO_HUMAN`,
+ * `" two_human"`, `""` — is `"invalid"`: the caller must refuse to boot rather
+ * than pick a mode, because silently picking one always picks the weaker one.
+ * The production caller is the frozen schema's DUAL_CONTROL_MODE field
+ * (apps/generic-node/src/config/env-schema.ts), which rejects the same set.
+ */
+export function parseDualControlMode(
+  raw: string | null | undefined,
+): DualControlMode | "invalid" {
+  if (raw === null || raw === undefined) return "single_operator";
+  return (DUAL_CONTROL_MODES as readonly string[]).includes(raw)
+    ? (raw as DualControlMode)
+    : "invalid";
 }
 
 export function dualControlModeLabel(mode: DualControlMode): string {

@@ -6,6 +6,7 @@ import {
   createCandidateIntakeService,
   type CandidateIntakeRequest,
   type CandidateIntakeService,
+  type MetricCandidateIntakeSource,
   type SenderPreflightObserver,
   type SqlQueryFn,
 } from "@zucoins/node-core";
@@ -19,22 +20,67 @@ import {
 
 export const INTAKE_BATCH_LIMIT = 5;
 
+/**
+ * Producer lane. Alias of the closed metric domain so the label vocabulary has one
+ * source of truth: `push` is the Web Push delivery channel (authenticated by the ECE
+ * auth secret + endpoint id), `relay` the anonymous origin-relay POST.
+ */
+export type CandidateIntakeSource = MetricCandidateIntakeSource;
+
+export interface CandidateIntakeEnqueueResult {
+  readonly enqueued: boolean;
+  /** Set only on refusal. Coarse — never echoes signed material. */
+  readonly reason?: "inbox_full";
+}
+
 export interface CandidateIntakeInbox {
   readonly size: () => number;
   readonly take: (limit: number) => readonly CandidateIntakeRequest[];
-  readonly enqueue: (request: CandidateIntakeRequest) => void;
+  readonly enqueue: (
+    request: CandidateIntakeRequest,
+    source: CandidateIntakeSource,
+  ) => CandidateIntakeEnqueueResult;
 }
 
-export function createCandidateIntakeInbox(): CandidateIntakeInbox {
-  const q: CandidateIntakeRequest[] = [];
+/**
+ * Two capped lanes behind one inbox, so both producers are bounded by construction.
+ *
+ * `maxPerSource` is the per-lane ceiling and is derived, never a free number: pass
+ * RECEIVE_QUEUE_CAP (= POOL_CAP_TOTAL; see config/env-schema.ts receiveQueueCap). A
+ * deposit is only useful if it matches a live receive, and POOL_CAP_TOTAL is the hard
+ * maximum wallets across all states, so at most that many receives can be outstanding
+ * at once. A single lane holding more than that cannot be all-distinct-and-genuine —
+ * past the cap the marginal entry is backlog, not signal.
+ *
+ * Per-lane rather than shared: a shared cap would let an anonymous flood consume the
+ * authenticated lane's headroom, converting the starvation into an outright refusal
+ * of genuine deliveries.
+ */
+export function createCandidateIntakeInbox(maxPerSource: number): CandidateIntakeInbox {
+  if (!Number.isInteger(maxPerSource) || maxPerSource < 1) {
+    throw new Error(
+      `candidate intake inbox requires an integer maxPerSource >= 1, got ${String(maxPerSource)}`,
+    );
+  }
+  const lanes: Record<CandidateIntakeSource, CandidateIntakeRequest[]> = { push: [], relay: [] };
   return {
-    size: () => q.length,
+    size: () => lanes.push.length + lanes.relay.length,
     take(limit) {
-      if (limit <= 0 || q.length === 0) return [];
-      return q.splice(0, Math.min(limit, q.length));
+      if (limit <= 0) return [];
+      // Strict preference for the authenticated lane: relay entries are only served
+      // with the budget push leaves behind, so an anonymous backlog can never delay a
+      // verified delivery. Push is itself bounded by the push service's delivery rate.
+      const batch = lanes.push.splice(0, Math.min(limit, lanes.push.length));
+      if (batch.length < limit) {
+        batch.push(...lanes.relay.splice(0, limit - batch.length));
+      }
+      return batch;
     },
-    enqueue(request) {
-      q.push(request);
+    enqueue(request, source) {
+      const lane = lanes[source];
+      if (lane.length >= maxPerSource) return { enqueued: false, reason: "inbox_full" };
+      lane.push(request);
+      return { enqueued: true };
     },
   };
 }

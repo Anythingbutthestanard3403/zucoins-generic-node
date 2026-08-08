@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildNodeIdentityDocument,
+  buildSendTransferCodeText,
   createFailClosedOperationStore,
   createImplementerBearerAuth,
   createImplementerBearerAuthFromService,
@@ -24,6 +25,12 @@ import {
   type RuntimeListenerLogger,
 } from "../src/runtime-listener.js";
 import { NodeReadiness } from "../src/boot/readiness.js";
+import { createCandidateIntakeInbox } from "../src/money-workers/receive-candidate-intake-step.js";
+import {
+  enqueueReceiverChannelDeposit,
+  RECEIVER_CHANNEL_ACTION_DATA_FIELD,
+  RECEIVER_CHANNEL_ACTION_NAME,
+} from "../src/money-workers/receiver-channel-producer.js";
 
 // the network-containment guard (test/setup-network-guard.ts) replaces http.request and
 // net.connect with a throwing stub, so a loopback ephemeral-port round-trip is impossible
@@ -900,5 +907,73 @@ describe("operationPathClass + sanitizeFailureCause", () => {
     expect(out.cause_message).not.toContain("ABCD1234");
     expect(out.cause_message).not.toMatch(/A{60}/);
     expect(out.cause_message).toMatch(/\[redacted/);
+  });
+});
+// ZTR-1188 — the origin-relay route is anonymous by design; the bound lives in the inbox,
+// and the HTTP answer must stay 204 either way so the response leaks nothing.
+describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188)", () => {
+  const RELAY_CAP = 4;
+  const RECEIVER_PUBKEY = "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=";
+
+  function relayBody(marker: string): string {
+    const inner = JSON.stringify({
+      step_2_key_public__base64urlsafe: RECEIVER_PUBKEY,
+      expiry__unix_time_secs: "1900000000",
+      message: `zp1:${OP_ID}:${marker}`,
+    });
+    return JSON.stringify({
+      action_name: RECEIVER_CHANNEL_ACTION_NAME,
+      action_data: {
+        [RECEIVER_CHANNEL_ACTION_DATA_FIELD]: buildSendTransferCodeText(inner, `${"A".repeat(86)}==`),
+      },
+    });
+  }
+
+  // Same wiring shape main.ts ships: real inbox, real producer, metrics hook on refusal.
+  function relayDeps(): {
+    deps: NodeRuntimeListenerDeps;
+    inbox: ReturnType<typeof createCandidateIntakeInbox>;
+    metrics: ReturnType<typeof createNodeMetrics>;
+  } {
+    const inbox = createCandidateIntakeInbox(RELAY_CAP);
+    const metrics = createNodeMetrics();
+    const metricsHooks = createMetricsHooks(metrics);
+    const deps: NodeRuntimeListenerDeps = {
+      ...makeSuccessDeps(),
+      onReceiverChannelDeposit: (rawBody) => {
+        const result = enqueueReceiverChannelDeposit(inbox, rawBody, "relay");
+        if (!result.enqueued) {
+          metricsHooks.onCandidateIntakeRefused("relay", result.reason ?? "malformed_body");
+        }
+      },
+    };
+    return { deps, inbox, metrics };
+  }
+
+  it("a burst cannot grow the inbox past the cap, and every POST still answers 204", async () => {
+    const { deps, inbox, metrics } = relayDeps();
+
+    const burst = RELAY_CAP * 12;
+    for (let i = 0; i < burst; i++) {
+      const captured = await invoke(deps, "POST", "/v1/receivers/origin-relay", {}, relayBody(`m${i}`));
+      // Enqueued and refused are indistinguishable on the wire (non-oracular).
+      expect(captured.status, `deposit ${i}`).toBe(204);
+    }
+
+    expect(inbox.size()).toBe(RELAY_CAP);
+    expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "inbox_full" })).toBe(
+      burst - RELAY_CAP,
+    );
+  });
+
+  it("answers 204 and counts the reason when the body never decodes", async () => {
+    const { deps, inbox, metrics } = relayDeps();
+
+    expect((await invoke(deps, "POST", "/v1/receivers/origin-relay", {}, "not json")).status).toBe(204);
+    expect((await invoke(deps, "POST", "/v1/receivers/origin-relay", {}, "{}")).status).toBe(204);
+
+    expect(inbox.size()).toBe(0);
+    expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "malformed_body" })).toBe(1);
+    expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "wrong_action" })).toBe(1);
   });
 });

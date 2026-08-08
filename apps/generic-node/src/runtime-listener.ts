@@ -598,8 +598,12 @@ export function createNodeRuntimeListener(
       return;
     }
 
-    // internal receiver-channel deposit (origin-relay; the endpoint id is the credential). Not in
-    // ROUTE_POLICIES. 204 after enqueue; malformed/disabled looks like absent.
+    // internal receiver-channel deposit (origin-relay). Not in ROUTE_POLICIES, and unlike the
+    // Web Push delivery route below it carries no endpoint id, so there is no credential to
+    // check here — every deposit is instead re-verified against the chain before it can credit
+    // anything. Resource exhaustion is bounded upstream by the per-lane inbox cap, not here.
+    // 204 whether the deposit was enqueued or refused; malformed/disabled/refused all look
+    // like absent, so the response leaks nothing about whether the channel is configured.
     if (
       pathname === "/v1/receivers/origin-relay" &&
       (request.method ?? "").toUpperCase() === "POST" &&

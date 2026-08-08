@@ -246,6 +246,30 @@ export type MetricAuthOutcome = (typeof METRIC_AUTH_OUTCOMES)[number];
 export const METRIC_IDEMPOTENCY_OUTCOMES = ["first", "replay", "conflict", "invalid"] as const;
 export type MetricIdempotencyOutcome = (typeof METRIC_IDEMPOTENCY_OUTCOMES)[number];
 
+/**
+ * Candidate-intake producer lanes. `push` is the Web Push delivery channel
+ * (authenticated by the ECE auth secret + endpoint id); `relay` is the anonymous
+ * origin-relay POST. Held apart so an anonymous flood can neither consume the
+ * authenticated lane's headroom nor queue ahead of it.
+ */
+export const METRIC_CANDIDATE_INTAKE_SOURCES = ["push", "relay"] as const;
+export type MetricCandidateIntakeSource = (typeof METRIC_CANDIDATE_INTAKE_SOURCES)[number];
+
+/**
+ * Closed refusal reasons for a candidate-intake deposit. Coarse by design — a
+ * refusal reason is rendered on a public scrape and must never echo signed material.
+ * Sole source of truth for the app-side unions in
+ * apps/generic-node/src/money-workers/receiver-channel-producer.ts.
+ */
+export const METRIC_CANDIDATE_INTAKE_REFUSALS = [
+  "inbox_full",
+  "malformed_body",
+  "wrong_action",
+  "decode_failed",
+  "not_armed",
+] as const;
+export type MetricCandidateIntakeRefusal = (typeof METRIC_CANDIDATE_INTAKE_REFUSALS)[number];
+
 /** Observation anomaly classification (closed; relationship/parse kinds). */
 export const METRIC_ANOMALY_KINDS = [
   "REGRESSION",
@@ -387,6 +411,7 @@ export interface NodeMetrics {
   readonly gatewayRequestDuration: HistogramMetric;
   readonly authTotal: CounterMetric;
   readonly idempotencyTotal: CounterMetric;
+  readonly candidateIntakeRefused: CounterMetric;
 
   // --- per-scrape gauges (filled from snapshot on render) ---
   readonly availableWallets: GaugeMetric;
@@ -477,6 +502,11 @@ export function createNodeMetrics(): NodeMetrics {
   );
   const authTotal = createCounter("gn_auth_total", "Operation API authentication outcomes.", ["outcome"]);
   const idempotencyTotal = createCounter("gn_idempotency_total", "Operation API idempotency outcomes.", ["outcome"]);
+  const candidateIntakeRefused = createCounter(
+    "gn_candidate_intake_refused_total",
+    "Candidate-intake deposits refused before enqueue, by producer lane and reason.",
+    ["source", "reason"],
+  );
 
   const availableWallets = createGauge(
     "gn_available_wallets",
@@ -619,6 +649,7 @@ export function createNodeMetrics(): NodeMetrics {
     gatewayRequestDuration,
     authTotal,
     idempotencyTotal,
+    candidateIntakeRefused,
     availableWallets,
     totalWallets,
     walletsByState,
@@ -719,6 +750,7 @@ export function createNodeMetrics(): NodeMetrics {
       gatewayRequestDuration.reset();
       authTotal.reset();
       idempotencyTotal.reset();
+      candidateIntakeRefused.reset();
       availableWallets.reset();
       totalWallets.reset();
       walletsByState.reset();
@@ -839,6 +871,7 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderHistogram(metrics.gatewayRequestDuration),
     renderCounter(metrics.authTotal),
     renderCounter(metrics.idempotencyTotal),
+    renderCounter(metrics.candidateIntakeRefused),
     renderGauge(metrics.availableWallets),
     renderGauge(metrics.totalWallets),
     renderGauge(metrics.walletsByState),
@@ -888,6 +921,11 @@ export interface MetricsHooks {
   onProofBudgetExhaustion(): void;
   onAuth(outcome: MetricAuthOutcome): void;
   onIdempotency(outcome: MetricIdempotencyOutcome): void;
+  /** A candidate-intake deposit that never reached the inbox, by producer lane. */
+  onCandidateIntakeRefused(
+    source: MetricCandidateIntakeSource,
+    reason: MetricCandidateIntakeRefusal,
+  ): void;
   /**
    * Observe a gateway call duration. `rpc` is a closed action name;
    * `outcome` is ok on any non-throwing response (including app-level reject).
@@ -932,6 +970,9 @@ export function createMetricsHooks(metrics: NodeMetrics): MetricsHooks {
     },
     onIdempotency(outcome) {
       metrics.idempotencyTotal.inc({ outcome });
+    },
+    onCandidateIntakeRefused(source, reason) {
+      metrics.candidateIntakeRefused.inc({ source, reason });
     },
     observeGateway(rpc, outcome, durationSeconds) {
       metrics.gatewayRequestDuration.observe({ rpc, outcome }, durationSeconds);

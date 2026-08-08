@@ -1019,6 +1019,16 @@ async function main(): Promise<void> {
           backoffMaxMs: config.GATEWAY_READ_BACKOFF_MAX_MS,
         },
       );
+      // Push action-vocabulary probe (ZTR-1152 Option B). The push host dispatches on
+      // opaque suffixed action names transcribed from the wallet bundle; a wallet
+      // release can rotate them, and the rejection otherwise masquerades as a
+      // transport failure mid-money-path. Only deterministic vocabulary drift throws
+      // (PushActionVocabularyRejectedError — named, distinct); a plain push-host
+      // outage logs and proceeds, because availability has never gated boot (the boot
+      // reconcile and periodic pass repair it later).
+      if (push !== null) {
+        await push.probeActionVocabulary();
+      }
     },
     startMoneyWorkers: (leadership: SignerLeadershipHandle) => {
       // boot-lane already gated via shouldStartMoneyWorkersAfterRecovery.

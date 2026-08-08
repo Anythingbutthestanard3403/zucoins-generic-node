@@ -37,12 +37,15 @@ describe("type-level exclusion — negative compile fixtures (the never-blind-re
   });
 
   it("the read-safe union is exactly the five read-safe actions, submit absent", () => {
+    // Suffixed push literals transcribed from wallet 200.6 (ZTR-1152). This assertion
+    // pins OUR OUTPUT only — the host's acceptance is verified by the boot-lane push
+    // action-vocabulary probe, not by this suite.
     expect(READ_SAFE_ACTION_NAMES).toEqual([
       "get_transaction__v1",
-      "push_notification__subscribe__v1",
-      "push_notification__has_subscription_for_public_key_base64urlsafe__v1",
-      "push_notification__send_to_public_key_base64urlsafe__v1",
-      "push_notification__get_app_server_public_key__v1",
+      "push_notification__subscribe__v1__tos2d5b5md",
+      "push_notification__has_subscription_for_public_key_base64urlsafe__v1__jxqlqcj5zv",
+      "push_notification__send_to_public_key_base64urlsafe__v1__jc34lsh7ps",
+      "push_notification__get_app_server_public_key__v1__nozleh4wul",
     ]);
     expect(READ_SAFE_ACTION_NAMES as readonly string[]).not.toContain(SUBMIT_ACTION_NAME);
   });

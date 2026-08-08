@@ -7,8 +7,11 @@ import { SUBMIT_ACTION_NAME } from "@zucoins/generic-node-contracts/transfer-cod
 
 import {
   createPushGatewayActions,
+  probePushActionVocabulary,
+  PushActionVocabularyRejectedError,
   PushGatewayRejectedError,
   PushGatewayUnavailableError,
+  PUSH_VOCABULARY_PROBE_KEY,
 } from "./gateway-actions.js";
 
 const PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
@@ -36,7 +39,7 @@ afterEach(() => {
 });
 
 describe("subscribe", () => {
-  test("posts push_notification__subscribe__v1 with the wire shape verbatim", async () => {
+  test("posts push_notification__subscribe__v1__tos2d5b5md with the wire shape verbatim", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ status: true, code: "ok", message: "OK", data: {} }));
     const gateway = createPushGatewayActions({ pushApiBase: PUSH_API_BASE });
 
@@ -51,7 +54,9 @@ describe("subscribe", () => {
     const [calledUrl, init] = fetchMock.mock.calls[0];
     expect(calledUrl).toBe(PUSH_API_BASE.replace(/\/+$/u, ""));
     const parsed = decodeBody(init) as { action_name: string; action_data: unknown };
-    expect(parsed.action_name).toBe("push_notification__subscribe__v1");
+    // Suffixed literal from wallet 200.6 app.js:4841 (ZTR-1152). This pin covers OUR
+    // OUTPUT only; the host's acceptance is verified by the boot-lane vocabulary probe.
+    expect(parsed.action_name).toBe("push_notification__subscribe__v1__tos2d5b5md");
     expect(parsed.action_data).toEqual({
       id_proof__url_query: "utm_source=zupayments_node_v1&…",
       subscription: {
@@ -90,8 +95,9 @@ describe("hasSubscriptionForPublicKey", () => {
 
     expect(result).toBe(true);
     const parsed = decodeBody(fetchMock.mock.calls[0][1]) as { action_name: string; action_data: unknown };
+    // Suffixed literal from wallet 200.6 main.js:8866 (ZTR-1152).
     expect(parsed.action_name).toBe(
-      "push_notification__has_subscription_for_public_key_base64urlsafe__v1",
+      "push_notification__has_subscription_for_public_key_base64urlsafe__v1__jxqlqcj5zv",
     );
     expect(parsed.action_data).toEqual({ wallet_key_public__base64urlsafe: "wallet-pub-b64url" });
   });
@@ -119,7 +125,8 @@ describe("getAppServerPublicKey — app-server key discovery", () => {
 
     expect(key).toBe(standard);
     const parsed = decodeBody(fetchMock.mock.calls[0][1]) as { action_name: string; action_data: unknown };
-    expect(parsed.action_name).toBe("push_notification__get_app_server_public_key__v1");
+    // Suffixed literal from wallet 200.6 app.js:4222 (ZTR-1152).
+    expect(parsed.action_name).toBe("push_notification__get_app_server_public_key__v1__nozleh4wul");
     expect(parsed.action_data).toEqual({});
   });
 
@@ -215,6 +222,84 @@ describe("bounded retry with jitter + backoff", () => {
     await expect(gateway.hasSubscriptionForPublicKey("k")).rejects.toThrow(PushGatewayUnavailableError);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(sleep).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("action-vocabulary rejection (ZTR-1152) — distinct, deterministic, never retried", () => {
+  // Envelope transcribed verbatim from the live probe 2026-08-08 (ZTR-1152 evidence):
+  // the host answers an unknown action name with HTTP 200 + status:false — the same
+  // shape as a legitimate negative answer — distinguished only by code/message.
+  const VOCABULARY_REJECTION = {
+    status: false,
+    code: "oysinkh3cy",
+    message:
+      'Info: Main: Network handle api request: Unsupported "action_name" property provided in data. ' +
+      "Fix: Provide a valid network [object] request data action_name",
+    data: [],
+  };
+
+  test("hasSubscriptionForPublicKey surfaces PushActionVocabularyRejectedError, not false, in one attempt", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(VOCABULARY_REJECTION));
+    const gateway = createPushGatewayActions({
+      pushApiBase: PUSH_API_BASE,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await expect(gateway.hasSubscriptionForPublicKey("wallet-pub-b64url")).rejects.toMatchObject({
+      name: "PushActionVocabularyRejectedError",
+      code: "push_action_vocabulary_rejected",
+      gatewayCode: "oysinkh3cy",
+    });
+    // Deterministic — must not burn retry attempts or fold into UnavailableError.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("subscribe surfaces the vocabulary error (matched on envelope code alone), not the generic rejection", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ status: false, code: "oysinkh3cy", message: "", data: [] }),
+    );
+    const gateway = createPushGatewayActions({ pushApiBase: PUSH_API_BASE });
+
+    await expect(
+      gateway.subscribe({ idProofQuery: "q", endpoint: "e", keyP256dh: "p", keyAuth: "a" }),
+    ).rejects.toBeInstanceOf(PushActionVocabularyRejectedError);
+  });
+
+  test("a status:false envelope with an ordinary code still degrades normally (no false positive)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ status: false, code: "ehmqh23o7m", message: "No active subscriptions found", data: [] }),
+    );
+    const gateway = createPushGatewayActions({ pushApiBase: PUSH_API_BASE });
+
+    expect(await gateway.hasSubscriptionForPublicKey("wallet-pub-b64url")).toBe(false);
+  });
+});
+
+describe("probePushActionVocabulary — boot-lane smoke call (ZTR-1152 Option B)", () => {
+  const logger = { info: vi.fn(), error: vi.fn() };
+
+  test("propagates vocabulary drift as the named error", async () => {
+    const gateway = {
+      hasSubscriptionForPublicKey: vi
+        .fn()
+        .mockRejectedValue(new PushActionVocabularyRejectedError("probe", "oysinkh3cy")),
+    };
+
+    await expect(probePushActionVocabulary(gateway, logger)).rejects.toBeInstanceOf(
+      PushActionVocabularyRejectedError,
+    );
+    expect(gateway.hasSubscriptionForPublicKey).toHaveBeenCalledWith(PUSH_VOCABULARY_PROBE_KEY);
+  });
+
+  test("a plain outage logs and resolves — push-host availability never gates boot", async () => {
+    const gateway = {
+      hasSubscriptionForPublicKey: vi
+        .fn()
+        .mockRejectedValue(new PushGatewayUnavailableError("probe", 5, "ECONNRESET")),
+    };
+
+    await expect(probePushActionVocabulary(gateway, logger)).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalled();
   });
 });
 

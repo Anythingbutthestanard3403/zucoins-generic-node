@@ -1,4 +1,4 @@
-// The id-proof query accompanying `push_notification__subscribe__v1`.
+// The id-proof query accompanying `push_notification__subscribe__v1__tos2d5b5md`.
 //
 // It proves the node controls the wallet's private key by signing a fresh timestamp with
 // it, so the push service will bind our endpoint to that pubkey. Field names and their

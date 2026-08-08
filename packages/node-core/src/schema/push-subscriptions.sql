@@ -1,5 +1,5 @@
 -- Push subscriptions. SplitChain push is the primary detection channel and every wallet
--- pubkey subscribed via push_notification__subscribe__v1 to a node-controlled Web Push
+-- pubkey subscribed via push_notification__subscribe__v1__tos2d5b5md to a node-controlled Web Push
 -- pubkey is subscribed. Web Push/VAPID is keyed per wallet pubkey: there is NO node-wide
 -- VAPID keypair, only a fresh P-256 ECDH keypair plus a 16-byte auth secret per wallet,
 -- encrypted at rest under the vault master key. The URL carries an opaque >=128-bit

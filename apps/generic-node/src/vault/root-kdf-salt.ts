@@ -28,7 +28,11 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 
 import {
   deriveEd25519PublicKeyBase64Url,
+  openNodeSigningSeed,
   openWalletSecret,
+  type NodeSigningKeyIdentity,
+  type NodeSigningKeyPurpose,
+  type NodeSigningKeySealedEnvelope,
   type SealedEnvelope,
   type WalletIdentity,
 } from "@zucoins/node-core";
@@ -74,7 +78,12 @@ export type VaultRootSaltErrorCode =
   /** The configured salt disagrees with the one persisted beside the sealed material. */
   | "VAULT_ROOT_SALT_MISMATCH"
   /** The derived root key does not open an envelope this node already sealed. */
-  | "VAULT_ROOT_KEY_DOES_NOT_OPEN";
+  | "VAULT_ROOT_KEY_DOES_NOT_OPEN"
+  /**
+   * A node with sealed material would have to write a salt it cannot prove. The row is
+   * insert-only, so an unproven write is permanent — this refuses and writes nothing.
+   */
+  | "VAULT_ROOT_SALT_UNPROVEN";
 
 /**
  * The named, early failure the acceptance criteria require. Every path that derives a root key
@@ -191,9 +200,14 @@ export async function loadPersistedRootKdfSalt(
  * deployment, mint one" or "node that predates ZTR-1159, it has been deriving under the
  * historical literal all along".
  *
- * Both sealed stores count. The push receiver's per-wallet ECDH secret
- * (push/subscription-service.ts) is sealed under the same root key as the wallet envelopes, so
- * a node with push secrets and no wallets is still not a virgin deployment.
+ * Two sealed stores are queried directly: the wallet `vault` and
+ * `node_signing_key_sealed_store`. The push receiver's per-wallet ECDH secret
+ * (push/subscription-service.ts) is NOT queried — `push_subscriptions.wallet_id` is a primary
+ * key referencing `wallets(id)`, so a push secret implies a wallet — but a wallet whose `vault`
+ * row is missing would not be counted here. Reaching that gap needs a node with a push secret,
+ * no wallet `vault` row and no sealed signing key at all, which no node past its first boot
+ * recovery has (NODE_IDENTITY is sealed there). Widen the query, not this comment, if that
+ * ever stops being true.
  */
 async function hasSealedMaterial(sql: RootKdfSaltSqlExecutor, nodeId: string): Promise<boolean> {
   const { rows } = await sql.query<{ present: boolean }>(
@@ -227,11 +241,22 @@ export interface RootKdfSaltReconciliation extends ResolvedRootKdfSalt {
  * The row is insert-only (the slice carries UPDATE/DELETE/TRUNCATE guards), so once written it
  * is the node's answer forever. A configured salt that disagrees with it is refused here, which
  * is the whole point: the mismatch is reported before anything tries to open an envelope.
+ *
+ * The same insert-only property is why nothing is written on a node that has sealed material
+ * until the chosen salt has been PROVEN to open that material: a wrong first write cannot be
+ * corrected in place, so it would brick the node permanently. See
+ * {@link assertChosenSaltOpensSealedMaterial}.
  */
 export async function reconcileRootKdfSalt(deps: {
   readonly sql: RootKdfSaltSqlExecutor;
   readonly nodeId: string;
   readonly configured: ResolvedRootKdfSalt;
+  /**
+   * Derive a root key from a candidate salt — the caller's master key, closed over. Required:
+   * on a node that has already sealed something, this module refuses to write a salt it has not
+   * proven, and proving needs a derivation. The buffer handed back is wiped after the proof.
+   */
+  readonly deriveRootKey: (salt: Buffer) => Uint8Array;
   readonly randomSalt?: () => Buffer;
 }): Promise<RootKdfSaltReconciliation> {
   const persisted = await loadPersistedRootKdfSalt(deps.sql, deps.nodeId);
@@ -254,15 +279,20 @@ export async function reconcileRootKdfSalt(deps: {
 
   // No row yet. Configuration wins when the operator supplied one; otherwise the node's own
   // history decides, and only a node that has sealed nothing may be given a fresh salt.
+  const sealed = await hasSealedMaterial(deps.sql, deps.nodeId);
   const chosen: ResolvedRootKdfSalt =
     deps.configured.source === "environment"
       ? deps.configured
-      : (await hasSealedMaterial(deps.sql, deps.nodeId))
+      : sealed
         ? { salt: Buffer.from(HISTORICAL_ROOT_KDF_SALT), source: "historical_default" }
         : {
             salt: (deps.randomSalt ?? (() => randomBytes(GENESIS_ROOT_KDF_SALT_BYTES)))(),
             source: "genesis_random",
           };
+
+  // The write below is irreversible. Prove first, on every branch that can reach a node with
+  // sealed material — an operator-supplied salt and the historical default alike.
+  if (sealed) await assertChosenSaltOpensSealedMaterial(deps, chosen);
 
   // ON CONFLICT DO NOTHING, then re-read: two replicas racing first boot must converge on one
   // salt rather than one of them proceeding under a value the insert did not keep.
@@ -294,6 +324,55 @@ export async function reconcileRootKdfSalt(deps: {
 }
 
 /**
+ * The guard that makes the insert-only `vault_root_kdf_salt` row safe to write.
+ *
+ * The slice refuses UPDATE, DELETE and TRUNCATE at the engine, so the first row a node writes is
+ * its answer forever. Writing an unproven salt on a node that has already sealed material is
+ * therefore not a failed boot — it is the end of the node: every later boot reads the bad row
+ * back (it beats configuration), re-derives into a key that opens nothing, and there is no
+ * supported in-place repair. So: derive first, open something this node actually sealed, and
+ * only then let the caller insert.
+ *
+ * Both refusals leave ZERO rows behind, which is what keeps the node repairable: the operator
+ * can unset `VAULT_ROOT_SALT_B64` to adopt the pre-ZTR-1159 literal, or supply the salt the
+ * envelopes were really sealed under, and boot again.
+ *
+ * The one case that is allowed through unproven is `historical_default` with nothing openable to
+ * prove against. That is not a guess: before ZTR-1159 boot derived under the literal and nothing
+ * else, so the literal is the only value such a node's material can be under. An
+ * operator-supplied salt in the same position IS a guess, and is refused.
+ */
+async function assertChosenSaltOpensSealedMaterial(
+  deps: {
+    readonly sql: RootKdfSaltSqlExecutor;
+    readonly nodeId: string;
+    readonly deriveRootKey: (salt: Buffer) => Uint8Array;
+  },
+  chosen: ResolvedRootKdfSalt,
+): Promise<void> {
+  const candidate = deps.deriveRootKey(chosen.salt);
+  let proof: RootKeySelfCheckResult;
+  try {
+    proof = await assertRootKeyOpensSealedEnvelope({
+      sql: deps.sql,
+      nodeId: deps.nodeId,
+      rootKey: candidate,
+      saltSource: chosen.source,
+    });
+  } finally {
+    candidate.fill(0);
+  }
+  if (proof.checked || chosen.source !== "environment") return;
+  throw new VaultRootSaltError(
+    "VAULT_ROOT_SALT_UNPROVEN",
+    `VAULT_ROOT_SALT_B64 cannot be proven for node ${deps.nodeId}: the node has sealed material ` +
+      `but nothing this check can open (no node-generated wallet and no sealed signing key), so ` +
+      `the supplied salt would be written to an insert-only row on faith. Unset ` +
+      `VAULT_ROOT_SALT_B64 to adopt the salt this node has been deriving under.`,
+  );
+}
+
+/**
  * The salt a recovery ceremony must derive under. Identical to {@link reconcileRootKdfSalt}
  * except that it never writes: a ceremony reads what the node already decided, and a node with
  * no persisted row is one that predates ZTR-1159 and has been deriving under the historical
@@ -321,6 +400,8 @@ export async function resolveCeremonyRootKdfSalt(deps: {
 export interface RootKeySelfCheckResult {
   /** False when the node has sealed nothing yet — there was no envelope to prove against. */
   readonly checked: boolean;
+  /** Which sealed store the proof actually ran against. Absent when `checked` is false. */
+  readonly provenAgainst?: "wallet" | "node_signing_key";
   readonly walletId?: string;
   readonly saltSource: RootKdfSaltSource;
 }
@@ -337,12 +418,89 @@ const SELECT_ONE_SEALED_WALLET = `
 `;
 
 /**
+ * The second thing worth proving against. A node seals its NODE_IDENTITY / EVENT_SIGNING seeds
+ * in boot recovery, which happens long before it has any wallet — so on every deployment between
+ * first boot and first wallet this is the ONLY sealed material there is, and without it the
+ * self-check silently passes on a node `hasSealedMaterial` calls non-virgin.
+ *
+ * Active keys first (`retired_at IS NULL`), then oldest, so the proof names the key the node is
+ * actually signing with.
+ */
+const SELECT_ONE_SEALED_SIGNING_KEY = `
+  SELECT k.public_key, k.purpose, k.vault_secret_ref,
+         s.key_version, s.ciphertext, s.nonce, s.auth_tag, s.ciphertext_sha256
+    FROM node_signing_keys k
+    INNER JOIN node_signing_key_sealed_store s ON s.vault_secret_ref = k.vault_secret_ref
+   WHERE k.node_id = $1::uuid
+   ORDER BY k.retired_at NULLS FIRST, k.activated_at ASC -- contract-allow:order:frozen structural vocabulary
+   LIMIT 1
+`;
+
+/**
+ * Fallback leg of {@link assertRootKeyOpensSealedEnvelope}, for a node with sealed signing keys
+ * and no node-generated wallet. `openNodeSigningSeed` authenticates AES-256-GCM over AAD bound to
+ * node/purpose/public key/version AND re-derives the Ed25519 public key — the same strength of
+ * proof the wallet leg gets, from node-core's own open path rather than a copy of it.
+ */
+async function proveAgainstSealedSigningKey(deps: {
+  readonly sql: RootKdfSaltSqlExecutor;
+  readonly nodeId: string;
+  readonly rootKey: Uint8Array;
+  readonly saltSource: RootKdfSaltSource;
+}): Promise<RootKeySelfCheckResult> {
+  const { rows } = await deps.sql.query<{
+    public_key: string;
+    purpose: string;
+    vault_secret_ref: string;
+    key_version: number | string;
+    ciphertext: unknown;
+    nonce: unknown;
+    auth_tag: unknown;
+    ciphertext_sha256: string;
+  }>(SELECT_ONE_SEALED_SIGNING_KEY, [deps.nodeId]);
+
+  const row = rows[0];
+  if (row === undefined) return { checked: false, saltSource: deps.saltSource };
+
+  const keyVersion = Number(row.key_version);
+  const identity: NodeSigningKeyIdentity = {
+    nodeId: deps.nodeId,
+    purpose: row.purpose as NodeSigningKeyPurpose,
+    publicKey: row.public_key,
+    keyVersion,
+  };
+  const envelope: NodeSigningKeySealedEnvelope = {
+    vaultSecretRef: row.vault_secret_ref,
+    keyVersion,
+    ciphertext: toBytes(row.ciphertext),
+    nonce: toBytes(row.nonce),
+    authTag: toBytes(row.auth_tag),
+    ciphertextSha256: row.ciphertext_sha256,
+  };
+
+  try {
+    openNodeSigningSeed(deps.rootKey, envelope, identity).wipe();
+  } catch (err) {
+    throw new VaultRootSaltError(
+      "VAULT_ROOT_KEY_DOES_NOT_OPEN",
+      `the root key derived under salt source=${deps.saltSource} does not open the ${row.purpose} ` +
+        `signing key already sealed by this node. The master key or the salt is not the one this ` +
+        `node sealed under — do not proceed. (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+
+  return { checked: true, provenAgainst: "node_signing_key", saltSource: deps.saltSource };
+}
+
+/**
  * Prove the derived root key opens something this node actually sealed, before any caller does
  * real work with it. This is the check that turns a salt mismatch from a mid-ceremony
  * catastrophe into a named refusal in the first second.
  *
- * A node with no sealed wallet returns `checked: false` rather than throwing — there is nothing
- * to disagree with yet, and a fresh deployment must still boot.
+ * A node-generated wallet is the strongest subject; a node that has none falls back to its sealed
+ * signing keys, which every node has from its first boot recovery onward. `checked: false` is
+ * reached only by a node that has sealed neither — a genuinely fresh deployment, which must still
+ * boot — so it is no longer an answer a node with sealed material can produce by accident.
  */
 export async function assertRootKeyOpensSealedEnvelope(deps: {
   readonly sql: RootKdfSaltSqlExecutor;
@@ -363,7 +521,7 @@ export async function assertRootKeyOpensSealedEnvelope(deps: {
   }>(SELECT_ONE_SEALED_WALLET, [deps.nodeId]);
 
   const row = rows[0];
-  if (row === undefined) return { checked: false, saltSource: deps.saltSource };
+  if (row === undefined) return proveAgainstSealedSigningKey(deps);
 
   const keyVersion = Number(row.key_version);
   const identity: WalletIdentity = {
@@ -400,5 +558,5 @@ export async function assertRootKeyOpensSealedEnvelope(deps: {
     );
   }
 
-  return { checked: true, walletId: row.id, saltSource: deps.saltSource };
+  return { checked: true, provenAgainst: "wallet", walletId: row.id, saltSource: deps.saltSource };
 }

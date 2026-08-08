@@ -21,8 +21,12 @@ import {
   SUPPORTED_ENVELOPE_VERSION,
   deriveEd25519PublicKeyBase64Url,
   deriveRootKey,
+  publicKeyFromEd25519Seed,
+  sealNodeSigningSeed,
   sealWalletSecret,
   openWalletSecret,
+  type NodeSigningKeyIdentity,
+  type NodeSigningKeySealedEnvelope,
   type WalletIdentity,
 } from "@zucoins/node-core";
 
@@ -69,9 +73,31 @@ function mintWallet(): { identity: WalletIdentity; secretKey: Buffer; walletId: 
   };
 }
 
+/** A real 32-byte Ed25519 seed plus the public key it derives, for the signing-key store. */
+function mintSigningKey(purpose: "NODE_IDENTITY" | "EVENT_SIGNING" = "NODE_IDENTITY"): {
+  identity: NodeSigningKeyIdentity;
+  seed: Buffer;
+  vaultSecretRef: string;
+} {
+  const seed = randomBytes(32);
+  return {
+    seed,
+    vaultSecretRef: randomUUID(),
+    identity: {
+      nodeId: NODE_ID,
+      purpose,
+      publicKey: publicKeyFromEd25519Seed(seed),
+      keyVersion: 1,
+    },
+  };
+}
+
 /**
- * A SQL fake that answers exactly the three statements this module issues, keyed on a
- * distinguishing fragment rather than the full text (which carries formatting).
+ * A SQL fake that answers exactly the statements this module issues, keyed on a distinguishing
+ * fragment rather than the full text (which carries formatting).
+ *
+ * `sealedSigningKeys` is the store the self-check falls back to when a node has no
+ * node-generated wallet — every deployment between first boot and first wallet.
  */
 function makeSql(options: {
   salt?: { salt: Buffer; source: RootKdfSaltSource };
@@ -79,9 +105,14 @@ function makeSql(options: {
     identity: WalletIdentity;
     envelope: ReturnType<typeof sealWalletSecret>;
   }[];
+  sealedSigningKeys?: readonly {
+    identity: NodeSigningKeyIdentity;
+    envelope: NodeSigningKeySealedEnvelope;
+  }[];
 }): RootKdfSaltSqlExecutor & { inserts: unknown[][] } {
   let row = options.salt;
   const sealed = options.sealedWallets ?? [];
+  const sealedKeys = options.sealedSigningKeys ?? [];
   const inserts: unknown[][] = [];
   return {
     inserts,
@@ -96,7 +127,7 @@ function makeSql(options: {
         return { rows: [] as T[] };
       }
       if (text.includes("AS present")) {
-        return { rows: [{ present: sealed.length > 0 }] as T[] };
+        return { rows: [{ present: sealed.length + sealedKeys.length > 0 }] as T[] };
       }
       if (text.includes("INNER JOIN vault v ON v.wallet_id = w.id")) {
         return {
@@ -113,10 +144,30 @@ function makeSql(options: {
           })) as T[],
         };
       }
+      if (text.includes("INNER JOIN node_signing_key_sealed_store")) {
+        return {
+          rows: sealedKeys.map((k) => ({
+            public_key: k.identity.publicKey,
+            purpose: k.identity.purpose,
+            vault_secret_ref: k.envelope.vaultSecretRef,
+            key_version: k.envelope.keyVersion,
+            ciphertext: Buffer.from(k.envelope.ciphertext),
+            nonce: Buffer.from(k.envelope.nonce),
+            auth_tag: Buffer.from(k.envelope.authTag),
+            ciphertext_sha256: k.envelope.ciphertextSha256,
+          })) as T[],
+        };
+      }
       throw new Error(`unexpected SQL: ${text.slice(0, 80)}`);
     },
   };
 }
+
+/** The derivation port `reconcileRootKdfSalt` proves a candidate salt with. */
+const deriveWith =
+  (masterKey: string) =>
+  (salt: Buffer): Uint8Array =>
+    deriveRootKey(masterKey, salt);
 
 describe("backward compatibility — the historical salt still opens historical envelopes", () => {
   it("opens an envelope sealed under the hardcoded literal with VAULT_ROOT_SALT_B64 unset", () => {
@@ -164,6 +215,7 @@ describe("backward compatibility — the historical salt still opens historical 
     const result = await reconcileRootKdfSalt({
       sql,
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({}),
     });
 
@@ -191,7 +243,12 @@ describe("a salt mismatch fails loudly, early, and by name", () => {
       VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
     });
 
-    const err = await reconcileRootKdfSalt({ sql, nodeId: NODE_ID, configured }).catch((e) => e);
+    const err = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured,
+    }).catch((e) => e);
 
     expect(err).toBeInstanceOf(VaultRootSaltError);
     expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_SALT_MISMATCH");
@@ -250,6 +307,287 @@ describe("a salt mismatch fails loudly, early, and by name", () => {
   });
 });
 
+describe("the insert-only row is never written under an unproven salt", () => {
+  // `vault_root_kdf_salt` refuses UPDATE, DELETE and TRUNCATE at the engine, so the first row a
+  // node writes is its answer forever and a wrong one ends the node — every later boot reads it
+  // back, re-derives into a key that opens nothing, and no in-place repair exists. Before this
+  // guard, a node that had already sealed material and happened to carry a stale
+  // VAULT_ROOT_SALT_B64 (a shared .env, a rotation runbook, a copy from a sibling node) wrote
+  // that value on its first boot after upgrade and was bricked. The variable was inert before
+  // ZTR-1159, so this is reachable on every existing deployment.
+  const sealedNodeSql = () => {
+    const wallet = mintWallet();
+    const legacyRoot = deriveRootKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT);
+    return {
+      wallet,
+      sql: makeSql({
+        sealedWallets: [
+          {
+            identity: wallet.identity,
+            envelope: sealWalletSecret(legacyRoot, wallet.identity, wallet.secretKey),
+          },
+        ],
+      }),
+    };
+  };
+
+  it("refuses an environment salt that does not open the sealed material, and inserts NOTHING", async () => {
+    const { sql } = sealedNodeSql();
+
+    const err = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({
+        VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
+      }),
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(VaultRootSaltError);
+    expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_KEY_DOES_NOT_OPEN");
+    // The assertion this whole guard exists for: zero rows, so the node is still repairable.
+    expect(sql.inserts).toHaveLength(0);
+  });
+
+  it("leaves the node bootable: the same node boots clean once the variable is unset", async () => {
+    const { sql, wallet } = sealedNodeSql();
+
+    await expect(
+      reconcileRootKdfSalt({
+        sql,
+        nodeId: NODE_ID,
+        deriveRootKey: deriveWith(MASTER_KEY),
+        configured: resolveConfiguredRootKdfSalt({
+          VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
+        }),
+      }),
+    ).rejects.toBeInstanceOf(VaultRootSaltError);
+
+    // Operator unsets VAULT_ROOT_SALT_B64 and boots again. No poisoned row is in the way.
+    const recovered = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({}),
+    });
+    expect(recovered.source).toBe("historical_default");
+    expect(sql.inserts).toHaveLength(1);
+    await expect(
+      assertRootKeyOpensSealedEnvelope({
+        sql,
+        nodeId: NODE_ID,
+        rootKey: deriveRootKey(MASTER_KEY, recovered.salt),
+        saltSource: recovered.source,
+      }),
+    ).resolves.toMatchObject({ checked: true, walletId: wallet.walletId });
+  });
+
+  it("adopts an environment salt that DOES open the sealed material — repair, not refusal", async () => {
+    // A node whose envelopes were re-sealed under a non-default salt by an old rotation. The
+    // operator supplies that salt; it proves out, so it is persisted.
+    const rotated = randomBytes(32);
+    const wallet = mintWallet();
+    const sql = makeSql({
+      sealedWallets: [
+        {
+          identity: wallet.identity,
+          envelope: sealWalletSecret(
+            deriveRootKey(MASTER_KEY, rotated),
+            wallet.identity,
+            wallet.secretKey,
+          ),
+        },
+      ],
+    });
+
+    const result = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({ VAULT_ROOT_SALT_B64: rotated.toString("base64") }),
+    });
+
+    expect(result.source).toBe("environment");
+    expect(Buffer.from(result.salt).equals(rotated)).toBe(true);
+    expect(sql.inserts).toHaveLength(1);
+  });
+
+  it("refuses the historical default too when it does not open — a wrong master key writes nothing", async () => {
+    const { sql } = sealedNodeSql();
+
+    const err = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith("a-completely-different-master-key-value!!"),
+      configured: resolveConfiguredRootKdfSalt({}),
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(VaultRootSaltError);
+    expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_KEY_DOES_NOT_OPEN");
+    expect(sql.inserts).toHaveLength(0);
+  });
+
+  it("refuses an environment salt it cannot prove at all rather than writing on faith", async () => {
+    // Sealed material this check cannot open anything from: no node-generated wallet and no
+    // sealed signing key. Guessing here is exactly the write that cannot be taken back.
+    const inserts: unknown[][] = [];
+    let row: { salt: Buffer; source: RootKdfSaltSource } | undefined;
+    const sql: RootKdfSaltSqlExecutor & { inserts: unknown[][] } = {
+      inserts,
+      async query<T>(text: string, params: readonly unknown[] = []): Promise<{ rows: T[] }> {
+        if (text.includes("SELECT salt, source FROM vault_root_kdf_salt")) {
+          return { rows: (row === undefined ? [] : [row]) as T[] };
+        }
+        if (text.includes("AS present")) return { rows: [{ present: true }] as T[] };
+        if (text.includes("INNER JOIN vault v ON v.wallet_id = w.id")) return { rows: [] as T[] };
+        if (text.includes("INNER JOIN node_signing_key_sealed_store")) return { rows: [] as T[] };
+        if (text.includes("INSERT INTO vault_root_kdf_salt")) {
+          inserts.push([...params]);
+          row ??= { salt: params[1] as Buffer, source: params[2] as RootKdfSaltSource };
+          return { rows: [] as T[] };
+        }
+        throw new Error(`unexpected SQL: ${text.slice(0, 60)}`);
+      },
+    };
+
+    const err = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({
+        VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
+      }),
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(VaultRootSaltError);
+    expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_SALT_UNPROVEN");
+    expect(sql.inserts).toHaveLength(0);
+
+    // The historical default in the same position is not a guess — before ZTR-1159 boot derived
+    // under the literal and nothing else — so it is adopted rather than refused.
+    const fallback = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({}),
+    });
+    expect(fallback.source).toBe("historical_default");
+  });
+
+  it("a virgin node is unaffected — nothing sealed means nothing to prove", async () => {
+    const sql = makeSql({});
+    const result = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: () => {
+        throw new Error("a virgin node must not attempt a proof");
+      },
+      configured: resolveConfiguredRootKdfSalt({ VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64") }),
+    });
+    expect(result.source).toBe("environment");
+    expect(sql.inserts).toHaveLength(1);
+  });
+});
+
+describe("the self-check proves against signing keys when the node has no wallet", () => {
+  // Every deployment between first boot and its first wallet has sealed NODE_IDENTITY /
+  // EVENT_SIGNING seeds and no wallet at all. `hasSealedMaterial` calls such a node non-virgin,
+  // so a self-check that only looked at wallets returned `checked: false` and let a wrong root
+  // key through the gate it exists to close.
+  const sealSigningKey = (masterKey: string, salt: Buffer) => {
+    const key = mintSigningKey();
+    return {
+      identity: key.identity,
+      envelope: sealNodeSigningSeed(
+        deriveRootKey(masterKey, salt),
+        key.identity,
+        key.seed,
+        key.vaultSecretRef,
+      ),
+    };
+  };
+
+  it("opens a sealed signing key under the right root key", async () => {
+    const sql = makeSql({
+      salt: { salt: HISTORICAL_ROOT_KDF_SALT, source: "historical_default" },
+      sealedSigningKeys: [sealSigningKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT)],
+    });
+
+    await expect(
+      assertRootKeyOpensSealedEnvelope({
+        sql,
+        nodeId: NODE_ID,
+        rootKey: deriveRootKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT),
+        saltSource: "historical_default",
+      }),
+    ).resolves.toMatchObject({ checked: true, provenAgainst: "node_signing_key" });
+  });
+
+  it("names the failure under a wrong master key instead of returning checked:false", async () => {
+    const sql = makeSql({
+      salt: { salt: HISTORICAL_ROOT_KDF_SALT, source: "historical_default" },
+      sealedSigningKeys: [sealSigningKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT)],
+    });
+
+    const err = await assertRootKeyOpensSealedEnvelope({
+      sql,
+      nodeId: NODE_ID,
+      rootKey: deriveRootKey("a-completely-different-master-key-value!!", HISTORICAL_ROOT_KDF_SALT),
+      saltSource: "historical_default",
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(VaultRootSaltError);
+    expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_KEY_DOES_NOT_OPEN");
+    expect((err as Error).message).toContain("NODE_IDENTITY");
+  });
+
+  it("such a node also refuses an unopenable environment salt without writing a row", async () => {
+    const sql = makeSql({
+      sealedSigningKeys: [sealSigningKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT)],
+    });
+
+    const err = await reconcileRootKdfSalt({
+      sql,
+      nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
+      configured: resolveConfiguredRootKdfSalt({
+        VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
+      }),
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(VaultRootSaltError);
+    expect((err as VaultRootSaltError).code).toBe("VAULT_ROOT_KEY_DOES_NOT_OPEN");
+    expect(sql.inserts).toHaveLength(0);
+  });
+
+  it("prefers a wallet when the node has both", async () => {
+    const wallet = mintWallet();
+    const sql = makeSql({
+      salt: { salt: HISTORICAL_ROOT_KDF_SALT, source: "historical_default" },
+      sealedWallets: [
+        {
+          identity: wallet.identity,
+          envelope: sealWalletSecret(
+            deriveRootKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT),
+            wallet.identity,
+            wallet.secretKey,
+          ),
+        },
+      ],
+      sealedSigningKeys: [sealSigningKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT)],
+    });
+
+    await expect(
+      assertRootKeyOpensSealedEnvelope({
+        sql,
+        nodeId: NODE_ID,
+        rootKey: deriveRootKey(MASTER_KEY, HISTORICAL_ROOT_KDF_SALT),
+        saltSource: "historical_default",
+      }),
+    ).resolves.toMatchObject({ checked: true, provenAgainst: "wallet", walletId: wallet.walletId });
+  });
+});
+
 describe("configuration resolution", () => {
   it("prefers VAULT_ROOT_SALT_B64 over the historical default", () => {
     const salt = randomBytes(32);
@@ -293,6 +631,7 @@ describe("genesis mints a per-deployment salt", () => {
     const result = await reconcileRootKdfSalt({
       sql,
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({}),
     });
 
@@ -310,11 +649,13 @@ describe("genesis mints a per-deployment salt", () => {
     const a = await reconcileRootKdfSalt({
       sql: makeSql({}),
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({}),
     });
     const b = await reconcileRootKdfSalt({
       sql: makeSql({}),
       nodeId: randomUUID(),
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({}),
     });
     expect(Buffer.from(a.salt).equals(Buffer.from(b.salt))).toBe(false);
@@ -327,6 +668,7 @@ describe("genesis mints a per-deployment salt", () => {
     const first = await reconcileRootKdfSalt({
       sql,
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({}),
     });
     expect(first.rederive).toBe(true); // configuration still resolves to the historical default
@@ -356,6 +698,7 @@ describe("genesis mints a per-deployment salt", () => {
     const result = await reconcileRootKdfSalt({
       sql,
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({ VAULT_ROOT_SALT_B64: supplied.toString("base64") }),
     });
     expect(result.source).toBe("environment");
@@ -377,6 +720,8 @@ describe("genesis mints a per-deployment salt", () => {
           };
         }
         if (text.includes("INSERT INTO vault_root_kdf_salt")) return { rows: [] as T[] };
+        // A virgin racer: nothing sealed, so no proof is owed before the insert.
+        if (text.includes("AS present")) return { rows: [{ present: false }] as T[] };
         throw new Error(`unexpected SQL: ${text.slice(0, 60)}`);
       },
     };
@@ -384,6 +729,7 @@ describe("genesis mints a per-deployment salt", () => {
     const err = await reconcileRootKdfSalt({
       sql,
       nodeId: NODE_ID,
+      deriveRootKey: deriveWith(MASTER_KEY),
       configured: resolveConfiguredRootKdfSalt({
         VAULT_ROOT_SALT_B64: randomBytes(32).toString("base64"),
       }),

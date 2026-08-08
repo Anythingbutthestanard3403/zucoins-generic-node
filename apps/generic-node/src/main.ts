@@ -909,13 +909,19 @@ async function main(): Promise<void> {
         sql: poolSql,
         nodeId: config.NODE_ID,
         configured: configuredRootSalt,
+        // The row is insert-only: on a node that has already sealed something, reconcile
+        // proves the candidate salt opens that material and refuses (writing nothing)
+        // when it does not, rather than committing a salt that can never be corrected.
+        deriveRootKey: (salt) => deriveRootKey(config.VAULT_MASTER_KEY, salt),
       });
       if (rootSalt.rederive) {
         // Only reachable when the durable salt is not the configured one, which the
         // reconcile above permits only while VAULT_ROOT_SALT_B64 is unset. Nothing has
         // been sealed under the composition-time key: the durable row predates any use of
         // this buffer, and holders read it by reference.
-        rootKey.set(deriveRootKey(config.VAULT_MASTER_KEY, rootSalt.salt));
+        const rederived = deriveRootKey(config.VAULT_MASTER_KEY, rootSalt.salt);
+        rootKey.set(rederived);
+        rederived.fill(0);
       }
       // Derivation self-check. Prove the root key opens something this node actually
       // sealed BEFORE readiness opens the vault gate — a salt or master-key mismatch is a
@@ -928,7 +934,8 @@ async function main(): Promise<void> {
       });
       logger.info(
         `boot: vault root salt source=${rootSalt.source} persisted=${rootSalt.persisted} ` +
-          `rederived=${rootSalt.rederive} self-check=${proof.checked ? "opened" : "no-sealed-wallet"}`,
+          `rederived=${rootSalt.rederive} ` +
+          `self-check=${proof.checked ? `opened:${proof.provenAgainst}` : "nothing-sealed"}`,
       );
       logger.info("boot: vault sealed store initialised (root key derived)");
     },

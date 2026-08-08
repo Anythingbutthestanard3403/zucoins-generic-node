@@ -24,7 +24,12 @@ import {
   OPERATOR_SEQUENCE,
   runRotateMasterKeyCli,
 } from "../../src/operations/rotate-master-key.cli.js";
-import { HISTORICAL_ROOT_KDF_SALT } from "../../src/vault/root-kdf-salt.js";
+import {
+  HISTORICAL_ROOT_KDF_SALT,
+  resolveCeremonyRootKdfSalt,
+  type RootKdfSaltSource,
+  type RootKdfSaltSqlExecutor,
+} from "../../src/vault/root-kdf-salt.js";
 
 const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const OLD_MASTER = "old-cli-master-key-material-32b!!";
@@ -93,6 +98,27 @@ async function makePushRow(root: Uint8Array = OLD_ROOT): Promise<{
   return { row: { identity, envelope }, secret };
 }
 
+const NODE_ID = "11111111-1111-4111-8111-111111111111";
+
+/**
+ * The salt port a composition root wires (ZTR-1159): `resolveCeremonyRootKdfSalt` bound to the
+ * live connection, exactly as both recovery ceremonies bind it. Rotation must derive under the
+ * salt persisted beside the envelopes — a node whose salt was minted at genesis keeps it there
+ * and nowhere else, so a config-only resolver would derive the historical literal and unwrap
+ * nothing.
+ */
+function saltPort(options: {
+  persisted?: { salt: Buffer; source: RootKdfSaltSource };
+  env?: NodeJS.ProcessEnv;
+}) {
+  const sql: RootKdfSaltSqlExecutor = {
+    async query<T>(): Promise<{ rows: T[] }> {
+      return { rows: (options.persisted === undefined ? [] : [options.persisted]) as T[] };
+    },
+  };
+  return () => resolveCeremonyRootKdfSalt({ sql, nodeId: NODE_ID, env: options.env ?? {} });
+}
+
 function env(): NodeJS.ProcessEnv {
   return {
     VAULT_MASTER_KEY: OLD_MASTER,
@@ -124,6 +150,7 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         journal: new InMemoryMasterKeyRotationJournal(1),
         interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
         unitOfWork: new InMemoryRotationUnitOfWork(),
         commitWalletVault: async () => {},
         fromEpoch: 1,
@@ -153,6 +180,7 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 1,
       journal,
       interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
       unitOfWork: new InMemoryRotationUnitOfWork(),
       commitWalletVault: commit,
       commitPushSecrets: commitPush,
@@ -186,6 +214,7 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 1,
       journal,
       interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
       unitOfWork: new InMemoryRotationUnitOfWork(),
       commitWalletVault: async (rows) => { committed = rows; },
       commitPushSecrets: async (rows) => { committedPush = rows; },
@@ -251,6 +280,7 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => durable.push.length,
       journal,
       interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
       unitOfWork,
       commitWalletVault: async (rows) => { staged.wallets = rows; },
       commitPushSecrets: async () => { throw new Error("injected push write failure"); },
@@ -296,6 +326,7 @@ describe("runRotateMasterKeyCli", () => {
         ...counts,
         journal,
         interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
         unitOfWork: new InMemoryRotationUnitOfWork(),
         commitWalletVault: async () => {},
         fromEpoch: 1,
@@ -334,6 +365,8 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 0,
       journal: new InMemoryMasterKeyRotationJournal(1),
       interlock: { async acquire() {}, async release() {} },
+      // A node that predates ZTR-1159: no persisted row, so the resolver answers the literal.
+      resolveRootKdfSalt: saltPort({}),
       unitOfWork: new InMemoryRotationUnitOfWork(),
       commitWalletVault: async (rows) => { committed = rows; },
       fromEpoch: 1,
@@ -366,6 +399,9 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         journal: new InMemoryMasterKeyRotationJournal(1),
         interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({
+          env: { VAULT_ROOT_SALT_B64: Buffer.from("tiny").toString("base64") },
+        }),
         unitOfWork: new InMemoryRotationUnitOfWork(),
         commitWalletVault: async () => {},
         fromEpoch: 1,
@@ -374,6 +410,71 @@ describe("runRotateMasterKeyCli", () => {
           VAULT_MASTER_KEY_NEW: NEW_MASTER,
           VAULT_ROOT_SALT_B64: Buffer.from("tiny").toString("base64"),
         },
+        argv: ["node", "cli.js"],
+        logger: { info() {}, error() {} },
+      }),
+    ).rejects.toMatchObject({ code: "ROTATION_REFUSED" });
+  });
+
+  // ZTR-1159 r1 / D2. The CLI used to resolve the salt from configuration alone, which is a
+  // DIFFERENT value from the one boot derives on any node whose salt was minted at genesis —
+  // the exact divergence the ticket exists to remove, reintroduced on the fourth path.
+  it("derives under the PERSISTED salt on a genesis_random node, not the historical literal", async () => {
+    const minted = Buffer.alloc(32, 0x7c);
+    const mintedOldRoot = deriveRootKey(OLD_MASTER, minted);
+    const wallet = makeRowUnder(mintedOldRoot, 0x42, 1);
+    let committed: readonly WalletVaultRewrapRow[] = [];
+
+    const result = await runRotateMasterKeyCli({
+      loadCensus: { rows: [wallet.row] },
+      countWalletVaultRows: async () => 1,
+      countNodeSigningKeyRows: async () => 0,
+      loadPushSecretsCensus: { rows: [] },
+      countPushSecretRows: async () => 0,
+      journal: new InMemoryMasterKeyRotationJournal(1),
+      interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: minted, source: "genesis_random" } }),
+      unitOfWork: new InMemoryRotationUnitOfWork(),
+      commitWalletVault: async (rows) => {
+        committed = rows;
+      },
+      fromEpoch: 1,
+      // Unset, as the CLI header instructs. The config-only resolver would answer the
+      // historical literal here and unwrap nothing.
+      env: { VAULT_MASTER_KEY: OLD_MASTER, VAULT_MASTER_KEY_NEW: NEW_MASTER },
+      argv: ["node", "cli.js"],
+      logger: { info() {}, error() {} },
+    });
+
+    expect(result.committed).toBe(true);
+    // What boot will derive at the next start: the persisted salt under the new master.
+    const bootRoot = deriveRootKey(NEW_MASTER, minted);
+    const opened = openWalletSecret(bootRoot, committed[0]!.envelope, committed[0]!.identity);
+    try {
+      expect(Buffer.from(opened.bytes).equals(wallet.secretKey)).toBe(true);
+    } finally {
+      opened.wipe();
+    }
+  });
+
+  it("refuses when VAULT_ROOT_SALT_B64 disagrees with the persisted salt", async () => {
+    await expect(
+      runRotateMasterKeyCli({
+        loadCensus: { rows: [] },
+        countWalletVaultRows: async () => 0,
+        countNodeSigningKeyRows: async () => 0,
+        loadPushSecretsCensus: { rows: [] },
+        countPushSecretRows: async () => 0,
+        journal: new InMemoryMasterKeyRotationJournal(1),
+        interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({
+          persisted: { salt: Buffer.alloc(32, 0x7c), source: "genesis_random" },
+          env: { VAULT_ROOT_SALT_B64: SALT_B64 },
+        }),
+        unitOfWork: new InMemoryRotationUnitOfWork(),
+        commitWalletVault: async () => {},
+        fromEpoch: 1,
+        env: { VAULT_MASTER_KEY: OLD_MASTER, VAULT_MASTER_KEY_NEW: NEW_MASTER },
         argv: ["node", "cli.js"],
         logger: { info() {}, error() {} },
       }),
@@ -391,6 +492,7 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         journal,
         interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
         unitOfWork: new InMemoryRotationUnitOfWork(),
         commitWalletVault: async () => {},
         fromEpoch: 1,

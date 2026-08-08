@@ -13,6 +13,8 @@ import { NodeReadiness } from "../src/boot/readiness.js";
 
 function fullyReady(): NodeReadiness {
   const readiness = new NodeReadiness(3);
+  // /health/ready now gates on EVENT_SIGNING availability (ZTR-1179).
+  readiness.setEventSignerAvailable(true);
   readiness.markSchemaChecksPassed();
   readiness.setVaultAvailable(true);
   readiness.recordGatewayReadSuccess();

@@ -5,6 +5,7 @@
 // database_reachable → DATABASE_HEALTH_PROBE (live CachedDbProbe; not stamped here)
 // vault_available → VAULT_KEY_RING_LOADER (setVault*)
 // observation_read_capable → OBSERVATION_SERVICE (recordObservation*)
+// event_signer_available → EVENT_SIGNING_AUTHORITY (setEventSignerAvailable)
 // signer_leadership (report) → LEADERSHIP_LOCK_MANAGER (setLeadershipHeld)
 //
 // Observation gate: closed until the first validated gateway read
@@ -26,6 +27,18 @@ export interface ReadinessStateInputs {
   readonly vaultCensusVerified: boolean;
   readonly observationReadCapable: boolean;
   readonly leadershipLockHeld: boolean;
+  /**
+   * EVENT_SIGNING authority availability. Gating: forces not-ready when false,
+   * the same way `stopping` does, WITHOUT joining the frozen reported check set
+   * (readiness-checks.contract.ts census stays closed). Defaults open — a
+   * deployment with no event-signing authority never stamps it; a composition
+   * that installs one (apps/generic-node boot/event-signer-authority.ts) stamps
+   * false at construction and re-opens only via arm. Safe to gate: EVENT_SIGNING
+   * ensure always runs after leadership is already held, so this cannot
+   * reproduce the overlap-deploy deadlock class that keeps signer_leadership
+   * non-gating (ZTR-1179).
+   */
+  readonly eventSignerAvailable: boolean;
   /** Operator halt engaged. Reported only; non-gating. */
   readonly halted: boolean;
   /** Storage-pressure / critical band engaged. Reported only; non-gating. */
@@ -54,6 +67,9 @@ export class NodeCoreReadinessState {
   private vaultKeyRingLoaded = false;
   private vaultCensusVerified = false;
   private leadershipLockHeld = false;
+  // Open by default: only an installed EVENT_SIGNING authority closes it
+  // (see ReadinessStateInputs.eventSignerAvailable).
+  private eventSignerAvailable = true;
   private observationReadEverSucceeded = false;
   private observationFailureCount = 0;
   private halted = false;
@@ -91,6 +107,15 @@ export class NodeCoreReadinessState {
 
   setLeadershipHeld(held: boolean): void {
     this.leadershipLockHeld = held;
+  }
+
+  /**
+   * EVENT_SIGNING authority availability. Fail-closed once an authority
+   * exists: the shell stamps false at construction, arm stamps true only on a
+   * signer that has proven it can sign, and runtime loss stamps false again.
+   */
+  setEventSignerAvailable(available: boolean): void {
+    this.eventSignerAvailable = available;
   }
 
   recordObservationReadSuccess(): void {
@@ -142,6 +167,7 @@ export class NodeCoreReadinessState {
       vaultCensusVerified: this.vaultCensusVerified,
       observationReadCapable: this.observationGateOpen(),
       leadershipLockHeld: this.leadershipLockHeld,
+      eventSignerAvailable: this.eventSignerAvailable,
       halted: this.halted,
       storagePressure: this.storagePressure,
       stopping: this.stopping,

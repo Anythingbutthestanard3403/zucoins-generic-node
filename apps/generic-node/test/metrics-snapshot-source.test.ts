@@ -41,6 +41,7 @@ function readyState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessSta
     vaultCensusVerified: true,
     observationReadCapable: true,
     leadershipLockHeld: true,
+    eventSignerAvailable: true,
     halted: false,
     storagePressure: false,
     stopping: false,

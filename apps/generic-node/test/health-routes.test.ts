@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createHealthHttpListener, createHealthRouter } from "../src/health/routes.js";
+import { createEventSignerAuthority } from "../src/boot/event-signer-authority.js";
 import { NodeReadiness } from "../src/boot/readiness.js";
 
 /** Success probe — DB reachable. */
@@ -25,6 +26,8 @@ function fullyReadyStamps(): NodeReadiness {
   readiness.setVaultAvailable(true);
   readiness.setSignerLeadershipHeld(true);
   readiness.recordGatewayReadSuccess();
+  // /health/ready now gates on EVENT_SIGNING availability (ZTR-1179).
+  readiness.setEventSignerAvailable(true);
   return readiness;
 }
 
@@ -139,6 +142,44 @@ describe("health routes — readiness gating", () => {
     expect(checks.find((c) => c.name === "schema_migrated")?.ready).toBe(true);
     expect(checks.find((c) => c.name === "vault_available")?.ready).toBe(true);
     expect(checks.find((c) => c.name === "observation_read_capable")?.ready).toBe(true);
+  });
+});
+
+describe("health routes — EVENT_SIGNING availability gates /health/ready (ZTR-1179)", () => {
+  it("a runtime EVENT_SIGNING withdrawal flips /health/ready to 503", async () => {
+    const readiness = fullyReadyStamps();
+    const authority = createEventSignerAuthority({
+      readiness,
+      withdrawSignerAuthority: () => {},
+      stopWorkers: () => {},
+      logger: { info: () => {}, error: () => {} },
+    });
+    const armed = authority.arm({
+      signingKeyId: "key-1",
+      sign: () => {
+        throw new Error("sealed row unreadable");
+      },
+    });
+    const router = createHealthRouter({ readiness, pingDb: pingDbOk });
+    expect((await router("GET", "/health/ready")).status).toBe(200);
+
+    // The first runtime sign failure withdraws authority and must close /health/ready.
+    expect(() => armed.sign(new Uint8Array())).toThrow(/sealed row unreadable/);
+
+    const res = await router("GET", "/health/ready");
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ status: "not_ready" });
+  });
+
+  it("a boot-unarmed signer keeps /health/ready 503 even with every other gate open", async () => {
+    const readiness = new NodeReadiness(3);
+    readiness.markSchemaChecksPassed();
+    readiness.setVaultAvailable(true);
+    readiness.recordGatewayReadSuccess();
+    const router = createHealthRouter({ readiness, pingDb: pingDbOk });
+    const res = await router("GET", "/health/ready");
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ status: "not_ready" });
   });
 });
 

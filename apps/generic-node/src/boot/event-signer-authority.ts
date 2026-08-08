@@ -11,17 +11,18 @@
 //             readiness never opens and `startMoneyWorkers` is never reached.
 //             `arm` is the only thing that opens the readiness conjunct, and it is
 //             called only on a signer that has already proven it can sign.
-//   runtime — the first `sign` failure closes the shell-local readiness conjunct,
+//   runtime — the first `sign` failure closes the readiness conjunct,
 //             withdraws signer authority and quiesces the money surface, in the same
 //             sequence graceful stop uses for its synchronous steps 1–2, and the failure
 //             is rethrown so the in-flight READY transaction rolls back instead of
 //             committing eventless.
 //
-// Scope of "readiness" here: the shell-local gating conjunct in boot/readiness.ts, which
-// is what stops `startMoneyWorkers` at boot and what a runtime authority loss closes. It is
-// NOT the /health/ready response body — that surface is built from node-core's
-// REPORTED_READINESS_CHECK_IDS (api/health.ts) and is unchanged by this file, so a
-// withdrawn node keeps reporting its node-core checks until the process stops.
+// Scope of "readiness" here: node-core's ReadinessStateInputs.eventSignerAvailable,
+// stamped through the boot/readiness.ts forwarder. One conjunct, three consumers: it
+// stops `startMoneyWorkers` at boot, forces /health/ready to 503 (evaluateReadinessFromProbes
+// gates on it like `stopping`), and makes money admission refuse with
+// `event_signer_unavailable` — so a withdrawn node stops reporting healthy and stops
+// admitting new money work (ZTR-1179).
 //
 // Once authority is withdrawn the armed signer keeps THROWING rather than reverting to
 // null. A null signer is the appender's "skip the event, keep the money" branch
@@ -76,7 +77,7 @@ export function createEventSignerAuthority(
         "money surface quiesced (no custody transition may outrun its signed event)",
       reason,
     );
-    // Same sequence as graceful-stop's synchronous steps: close the shell-local
+    // Same sequence as graceful-stop's synchronous steps: close the
     // readiness conjunct, drop the signing latch, then quiesce the engines. Each is
     // independently fail-closed, so a throw from one must not skip the rest.
     try {

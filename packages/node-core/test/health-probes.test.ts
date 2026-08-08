@@ -36,6 +36,7 @@ function baseState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessStat
     vaultCensusVerified: true,
     observationReadCapable: true,
     leadershipLockHeld: true,
+    eventSignerAvailable: true,
     halted: false,
     storagePressure: false,
     stopping: false,
@@ -43,6 +44,28 @@ function baseState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessStat
     ...overrides,
   };
 }
+
+describe("readiness — EVENT_SIGNING availability (verdict-forcing, outside the frozen check census; ZTR-1179)", () => {
+  it("eventSignerAvailable:false forces not-ready without joining the reported check set", () => {
+    const verdict = evaluateReadinessFromProbes(baseState({ eventSignerAvailable: false }), true);
+    expect(verdict.ready).toBe(false);
+    expect(verdict.status).toBe("not_ready");
+    // Like `stopping`: no failing gating check id — the frozen census stays closed.
+    expect(verdict.failing).toEqual([]);
+    expect(verdict.checks.map((c) => c.name)).not.toContain("event_signer_available");
+  });
+
+  it("NodeCoreReadinessState defaults open and stamps through setEventSignerAvailable", () => {
+    const state = new NodeCoreReadinessState({ observationFailureBudget: 3 });
+    // Open by default: only a composition that installs an EVENT_SIGNING
+    // authority closes it (the custody shell stamps false at construction).
+    expect(state.snapshot().eventSignerAvailable).toBe(true);
+    state.setEventSignerAvailable(false);
+    expect(state.snapshot().eventSignerAvailable).toBe(false);
+    state.setEventSignerAvailable(true);
+    expect(state.snapshot().eventSignerAvailable).toBe(true);
+  });
+});
 
 describe("liveness — zero dependency", () => {
   it("returns alive with version and timestamp", () => {

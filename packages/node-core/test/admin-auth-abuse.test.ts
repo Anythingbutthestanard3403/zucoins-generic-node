@@ -565,6 +565,28 @@ describe("login — per-(IP, username) lockout", () => {
     expect(correct.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("a concurrent burst cannot outrun the lock — the correct guess inside it is refused", async () => {
+    const { users, service } = await seedClearedPassword();
+
+    // The attempts above are sequential, which a brute-force tool never is. Every
+    // request already in flight when the threshold trips must be decided against the
+    // lock as it stands at the decision, not as it stood at handler entry — otherwise
+    // the attacker's guess budget per window is their own concurrency, not the threshold.
+    // Correct guess fires last so it reaches the decision after the burst has tripped.
+    const attempts = [
+      ...Array.from({ length: 20 }, () => attempt(users, service, WRONG)),
+      attempt(users, service, PASSWORD),
+    ];
+    const results = await Promise.all(attempts);
+
+    const correct = results[results.length - 1]!;
+    expect(correct.status).toBe(401);
+    // No session escaped anywhere in the burst — set-cookie is the only issuance channel.
+    expect(results.filter((r) => r.headers["set-cookie"] !== undefined)).toEqual([]);
+    // Still locked afterwards: a granted login would have cleared the pair counter.
+    expect(isIpPairLocked(IP, DEFAULT_ADMIN_USERNAME)).toBe(true);
+  });
+
   it("a locked response is byte-identical to a wrong-password response", async () => {
     const { users, service } = await seedClearedPassword();
 

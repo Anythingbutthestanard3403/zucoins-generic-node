@@ -11,6 +11,7 @@ import {
   type BackupSchedulerHandle,
   type PgClientProbeResult,
 } from "./dr/index.js";
+import { installFatalExceptionHandler } from "./boot/fatal-exception.js";
 import { installStage1GracefulStop } from "./stage1-shutdown.js";
 
 export interface Stage1ServiceDependencies {
@@ -187,6 +188,10 @@ export async function startStage1Service(
 }
 
 async function main(): Promise<void> {
+  // Before config, before any listener: an unguarded synchronous throw in a
+  // request path must not be able to kill the process.
+  const fatal = installFatalExceptionHandler();
+
   // Validation is intentionally first. The dynamic imports prevent either DB
   // pool construction or migration work before the Stage-1 schema succeeds.
   const config = loadStage1Config();
@@ -215,13 +220,16 @@ async function main(): Promise<void> {
       "generic-node Stage 1 backup scheduler disabled — set BACKUP_SCHEDULE_ENABLED=true (required in production)",
     );
   }
-  installStage1GracefulStop({
+  const stop = installStage1GracefulStop({
     stop: () => service.stop(),
+    // A fatal left the process in unknown state — even a clean stop exits non-zero.
+    exit: (code) => process.exit(fatal.tripped() ? 1 : code),
     logger: {
       info: (message) => console.log(message),
       error: (message, err) => console.error(message, err),
     },
   });
+  fatal.wire(() => stop.handleSignal("uncaughtException"));
   console.log(`generic-node Stage 1 listening on ${config.bindHost}:${config.port}`);
 }
 

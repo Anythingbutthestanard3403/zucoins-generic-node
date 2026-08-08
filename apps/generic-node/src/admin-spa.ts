@@ -36,7 +36,15 @@ export function resolveAdminSpaDist(): string | null {
 }
 
 function safeJoin(root: string, reqPath: string): string | null {
-  const cleaned = decodeURIComponent(reqPath.split("?")[0] ?? "/");
+  let cleaned: string;
+  try {
+    cleaned = decodeURIComponent(reqPath.split("?")[0] ?? "/");
+  } catch {
+    // Malformed percent-escape (URIError from e.g. "/%zz") — not servable,
+    // same verdict as a traversal attempt. Total function: never throws into
+    // the synchronous dispatch closure (ZTR-1185).
+    return null;
+  }
   const rel = cleaned === "/" ? "index.html" : cleaned.replace(/^\/+/, "");
   const full = normalize(join(root, rel));
   if (!full.startsWith(root.endsWith(sep) ? root : root + sep) && full !== root) {

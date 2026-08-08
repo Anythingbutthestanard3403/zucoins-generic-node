@@ -152,6 +152,8 @@ export interface NodeRuntimeListenerDeps {
     | Promise<{ sessionId: string; orderId: string } | null>;
   /** Override embed dist root (tests). Default: packages/widget/dist-embed. */
   readonly embedDistRoot?: string | null;
+  /** Override admin SPA dist root (tests). Default: resolveAdminSpaDist(). */
+  readonly adminSpaDist?: string | null;
   /**
    * Signed reporting pipeline listener (raw capture). Required for the seven
    * REPORTING_CREDENTIAL ROUTE_POLICIES entries when production_full is mounted.
@@ -520,7 +522,7 @@ export function createNodeRuntimeListener(
   const adminRouter: AdminRouter | null =
     deps.adminRouter ??
     (deps.adminRouteDeps !== undefined ? createAdminRouter(deps.adminRouteDeps) : null);
-  const adminSpaDist = resolveAdminSpaDist();
+  const adminSpaDist = deps.adminSpaDist !== undefined ? deps.adminSpaDist : resolveAdminSpaDist();
   const embedDistRoot =
     deps.embedDistRoot !== undefined ? deps.embedDistRoot : resolveEmbedDist();
 

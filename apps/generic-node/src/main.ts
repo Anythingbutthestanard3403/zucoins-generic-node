@@ -103,6 +103,7 @@ import {
   createShutdownRegistry,
   dispositionForIncompleteBoot,
   installEventSigner,
+  installFatalExceptionHandler,
   installGracefulStop,
   NodeReadiness,
   runBootLane,
@@ -254,6 +255,10 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
 }
 
 async function main(): Promise<void> {
+  // Before config, before any listener: an unguarded synchronous throw in a
+  // request path must not be able to kill a node holding signer leadership.
+  const fatal = installFatalExceptionHandler({ logger });
+
   let config;
   try {
     config = loadCustodyNodeConfig();
@@ -791,6 +796,8 @@ async function main(): Promise<void> {
     server,
     readiness,
     logger,
+    // A fatal left the process in unknown state — even a clean stop exits non-zero.
+    exit: (code) => process.exit(fatal.tripped() ? 1 : code),
     withdrawSignerAuthority: registryHooks.withdrawSignerAuthority,
     stopWorkers: () => {
       registryHooks.stopWorkers();
@@ -802,7 +809,7 @@ async function main(): Promise<void> {
     },
     releaseLeadership: registryHooks.releaseLeadership,
   });
-  void stop;
+  fatal.wire(() => stop.handleSignal("uncaughtException"));
 
   const leadershipPool = createLeadershipPool(pool);
 

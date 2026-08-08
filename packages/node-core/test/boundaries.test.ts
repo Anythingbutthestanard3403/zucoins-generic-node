@@ -97,8 +97,11 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // persisted lease foundation: reads frozen schema version/file constants only.
   leases: ["schema"],
   workers: ["protocol", "core", "gateway"],
-  // Admin TOTP chain consumes the shared matcher leaf.
-  http: ["totp"],
+  // Admin TOTP chain consumes the shared matcher leaf. The login volume throttle
+  // (login-rate-limit.ts) reuses reporting's InMemoryReportingRateLimiter rather than
+  // minting a second limiter shape, so "am I throttled" has one answer node-wide;
+  // reporting imports only protocol, so this adds no cycle.
+  http: ["totp", "reporting"],
   net: [],
   observability: [],
   credential: ["proof-body"],

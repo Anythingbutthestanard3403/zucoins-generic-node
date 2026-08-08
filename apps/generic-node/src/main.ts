@@ -161,21 +161,16 @@ import {
   type MoneyWorkersHandle,
 } from "./money-workers/index.js";
 import { createMoveAdvancedPorts } from "./money-workers/move-advanced-ports.js";
+import { createSafeConsoleLogger, safeJsonLine } from "./boot/safe-logger.js";
 
-const logger: BootLogger = {
-  info: (message) => console.log(message),
-  error: (message, err) => {
-    if (err === undefined) {
-      console.error(message);
-      return;
-    }
-    console.error(message, err);
-  },
-};
+// Every log line this entry point writes goes through the central redactor.
+// Raw console calls here are what let vault, driver and gateway values reach
+// the platform log store unfiltered — see boot/safe-logger.ts.
+const logger: BootLogger = createSafeConsoleLogger();
 
 const runtimeListenerLogger: RuntimeListenerLogger = {
   error(event) {
-    logger.error(JSON.stringify(event));
+    logger.error(safeJsonLine({ ...event }));
   },
 };
 
@@ -264,7 +259,7 @@ async function main(): Promise<void> {
     config = loadCustodyNodeConfig();
   } catch (err) {
     if (err instanceof NodeConfigurationError || err instanceof PlaceholderSecretError) {
-      console.error(`fatal: ${err.message}`);
+      logger.error(`fatal: ${err.message}`);
       process.exit(1);
     }
     throw err;
@@ -303,7 +298,7 @@ async function main(): Promise<void> {
     collector: hostStorageCollector,
     diskUtilization: createStatfsDiskUtilization(storageProbePath),
     onEarlyAlert: (event) => {
-      console.error(
+      logger.error(
         `node: storage-pressure early alert reason=${event.reason} util=${event.utilization} pressure=${event.pressure}`,
       );
     },
@@ -344,7 +339,7 @@ async function main(): Promise<void> {
       log: {
         kind: "log",
         deliver: async (notification) => {
-          console.error(
+          logger.error(
             `node: safety-alert signal=${notification.signal} severity=${notification.severity} ` +
               `${notification.message}`,
           );
@@ -397,7 +392,7 @@ async function main(): Promise<void> {
       ? parseNodeIdentitySeed(identitySeedRaw)
       : null;
   if (identitySeedRaw !== undefined && identitySeedRaw.length > 0 && identitySeed === null) {
-    console.error(
+    logger.error(
       "fatal: NODE_IDENTITY_SEED must be ≥32 bytes as hex (≥64 hex chars) or base64/base64url",
     );
     process.exit(1);
@@ -1253,6 +1248,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error("fatal: unexpected boot failure", err);
+  logger.error("fatal: unexpected boot failure", err);
   process.exit(1);
 });

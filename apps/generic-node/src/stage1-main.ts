@@ -12,7 +12,13 @@ import {
   type PgClientProbeResult,
 } from "./dr/index.js";
 import { installFatalExceptionHandler } from "./boot/fatal-exception.js";
+import { createSafeConsoleLogger } from "./boot/safe-logger.js";
 import { installStage1GracefulStop } from "./stage1-shutdown.js";
+
+// Zero-custody or not, Stage 1 holds the backup master key and a database URL,
+// and its errors come from the same drivers. Every log line goes through the
+// central redactor — see boot/safe-logger.ts.
+const logger = createSafeConsoleLogger();
 
 export interface Stage1ServiceDependencies {
   readonly closeDatabase: () => Promise<void>;
@@ -60,13 +66,7 @@ function defaultCreateScheduler(config: Stage1Config): BackupSchedulerHandle | u
       retentionDays: config.backup.retentionDays,
       scheduleIntervalMs: config.backup.scheduleIntervalMs,
     },
-    logger: {
-      info: (message) => console.log(message),
-      error: (message, err) => {
-        if (err === undefined) console.error(message);
-        else console.error(message, err);
-      },
-    },
+    logger,
   });
 }
 
@@ -111,12 +111,12 @@ export async function startStage1Service(
         const newest = await newestBackupArtifactMtimeMs(outputDir);
         const status = backupScheduler?.status();
         if (isRpoBreached(newest, Date.now()) || status?.rpoBreached === true) {
-          console.error(
+          logger.error(
             `dr: RPO BREACHED newestArtifactAtMs=${newest ?? "none"} consecutiveFailures=${status?.consecutiveFailures ?? "n/a"} — run \`node dist/dr/cli.js status\` / restore drill`,
           );
         }
       } catch (err) {
-        console.error("dr: RPO monitor probe failed", err);
+        logger.error("dr: RPO monitor probe failed", err);
       }
     };
     void check();
@@ -190,7 +190,7 @@ export async function startStage1Service(
 async function main(): Promise<void> {
   // Before config, before any listener: an unguarded synchronous throw in a
   // request path must not be able to kill the process.
-  const fatal = installFatalExceptionHandler();
+  const fatal = installFatalExceptionHandler({ logger });
 
   // Validation is intentionally first. The dynamic imports prevent either DB
   // pool construction or migration work before the Stage-1 schema succeeds.
@@ -212,11 +212,11 @@ async function main(): Promise<void> {
     },
   });
   if (config.backup !== undefined) {
-    console.log(
+    logger.info(
       `generic-node Stage 1 backup scheduler enabled intervalMs=${config.backup.scheduleIntervalMs} dir=${config.backup.outputDir}`,
     );
   } else {
-    console.log(
+    logger.info(
       "generic-node Stage 1 backup scheduler disabled — set BACKUP_SCHEDULE_ENABLED=true (required in production)",
     );
   }
@@ -224,18 +224,15 @@ async function main(): Promise<void> {
     stop: () => service.stop(),
     // A fatal left the process in unknown state — even a clean stop exits non-zero.
     exit: (code) => process.exit(fatal.tripped() ? 1 : code),
-    logger: {
-      info: (message) => console.log(message),
-      error: (message, err) => console.error(message, err),
-    },
+    logger,
   });
   fatal.wire(() => stop.handleSignal("uncaughtException"));
-  console.log(`generic-node Stage 1 listening on ${config.bindHost}:${config.port}`);
+  logger.info(`generic-node Stage 1 listening on ${config.bindHost}:${config.port}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((error: unknown) => {
-    console.error(
+    logger.error(
       "generic-node Stage 1 could not start and is not serving traffic. Inspect configuration validation, database connectivity, migration status, and bind-address availability before restarting.",
       error,
     );

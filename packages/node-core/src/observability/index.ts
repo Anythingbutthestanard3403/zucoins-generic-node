@@ -1,5 +1,6 @@
 export {
   ELLIPSIS,
+  MAX_DEPTH_MARKER,
   MAX_REDACT_DEPTH,
   REDACTED,
   assertDumpSecretFree,
@@ -9,6 +10,7 @@ export {
   notFoundErrorBody,
   redactLogFields,
   scrubErrorDetails,
+  scrubText,
   truncate,
   truncateKind,
   type TruncateKind,

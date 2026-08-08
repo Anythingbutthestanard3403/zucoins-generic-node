@@ -186,3 +186,96 @@ python3 scripts/claim.py check   ZTR-1187
 python3 scripts/claim.py beat    ZTR-1187 implementer "<progress>" --run c843dfad-ef62-4a54-99bd-e5da534f9fdb
 python3 scripts/claim.py release ZTR-1187 implementer "PR #<n>" "QA Review" --run c843dfad-ef62-4a54-99bd-e5da534f9fdb
 ```
+
+---
+
+## Rework r1 — lane=implementer run=870e0c3c-6940-486b-bd5d-82a0246d774b
+
+Review of `a16481f` returned **FAIL** on one blocking regression (`tasks/ztr-1187-review.md`,
+PR #9 `issuecomment-5225211439`). Everything else PASSed and was left untouched.
+
+**Rebased** `ztr-1187-safe-log-redaction` onto `origin/main` @ `276b0e7` (was `6c29b0a`);
+one commit `f3a9c2b` (was `a16481f`) + the rework commit, which is the branch head — exact SHA
+in the PR #9 body, since it cannot be written into itself.
+
+### The defect
+
+`main.ts:171-179` composes `logger.error(safeJsonLine(event))`. `safeJsonLine` serializes, then
+`createSafeConsoleLogger.error` runs `scrubText` over the resulting JSON *string*.
+`TEXT_ASSIGNMENT`'s unquoted-value class `[^\s,;)\]}]+` did not exclude `"`, so a never-log
+assignment running to the end of a JSON string value consumed the closing quote.
+`cause_message` is the last declared field of `RuntimeListenerFailureEvent`, so the corruption
+always landed at the line terminus → `SyntaxError: Unterminated string in JSON`.
+
+Reachable because `sanitizeFailureCause`'s `\b`-anchored keyword list does not cover
+`vaultMasterKey` / `sessionToken` / `pwd`, while `isNeverLog` does. Before the PR: parseable but
+leaky. At `a16481f`: redacted but unparseable. Both are broken controls.
+
+### The fix — `packages/node-core/src/observability/safe-log.ts:74`
+
+One regex, and it goes one alternative past the reviewer's prescribed form:
+
+```
+- ("[^"]*"|'[^']*'|[^\s,;)\]}]+)
++ ("[^"]*"|'[^']*'|\\"[^"]*\\"|[^\s,;)\]}"']+)
+```
+
+Excluding the quotes alone (the prescribed form) fixes the bare-value cases but leaves an
+escaped-quote value inside a JSON line **both unparseable and leaking**. Probed all three forms
+(`/Volumes/Ai Building/.zup-scratch/regex-probe.mjs`):
+
+| input | a16481f | quote-exclusion only | shipped |
+| -- | -- | -- | -- |
+| `{…"cause_message":"… pwd=hunter2"}` | JSON BROKEN | JSON OK, clean | JSON OK, clean |
+| `{…"cause_message":"… vaultMasterKey=MK-LEAK"}` | JSON BROKEN | JSON OK, clean | JSON OK, clean |
+| `{…"cause_message":"… sessionToken=ST-LEAK"}` | JSON BROKEN | JSON OK, clean | JSON OK, clean |
+| `{…"cause_message":"… pwd=\"hunter2\""}` | JSON BROKEN | **JSON BROKEN, LEAK** | JSON OK, clean |
+| `VAULT_MASTER_KEY=MK-…` | redacted | redacted | redacted |
+| `totpSecret: 123456` | redacted | redacted | redacted |
+| `connect failed password=hunter2 host=db.internal` | redacted, host kept | same | same |
+| `password="hunter2"` | redacted | redacted | redacted |
+| `{"password":"hunter2"}` (structural) | untouched | untouched | untouched |
+
+Excluding `\` instead was considered and rejected: the whole match then fails at `pwd=\"…` and
+the secret prints raw — strictly worse.
+
+The doc comment at `:69-79` now states *why* the class excludes quotes, so the "must stay
+parseable" claim in that header is in force rather than merely asserted.
+
+### The test — `apps/generic-node/test/safe-logger.test.ts`
+
+Three cases on the **composed** path (the gap that let this through: `:39-43` only ever
+exercised `safeJsonLine` in isolation). Each drives
+`createSafeConsoleLogger(sink).error(safeJsonLine(event))` on a full
+`RuntimeListenerFailureEvent`, spreading `sanitizeFailureCause(new Error(cause))` exactly as
+`main.ts` does, and asserts: `JSON.parse` succeeds, no `UNIQUE-VALUE` in the emitted line, and
+`cause_message` contains `[redacted]`.
+
+Fails before / passes after, both at this SHA:
+
+- `git checkout -- safe-log.ts` (revert to `a16481f` form), tests present →
+  **3 failed | 7 passed (10)**, all three `SyntaxError: Unterminated string in JSON`
+  (positions 231, 220, …).
+- fix restored → **10 passed (10)**.
+
+### Verification at the head SHA
+
+| Command | Result |
+| -- | -- |
+| `npx tsc -b` | exit 0 |
+| `npx eslint .` | 0 errors, **6 warnings** — the exact pre-existing six |
+| `pnpm test:boundaries` | **162 passed** (5 files) |
+| node-core `safe-log-redaction` + `neutrality` | **50 passed** (2 files) |
+| contracts `forbidden-terms` | **18 passed** (1 file) |
+| generic-node `safe-logger` + `fatal-exception` + `runtime-listener` + `stage1-production` + `stage1-shutdown` | **63 passed** (5 files) |
+
+Reconciles exactly with the reviewer's two runs at `a16481f` (60 + 68 = 128): 50 + 18 + 63 = 131
+= 128 + 3 new cases. No existing redaction assertion moved.
+
+Full `pnpm test` not repeated — the diff since `a16481f` is one regex and one test file, neither
+reachable from any pg suite. The `a16481f` pg attribution (ZTR-1209-class contention) stands.
+
+### Out of scope, per the review
+
+`db/client.ts:126`'s raw driver `err` → ZTR-1215. The fatal-path double-wrap (`{err:{err}}`) is
+cosmetic and was left alone.

@@ -14,6 +14,7 @@ import {
   safeJsonLine,
   type SafeLoggerSink,
 } from "../src/boot/safe-logger.js";
+import { sanitizeFailureCause } from "../src/runtime-listener.js";
 
 const REDACTED = "[redacted]";
 
@@ -41,6 +42,39 @@ describe("production logger routes through the central redactor", () => {
     expect(() => JSON.parse(line) as unknown).not.toThrow();
     expect(line).not.toContain("zp_live_x");
   });
+
+  // The composition main.ts:171-179 actually uses: safeJsonLine serializes the
+  // event, then the logger scrubs that JSON as text. The two passes have to
+  // agree — a text scrub that eats the closing quote of the last string value
+  // hands the operator's aggregator a line it cannot parse, on exactly the
+  // events that carried a secret. sanitizeFailureCause runs first, as in
+  // production: its keyword list is deliberately narrower than isNeverLog, so
+  // these three assignments survive it and reach the scrubber.
+  const LISTENER_CAUSES = [
+    "vault unlock failed vaultMasterKey=MK-UNIQUE-VALUE",
+    "session rejected sessionToken=ST-UNIQUE-VALUE",
+    'db auth failed pwd="PW-UNIQUE-VALUE"',
+  ];
+
+  for (const cause of LISTENER_CAUSES) {
+    it(`keeps the composed listener line parseable and redacted — ${cause}`, () => {
+      const { sink, lines } = captureSink();
+      createSafeConsoleLogger(sink).error(
+        safeJsonLine({
+          event: "operation_listener_unexpected_failure",
+          request_id: "00000000-0000-4000-8000-0000000000ff",
+          method: "POST",
+          path_class: "POST /v1/operations",
+          ...sanitizeFailureCause(new Error(cause)),
+        }),
+      );
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).not.toContain("UNIQUE-VALUE");
+      const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+      expect(parsed["event"]).toBe("operation_listener_unexpected_failure");
+      expect(parsed["cause_message"]).toContain(REDACTED);
+    });
+  }
 
   it("scrubs a never-log assignment out of an info message", () => {
     const { sink, lines } = captureSink();

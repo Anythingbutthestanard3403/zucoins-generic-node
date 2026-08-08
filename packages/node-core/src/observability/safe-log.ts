@@ -70,8 +70,16 @@ export function truncate(kind: TruncateKind, value: string): string {
  * at whitespace and quotes, so a JSON fragment (`"password":"…"`) never matches
  * — structured payloads are redacted by field name through redactLogFields and
  * must stay parseable.
+ *
+ * The unquoted value class excludes `"` and `'` for that last reason: this
+ * scrubber also runs over already-serialized JSON lines (the composition roots
+ * log `scrubText(safeJsonLine(event))`), and a value class that ran through the
+ * closing quote ate the string terminator — redacted but unparseable, which is
+ * a broken control, not a safe one. `\"…\"` is matched as its own alternative
+ * so an escaped-quote value inside such a line is still redacted whole.
  */
-const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)\]}]+)/g;
+const TEXT_ASSIGNMENT =
+  /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|\\"[^"]*\\"|[^\s,;)\]}"']+)/g;
 
 /**
  * Free-text counterpart of the field-name redactor, for strings that were

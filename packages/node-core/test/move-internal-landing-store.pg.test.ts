@@ -39,7 +39,7 @@ import {
 } from "../src/core/move-internal-landing-store.ts";
 import type { SqlQueryFn } from "../src/core/sql-query-fn.ts";
 import { sha256Hex } from "../src/gateway/capture.ts";
-import { mintLandingPathProofFromOracle } from "../src/protocol/reconcile/landing-oracle-mint.ts";
+import { mintLandingPathProofFromOracle } from "../src/protocol/reconcile/landing-oracle-mint.fixture.js";
 import type { MoveReconcileOutcome } from "../src/protocol/reconcile/move.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -325,26 +325,32 @@ async function seedMove(
   return move;
 }
 
+// A landing path is a capability, not a shape: persistMoveOutcome identity-checks both proofs
+// against the mint's issued set, so they are minted fresh per call — the seal is single-use.
+// `kind` is the minter's to derive from depth; declaring it here could only drift.
 function landedVerdict(move: SeededMove): MoveReconcileOutcome {
+  const expectedBodySha256 = sha256Hex(utf8("move-body"));
   return {
     kind: "LANDED_VERIFIED",
     moveAttemptId: move.operationId,
-    sourcePath: {
-      kind: "LANDED_EXACT",
+    sourcePath: mintLandingPathProofFromOracle({
       walletPubkeyBase64Urlsafe: PUBKEY,
-      expectedBodySha256: sha256Hex(utf8("move-body")),
+      expectedBodySha256,
+      freshHeadBodySha256: expectedBodySha256,
       freshHeadObservationId: move.sourceTerminal,
       depth: 0,
-    },
+    }),
     // The asymmetric-burial shape exercises: the destination side is proven at depth,
     // by walking step_2 forward-linkage to the chain head, not by a position-only lookup.
-    destinationPath: {
-      kind: "LANDED_COMPLETE_PATH",
+    // Burial is what makes the head body differ from the expected one, which is exactly what
+    // the seal validator demands at depth >= 1.
+    destinationPath: mintLandingPathProofFromOracle({
       walletPubkeyBase64Urlsafe: PUBKEY,
-      expectedBodySha256: sha256Hex(utf8("move-body")),
+      expectedBodySha256,
+      freshHeadBodySha256: sha256Hex(utf8("move-body-buried-head")),
       freshHeadObservationId: move.destinationTerminal,
       depth: 3,
-    },
+    }),
   };
 }
 

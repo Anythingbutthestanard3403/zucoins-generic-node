@@ -1060,6 +1060,8 @@ export type AdminRouter = (
   rawPath: string,
   rawBody: Uint8Array,
   headers: Record<string, string | undefined>,
+  /** Socket peer address, supplied by the transport. Never client-settable. */
+  remoteAddress?: string | null,
 ) => Promise<AdminRouterResponse>;
 
 const JSON_HEADERS: Record<string, string> = {
@@ -1417,7 +1419,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     return { ok: true, user: validated.user };
   }
 
-  return async (method, rawPath, rawBody, headers) => {
+  return async (method, rawPath, rawBody, headers, remoteAddress) => {
     const verb = method.trim().toUpperCase();
     const pathname = (rawPath.split(/[?#]/, 1)[0] ?? rawPath).replace(/\/+$/u, "") || "/";
     const requestId = newRequestId();
@@ -1427,8 +1429,20 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     if (verb === "POST" && pathname === "/admin/v1/login") {
       try {
         const body = decodeBody(rawBody) as { username?: string; password?: string };
+        // IP source is the socket peer, never X-Forwarded-For. Login is the one
+        // unauthenticated write on this surface, so a client-settable header
+        // would let an attacker rotate the lockout key at will. TRUST_PROXY_HOPS
+        // and node-core's resolveClientIp are the upgrade path for a
+        // reverse-proxied deployment; until that is wired, a proxied node
+        // collapses every client onto the proxy address, which locks per
+        // username rather than per attacker.
         const result = await handleAdminLogin(
-          { userStore: deps.userStore, sessions },
+          {
+            userStore: deps.userStore,
+            sessions,
+            ip: ipForDb(remoteAddress ?? null),
+            userAgent: headers["user-agent"] ?? null,
+          },
           { username: body.username ?? "", password: body.password ?? "" },
         );
         return fromAuthResult(result);

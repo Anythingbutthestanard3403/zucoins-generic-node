@@ -3,7 +3,7 @@
   "description": "Published coupling-exceptions manifest. Enumerates every deliberate exemption from the generic-core product-coupling gates: inline contract-allow markers (drift-gate scanner, forbidden-terms.ts) and D99_ALLOWLIST compatibility literals (allowlist.d99.ts). coupling-exceptions.manifest.test.ts asserts this manifest's per-file and total counts match the live scan and the frozen constants; it is an audit artifact and does not modify scan logic. v2 drops the per-entry line number v1 carried: the gate never verified it, so it rotted silently as the exempted files grew. The exempted file is the durable locator; the exact lines are recovered live with `grep -n contract-allow: <file>`.",
   "inlineMarkers": {
     "markerPrefix": "contract-allow:",
-    "frozenCount": 203,
+    "frozenCount": 204,
     "entries": [
       {
         "file": "packages\u002Fgeneric-node-contracts\u002Fsrc\u002Fcredential-matrix\u002Fmatrix.ts",
@@ -1018,6 +1018,11 @@
       {
         "file": "packages\u002Fnode-core\u002Fsrc\u002Freceive\u002Fexpiry-release.ts",
         "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps\u002Fgeneric-node\u002Fsrc\u002Fvault\u002Froot-kdf-salt.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       }
     ]

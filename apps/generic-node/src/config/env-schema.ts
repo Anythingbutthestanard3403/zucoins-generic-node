@@ -273,6 +273,28 @@ export const CONFIG_FIELD_SCHEMAS = {
     .min(1000, "RAILWAY_HEALTHCHECK_TIMEOUT_MS must be at least 1000 ms")
     .default(150_000),
 
+  // ── Vault root-key derivation ─────────────────────────────────────
+  // The PBKDF2 salt the vault root key is derived under. Not secret, but it must be the
+  // same value on every path that derives that key — and until ZTR-1159 it was read raw
+  // from process.env by the master-key rotation CLI alone, validated nowhere, while boot
+  // and both recovery ceremonies used a hardcoded literal. An operator who supplied a
+  // different value here re-sealed every envelope under a root key no other path could
+  // reproduce, and found out at the next boot or at the recovery ceremony.
+  //
+  // Optional on purpose: unset means the pre-ZTR-1159 literal, so an existing node keeps
+  // deriving exactly the key it derives today (vault/root-kdf-salt.ts). Once set it is
+  // pinned against the salt persisted beside the envelopes (`vault_root_kdf_salt`); a
+  // disagreement refuses the boot rather than deriving a key that opens nothing.
+  VAULT_ROOT_SALT_B64: z
+    .string()
+    .trim()
+    .min(1, "VAULT_ROOT_SALT_B64 must not be blank when set")
+    .refine(
+      (value) => Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64").length >= 8,
+      "VAULT_ROOT_SALT_B64 must be base64 (standard or URL-safe) decoding to at least 8 bytes",
+    )
+    .optional(),
+
   // ── Disaster recovery (dedicated-KEK scheduled backups) ───────────
   // Schema default remains false so rollback/dev boots stay green (rollback-safe default
   // heritage). The *reference production deploy* (deploy/deployment.yaml +

@@ -134,6 +134,11 @@ import {
   runGenesisBootstrap,
 } from "./bootstrap/genesis.js";
 import { composePush, type PushComposition } from "./push/compose.js";
+import {
+  assertRootKeyOpensSealedEnvelope,
+  reconcileRootKdfSalt,
+  resolveConfiguredRootKdfSalt,
+} from "./vault/root-kdf-salt.js";
 import { createPoolVaultSigner } from "./money-workers/send-vault-signer.js";
 import {
   SqlReportingRateLimiter,
@@ -179,7 +184,6 @@ const runtimeListenerLogger: RuntimeListenerLogger = {
   },
 };
 
-const VAULT_ROOT_KDF_SALT = Buffer.from("zupayments-vault-root-kdf-salt-v1", "utf8");
 const DEFERRED_SIGNING_KEY_ID = "00000000-0000-4000-8000-000000000001";
 
 function adaptPoolClientForLeadership(client: PoolClient): LeadershipLockClient {
@@ -497,7 +501,15 @@ async function main(): Promise<void> {
     new CredentialService(credentialStore),
   );
 
-  const rootKey = deriveRootKey(config.VAULT_MASTER_KEY, VAULT_ROOT_KDF_SALT);
+  // Vault root key. Derived here from configuration alone, because composition runs before
+  // the boot lane and therefore before migrations — there is no `vault_root_kdf_salt` table
+  // to consult yet. `unlockVault` binds this to the salt persisted beside the envelopes and
+  // re-derives IN PLACE if the two differ, which is only ever the case on a node whose salt
+  // was minted at genesis while VAULT_ROOT_SALT_B64 stays unset. Every downstream holder
+  // (EncryptedWalletKeyStore, composePush, the sealed signing-key store) keeps this
+  // reference rather than a copy, and none of them touches it before the vault gate opens.
+  const configuredRootSalt = resolveConfiguredRootKdfSalt(config);
+  const rootKey = deriveRootKey(config.VAULT_MASTER_KEY, configuredRootSalt.salt);
   const reportingRateLimiter = new SqlReportingRateLimiter(pool, 60_000, 600);
   const proofBodyStore = new SqlProofBodyStore(
     createPoolSqlExecutor(pool),
@@ -888,6 +900,36 @@ async function main(): Promise<void> {
       if (vaultKeyStore === undefined) {
         throw new Error("vault key store failed to initialise");
       }
+      // Bind the configured salt to the durable one (ZTR-1159). First sight of this node
+      // writes the row: the operator's VAULT_ROOT_SALT_B64 when set, the pre-ZTR-1159
+      // literal when the node has already sealed material, and a fresh per-deployment
+      // CSPRNG salt when it has sealed nothing. A configured salt that disagrees with an
+      // existing row throws VaultRootSaltError here, before anything opens an envelope.
+      const rootSalt = await reconcileRootKdfSalt({
+        sql: poolSql,
+        nodeId: config.NODE_ID,
+        configured: configuredRootSalt,
+      });
+      if (rootSalt.rederive) {
+        // Only reachable when the durable salt is not the configured one, which the
+        // reconcile above permits only while VAULT_ROOT_SALT_B64 is unset. Nothing has
+        // been sealed under the composition-time key: the durable row predates any use of
+        // this buffer, and holders read it by reference.
+        rootKey.set(deriveRootKey(config.VAULT_MASTER_KEY, rootSalt.salt));
+      }
+      // Derivation self-check. Prove the root key opens something this node actually
+      // sealed BEFORE readiness opens the vault gate — a salt or master-key mismatch is a
+      // named refusal in the first second rather than a decrypt failure under load.
+      const proof = await assertRootKeyOpensSealedEnvelope({
+        sql: poolSql,
+        nodeId: config.NODE_ID,
+        rootKey,
+        saltSource: rootSalt.source,
+      });
+      logger.info(
+        `boot: vault root salt source=${rootSalt.source} persisted=${rootSalt.persisted} ` +
+          `rederived=${rootSalt.rederive} self-check=${proof.checked ? "opened" : "no-sealed-wallet"}`,
+      );
       logger.info("boot: vault sealed store initialised (root key derived)");
     },
     acquireSignerLeadership: async (): Promise<SignerLeadershipHandle> => {

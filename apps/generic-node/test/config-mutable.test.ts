@@ -28,6 +28,10 @@ describe("first-boot vs mutable split", () => {
       "RECEIVE_TTL_DEFAULT_SECS",
       "RECEIVE_TTL_MIN_SECS",
       "RECEIVE_TTL_MAX_SECS",
+      // the vault root-KDF salt is pinned to the row persisted beside the envelopes at
+      // first vault-unlock and is insert-only thereafter; changing it on a running node
+      // would derive a root key that opens nothing.
+      "VAULT_ROOT_SALT_B64",
       "BACKUP_SCHEDULE_ENABLED",
       "BACKUP_MASTER_KEY",
       "BACKUP_OUTPUT_DIR",

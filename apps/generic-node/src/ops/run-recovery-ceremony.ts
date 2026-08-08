@@ -59,8 +59,11 @@ import {
   createRestoredVaultAccess,
   createThrowawayRestoredInstance,
 } from "./restored-instance.js";
+import {
+  assertRootKeyOpensSealedEnvelope,
+  resolveCeremonyRootKdfSalt,
+} from "../vault/root-kdf-salt.js";
 
-const VAULT_ROOT_KDF_SALT = Buffer.from("zupayments-vault-root-kdf-salt-v1", "utf8");
 const MIN_MASTER_KEY_CHARS = 32;
 
 export interface RunRecoveryCeremonyEnv {
@@ -79,6 +82,12 @@ export interface RunRecoveryCeremonyEnv {
    * operator, never caller-forged.
    */
   readonly ADMIN_TOTP_CODE?: string;
+  /**
+   * Base64 (standard or URL-safe) vault root-KDF salt. Read only as a cross-check: the
+   * authoritative value is the one persisted beside the envelopes, and a disagreement refuses
+   * the ceremony rather than deriving a key that opens nothing (ZTR-1159).
+   */
+  readonly VAULT_ROOT_SALT_B64?: string;
 }
 
 export interface RunRecoveryCeremonySummary {
@@ -403,20 +412,39 @@ export async function runRecoveryCeremony(deps: {
   const ceremonyId = deps.newId?.() ?? randomUUID();
   const ceremonyNonce = b64urlNonce();
   const issuedAt = (deps.now ?? (() => new Date()))().toISOString();
-  const rootKey = deriveRootKey(masterKey, VAULT_ROOT_KDF_SALT);
-  // the archive-epoch key. Required when ARCHIVE_PATH names a
-  // prior-epoch archive; the current VAULT_MASTER_KEY drives the possession proof, and this key
-  // opens the archive's vault envelopes.
   const archiveEpochMaster = env.ARCHIVE_EPOCH_MASTER_KEY?.trim();
-  const archiveRootKey =
-    archiveEpochMaster !== undefined && archiveEpochMaster.length > 0
-      ? deriveRootKey(archiveEpochMaster, VAULT_ROOT_KDF_SALT)
-      : undefined;
   if (archiveEpochMaster !== undefined && archiveEpochMaster.length < MIN_MASTER_KEY_CHARS) {
     fail(`ARCHIVE_EPOCH_MASTER_KEY must be at least ${MIN_MASTER_KEY_CHARS} characters`);
   }
 
   const pool = new Pool({ connectionString: databaseUrl });
+
+  // ZTR-1159: the salt comes from the single resolver, read from the row persisted beside the
+  // envelopes, and the derived root key is proven against a real envelope BEFORE the ceremony
+  // takes a single further step. A ceremony that discovers a salt mismatch in its first second
+  // is survivable; one that discovers it halfway through is not.
+  const ceremonySql = {
+    query: async <R>(text: string, params?: readonly unknown[]) => {
+      const result = await pool.query(text, params as never);
+      return { rows: result.rows as R[] };
+    },
+  };
+  const rootSalt = await resolveCeremonyRootKdfSalt({ sql: ceremonySql, nodeId, env });
+  const rootKey = deriveRootKey(masterKey, rootSalt.salt);
+  await assertRootKeyOpensSealedEnvelope({
+    sql: ceremonySql,
+    nodeId,
+    rootKey,
+    saltSource: rootSalt.source,
+  });
+  // the archive-epoch key. Required when ARCHIVE_PATH names a
+  // prior-epoch archive; the current VAULT_MASTER_KEY drives the possession proof, and this key
+  // opens the archive's vault envelopes. Rotation re-seals under the SAME salt (only the master
+  // key changes), so a prior epoch derives under the node's one salt too.
+  const archiveRootKey =
+    archiveEpochMaster !== undefined && archiveEpochMaster.length > 0
+      ? deriveRootKey(archiveEpochMaster, rootSalt.salt)
+      : undefined;
   let archiveText = "";
   let exportId: string | null = null;
 

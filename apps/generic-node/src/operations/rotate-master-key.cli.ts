@@ -5,7 +5,11 @@
 //
 //   VAULT_MASTER_KEY       old master key (≥32 bytes)
 //   VAULT_MASTER_KEY_NEW   new master key (≥32 bytes, ≠ old)
-//   VAULT_ROOT_SALT_B64    base64 (std or url) of the PBKDF2 salt
+//   VAULT_ROOT_SALT_B64    OPTIONAL. base64 (std or url) of the PBKDF2 salt. Leave it unset:
+//                          rotation changes the master key, never the salt, and the salt this
+//                          node derives under is resolved by vault/root-kdf-salt.ts. Supplying
+//                          a value that is not the node's own salt re-seals every envelope
+//                          under a root key no other path can reproduce (ZTR-1159).
 //
 //   node dist/operations/rotate-master-key.cli.js            # rotate + commit
 //   node dist/operations/rotate-master-key.cli.js --dry-run  # prove, roll back
@@ -32,6 +36,8 @@ import {
   type RotationLogger,
   type RotationUnitOfWork,
 } from "@zucoins/node-core";
+
+import { resolveConfiguredRootKdfSalt } from "../vault/root-kdf-salt.js";
 
 const MIN_MASTER_KEY_BYTES = 32;
 
@@ -102,7 +108,7 @@ function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   if (value === undefined || value === "") {
     throw new MasterKeyRotationError(
       "ROTATION_REFUSED",
-      `${name} is not set — rotation needs VAULT_MASTER_KEY, VAULT_MASTER_KEY_NEW, and VAULT_ROOT_SALT_B64`,
+      `${name} is not set — rotation needs VAULT_MASTER_KEY and VAULT_MASTER_KEY_NEW`,
     );
   }
   return value;
@@ -119,16 +125,26 @@ function parseMasterKey(raw: string, label: string): Buffer {
   return buf;
 }
 
-function parseSalt(raw: string): Buffer {
-  const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
-  const buf = Buffer.from(normalized, "base64");
-  if (buf.length < 8) {
+/**
+ * The salt this rotation must derive under (ZTR-1159).
+ *
+ * This used to be `requireEnv(env, "VAULT_ROOT_SALT_B64")` with nothing constraining the value
+ * beyond an 8-byte floor — so an operator following this CLI's own error message could re-seal
+ * every envelope under a root key that boot and both recovery ceremonies cannot reproduce. The
+ * rotation reported success and the loss surfaced at the next boot, or at the recovery
+ * ceremony. It now goes through the one resolver every other path uses: unset means the salt
+ * the node is already deriving under, and a supplied value that cannot decode is refused with
+ * the same rotation error code as before.
+ */
+function resolveSalt(env: NodeJS.ProcessEnv): Buffer {
+  try {
+    return resolveConfiguredRootKdfSalt({ VAULT_ROOT_SALT_B64: env.VAULT_ROOT_SALT_B64 }).salt;
+  } catch (err) {
     throw new MasterKeyRotationError(
       "ROTATION_REFUSED",
-      "VAULT_ROOT_SALT_B64 decodes to fewer than 8 bytes",
+      err instanceof Error ? err.message : String(err),
     );
   }
-  return buf;
 }
 
 const defaultLogger: RotationLogger = {
@@ -154,7 +170,6 @@ export async function runRotateMasterKeyCli(
 
   const oldRaw = requireEnv(env, "VAULT_MASTER_KEY");
   const newRaw = requireEnv(env, "VAULT_MASTER_KEY_NEW");
-  const saltRaw = requireEnv(env, "VAULT_ROOT_SALT_B64");
 
   if (oldRaw === newRaw) {
     throw new MasterKeyRotationError(
@@ -191,7 +206,7 @@ export async function runRotateMasterKeyCli(
   let result;
   try {
     newMaster = parseMasterKey(newRaw, "VAULT_MASTER_KEY_NEW");
-    salt = parseSalt(saltRaw);
+    salt = resolveSalt(env);
     oldRoot = deriveRootKey(oldMaster, salt);
     newRoot = deriveRootKey(newMaster, salt);
 

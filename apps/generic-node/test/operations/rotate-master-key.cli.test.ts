@@ -24,6 +24,7 @@ import {
   OPERATOR_SEQUENCE,
   runRotateMasterKeyCli,
 } from "../../src/operations/rotate-master-key.cli.js";
+import { HISTORICAL_ROOT_KDF_SALT } from "../../src/vault/root-kdf-salt.js";
 
 const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const OLD_MASTER = "old-cli-master-key-material-32b!!";
@@ -58,6 +59,18 @@ function makeRow(seedByte: number, ordinal: number): {
   return {
     row: { identity, envelope: sealWalletSecret(OLD_ROOT, identity, secretKey) },
     secretKey,
+  };
+}
+
+/** Same fixture, sealed under an arbitrary root — used to seal under the historical salt. */
+function makeRowUnder(root: Uint8Array, seedByte: number, ordinal: number): {
+  row: WalletVaultRewrapRow;
+  secretKey: Buffer;
+} {
+  const base = makeRow(seedByte, ordinal);
+  return {
+    row: { identity: base.row.identity, envelope: sealWalletSecret(root, base.row.identity, base.secretKey) },
+    secretKey: base.secretKey,
   };
 }
 
@@ -300,6 +313,71 @@ describe("runRotateMasterKeyCli", () => {
     });
     expect(keyMaterialHygiene.liveOwnedCount()).toBe(liveBefore);
     expect((await journal.read()).writerEpoch).toBe(1);
+  });
+
+  // ZTR-1159. This CLI used to REQUIRE VAULT_ROOT_SALT_B64 and accept almost any value for
+  // it, while boot and both recovery ceremonies derived under a hardcoded literal. An
+  // operator following this CLI's own error message therefore re-sealed every envelope under
+  // a root key nothing else could reproduce, and found out at the next boot or at the
+  // recovery ceremony. Unset now means the salt the node is already deriving under, so the
+  // rewrapped envelopes stay openable on every other path.
+  it("rotates without VAULT_ROOT_SALT_B64, under the node's own salt", async () => {
+    const historicalRoot = deriveRootKey(OLD_MASTER, HISTORICAL_ROOT_KDF_SALT);
+    const wallet = makeRowUnder(historicalRoot, 0x41, 1);
+    let committed: readonly WalletVaultRewrapRow[] = [];
+
+    const result = await runRotateMasterKeyCli({
+      loadCensus: { rows: [wallet.row] },
+      countWalletVaultRows: async () => 1,
+      countNodeSigningKeyRows: async () => 0,
+      loadPushSecretsCensus: { rows: [] },
+      countPushSecretRows: async () => 0,
+      journal: new InMemoryMasterKeyRotationJournal(1),
+      interlock: { async acquire() {}, async release() {} },
+      unitOfWork: new InMemoryRotationUnitOfWork(),
+      commitWalletVault: async (rows) => { committed = rows; },
+      fromEpoch: 1,
+      // No VAULT_ROOT_SALT_B64 — the trap the ticket describes cannot be sprung.
+      env: { VAULT_MASTER_KEY: OLD_MASTER, VAULT_MASTER_KEY_NEW: NEW_MASTER },
+      argv: ["node", "cli.js"],
+      logger: { info() {}, error() {} },
+    });
+
+    expect(result.committed).toBe(true);
+    expect(result.walletCount).toBe(1);
+    // The rewrapped envelope opens under the NEW master and the SAME salt — which is exactly
+    // what boot will derive at the next start with VAULT_ROOT_SALT_B64 still unset.
+    const bootRoot = deriveRootKey(NEW_MASTER, HISTORICAL_ROOT_KDF_SALT);
+    const opened = openWalletSecret(bootRoot, committed[0]!.envelope, committed[0]!.identity);
+    try {
+      expect(Buffer.from(opened.bytes).equals(wallet.secretKey)).toBe(true);
+    } finally {
+      opened.wipe();
+    }
+  });
+
+  it("refuses a VAULT_ROOT_SALT_B64 that cannot decode to a usable salt", async () => {
+    await expect(
+      runRotateMasterKeyCli({
+        loadCensus: { rows: [] },
+        countWalletVaultRows: async () => 0,
+        countNodeSigningKeyRows: async () => 0,
+        loadPushSecretsCensus: { rows: [] },
+        countPushSecretRows: async () => 0,
+        journal: new InMemoryMasterKeyRotationJournal(1),
+        interlock: { async acquire() {}, async release() {} },
+        unitOfWork: new InMemoryRotationUnitOfWork(),
+        commitWalletVault: async () => {},
+        fromEpoch: 1,
+        env: {
+          VAULT_MASTER_KEY: OLD_MASTER,
+          VAULT_MASTER_KEY_NEW: NEW_MASTER,
+          VAULT_ROOT_SALT_B64: Buffer.from("tiny").toString("base64"),
+        },
+        argv: ["node", "cli.js"],
+        logger: { info() {}, error() {} },
+      }),
+    ).rejects.toMatchObject({ code: "ROTATION_REFUSED" });
   });
 
   it("refuses missing env without touching the journal", async () => {

@@ -24,13 +24,14 @@ invariants require under concurrent access. ZKZ amounts are canonical decimal `t
  — never `real`, `double precision`, or a JavaScript-number-derived `numeric` — so the
 serialization guarantee protects exact bytes, not approximations.
 
-### 1.1 The two accepted money-path mechanisms
+### 1.1 The three accepted money-path mechanisms
 
 The guarantee the money path needs is that no read-then-write it performs can interleave
 with a concurrent one and both commit. `SERIALIZABLE` delivers that for the whole
 transaction. A lock taken inside the transaction delivers it for the rows the lock covers,
-which is sufficient when those rows are the ones the decision is made on. **Both are
-accepted; nothing else is.**
+which is sufficient when those rows are the ones the decision is made on. An immediate
+constraint delivers it by making the loser abort in the database, which is sufficient where
+losing must abort rather than double-apply. **All three are accepted; nothing else is.**
 
 | Mechanism | What qualifies | Obligation it carries |
 |---|---|---|

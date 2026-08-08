@@ -26,6 +26,8 @@
 //     module a reviewer can read it in; the claim is auditable, not executed here. The
 //     runtime proofs live with each site (e.g. `arm-wallet-gate.test.ts` asserts the pinned
 //     BEGIN → body → COMMIT, `sql-attention-retraction-store.pg.test.ts` runs the lock).
+//   * that a `file:line` citation in a row resolves. Nothing here parses the prose; a stale
+//     pointer is caught by review, not by the gate. (Two were, in the ZTR-1155 review.)
 //   * anything about SQL issued outside these two trees, or from test files.
 //   * that a `READ COMMITTED` site classified `other` is correct to be `other`. That is the
 //     judgement the table records so it can be reviewed once and re-reviewed on change,
@@ -162,14 +164,41 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
   ],
   "apps/generic-node/src/main.ts": [
     {
-      site: "withPgTransaction (RECEIVE/MOVE admission stores)",
+      site: "withPgTransaction (shared by the RECEIVE and MOVE admission stores)",
       pathClass: "money-path",
+      // One BEGIN, two consumers, two different mechanisms. `mechanism` carries a single
+      // token and holds the RECEIVE half's; the MOVE half is CONSTRAINT and is spelled out
+      // below rather than generalised away (ZTR-1155 review D1).
       isolation: "READ COMMITTED",
       mechanism: "ROW_LOCK",
       covering:
+        "TWO CONSUMERS, TWO MECHANISMS — read both before trusting the token above. " +
+        "(1) RECEIVE / SqlReceiveAdmissionStore (main.ts:473-475) is ROW_LOCK: " +
         "`SELECT pg_advisory_xact_lock($1) AS locked` (receive/sql-store.ts:123 " +
-        "LOCK_ADMISSION_QUEUE), taken before the queue-cap read and the insert it decides. " +
-        "An xact lock is released at COMMIT, never earlier.",
+        "LOCK_ADMISSION_QUEUE), issued as the first statement in the transaction " +
+        "(receive/sql-store.ts:357), before the queue-cap read and the insert it decides. An " +
+        "xact lock is released at COMMIT, never earlier. " +
+        "(2) MOVE / SqlMoveCreateStore.insertAdmitted (main.ts:476-479, " +
+        "move/sql-store.ts:311-367) is CONSTRAINT, NOT a lock: that half takes no row lock " +
+        "and no advisory lock anywhere in the module. Its arbiter is the immediate unique " +
+        "index on operations (implementer_id, kind, idempotency_key), reached as " +
+        "`ON CONFLICT … DO NOTHING RETURNING` (move/sql-store.ts:86) — the loser gets zero " +
+        "rows and returns IDEMPOTENCY_CONFLICT — plus the guarded `UPDATE lease_groups … " +
+        "WHERE id = $1 AND child_disposition = 'PENDING'` (MARK_CHILD_JOINED, " +
+        "move/sql-store.ts:98-100) for the receive-child group flip. " +
+        "RULED, NOT PAPERED: the one-in-flight pre-check hasActiveLease " +
+        "(move/sql-store.ts:303) reads wallet_active_leases on the POOL, outside this " +
+        "transaction (move/create.ts:408,415), so the MOVE read-then-write straddles the " +
+        "boundary. That is safe because the read is not the arbiter of anything: it exists " +
+        "to return 409 wallet_busy on the public path (move/create.ts:405-421) and admission " +
+        "writes NO row to wallet_active_leases. One-active-lease is decided structurally by " +
+        "`wallet_active_leases.wallet_id PRIMARY KEY` (schema/lease-foundation.sql:172) at " +
+        "lease ACQUISITION, under LOCK_WALLET `FOR UPDATE` + SELECT_ACTIVE_FOR_UPDATE " +
+        "(leases/repository.ts:111,372) inside the move-internal-worker.ts transaction — a " +
+        "different site, classified below. Two racers that both pass the pre-check are both " +
+        "admitted CREATED; the second loses at acquisition, never by double-leasing. Pulling " +
+        "the read inside this transaction would not change that: READ COMMITTED with no lock " +
+        "on wallet_active_leases has the same interleaving.",
       pinned: "pool.connect() → BEGIN → fn(tx) → COMMIT; every statement on that one client",
     },
     {
@@ -222,8 +251,11 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       isolation: "READ COMMITTED",
       mechanism: "ROW_LOCK",
       covering:
-        "`lockNextEventSeq` takes node_event_seq_counters `FOR UPDATE` " +
-        "(event-log/pg-event-store.ts:38) for the whole transaction, and persistMoveOutcome " +
+        "`lockNextEventSeq` (move-advanced-ports.ts:209-215) takes node_event_seq_counters " +
+        "`FOR UPDATE OF c` via LOCK_EVENT_SEQ_COUNTER_SQL (move-advanced-ports.ts:190-196) " +
+        "for the whole transaction — this module mirrors event-log/pg-event-store.ts's " +
+        "counter SQL but deliberately does not import it (its own note at :179), so the lock " +
+        "to read is the local one. persistMoveOutcome " +
         "lands under a `row_version` CAS on operations. Deliberately NOT wrapped in a retry: " +
         "signWithNodeIdentity runs inside this body, so the row-lock arm is the right one.",
       pinned: "pool.connect() → BEGIN; createSqlQueryFn(client) carries every later statement",
@@ -282,7 +314,7 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       mechanism: "ROW_LOCK",
       covering:
         "`CLAIM_AND_OBSERVE_SQL.CLAIM_APPROVED_SEND_OPERATION` carries `FOR UPDATE OF o` " +
-        "(core/claim-and-observe.ts:392) so the APPROVED claim serialises on the operations " +
+        "(send/claim-and-observe.ts:392) so the APPROVED claim serialises on the operations " +
         "row; the source-lease port runs the leases/statements.ts FOR UPDATE set on the same " +
         "transaction.",
       pinned: "pool.connect() → BEGIN → fn(tx) → COMMIT; all four ports share this one factory",
@@ -337,11 +369,33 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       isolation: "READ COMMITTED",
       mechanism: "ROW_LOCK",
       covering:
-        "`pg_advisory_xact_lock` on both queue paths (receive/pool-scaler.ts:98 LOCK_SCALE_UP, " +
-        "receive/pool-allocator.ts:221 LOCK_ADMISSION_QUEUE) plus " +
-        "`FOR UPDATE SKIP LOCKED` / `FOR UPDATE` on the candidate wallet " +
-        "(receive/pool-allocator.ts:130,150).",
-      pinned: "pool.connect() → BEGIN → fn(tx) → COMMIT on one client per call",
+        "FOUR CALLERS, each with its own cover (ZTR-1155 review D2 — the earlier text cited " +
+        "pool-allocator.ts:221 LOCK_ADMISSION_QUEUE, which only admitReceive takes and which " +
+        "no caller of THIS factory reaches). " +
+        "(1) runPoolScaleUp (:1020): `pg_advisory_xact_lock` LOCK_SCALE_UP " +
+        "(receive/pool-scaler.ts:98), taken before every count it reads. " +
+        "(2) assignReceiveWallet (:1045): `FOR UPDATE SKIP LOCKED` / `FOR UPDATE` on the " +
+        "candidate wallet (receive/pool-allocator.ts:130,150). " +
+        "(3) commitReceiveReady (:597): the guarded CAS_CREATED_TO_READY " +
+        "`UPDATE operations … WHERE status = 'CREATED' AND row_version = $2 AND EXISTS " +
+        "(wallet_active_leases … lease_epoch = $3) … RETURNING` " +
+        "(receive/code-ready-commit.ts:80-98) — zero rows for a concurrent loser. " +
+        "(4) expireQueueAgedReceives (:1065): the guarded EXPIRE_QUEUE_AGED_RECEIVE " +
+        "`UPDATE operations … WHERE status = 'CREATED' … ` (receive/pool-scaler.ts:212), " +
+        "which restates the queued predicate so an assigner that already won matches zero " +
+        "rows (receive/pool-scaler.ts:446-448).",
+      pinned:
+        "pool.connect() → BEGIN → fn(tx) → COMMIT on one client per call, WITH ONE " +
+        "EXCEPTION. KNOWN OPEN OBLIGATION (pre-existing, not introduced by ZTR-1155): the " +
+        "emitExpired callback (start-money-workers.ts:1068-1080), invoked from inside fn(tx) " +
+        "by expireQueueAgedReceives (receive/pool-scaler.ts:477), ignores the `_db` it is " +
+        "handed and issues its `UPDATE receive_operations … SET status = 'EXPIRED'` on " +
+        "deps.pool — a second pooled connection, in autocommit, while this transaction is " +
+        "still open. That mirror write commits independently, so a rollback of the enclosing " +
+        "transaction leaves receive_operations EXPIRED while the in-transaction operations " +
+        "flip is undone. The exposure is a mirror-table divergence on rollback, not a " +
+        "double-apply — the guarded UPDATE above is still the arbiter. Routing emitExpired " +
+        "through `_db` closes it; tracked separately, not fixed here.",
     },
     {
       site: "runReceiveExpiryReleaseStep (SqlReceiveExpiryReleaseService)",
@@ -520,6 +574,21 @@ function listProductionTsFiles(): string[] {
   return files.sort();
 }
 
+/** The exact literal that raises the level; the retry obligation keys off this string. */
+const SERIALIZABLE_BEGIN = "BEGIN ISOLATION LEVEL SERIALIZABLE";
+
+/**
+ * Both SQL spellings of a transaction start, CASE-SENSITIVE on purpose.
+ *
+ * PostgreSQL also accepts lowercase `begin`, and matching it would be a strictly wider net —
+ * except that `admin-readiness.ts:130` carries the redaction literal `"begin private"`, which
+ * a case-insensitive matcher turns into a phantom census site. Neither tree contains a
+ * lowercase or mixed-case SQL opener (verified by both ZTR-1155 reviewers across five trees),
+ * so the case-sensitive form is exact here; if one ever lands, this is the line that must
+ * widen and exclude that literal.
+ */
+const TRANSACTION_OPENER = /^(BEGIN|START\s+TRANSACTION)\b/;
+
 /**
  * Every transaction-start literal in one source: any string or template literal whose text
  * starts with `BEGIN`. PARSED rather than regex-matched over raw source, for the reason the
@@ -530,7 +599,7 @@ export function beginLiterals(source: string, fileLabel = "<inline>"): readonly 
   const parsed = ts.createSourceFile(fileLabel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found: MeasuredSite[] = [];
   const record = (node: ts.Node, text: string): void => {
-    if (!/^BEGIN\b/.test(text)) return;
+    if (!TRANSACTION_OPENER.test(text)) return;
     found.push({
       file: fileLabel,
       line: parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1,
@@ -549,6 +618,43 @@ export function beginLiterals(source: string, fileLabel = "<inline>"): readonly 
   };
   ts.forEachChild(parsed, visit);
   return found;
+}
+
+/**
+ * Real `withSerializationRetry(<policy>, …)` CALL sites in one source.
+ *
+ * AST, not `String.includes`. The substring form this replaces was satisfied by a comment
+ * mentioning the identifier while the actual call and both imports were deleted — proven by
+ * mutation in the ZTR-1155 review (Probe D), with census, eslint and tsc all green. A
+ * `CallExpression` cannot be written in a comment.
+ *
+ * `policy` pins the first argument to one identifier (`CONVENTIONS.md` §2: one fixed policy,
+ * not a second one). Pass `null` where the policy is a parameter, as it is in node-core's
+ * `runMigrations`.
+ */
+export function serializationRetryCalls(
+  source: string,
+  fileLabel = "<inline>",
+  policy: string | null = "DEFAULT_SERIALIZATION_RETRY_POLICY",
+): number {
+  const parsed = ts.createSourceFile(fileLabel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let calls = 0;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "withSerializationRetry" &&
+      node.arguments.length >= 2
+    ) {
+      const first = node.arguments[0];
+      if (policy === null || (first !== undefined && ts.isIdentifier(first) && first.text === policy)) {
+        calls += 1;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(parsed, visit);
+  return calls;
 }
 
 function measureSites(): readonly MeasuredSite[] {
@@ -626,38 +732,49 @@ describe("transaction isolation census (CONVENTIONS.md §1)", () => {
     }
   });
 
-  it("a SERIALIZABLE mechanism is only claimed where a retry wraps it", () => {
+  it("a source-level SERIALIZABLE carries the retry, whatever mechanism its row declares", () => {
     // `CONVENTIONS.md` §2: raising the level makes 40001 reachable, so the retry is not
-    // optional. The four SERIALIZABLE sites are checked against their source.
-    // Three sites carry the retry themselves; migrate.ts is retried one level up, by
-    // node-core's runMigrations, so its proof lives on that side.
-    const RETRIED_IN_FILE = [
-      "apps/generic-node/src/money-workers/genesis-t0-observer.ts",
-      "apps/generic-node/src/money-workers/start-money-workers.ts",
-      "apps/generic-node/src/operations/sql-recovery-store.ts",
-    ] as const;
+    // optional.
+    //
+    // The requirement is keyed off the MEASURED SOURCE, never off `entry.mechanism`. Keying it
+    // on the declared field made the rule opt-in: a site could open
+    // `BEGIN ISOLATION LEVEL SERIALIZABLE`, declare `mechanism: "ROW_LOCK"`, carry no retry,
+    // and pass — which is exactly the defect this gate exists to catch (ZTR-1155 review,
+    // Probe C).
     const RETRIED_BY_CALLER = "apps/generic-node/src/db/migrate.ts";
-    const serializableFiles = Object.entries(TRANSACTION_SITES)
+    const opensSerializable = [
+      ...new Set(measured.filter((s) => s.text === SERIALIZABLE_BEGIN).map((s) => s.file)),
+    ].sort();
+    // Non-vacuity: if the scanner ever stops seeing SERIALIZABLE literals the loop below
+    // becomes a no-op, so the set is floored before it is walked.
+    expect(opensSerializable.length, "no source-level SERIALIZABLE site found — scanner broken?").toBeGreaterThanOrEqual(3);
+    for (const file of opensSerializable) {
+      const text = readFileSync(resolve(repoRoot, file), "utf8");
+      expect(
+        serializationRetryCalls(text, file),
+        `${file} opens ${SERIALIZABLE_BEGIN} but issues no ` +
+          `withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, …) call`,
+      ).toBeGreaterThan(0);
+    }
+    // The declared side, both directions: `mechanism: "SERIALIZABLE"` is claimable only where
+    // the source raises the level, or in migrate.ts where the level is a parameter and the
+    // one caller (node-core runMigrations) supplies both the level and the retry.
+    const declaredSerializable = Object.entries(TRANSACTION_SITES)
       .filter(([, entries]) => entries.some((entry) => entry.mechanism === "SERIALIZABLE"))
       .map(([file]) => file)
       .sort();
-    expect(serializableFiles).toEqual([...RETRIED_IN_FILE, RETRIED_BY_CALLER].sort());
-    for (const file of RETRIED_IN_FILE) {
-      const text = readFileSync(resolve(repoRoot, file), "utf8");
-      expect(text, `${file} sets SERIALIZABLE but lost its retry`).toContain("withSerializationRetry");
-      // The one fixed policy, not a second one (CONVENTIONS.md §2).
-      expect(text, `${file} must use DEFAULT_SERIALIZATION_RETRY_POLICY, not a second policy`).toContain(
-        "DEFAULT_SERIALIZATION_RETRY_POLICY",
-      );
-    }
+    expect(declaredSerializable).toEqual([...opensSerializable, RETRIED_BY_CALLER].sort());
     // migrate.ts passes the level through; runMigrations supplies SERIALIZABLE and the retry.
     const migrations = readFileSync(
       resolve(repoRoot, "packages/node-core/src/data/migrations.ts"),
       "utf8",
     );
+    expect(
+      serializationRetryCalls(migrations, "packages/node-core/src/data/migrations.ts", null),
+      "runMigrations is migrate.ts's retry — it must be a real call, not a mention",
+    ).toBeGreaterThan(0);
     expect(migrations).toContain('MONEY_PATH_ISOLATION: TransactionIsolationLevel = "SERIALIZABLE"');
     expect(migrations).toContain("executor.transaction(MONEY_PATH_ISOLATION");
-    expect(migrations).toContain("await withSerializationRetry(");
     expect(readFileSync(resolve(repoRoot, RETRIED_BY_CALLER), "utf8")).toContain(
       "BEGIN ISOLATION LEVEL ${isolation}",
     );
@@ -700,6 +817,29 @@ describe("transaction isolation census (CONVENTIONS.md §1)", () => {
     expect(beginLiterals("// we BEGIN here\nconst x = 1;")).toEqual([]);
     // Nor is a word that merely starts with the same letters.
     expect(beginLiterals('const x = "BEGINNING";')).toEqual([]);
+    // The other SQL spelling. Neither tree uses it today; the matcher covers it so landing
+    // one does not open an unclassified transaction.
+    expect(beginLiterals('await client.query("START TRANSACTION ISOLATION LEVEL SERIALIZABLE");').map((s) => s.text)).toEqual([
+      "START TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    ]);
+    // Case-sensitive by design: admin-readiness.ts's `"begin private"` redaction literal must
+    // not become a phantom site. Documented at TRANSACTION_OPENER.
+    expect(beginLiterals('const x = "begin private";')).toEqual([]);
+  });
+
+  it("predicate proof: the retry check sees a call and not a comment naming it", () => {
+    // The rule that stops Probe D — a comment mentioning the identifier used to satisfy the
+    // old `String.includes` check with the real call and both imports deleted.
+    const call = "await withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, async () => run());";
+    expect(serializationRetryCalls(call)).toBe(1);
+    expect(
+      serializationRetryCalls("// was: withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, ...) — refactored away\nawait run();"),
+    ).toBe(0);
+    expect(serializationRetryCalls('const doc = "withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, x)";')).toBe(0);
+    // A second, non-frozen policy is not the §2 policy.
+    expect(serializationRetryCalls("await withSerializationRetry(MY_OWN_POLICY, async () => run());")).toBe(0);
+    // …unless the caller is the one where the policy is a parameter (runMigrations).
+    expect(serializationRetryCalls("await withSerializationRetry(policy, async () => run());", "<inline>", null)).toBe(1);
   });
 
   it("predicate proof: the money-path rule rejects a mechanism-less money-path entry", () => {

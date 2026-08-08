@@ -20,6 +20,12 @@ export default defineConfig({
         ),
       },
       {
+        find: "@zucoins/node-core/observability",
+        replacement: fileURLToPath(
+          new URL("../../packages/node-core/src/observability/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "@zucoins/node-core",
         replacement: fileURLToPath(
           new URL("../../packages/node-core/src/index.ts", import.meta.url),

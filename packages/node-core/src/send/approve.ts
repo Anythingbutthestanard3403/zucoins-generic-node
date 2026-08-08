@@ -69,6 +69,12 @@ export const SEND_APPROVE_ROUTE = "/admin/v1/external-sends/:operation_id/approv
 export const APPROVAL_FACTOR_FAILURE_CODE = "approval_rejected" as const;
 export const APPROVAL_FACTOR_FAILURE_HTTP_STATUS = 403 as const;
 
+// Deployment-policy denial. Doc 01 §4.2 requires optional node policy to stay
+// distinguishable from protocol validity, so a dual-control refusal carries its own
+// code. It is not a hole in the envelope above: it discloses that this deployment's
+// policy refused this approver, never which authentication factor failed.
+export const APPROVAL_POLICY_DENIAL_CODE = "same_operator_both_sides" as const;
+
 export type ApprovalChallengeStatus = "ISSUED" | "CONSUMED" | "SUPERSEDED" | "EXPIRED";
 export type ApprovalMethod = "TOTP_ONLY" | "TOTP_AND_DEVICE";
 
@@ -246,10 +252,18 @@ export type ApproveOutcome =
     }
   | { readonly outcome: "REJECTED"; readonly reason: ApprovalRejectReason };
 
-export function toOpaqueApprovalFailure(_reason: ApprovalRejectReason): {
-  readonly code: typeof APPROVAL_FACTOR_FAILURE_CODE;
+export function toOpaqueApprovalFailure(reason: ApprovalRejectReason): {
+  readonly code: typeof APPROVAL_FACTOR_FAILURE_CODE | typeof APPROVAL_POLICY_DENIAL_CODE;
   readonly httpStatus: typeof APPROVAL_FACTOR_FAILURE_HTTP_STATUS;
 } {
+  // Policy denial is distinguishable (§4.2); every FACTOR reason still collapses
+  // to one envelope so body-diffing cannot reveal which factor failed.
+  if (reason === APPROVAL_POLICY_DENIAL_CODE) {
+    return {
+      code: APPROVAL_POLICY_DENIAL_CODE,
+      httpStatus: APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
+    };
+  }
   return {
     code: APPROVAL_FACTOR_FAILURE_CODE,
     httpStatus: APPROVAL_FACTOR_FAILURE_HTTP_STATUS,

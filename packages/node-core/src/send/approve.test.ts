@@ -9,6 +9,7 @@ import {
   APPROVAL_CHALLENGE_FRESHNESS_MS,
   APPROVAL_FACTOR_FAILURE_CODE,
   APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
+  APPROVAL_POLICY_DENIAL_CODE,
   APPROVAL_PURPOSE,
   APPROVAL_REJECT_REASONS,
   approveExternalSend,
@@ -21,6 +22,7 @@ import {
   type ApproveDeps,
 } from "./approve.js";
 import { InMemoryApprovalChallengeStore } from "./approval-store.js";
+import { InMemoryApprovalChallengeIssuerStore } from "./challenge-issuer-store.js";
 import { TotpConsumptionLog } from "../totp/burn-store.js";
 
 const GOLDEN_DIR = new URL("../../../generic-node-contracts/goldens/approval/", import.meta.url);
@@ -660,12 +662,99 @@ describe("approveExternalSend — guarded mutation", () => {
 });
 
 describe("opaque factor failure", () => {
-  it("every reject reason collapses to the same HTTP code and status", () => {
-    const bodies = APPROVAL_REJECT_REASONS.map((r) => toOpaqueApprovalFailure(r));
+  it("every FACTOR reject reason collapses to the same HTTP code and status", () => {
+    const factorReasons = APPROVAL_REJECT_REASONS.filter(
+      (r) => r !== APPROVAL_POLICY_DENIAL_CODE,
+    );
+    expect(factorReasons).toHaveLength(APPROVAL_REJECT_REASONS.length - 1);
+    const bodies = factorReasons.map((r) => toOpaqueApprovalFailure(r));
     for (const b of bodies) {
       expect(b.code).toBe(APPROVAL_FACTOR_FAILURE_CODE);
       expect(b.httpStatus).toBe(APPROVAL_FACTOR_FAILURE_HTTP_STATUS);
     }
     expect(new Set(bodies.map((b) => JSON.stringify(b))).size).toBe(1);
+  });
+
+  // Doc 01 §4.2: optional policy stays distinguishable from protocol validity.
+  // The exception is exactly one reason wide, and it names the deployment's policy
+  // rather than a factor — a caller still cannot tell TOTP from device from nonce.
+  it("policy denial is the one distinguishable code, at the same status", () => {
+    const policy = toOpaqueApprovalFailure(APPROVAL_POLICY_DENIAL_CODE);
+    expect(policy.code).toBe(APPROVAL_POLICY_DENIAL_CODE);
+    expect(policy.code).not.toBe(APPROVAL_FACTOR_FAILURE_CODE);
+    expect(policy.httpStatus).toBe(APPROVAL_FACTOR_FAILURE_HTTP_STATUS);
+  });
+});
+
+describe("approveExternalSend — two-human dual control", () => {
+  const ISSUER = "operator-a";
+  const CHALLENGE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  function issuerStore(): InMemoryApprovalChallengeIssuerStore {
+    const store = new InMemoryApprovalChallengeIssuerStore();
+    store.recordIssuer(OPERATION_ID, CHALLENGE_ID, ISSUER);
+    return store;
+  }
+
+  async function approveAs(approverOperatorId: string, extras: Partial<ApproveDeps>) {
+    const store = new InMemoryApprovalChallengeStore();
+    const challenge = await issueFixture(store, baseOp());
+    return approveExternalSend(
+      {
+        operationId: OPERATION_ID,
+        challengeNonce: challenge.nonce,
+        expectedRowVersion: 1,
+        preimageSha256: challenge.preimageSha256,
+        deviceKeyId: null,
+        deviceSignature: null,
+        totpCode: totpAt(FIXED_NOW).code,
+        approverOperatorId,
+      },
+      approveDeps(store, extras),
+    );
+  }
+
+  it("rejects the same operator on both sides", async () => {
+    const result = await approveAs(ISSUER, {
+      dualControlMode: "two_human",
+      challengeIssuerStore: issuerStore(),
+    });
+    expect(result.outcome).toBe("REJECTED");
+    if (result.outcome !== "REJECTED") return;
+    expect(result.reason).toBe(APPROVAL_POLICY_DENIAL_CODE);
+  });
+
+  it("admits a different operator", async () => {
+    const result = await approveAs("operator-b", {
+      dualControlMode: "two_human",
+      challengeIssuerStore: issuerStore(),
+    });
+    expect(result.outcome).toBe("APPROVED");
+  });
+
+  // Distinctness that cannot be proven is not distinctness.
+  it("fails closed when the issuer was never recorded", async () => {
+    const result = await approveAs("operator-b", {
+      dualControlMode: "two_human",
+      challengeIssuerStore: new InMemoryApprovalChallengeIssuerStore(),
+    });
+    expect(result.outcome).toBe("REJECTED");
+    if (result.outcome !== "REJECTED") return;
+    expect(result.reason).toBe(APPROVAL_POLICY_DENIAL_CODE);
+  });
+
+  it("fails closed when no issuer store is wired at all", async () => {
+    const result = await approveAs("operator-b", { dualControlMode: "two_human" });
+    expect(result.outcome).toBe("REJECTED");
+    if (result.outcome !== "REJECTED") return;
+    expect(result.reason).toBe(APPROVAL_POLICY_DENIAL_CODE);
+  });
+
+  it("single_operator still admits one operator on both sides", async () => {
+    const result = await approveAs(ISSUER, {
+      dualControlMode: "single_operator",
+      challengeIssuerStore: issuerStore(),
+    });
+    expect(result.outcome).toBe("APPROVED");
   });
 });

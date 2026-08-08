@@ -71,6 +71,7 @@ import {
   extractSessionIdFromCookie,
   requireSessionCsrf,
   // Second-device enrol, dual-control policy, operator push
+  APPROVAL_POLICY_DENIAL_CODE,
   DUAL_CONTROL_COPY,
   issueSecondDeviceCeremony,
   bindSecondDevicePublicKey,
@@ -2878,12 +2879,15 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               challengeIssuerStore: deps.challengeIssuerStore,
             });
             if (outcome.outcome === "REJECTED") {
-              if (outcome.reason === "same_operator_both_sides") {
+              // Doc 01 §4.2: a POLICY refusal stays distinguishable from protocol
+              // invalidity. Every other reason keeps the single opaque envelope so
+              // no authentication factor is disclosed.
+              if (outcome.reason === APPROVAL_POLICY_DENIAL_CODE) {
                 return {
                   outcome: "abort",
                   response: fail(
                     403,
-                    "same_operator_both_sides",
+                    APPROVAL_POLICY_DENIAL_CODE,
                     DUAL_CONTROL_COPY.two_human.long,
                     requestId,
                   ),

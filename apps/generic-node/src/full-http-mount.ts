@@ -97,7 +97,7 @@ import {
   InMemoryDualControlPolicy,
   InMemoryApprovalChallengeIssuerStore,
   InMemoryOperatorPushSubscriptionStore,
-  parseDualControlMode,
+  type DualControlMode,
 } from "@zucoins/node-core";
 
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
@@ -349,6 +349,12 @@ export interface ProductionSurfaceConfig {
   };
   /** Optional device-key store for dual-control inventory + readiness. */
   readonly deviceStore?: AdminRouteDeps["deviceStore"];
+  /**
+   * Effective dual-control approval mode, already validated by the frozen schema
+   * (DUAL_CONTROL_MODE). Omitted ⇒ single_operator, the schema's documented
+   * "no optional policy configured" default; there is no parse step here.
+   */
+  readonly dualControlMode?: DualControlMode;
   /** Optional readiness probes (node health, backup schedule, break-glass). */
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   /**
@@ -654,8 +660,12 @@ export function createProductionRouteSurface(
   // Ceremony/issuer/push side-stores are process-local until a durable migration lands
   // (fail-soft / re-issue on restart OK).
   const secondDeviceCeremonyStore = new InMemorySecondDeviceCeremonyStore();
+  // Mode comes from the validated schema (config.DUAL_CONTROL_MODE), never from raw
+  // env here: an unrecognised value must have already refused boot rather than reach
+  // this constructor as the weaker mode. Omitted only by callers that supply no
+  // policy at all — the same single_operator default the schema documents.
   const dualControlPolicy = new InMemoryDualControlPolicy(
-    parseDualControlMode(process.env.DUAL_CONTROL_MODE),
+    config.dualControlMode ?? "single_operator",
   );
   const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
   const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();

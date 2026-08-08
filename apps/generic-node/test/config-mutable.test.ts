@@ -38,6 +38,9 @@ describe("first-boot vs mutable split", () => {
       // deployment-platform healthcheck timeout — tied to railway.json,
       // not a runtime knob. Changing it requires a redeploy to match.
       "RAILWAY_HEALTHCHECK_TIMEOUT_MS",
+      // read once at boot into the dual-control policy port; nothing re-applies a
+      // changed value to a running node, so mutable would be a lie (ZTR-1148).
+      "DUAL_CONTROL_MODE",
     ]);
     expect(MUTABLE_CONFIG_FIELDS).toEqual([
       "POOL_CAP_TOTAL",

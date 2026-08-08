@@ -66,20 +66,29 @@ export function truncate(kind: TruncateKind, value: string): string {
 }
 
 /**
- * `key=value` / `key: value` assignments inside free text. The key class stops
- * at whitespace and quotes, so a JSON fragment (`"password":"…"`) never matches
- * — structured payloads are redacted by field name through redactLogFields and
- * must stay parseable.
+ * `key=value` / `key: value` assignments inside **free text** — a log message,
+ * an `Error.message`, a formatted failure cause. The key class stops at
+ * whitespace and quotes, so a JSON fragment (`"password":"…"`) never matches:
+ * structured payloads are redacted by field name through redactLogFields.
  *
- * The unquoted value class excludes `"` and `'` for that last reason: this
- * scrubber also runs over already-serialized JSON lines (the composition roots
- * log `scrubText(safeJsonLine(event))`), and a value class that ran through the
- * closing quote ate the string terminator — redacted but unparseable, which is
- * a broken control, not a safe one. `\"…\"` is matched as its own alternative
- * so an escaped-quote value inside such a line is still redacted whole.
+ * The value class deliberately consumes `"` and `'`. It has to. Free text
+ * arrives truncated — the runtime listener cuts a cause at 200 characters —
+ * so `pwd="secret` with no closing quote is the ordinary shape, not the exotic
+ * one, and a class that stopped at the opening quote emitted the plaintext.
+ *
+ * That is safe only because this scrubber is never run over serialized JSON.
+ * A quote-consuming class run across a JSON line eats string terminators; a
+ * quote-avoiding one leaks truncated values. One pattern cannot do both jobs,
+ * so it only does this one — redactValue scrubs each string *before*
+ * serialization and the logger adapter re-redacts a JSON line structurally
+ * rather than textually (apps/generic-node/src/boot/safe-logger.ts).
+ *
+ * `]` is not a terminator, which is what makes the scrub idempotent: the class
+ * consumes `[redacted]` whole, so a second pass rewrites it to itself. Stopping
+ * at `]` instead both grew a `]` per pass and let `pwd=[redacted]still-secret`
+ * — a value the caller controls — keep its tail.
  */
-const TEXT_ASSIGNMENT =
-  /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|\\"[^"]*\\"|[^\s,;)\]}"']+)/g;
+const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)}]+)/g;
 
 /**
  * Free-text counterpart of the field-name redactor, for strings that were
@@ -127,6 +136,12 @@ function redactValue(value: unknown, seen: WeakSet<object>, depth: number): unkn
     seen.delete(value);
     return out;
   }
+  // Free text held in an ordinarily-named field — a formatted cause, a driver
+  // message someone copied into `detail` — carries assignments no field-name
+  // rule can see. Scrub it here, before the caller serializes: that is what
+  // makes the emitted JSON both clean and parseable, because nobody has to run
+  // a text pattern across the serialized line afterwards.
+  if (typeof value === "string") return scrubText(value);
   return value;
 }
 

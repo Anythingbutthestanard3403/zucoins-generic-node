@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ELLIPSIS,
   MAX_DEPTH_MARKER,
   MAX_REDACT_DEPTH,
   REDACTED,
@@ -165,6 +166,55 @@ describe("Error values carry no verbatim stack or message", () => {
     expect(scrubText("reason: bad_sig count=3")).toBe("reason: bad_sig count=3");
     expect(scrubText("VAULT_MASTER_KEY=abc123")).toBe(`VAULT_MASTER_KEY=${REDACTED}`);
     expect(scrubText("totpSecret: 123456")).toBe(`totpSecret: ${REDACTED}`);
+  });
+});
+
+// The free-text scrubber's fail-open, pinned where the pattern lives rather than
+// only at the app composition. Causes reach it truncated — the runtime listener
+// cuts at 200 characters — so a value whose opening quote is never closed is the
+// ordinary shape, not the exotic one. A value class that stopped at that opening
+// quote matched no alternative at all and emitted the plaintext verbatim.
+describe("scrubText redacts every quote shape free text arrives in", () => {
+  const SHAPES: ReadonlyArray<readonly [string, string, string]> = [
+    ["unbalanced double quote", 'db auth failed pwd="PW-UNIQUE-VALUE', "PW-UNIQUE-VALUE"],
+    ["unbalanced single quote", "db auth failed pwd='PW-UNIQUE-VALUE", "PW-UNIQUE-VALUE"],
+    ["unbalanced escaped quote", 'db auth failed pwd=\\"PW-UNIQUE-VALUE', "PW-UNIQUE-VALUE"],
+    ["truncation-shaped value", `db auth failed pwd="PW-UNIQUE-VALUE${ELLIPSIS}`, "PW-UNIQUE-VALUE"],
+    ["balanced double quote", 'db auth failed pwd="PW-UNIQUE-VALUE"', "PW-UNIQUE-VALUE"],
+    ["bare unquoted value", "db auth failed pwd=PW-UNIQUE-VALUE", "PW-UNIQUE-VALUE"],
+    ["key only scrubText nets", 'session rejected sessionToken="ST-UNIQUE-VALUE', "ST-UNIQUE-VALUE"],
+  ];
+
+  for (const [label, input, secret] of SHAPES) {
+    it(`redacts a ${label}`, () => {
+      const out = scrubText(input);
+      expect(out).not.toContain(secret);
+      expect(out).toContain(REDACTED);
+    });
+  }
+
+  it("is idempotent — the adapter scrubs a line that was already scrubbed", () => {
+    for (const [, input] of SHAPES) {
+      const once = scrubText(input);
+      expect(scrubText(once)).toBe(once);
+    }
+    expect(scrubText(`pwd=${REDACTED}`)).toBe(`pwd=${REDACTED}`);
+  });
+
+  it("does not stop at the marker when a live value follows it", () => {
+    expect(scrubText(`pwd=${REDACTED}PW-UNIQUE-VALUE`)).not.toContain("PW-UNIQUE-VALUE");
+  });
+
+  it("scrubs free text held in an ordinarily-named field, before serialization", () => {
+    const out = redactLogFields({
+      cause_message: 'db auth failed pwd="PW-UNIQUE-VALUE',
+      detail: { note: "vault unlock failed vaultMasterKey=MK-UNIQUE-VALUE" },
+      amount: "1.00",
+    }) as { cause_message: string; detail: { note: string }; amount: string };
+    expect(out.cause_message).toBe(`db auth failed pwd=${REDACTED}`);
+    expect(out.detail.note).toBe(`vault unlock failed vaultMasterKey=${REDACTED}`);
+    // No assignment shape, no change — a money-path string stays byte-exact.
+    expect(out.amount).toBe("1.00");
   });
 });
 

@@ -44,20 +44,38 @@ describe("production logger routes through the central redactor", () => {
   });
 
   // The composition main.ts:171-179 actually uses: safeJsonLine serializes the
-  // event, then the logger scrubs that JSON as text. The two passes have to
-  // agree — a text scrub that eats the closing quote of the last string value
-  // hands the operator's aggregator a line it cannot parse, on exactly the
-  // events that carried a secret. sanitizeFailureCause runs first, as in
-  // production: its keyword list is deliberately narrower than isNeverLog, so
-  // these three assignments survive it and reach the scrubber.
+  // event, then the logger redacts that line. Both properties have to hold at
+  // once, on every quote shape — the operator's aggregator needs a parseable
+  // line, and the plaintext must not be in it. Redacting the line as *text*
+  // could only ever satisfy one: a quote-consuming pattern eats the string
+  // terminator (r0), a quote-refusing one emits the truncated value verbatim
+  // (r1). sanitizeFailureCause runs first, as in production — its keyword list
+  // is deliberately narrower than isNeverLog, so every assignment below
+  // survives it and reaches the redactor.
+  //
+  // `tail_field` sits after the cause on purpose: a line whose last value is the
+  // damaged one hides the class of defect where the scrub runs on across a JSON
+  // string boundary into the next field.
   const LISTENER_CAUSES = [
     "vault unlock failed vaultMasterKey=MK-UNIQUE-VALUE",
     "session rejected sessionToken=ST-UNIQUE-VALUE",
     'db auth failed pwd="PW-UNIQUE-VALUE"',
+    'db auth failed pwd="PW-UNIQUE-VALUE',
+    "db auth failed pwd='PW-UNIQUE-VALUE",
+    'db auth failed pwd=\\"PW-UNIQUE-VALUE',
+    'session rejected sessionToken="ST-UNIQUE-VALUE',
+    // Longer than MAX_CAUSE_MESSAGE_CHARS, so sanitizeFailureCause cuts it
+    // mid-value and appends the ellipsis — the truncation shape, produced the
+    // way production produces it rather than hand-written.
+    `db auth failed pwd="PW-UNIQUE-VALUE${"x".repeat(400)}`,
+    // Degenerate assignments: the never-log key is the last thing in the
+    // message, so the character after the separator is the JSON terminator.
+    "db auth failed pwd=",
+    'db auth failed pwd="',
   ];
 
   for (const cause of LISTENER_CAUSES) {
-    it(`keeps the composed listener line parseable and redacted — ${cause}`, () => {
+    it(`keeps the composed listener line parseable and redacted — ${cause.slice(0, 48)}`, () => {
       const { sink, lines } = captureSink();
       createSafeConsoleLogger(sink).error(
         safeJsonLine({
@@ -66,15 +84,36 @@ describe("production logger routes through the central redactor", () => {
           method: "POST",
           path_class: "POST /v1/operations",
           ...sanitizeFailureCause(new Error(cause)),
+          tail_field: "sentinel",
         }),
       );
       expect(lines).toHaveLength(1);
       expect(lines[0]).not.toContain("UNIQUE-VALUE");
       const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
       expect(parsed["event"]).toBe("operation_listener_unexpected_failure");
-      expect(parsed["cause_message"]).toContain(REDACTED);
+      expect(parsed["tail_field"]).toBe("sentinel");
+      // Every case but the empty assignment has a value to censor.
+      if (!cause.endsWith("pwd=")) expect(parsed["cause_message"]).toContain(REDACTED);
     });
   }
+
+  it("re-redacts a serialized line structurally, not as text", () => {
+    const { sink, lines } = captureSink();
+    // Fail-closed: a JSON line built anywhere other than safeJsonLine is still
+    // redacted, by field name, and stays parseable.
+    createSafeConsoleLogger(sink).error(
+      JSON.stringify({ event: "x", vaultMasterKey: "MK-UNIQUE-VALUE", tail: "sentinel" }),
+    );
+    const parsed = JSON.parse(lines[0]) as Record<string, unknown>;
+    expect(parsed["vaultMasterKey"]).toBe(REDACTED);
+    expect(parsed["tail"]).toBe("sentinel");
+  });
+
+  it("scrubs a message that only looks like JSON", () => {
+    const { sink, lines } = captureSink();
+    createSafeConsoleLogger(sink).info("{not json after all pwd=PW-UNIQUE-VALUE");
+    expect(lines).toEqual([`{not json after all pwd=${REDACTED}`]);
+  });
 
   it("scrubs a never-log assignment out of an info message", () => {
     const { sink, lines } = captureSink();

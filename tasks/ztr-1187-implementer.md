@@ -279,3 +279,153 @@ reachable from any pg suite. The `a16481f` pg attribution (ZTR-1209-class conten
 
 `db/client.ts:126`'s raw driver `err` → ZTR-1215. The fatal-path double-wrap (`{err:{err}}`) is
 cosmetic and was left alone.
+
+## Rework r2
+
+Review r1 (`f9b2c8f`) FAILed: the r1 regex stopped eating the JSON string terminator but
+opened a new fail-open — a never-log value whose opening quote is never closed matched no
+alternative at all and was emitted verbatim. r0 had the mirror defect. The two properties
+were in tension **because one pattern was doing two jobs**: scrubbing free text, and
+scrubbing an already-serialized JSON document.
+
+### Approach: structural, not another regex shape
+
+I took the fallback the brief authorized, because the mechanical fix cannot close the class.
+Measured on the real built `scrubText` / composed path at `f9b2c8f` (harness below), head
+failed **more** shapes than the review found:
+
+| shape | head `f9b2c8f` |
+| -- | -- |
+| unbalanced `"` / `'` / `\"` / truncation-shaped (Property A) | **1 of 8 redacted** — 7 leak |
+| composed-path JSON validity (Property B) | **3 of 9** parse clean |
+| `cause_message` ending exactly at `pwd=` | invalid JSON — scrub runs on into the *next* field |
+| `cause_message` ending at `pwd="` | invalid JSON |
+| `scrubText(scrubText(x))` | not idempotent — grows a `]` per pass |
+
+The last three are not in the review's table. Any further quote-class tuning trades one of
+them for another: a class that consumes `"` destroys a serialized line, a class that refuses
+`"` emits truncated values. Neither is a shape problem; running a text pattern across JSON
+is the defect.
+
+So the three changes separate the two jobs:
+
+1. **`packages/node-core/src/observability/safe-log.ts` — `redactValue`** now scrubs a plain
+   string value (`if (typeof value === "string") return scrubText(value);`). Free text held
+   in an ordinarily-named field (`cause_message`) is redacted **before** the caller
+   serializes, so the JSON `safeJsonLine` emits is already clean *and* parseable — `JSON.stringify`
+   does the escaping, so there is no quote balancing to get wrong.
+2. **`TEXT_ASSIGNMENT`** goes back to a free-text-only pattern that consumes quotes
+   (`"[^"]*"|'[^']*'|[^\s,;)}]+`), which is the form that redacted 6 of 6 unbalanced inputs
+   before r1. It is now only ever run on free text. `]` was dropped from the terminator set:
+   that makes the scrub idempotent (`[redacted]` is consumed whole and rewritten to itself)
+   and closes a bypass where a caller-controlled `pwd=[redacted]still-secret` kept its tail —
+   my own new test caught that one.
+3. **`apps/generic-node/src/boot/safe-logger.ts` — `redactMessage`** routes: a line that
+   parses as a JSON object is re-redacted *structurally* (`safeJsonLine(JSON.parse(line))`),
+   everything else gets `scrubText`. Re-redacting rather than passing through keeps it
+   fail-closed — a JSON line built anywhere else is still redacted — and both redactors are
+   idempotent, so on a line `safeJsonLine` already produced the second pass is a no-op.
+
+The text pattern now never sees serialized JSON, and serialized JSON is never text-scrubbed.
+Both properties hold by construction rather than by shape enumeration.
+
+### Both-properties harness — red before, green after
+
+One script, run against the **built dist** of the tree under test, checking both properties
+plus idempotence in a single pass
+(`scratchpad/both-properties.mjs`; the same cases are committed as tests, see below):
+
+- **Property A (no leak)** — `scrubText` output must not contain the never-log plaintext for
+  the review's six unbalanced-quote inputs, plus the escaped-unbalanced `pwd=\"…` shape and a
+  400-char input that `sanitizeFailureCause` truncates mid-value on its own.
+- **Property B (valid JSON)** — the composed production path
+  `createSafeConsoleLogger(sink).error(safeJsonLine({ …event, ...sanitizeFailureCause(err) }))`
+  must `JSON.parse` **and** not contain the plaintext, for the r0 blocker (bare value ending
+  the string), balanced quoted, unbalanced double/single/escaped, truncation-shaped, and the
+  two degenerate `pwd=` / `pwd="` shapes. A `tail_field: "sentinel"` sits **after** the cause
+  so a scrub that runs on across the string boundary into the next field cannot hide.
+- **Idempotence** — `scrubText(scrubText(x)) === scrubText(x)`.
+
+| | `f9b2c8f` (before) | this head (after) |
+| -- | -- | -- |
+| Property A — no leak | **1 / 8** | **8 / 8** |
+| Property B — parseable + clean | **3 / 9** | **9 / 9** |
+| Idempotence | 6 / 8 | **8 / 8** |
+| script exit code | 1 | **0** |
+
+Before-row output, verbatim (built dist at `f9b2c8f`):
+
+```
+LEAK    "db auth failed pwd=\"PW-UNIQUE-VALUE"          -> unchanged
+LEAK    "session rejected sessionToken=\"ST-UNIQUE-VALUE" -> unchanged
+LEAK    "vault unlock failed vaultMasterKey=\"MK-UNIQUE-VALUE" -> unchanged
+LEAK    "db auth failed pwd='PW-UNIQUE-VALUE"           -> unchanged
+LEAK    "db auth failed pwd=\"PW-UNIQUE-VALUE…"         -> unchanged
+redact  "db auth failed pwd=\"PW-UNIQUE-VALUE\""        -> "db auth failed pwd=[redacted]"
+LEAK    "db auth failed pwd=\\\"PW-UNIQUE-VALUE"        -> "db auth failed pwd=[redacted]\"PW-UNIQUE-VALUE"
+LEAK    "db auth failed pwd=\"PW-UNIQUE-VALUExxx…"      -> unchanged
+Property A: 1/8 redacted
+
+FAIL unbalanced double quote
+     line=…"cause_message":"db auth failed pwd=[redacted]"PW-UNIQUE-VALUE","tail_field":"sentinel"}
+     parse=Expected ',' or '}' after property value in JSON at position 220   leak=true
+FAIL assignment with empty value
+     line=…"cause_message":"db auth failed pwd=[redacted]tail_field":"sentinel"}
+     parse=Expected ',' or '}' after property value in JSON at position 230   leak=false
+Property B: 3/9 parseable+clean
+```
+
+After: every Property A row `redact`, every Property B row `PASS`, exit 0.
+
+### The cases are committed, not throwaway
+
+- `packages/node-core/test/safe-log-redaction.test.ts` — a `SHAPES` table pinning the
+  free-text invariant where the pattern lives: unbalanced double / single / escaped quote,
+  truncation-shaped, balanced, bare, plus a never-log key `sanitizeFailureCause` does not
+  cover; an idempotence assertion over every shape; the `pwd=[redacted]still-secret` bypass;
+  and the pre-serialization structural scrub (`cause_message` redacted, `amount: "1.00"`
+  untouched).
+- `apps/generic-node/test/safe-logger.test.ts` — `LISTENER_CAUSES` grows from 3 to 10 on the
+  same composed path, each asserting `JSON.parse` succeeds, the plaintext is absent, and the
+  trailing sentinel field survives. Two more tests pin the routing itself: a JSON line built
+  outside `safeJsonLine` is still redacted by field name, and a message that only *looks*
+  like JSON still gets the text scrub.
+
+### Certified behaviour left undisturbed
+
+- Depth fail-open census: `packages/node-core/test/safe-log-redaction.test.ts` — the depth
+  and dump-census assertions are untouched and green (26 tests in that file, up from 16 by the
+  new cases only).
+- Single chokepoint: `packages/node-core/test/boundaries.test.ts` **71/71**; the
+  `safe-logger.ts` import set is unchanged (`redactLogFields`, `scrubErrorDetails`,
+  `scrubText` all still used), and both entry points still log only through the adapter —
+  the raw-`console` source gate is unchanged and green.
+
+### Verification at the rework head
+
+| Command | Result |
+| -- | -- |
+| `npx tsc -b` | exit 0 |
+| `npx eslint .` | 6 problems, **0 errors**, 6 warnings — the exact pre-existing six |
+| `pnpm test:boundaries` | **162 passed** (5 files) |
+| node-core `safe-log-redaction` + `boundaries` + app `safe-logger` | **116 passed** (3 files) |
+| app `safe-logger` + `stage1-*` | **35 passed** (3 files) — was 26, +9 new composed-path cases |
+| both-properties harness | A **8/8**, B **9/9**, idempotence **8/8**, exit 0 |
+| `pnpm test` (full) | **11658 passed**, 20 skipped, 5 todo, **2 failed** |
+
+The two failures are both `.pg.test.ts` and are provisioning contention, not this diff — which
+touches one regex, one `typeof value === "string"` branch and one logger routing function, and
+has no DB surface at all. Re-run without the contention:
+
+- `metrics-postgres-deadline.pg` + `send-completion-lander.pg` alone at this head → **14/14 passed**.
+- All five pg files that failed in the full run, re-run at this head → 42 passed, only
+  `receive-settle-step.pg` failing, and on `duplicate key … pg_extension_name_index
+  (extname)=(pgcrypto)` — two files racing `CREATE EXTENSION` in the same scratch cluster.
+- The `send-completion-lander` failure mode was `role "degraded_lowpriv" does not exist`: that
+  role is **cluster-wide**, created in `beforeAll` and dropped in `afterAll` (lines 817, 856), so
+  a concurrent or interrupted run of the same file removes it out from under a live one.
+
+### Out of scope, unchanged
+
+`db/client.ts:126`'s raw driver `err` → ZTR-1215. The fatal-path double-wrap (`{err:{err}}`) is
+cosmetic and was left alone.

@@ -38,23 +38,58 @@ export function safeJsonLine(fields: Record<string, unknown>): string {
 }
 
 /**
- * BootLogger that scrubs the message text and routes the error through the
- * central redactor. Never mutates what the caller passed — redactLogFields
- * deep-copies, which the money path relies on for byte-exactness.
+ * Redact one line on its way to a text sink.
+ *
+ * A serialized event line is redacted *structurally* — parsed, run back through
+ * redactLogFields, re-serialized — so it stays parseable by construction.
+ * Anything else is free text and gets the text scrubber.
+ *
+ * The split is the point. Composition roots log `safeJsonLine(event)`, so the
+ * adapter is handed JSON; the text scrubber has to consume an unbalanced
+ * opening quote, because the runtime listener truncates causes at 200 chars and
+ * cuts quoted values mid-string. A quote-consuming pattern run across a JSON
+ * string terminator destroys the line, and a pattern that refuses quotes leaks
+ * exactly those truncated values. Both were tried (ZTR-1187 r0, r1). Neither
+ * defect exists once the text pattern never sees JSON.
+ *
+ * Re-redacting rather than passing the parsed line straight through keeps this
+ * fail-closed: a JSON line built anywhere else is still redacted, and both
+ * redactLogFields and scrubText are idempotent, so the second pass is a no-op
+ * on a line safeJsonLine already produced.
+ */
+function redactMessage(message: string): string {
+  if (message.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(message);
+    } catch {
+      return scrubText(message);
+    }
+    if (parsed !== null && typeof parsed === "object") {
+      return safeJsonLine(parsed as Record<string, unknown>);
+    }
+  }
+  return scrubText(message);
+}
+
+/**
+ * BootLogger that redacts the message and routes the error through the central
+ * redactor. Never mutates what the caller passed — redactLogFields deep-copies,
+ * which the money path relies on for byte-exactness.
  */
 export function createSafeConsoleLogger(sink: SafeLoggerSink = console): BootLogger {
   return {
     info: (message) => {
-      sink.log(scrubText(message));
+      sink.log(redactMessage(message));
     },
     error: (message, err) => {
       if (err === undefined) {
-        sink.error(scrubText(message));
+        sink.error(redactMessage(message));
         return;
       }
       // Wrapped in a field, because `message` and `stack` are non-enumerable on
       // Error: the redactor's Error branch is only reached through a value.
-      sink.error(scrubText(message), scrubErrorDetails({ err }));
+      sink.error(redactMessage(message), scrubErrorDetails({ err }));
     },
   };
 }

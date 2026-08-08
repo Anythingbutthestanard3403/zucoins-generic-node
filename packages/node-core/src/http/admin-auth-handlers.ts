@@ -122,6 +122,15 @@ export async function handleAdminLogin(
     return errorJson(400, "validation_error", "password required");
   }
 
+  const ip = deps.ip ?? null;
+  // Password brute force: same admin lockout model primary pair lock as
+  // confirm-TOTP (5/15 min). The lock is read at the decision below, never cached
+  // here — two awaits separate this point from that branch, and a snapshot taken
+  // before them lets every request already in flight when the threshold trips be
+  // judged as unlocked. That hands a pipelining attacker a per-window guess budget
+  // equal to their own concurrency instead of the threshold.
+  // Ceiling: ip-lockout state is in-memory per process, so an N-replica
+  // deployment gives an attacker N× the threshold before any pair locks.
   const user = await deps.userStore.findByUsername(username);
 
   // Constant work: exactly one bcrypt compare regardless of whether the user exists.
@@ -130,13 +139,26 @@ export async function handleAdminLogin(
     user?.passwordHash ?? DUMMY_PASSWORD_HASH,
   );
 
-  if (user === null || !passwordMatches || user.disabledAt !== null) {
+  // The compare above already ran, so short-circuiting on the lock here costs a
+  // locked pair exactly one bcrypt — no timing oracle DUMMY_PASSWORD_HASH exists to close.
+  if (
+    isIpPairLocked(ip, username) ||
+    user === null ||
+    !passwordMatches ||
+    user.disabledAt !== null
+  ) {
+    // Silent lockout: a locked pair answers with the wrong-password envelope,
+    // byte for byte (ip-lockout.ts:6-7). Registering while already locked only
+    // touches lastFailureMs — it never extends the lock.
+    registerIpFailure(ip, username);
     return errorJson(401, "invalid_credentials", "invalid credentials");
   }
 
+  clearIpFailures(ip, username);
+
   const { session, setCookie } = await deps.sessions.createSession({
     userId: user.id,
-    ip: deps.ip ?? null,
+    ip,
     userAgent: deps.userAgent ?? null,
   });
 

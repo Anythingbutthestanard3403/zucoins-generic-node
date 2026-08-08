@@ -29,6 +29,7 @@ import {
   commitReceiveReady,
   createMoneySignerBoundaryDeps,
   createSqlSignerAuditLog,
+  DEFAULT_SERIALIZATION_RETRY_POLICY,
   expireQueueAgedReceives,
   formReceiveCodeAndArtifact,
   GENESIS_PROJECTION,
@@ -40,6 +41,7 @@ import {
   runSendPostApproveFormation,
   SqlReceiveExpiryReleaseService,
   toBase64UrlPadded,
+  withSerializationRetry,
   type DeviceKeyStore,
   type DualChainEventQuota,
   type EncryptedWalletKeyStore,
@@ -727,31 +729,38 @@ async function runReceiveExpiryReleaseStep(deps: {
     return { processed: 0, released: 0, attention: 0 };
   }
 
+  // SERIALIZABLE per CONVENTIONS.md §1 (money-path: releases a wallet lease and mints a
+  // release proof), so 40001 is reachable here and must be retried under the one fixed
+  // policy rather than surfacing as a tick error. The retried body is DB-only: the expiry
+  // pass runs with `freshObservationId: null` (below), so no gateway read and no chain
+  // submit can occur inside it — the same discipline sql-recovery-store.ts applies when it
+  // wraps this very service.
   const service = new SqlReceiveExpiryReleaseService({
-    withTransaction: async <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> => {
-      const client = await deps.pool.connect();
-      try {
-        await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
-        const tx: SqlTx = {
-          query: async <R>(text: string, params?: readonly unknown[]) => {
-            const result = await client.query(text, params as never);
-            return { rows: result.rows as R[], rowCount: result.rowCount };
-          },
-        };
-        const out = await fn(tx);
-        await client.query("COMMIT");
-        return out;
-      } catch (err) {
+    withTransaction: async <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> =>
+      withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, async () => {
+        const client = await deps.pool.connect();
         try {
-          await client.query("ROLLBACK");
-        } catch {
-          /* original */
+          await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+          const tx: SqlTx = {
+            query: async <R>(text: string, params?: readonly unknown[]) => {
+              const result = await client.query(text, params as never);
+              return { rows: result.rows as R[], rowCount: result.rowCount };
+            },
+          };
+          const out = await fn(tx);
+          await client.query("COMMIT");
+          return out;
+        } catch (err) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            /* original */
+          }
+          throw err;
+        } finally {
+          client.release();
         }
-        throw err;
-      } finally {
-        client.release();
-      }
-    },
+      }),
   });
 
   let processed = 0;

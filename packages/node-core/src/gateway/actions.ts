@@ -14,10 +14,24 @@ import { SUBMIT_ACTION_NAME } from "@zucoins/generic-node-contracts/transfer-cod
 // submit action is intentionally absent from this list — see GatewayReadActionName.
 export const READ_SAFE_ACTION_NAMES = [
   "get_transaction__v1",
-  "push_notification__subscribe__v1",
-  "push_notification__has_subscription_for_public_key_base64urlsafe__v1",
-  "push_notification__send_to_public_key_base64urlsafe__v1",
-  "push_notification__get_app_server_public_key__v1",
+  // The push host dispatches on the exact suffixed literal. The ten-character suffix is
+  // an opaque per-action token transcribed VERBATIM from the shipped wallet bundle — it
+  // is part of the name, not a version qualifier, and there is no derivation rule (do
+  // not add one). The bare `__v1` forms are dead: live probe 2026-08-08 (ZTR-1152) got
+  // 200 {"status":false,"code":"oysinkh3cy","message":'…Unsupported "action_name"…'}
+  // for the bare name and a routed domain answer for the suffixed one. These literals
+  // pin OUR OUTPUT only; the host's acceptance is verified at boot by the push
+  // action-vocabulary probe (apps/generic-node/src/main.ts, gateway-read region), which
+  // surfaces PushActionVocabularyRejectedError on drift.
+  // Wallet 200.6 app.js:4841:
+  "push_notification__subscribe__v1__tos2d5b5md",
+  // Wallet 200.6 main.js:8866:
+  "push_notification__has_subscription_for_public_key_base64urlsafe__v1__jxqlqcj5zv",
+  // Wallet 200.6 main.js:8925 — zero production callers; unused vocabulary retained so
+  // the read-safe union stays the complete gateway vocabulary minus submit:
+  "push_notification__send_to_public_key_base64urlsafe__v1__jc34lsh7ps",
+  // Wallet 200.6 app.js:4222:
+  "push_notification__get_app_server_public_key__v1__nozleh4wul",
 ] as const;
 
 // The read-safe union: every gateway action EXCEPT the submit action. Passing

@@ -25,7 +25,7 @@ import {
 } from "@zucoins/node-core";
 
 import { createEceDecryptor } from "./ece-decryptor.js";
-import { createPushGatewayActions } from "./gateway-actions.js";
+import { createPushGatewayActions, probePushActionVocabulary } from "./gateway-actions.js";
 import { createSqlPushSubscriptionStore } from "./sql-store.js";
 
 export interface PushCompositionLogger {
@@ -57,6 +57,13 @@ export interface PushComposition {
   readonly onWalletsMinted: (walletIds: readonly string[]) => void;
   /** One immediate pass; call during boot after the vault is available. */
   readonly reconcileNow: () => Promise<void>;
+  /**
+   * One smoke call from the boot lane's gateway-read region (ZTR-1152 Option B):
+   * throws PushActionVocabularyRejectedError when the push host no longer dispatches
+   * our action names (wallet-release literal drift); logs and returns on a plain
+   * outage, which never gates boot.
+   */
+  readonly probeActionVocabulary: () => Promise<void>;
   /** Start the jittered sweep. Returns a stop handle for graceful shutdown. */ // contract-allow:sweep:frozen structural vocabulary
   readonly startSweep: (intervalMs?: number) => { stop: () => void };
 }
@@ -172,6 +179,10 @@ export function composePush(deps: ComposePushDeps): PushComposition {
           }
         }
       })();
+    },
+
+    async probeActionVocabulary() {
+      await probePushActionVocabulary(gateway, deps.logger);
     },
 
     async reconcileNow() {

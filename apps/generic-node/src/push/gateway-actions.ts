@@ -48,6 +48,37 @@ export class PushGatewayUnavailableError extends Error {
   }
 }
 
+// The push host dispatches on exact suffixed action names (opaque per-action tokens
+// transcribed from the wallet bundle — see READ_SAFE_ACTION_NAMES). When a wallet
+// release rotates them, the host answers an UNKNOWN name with HTTP 200 and
+// {"status":false,"code":"oysinkh3cy","message":'…Unsupported "action_name"…'} — the
+// same 200/status:false shape as a legitimate negative answer (live probe 2026-08-08,
+// ZTR-1152). Without this classification that rejection degrades into `false` on
+// hasSubscriptionForPublicKey (a re-subscribe storm) or a generic transport-flavoured
+// error, and the operator debugs the network while the defect is the vocabulary. This
+// error is DISTINCT and never folded into PushGatewayUnavailableError.
+export class PushActionVocabularyRejectedError extends Error {
+  readonly code = "push_action_vocabulary_rejected";
+  constructor(action: string, readonly gatewayCode: string) {
+    super(
+      `push action ${action} is not in the push host's dispatch vocabulary ` +
+        `(code=${gatewayCode}) — wallet-release action-name drift, not an outage; ` +
+        `re-transcribe the suffixed literals from the current wallet bundle`,
+    );
+    this.name = "PushActionVocabularyRejectedError";
+  }
+}
+
+// Vocabulary rejection is recognised by the host's message text (semantic, stable
+// phrasing) with the observed envelope code as a secondary signal — the code looks like
+// another opaque token and may itself rotate. Transcribed from the live probe
+// 2026-08-08 (ZTR-1152 evidence comment).
+function isActionVocabularyRejection(envelope: PushEnvelope): boolean {
+  if (envelope.status === true) return false;
+  const message = envelope.message ?? "";
+  return message.includes('Unsupported "action_name"') || envelope.code === "oysinkh3cy";
+}
+
 export interface PushGatewayOptions {
   /** Push API base, e.g. `https://wallet.zucoins.com/api__v1/`. */
   readonly pushApiBase: string;
@@ -107,13 +138,27 @@ export function createPushGatewayActions(options: PushGatewayOptions): PushGatew
         if (!res.ok) {
           lastError = `http ${res.status}`;
         } else {
+          let envelope: PushEnvelope | undefined;
           try {
-            return JSON.parse(text) as PushEnvelope;
+            envelope = JSON.parse(text) as PushEnvelope;
           } catch {
             lastError = "malformed envelope";
           }
+          if (envelope !== undefined) {
+            // A vocabulary rejection is deterministic — the same name gets the same
+            // refusal on every attempt — so it must escape the retry loop as its own
+            // named error, never burn attempts, and never fold into
+            // PushGatewayUnavailableError.
+            if (isActionVocabularyRejection(envelope)) {
+              throw new PushActionVocabularyRejectedError(actionName, envelope.code ?? "unknown");
+            }
+            return envelope;
+          }
         }
       } catch (err) {
+        if (err instanceof PushActionVocabularyRejectedError) {
+          throw err;
+        }
         lastError = err instanceof Error ? err.message : String(err);
       } finally {
         clearTimeout(timer);
@@ -129,7 +174,8 @@ export function createPushGatewayActions(options: PushGatewayOptions): PushGatew
 
   return {
     async subscribe(input) {
-      const res = await call("push_notification__subscribe__v1", {
+      // Wallet 200.6 app.js:4841 — suffixed literal transcribed verbatim (ZTR-1152).
+      const res = await call("push_notification__subscribe__v1__tos2d5b5md", {
         id_proof__url_query: input.idProofQuery,
         subscription: {
           endpoint: input.endpoint,
@@ -151,8 +197,9 @@ export function createPushGatewayActions(options: PushGatewayOptions): PushGatew
       // `data` is an empty array both when subscribed and when not, so reading
       // `data.has_subscription` yields undefined → always false → a re-subscribe storm
       // against the push rate limiter on every pass.
+      // Wallet 200.6 main.js:8866 — suffixed literal transcribed verbatim (ZTR-1152).
       const res = await call(
-        "push_notification__has_subscription_for_public_key_base64urlsafe__v1",
+        "push_notification__has_subscription_for_public_key_base64urlsafe__v1__jxqlqcj5zv",
         { wallet_key_public__base64urlsafe: walletPublicKey },
       );
       return res.status === true;
@@ -163,7 +210,8 @@ export function createPushGatewayActions(options: PushGatewayOptions): PushGatew
         return cachedAppServerKey;
       }
 
-      const res = await call("push_notification__get_app_server_public_key__v1", {});
+      // Wallet 200.6 app.js:4222 — suffixed literal transcribed verbatim (ZTR-1152).
+      const res = await call("push_notification__get_app_server_public_key__v1__nozleh4wul", {});
       const data = res.data;
       if (typeof data !== "object" || data === null) {
         throw new PushGatewayRejectedError("get_app_server_public_key", res.code ?? "unknown");
@@ -186,4 +234,37 @@ export function createPushGatewayActions(options: PushGatewayOptions): PushGatew
       return key;
     },
   };
+}
+
+// Fixed valid-shape probe key: 32 zero bytes, padded base64url (44 chars). The host
+// treats an unknown wallet key as a legitimate query ("No active subscriptions found"),
+// so the probe is a pure read that binds to nothing.
+export const PUSH_VOCABULARY_PROBE_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+/**
+ * One smoke call proving the push host still dispatches our (wallet-transcribed,
+ * opaque-suffixed) action names — ZTR-1152 Option B. Called from the boot lane's
+ * gateway-read region, NEVER from `createPushGatewayActions` (the factory stays
+ * side-effect-free).
+ *
+ * Only vocabulary drift propagates (`PushActionVocabularyRejectedError`, deterministic,
+ * named, actionable). Plain unavailability logs and returns: push-host availability has
+ * never gated boot — the boot reconcile and periodic pass repair an outage later.
+ */
+export async function probePushActionVocabulary(
+  gateway: Pick<PushGatewayActions, "hasSubscriptionForPublicKey">,
+  logger: { info(message: string): void; error(message: string, err?: unknown): void },
+): Promise<void> {
+  try {
+    await gateway.hasSubscriptionForPublicKey(PUSH_VOCABULARY_PROBE_KEY);
+    logger.info("push: action-vocabulary probe accepted by the push host");
+  } catch (err) {
+    if (err instanceof PushActionVocabularyRejectedError) {
+      throw err;
+    }
+    logger.error(
+      "push: action-vocabulary probe could not reach the push host — proceeding (availability, not vocabulary)",
+      err,
+    );
+  }
 }

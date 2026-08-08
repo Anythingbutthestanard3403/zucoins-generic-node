@@ -32,6 +32,17 @@ export default defineConfig({
         ),
       },
       {
+        // Operator-console operations list/detail wire shapes — src/admin-inventory/types.ts
+        // imports this subpath, so every suite reaching the admin router needs it.
+        find: "@zucoins/generic-node-contracts/admin-inventory",
+        replacement: fileURLToPath(
+          new URL(
+            "../../packages/generic-node-contracts/src/admin-inventory/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
         find: "@zucoins/generic-node-contracts/transfer-code",
         replacement: fileURLToPath(
           new URL("../../packages/generic-node-contracts/src/transfer-code/index.ts", import.meta.url),

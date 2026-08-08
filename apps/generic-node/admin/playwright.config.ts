@@ -24,6 +24,11 @@ export default defineConfig({
   outputDir: "test-results",
   use: {
     baseURL: BASE_URL,
+    // The built shell registers a service worker. A request the worker forwards leaves the
+    // worker context, so `page.route` never sees it: the admin fixtures were bypassed, the app
+    // got a real (refused) network call, and the fixture guard passed vacuously because no
+    // request reached it. Blocking workers puts every fetch back through the fixtures.
+    serviceWorkers: "block",
     viewport: { width: 320, height: 640 },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",

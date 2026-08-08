@@ -78,6 +78,9 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.4(react@19.2.8)
+      '@zucoins/generic-node-contracts':
+        specifier: workspace:*
+        version: link:../../../packages/generic-node-contracts
       qrcode-generator:
         specifier: ^2.0.4
         version: 2.0.4
@@ -112,9 +115,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@6.4.3(@types/node@22.20.1)(tsx@4.23.5))
-      '@zucoins/generic-node-contracts':
-        specifier: workspace:*
-        version: link:../../../packages/generic-node-contracts
       axe-core:
         specifier: ^4.12.1
         version: 4.12.1

@@ -46,6 +46,7 @@ const WALLET_ID = "22222222-2222-4222-8222-222222222222";
 const OP_ID = "33333333-3333-4333-8333-333333333333";
 const DEST_ID = "44444444-4444-4444-8444-444444444444";
 const AUDIT_ID = "55555555-5555-4555-8555-555555555555";
+const SEND_DESTINATION_ADDRESS = "zkz1qadmininventorydestinationpublickey000001";
 
 async function seedAdmin(store: InMemoryAdminUserStore, password: string): Promise<AdminUser> {
   const user: AdminUser = {
@@ -116,12 +117,12 @@ function inventorySeed() {
           created_at: "2026-07-03T00:00:00.000Z",
           updated_at: "2026-07-03T00:01:00.000Z",
           terminal_at: null,
+          destination_address: null,
         },
         detail: {
           source_wallet_id: null,
           receiver_wallet_id: WALLET_ID,
           destination_id: null,
-          destination_address: null,
           after_landing: "HOLD",
           after_landing_destination_id: null,
           formation_state: "NOT_REQUIRED",
@@ -142,6 +143,7 @@ function inventorySeed() {
           created_at: "2026-07-03T02:00:00.000Z",
           updated_at: "2026-07-03T02:00:00.000Z",
           terminal_at: null,
+          destination_address: SEND_DESTINATION_ADDRESS,
         },
       },
     ],
@@ -556,6 +558,59 @@ describe("admin inventory HTTP (contract)", () => {
     // AUDIT_ID appears as keyset param (not as the only timestamptz value).
     expect(paramsLog[0]).toContain(AUDIT_ID);
     expect(paramsLog[0]).toContain("2026-01-01T00:00:00.000Z");
+  });
+
+  it("D3: SQL listOperations projects destination_address (SELECT + mapOpList)", async () => {
+    // The allowlist walk above only proves the KEY is present: a list SELECT that stopped
+    // projecting the column would still map to null and still satisfy `toHaveProperty`. This
+    // pins the column in the query text and the value through the row mapper, which is the pair
+    // that has to move together for the operator's destination column to show anything.
+    const texts: string[] = [];
+    const sql: InventorySqlExecutor = {
+      async query(text, _params) {
+        texts.push(text);
+        return {
+          rows: [
+            {
+              id: "88888888-8888-4888-8888-888888888888",
+              kind: "SEND_EXTERNAL",
+              status: "CREATED",
+              amount_zkz: "0.01",
+              row_version: 1,
+              attention_required: false,
+              attention_reason: null,
+              created_at: "2026-07-03T02:00:00.000Z",
+              updated_at: "2026-07-03T02:00:00.000Z",
+              terminal_at: null,
+              destination_address: SEND_DESTINATION_ADDRESS,
+            },
+            {
+              id: OP_ID,
+              kind: "RECEIVE_EXTERNAL",
+              status: "READY",
+              amount_zkz: "0.01",
+              row_version: 2,
+              attention_required: false,
+              attention_reason: null,
+              created_at: "2026-07-03T00:00:00.000Z",
+              updated_at: "2026-07-03T00:01:00.000Z",
+              terminal_at: null,
+              destination_address: null,
+            },
+          ],
+        };
+      },
+    };
+    const store = createSqlAdminInventoryStore(sql);
+    const page = await store.listOperations(NODE_ID, { limit: 10 });
+
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!).toContain("o.destination_address");
+    // Straight off `operations o` — no join added to the scanning read.
+    expect(texts[0]!).not.toContain("JOIN");
+
+    expect(page.data[0]!.destination_address).toBe(SEND_DESTINATION_ADDRESS);
+    expect(page.data[1]!.destination_address).toBeNull();
   });
 
   it("empty inventory store still returns 200 list envelopes (fail-soft SPA)", async () => {

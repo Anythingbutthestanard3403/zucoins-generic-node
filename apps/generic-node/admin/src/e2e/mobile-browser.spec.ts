@@ -3,6 +3,7 @@
 // This is a real layout/paint/input engine with an emulated viewport, not a physical device.
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
+  E2E_DESTINATION_ADDRESS,
   E2E_OPERATION_ID,
   E2E_WALLET_PUBKEY,
   registerAdminApiRoutes,
@@ -82,12 +83,15 @@ type Workflow = {
 
 const workflows: Workflow[] = [
   { name: "Overview", path: "/", heading: "Overview", authenticated: true, critical: (p) => p.getByRole("button", { name: "Toggle theme" }) },
-  { name: "Approve inbox", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByTestId("approve-honesty") },
-  { name: "Approve inbox pending SEND", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByTestId("approve-send-card") },
+  // `critical` is asserted visible AND tabbed to, so it has to be a focusable control:
+  // a <p>/<li>/<h1> can never enter the tab order, which is why the honesty note, the send
+  // card and the Transfers heading could not pass. Each now names the page's real control.
+  { name: "Approve inbox", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("link", { name: "Transfers", exact: true }).last() },
+  { name: "Approve inbox pending SEND", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("button", { name: "Review & decide" }) },
   { name: "Operations", path: "/operations", heading: "Operations", authenticated: true, critical: (p) => p.getByRole("link", { name: "Operations" }) },
   { name: "Wallets", path: "/wallets", heading: "Wallets", authenticated: true, critical: (p) => p.getByRole("link", { name: new RegExp(E2E_WALLET_PUBKEY.slice(0, 12)) }) },
   { name: "Wallet detail", path: `/wallets/${E2E_WALLET_PUBKEY}`, heading: "Wallet", authenticated: true, critical: (p) => p.getByRole("button", { name: "Copy pubkey" }) },
-  { name: "Transfers", path: "/transfers", heading: "Transfers", authenticated: true, critical: (p) => p.getByRole("heading", { name: "Transfers" }) },
+  { name: "Transfers", path: "/transfers", heading: "Transfers", authenticated: true, critical: (p) => p.getByRole("link", { name: E2E_OPERATION_ID }) },
   { name: "Transfer detail", path: `/transfers/${E2E_OPERATION_ID}`, heading: new RegExp(`Transfer\\s+${E2E_OPERATION_ID}`), authenticated: true, critical: (p) => p.getByRole("link", { name: "← Transfers" }) },
   { name: "Destinations", path: "/destinations", heading: "Destinations", authenticated: true, critical: (p) => p.getByRole("button", { name: "Bless destination" }) },
   { name: "Audit", path: "/audit", heading: "Audit log", authenticated: true, critical: (p) => p.getByRole("link", { name: "Audit" }) },
@@ -131,6 +135,18 @@ test.describe("every-workflow Chromium route matrix (320px)", () => {
 });
 
 test.describe("deeper real-browser mobile/keyboard checks", () => {
+  test("Transfers 'To' shows the destination the summary row carries, not a dash", async ({
+    page,
+  }) => {
+    await authenticated(page, "/transfers");
+    const row = page.getByRole("row").filter({ hasText: E2E_OPERATION_ID });
+    await expect(row).toBeVisible();
+    // The fixture projects the list payload through OPERATION_INVENTORY_LIST_FIELDS, so this
+    // passes only while the node's list projection actually carries destination_address.
+    await expect(row.getByRole("cell", { name: E2E_DESTINATION_ADDRESS })).toBeVisible();
+  });
+
+
   test("sidebar overlays rather than squeezing content and is keyboard-operable without hover", async ({ page }) => {
     await authenticated(page, "/");
     const pin = page.getByRole("button", { name: "Pin sidebar" });

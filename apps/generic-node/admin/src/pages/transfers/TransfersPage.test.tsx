@@ -94,6 +94,9 @@ describe("TransfersPage honesty", () => {
     );
     renderPage();
     expect(await screen.findByText("op-live-1")).toBeInTheDocument();
+    // "To" renders the destination the summary row carries. It read `—` on every row in
+    // production while the list projection omitted the field the SPA type declared.
+    expect(screen.getByText("zkz1qdest")).toBeInTheDocument();
     expect(screen.queryByText("No transfers")).not.toBeInTheDocument();
   });
 

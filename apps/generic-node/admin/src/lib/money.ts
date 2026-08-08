@@ -2,6 +2,10 @@
 // Mutations always go through `api()` (never apiOrDemo — no fixture "success").
 // Reads may use inventory GETs when mounted; absent routes surface as live:false.
 
+import type {
+  OperationInventoryDetail,
+  OperationInventoryListItem,
+} from "@zucoins/generic-node-contracts/admin-inventory";
 import { api, apiOrDemo, ApiError, type ApiFailureDetail, toApiFailureDetail } from "./api.js";
 import { useAuth } from "../store/auth.js";
 
@@ -78,6 +82,14 @@ export interface RecoveryActionSuccess {
   [key: string]: unknown;
 }
 
+/**
+ * FOLLOW-UP (ZTR-1202): still hand-transcribed, and already known to disagree with the node's
+ * `DestinationInventoryItem` (missing `blessed_by_device_key_id` / `blessing_artifact_id`, and
+ * marking server-mandatory fields optional). Move it onto the shared
+ * `@zucoins/generic-node-contracts` declaration the way the operations shapes above already are
+ * — the compiler cannot see the disagreement until it is shared. Same for
+ * {@link WalletInventoryItem}.
+ */
 export interface DestinationItem {
   destination_id: string;
   node_id?: string;
@@ -169,33 +181,16 @@ async function loadCompleteInventory<T>(
   });
 }
 
-export interface OperationListItem {
-  operation_id: string;
-  operation_type: string;
-  status: string;
-  amount_zkz: string;
-  row_version: number;
-  attention_required: boolean;
-  attention_reason: string | null;
-  created_at: string;
-  updated_at?: string;
-  terminal_at?: string | null;
-  destination_address?: string | null;
-}
-
-/** Point-read inventory detail (GET /admin/v1/operations/:id). */
-export interface OperationInventoryDetail extends OperationListItem {
-  readonly source_wallet_id: string | null;
-  readonly receiver_wallet_id: string | null;
-  readonly destination_id: string | null;
-  readonly destination_address: string | null;
-  readonly after_landing: string | null;
-  readonly after_landing_destination_id: string | null;
-  readonly formation_state: string;
-  readonly verification_verdict: string;
-  readonly implementer_id: string;
-  readonly client_reference: string | null;
-}
+/**
+ * List row (GET /admin/v1/operations) and point read (GET /admin/v1/operations/:id).
+ *
+ * Both come from `@zucoins/generic-node-contracts/admin-inventory` — the same declaration the
+ * node's projection compiles against — rather than being transcribed here. A hand-copied list
+ * type is how `destination_address` came to be read off a summary row the server never sent it
+ * on; the shared declaration makes that a build failure instead of a column of dashes.
+ */
+export type { OperationInventoryDetail };
+export type OperationListItem = OperationInventoryListItem;
 
 /**
  * Deep-link path for an operation detail view.
@@ -478,6 +473,12 @@ export async function listDestinationsInventory(
 }
 
 /** Wallet inventory row. observed_balance_zkz is gateway-observed, null if never seen. */
+/**
+ * FOLLOW-UP (ZTR-1202): hand-transcribed and known-drifted against the node's
+ * `WalletInventoryItem` (which carries the full `WalletCustodyView` — `node_id`, `retired_at`,
+ * `quarantine_reason`, `recovery_verified_at`, `recovery_verification_id`). Share the
+ * declaration, as {@link OperationListItem} now does, rather than widening it by hand.
+ */
 export interface WalletInventoryItem {
   readonly wallet_id: string;
   readonly public_key: string;

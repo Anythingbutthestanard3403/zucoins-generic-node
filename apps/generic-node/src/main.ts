@@ -681,13 +681,15 @@ async function main(): Promise<void> {
   // Refusals are counted on every event but logged only on the leading edge of a
   // refusing run per lane, so a flood cannot trade a memory-exhaustion DoS for a
   // log-volume one. The counter is the continuous signal; the log names the reason.
+  // Returns the verdict so a producer that keeps a per-deposit record (push) can audit the
+  // refusal truthfully rather than reporting an enqueue that never happened.
   const refusingIntakeSources = new Set<CandidateIntakeSource>();
-  const depositToCandidateIntake = (source: CandidateIntakeSource, rawBody: unknown): void => {
+  const depositToCandidateIntake = (source: CandidateIntakeSource, rawBody: unknown): boolean => {
     const result = enqueueReceiverChannelDeposit(candidateIntake, rawBody, source);
     if (result.enqueued) {
       refusingIntakeSources.delete(source);
       logger.info(`node: candidate intake deposit enqueued source=${source}`);
-      return;
+      return true;
     }
     const reason = result.reason ?? "malformed_body";
     metricsHooks.onCandidateIntakeRefused(source, reason);
@@ -695,6 +697,7 @@ async function main(): Promise<void> {
       refusingIntakeSources.add(source);
       logger.info(`node: candidate intake deposit refused source=${source} reason=${reason}`);
     }
+    return false;
   };
   // the Web Push slices — push composition is built after the vault root exists (below) and
   // held here so the listener, money workers and shutdown can all reach it.
@@ -728,12 +731,11 @@ async function main(): Promise<void> {
       sign: (walletId, preimage) => pushSigner.sign(walletId, preimage),
       // Same inbox the origin relay feeds — one intake path, two producers, but the
       // authenticated lane has its own capacity and is served first.
-      sink: (transferCodeEncoded) => {
+      sink: (transferCodeEncoded) =>
         depositToCandidateIntake("push", {
           action_name: RECEIVER_CHANNEL_ACTION_NAME,
           action_data: { [RECEIVER_CHANNEL_ACTION_DATA_FIELD]: transferCodeEncoded },
-        });
-      },
+        }),
       logger,
     });
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);
@@ -767,7 +769,9 @@ async function main(): Promise<void> {
         depositToCandidateIntake("relay", rawBody);
       },
       // Channel-1 Web Push. Absent until the vault root is derived, so a delivery that beats
-      // composition is discarded rather than half-handled; the push service retries.
+      // composition is discarded rather than half-handled. The route answers 204 regardless
+      // (non-oracular), so nothing upstream retries — the discard is final and is why the
+      // window is closed inside the boot lane rather than tolerated.
       onPushDelivery: async (endpointId, body) => {
         await push?.onPushDelivery(endpointId, body);
       },

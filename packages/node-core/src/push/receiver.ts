@@ -21,8 +21,14 @@ import type {
   WebPushPayloadDecryptor,
 } from "./store.js";
 
-/** Receives an already-decoded transfer code. Implemented by the app over the intake inbox. */
-export type PushTransferCodeSink = (transferCodeEncoded: string) => void;
+/**
+ * Receives an already-decoded transfer code. Implemented by the app over the intake inbox.
+ * Returns the inbox's verdict: `false` means the deposit was refused (lane at cap) and is
+ * gone. The verdict is threaded back so the audit record names what actually happened —
+ * a refusal audited as `enqueued` is a lost credit notification with a record claiming
+ * the opposite (ZTR-1188).
+ */
+export type PushTransferCodeSink = (transferCodeEncoded: string) => boolean;
 
 export interface PushReceiverDeps {
   readonly store: PushSubscriptionStore;
@@ -34,6 +40,7 @@ export interface PushReceiverDeps {
 
 export type PushReceiveOutcome =
   | "enqueued"
+  | "refused"
   | "unknown_endpoint"
   | "malformed_endpoint"
   | "decrypt_failed"
@@ -108,7 +115,13 @@ export function createPushReceiver(deps: PushReceiverDeps): PushReceiver {
           }
 
           // Verbatim hand-off — the code is already-signed bytes (the byte-exact signing rule).
-          deps.sink(resolved.transferCodeEncoded);
+          if (!deps.sink(resolved.transferCodeEncoded)) {
+            // The inbox shed it. The route still answers 204 either way (non-oracular), but
+            // the audit trail is internal and must not claim an enqueue that never happened —
+            // this is the only wallet-scoped record of the loss.
+            await audit("push.receive_refused", row.walletId, { shape: resolved.shape });
+            return "refused";
+          }
           await audit("push.receive_enqueued", row.walletId, { shape: resolved.shape });
           return "enqueued";
         } catch (err) {

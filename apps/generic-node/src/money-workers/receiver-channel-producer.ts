@@ -9,7 +9,12 @@
 // Action literals match packages/generic-node-contracts candidate-intake.contract
 // . Inlined — contracts package is not a production dependency of this app.
 
-import type { CandidateIntakeInbox } from "./receive-candidate-intake-step.js";
+import type { MetricCandidateIntakeRefusal } from "@zucoins/node-core";
+
+import type {
+  CandidateIntakeInbox,
+  CandidateIntakeSource,
+} from "./receive-candidate-intake-step.js";
 
 /** Wallet-compatible action name. */
 export const RECEIVER_CHANNEL_ACTION_NAME =
@@ -23,8 +28,8 @@ export const RECEIVER_CHANNEL_PATH = "/v1/receivers/origin-relay" as const;
 
 export interface ReceiverChannelEnqueueResult {
   readonly enqueued: boolean;
-  /** Silent discard reasons stay coarse — never echo signed material. */
-  readonly reason?: "malformed_body" | "wrong_action" | "decode_failed" | "not_armed";
+  /** Discard reasons stay coarse — never echo signed material. */
+  readonly reason?: MetricCandidateIntakeRefusal;
 }
 
 /**
@@ -47,10 +52,14 @@ export function extractSenderPartialCapture(encodedTransferCode: string): {
 /**
  * Decode a POST body (receiver-channel action) into an inbox enqueue.
  * Fire-and-forget: always safe to 204 after this returns (discard semantics).
+ *
+ * `source` names the producer lane and is required rather than defaulted — a new
+ * producer must choose its trust level explicitly, not inherit one.
  */
 export function enqueueReceiverChannelDeposit(
   inbox: CandidateIntakeInbox,
   rawBody: unknown,
+  source: CandidateIntakeSource,
 ): ReceiverChannelEnqueueResult {
   if (typeof rawBody !== "object" || rawBody === null) {
     return { enqueued: false, reason: "malformed_body" };
@@ -80,12 +89,15 @@ export function enqueueReceiverChannelDeposit(
     return { enqueued: false, reason: "decode_failed" };
   }
 
-  inbox.enqueue({
-    locate,
-    inner_preimage_text: capture.inner_preimage_text,
-    step_1_signature: capture.step_1_signature,
-  });
-  return { enqueued: true };
+  // Cap enforcement lives in the inbox, so every producer is bounded by construction.
+  return inbox.enqueue(
+    {
+      locate,
+      inner_preimage_text: capture.inner_preimage_text,
+      step_1_signature: capture.step_1_signature,
+    },
+    source,
+  );
 }
 
 function decodeTransferCodeToJsonText(encoded: string): string {

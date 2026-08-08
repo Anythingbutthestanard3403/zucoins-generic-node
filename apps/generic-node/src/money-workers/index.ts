@@ -48,7 +48,9 @@ export {
   createProductionCandidateIntakeService,
   runReceiveCandidateIntakeStep,
   INTAKE_BATCH_LIMIT,
+  type CandidateIntakeEnqueueResult,
   type CandidateIntakeInbox,
+  type CandidateIntakeSource,
   type ReceiveCandidateIntakeStepDeps,
 } from "./receive-candidate-intake-step.js";
 export {

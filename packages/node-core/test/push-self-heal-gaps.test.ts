@@ -6,6 +6,8 @@
 // 2. subscription-service.ts reconcileAll alreadySubscribed skip now verifies the sealed
 //    material is openable before skipping, so an ACTIVE row with unopenable material
 //    (corrupt envelope, master-key rotation without rewrap) gets re-provisioned.
+// 3. the audit record follows the sink's verdict, so a deposit the bounded intake inbox
+//    refused is recorded as refused rather than as enqueued (ZTR-1188).
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -138,7 +140,7 @@ describe("push self-heal gaps", () => {
         store,
         sealer: makeMockSealer(),
         decryptor: makeMockDecryptor(false),
-        sink: () => {},
+        sink: () => true,
         audit,
       });
 
@@ -169,7 +171,7 @@ describe("push self-heal gaps", () => {
         store,
         sealer: makeMockSealer(),
         decryptor: makeMockDecryptor(true),
-        sink: () => {},
+        sink: () => true,
         audit,
       });
 
@@ -200,7 +202,7 @@ describe("push self-heal gaps", () => {
         store,
         sealer: makeMockSealer(),
         decryptor: makeMockDecryptor(false),
-        sink: () => {
+        sink: (): boolean => {
           throw new Error("sink failed");
         },
         audit,
@@ -238,11 +240,73 @@ describe("push self-heal gaps", () => {
         store: failingStore,
         sealer: makeMockSealer(),
         decryptor: makeMockDecryptor(false),
-        sink: () => {},
+        sink: () => true,
       });
 
       const outcome = await receiver.receive("wp_abcdefghijklmnopqrs2", Buffer.from("encrypted-body"));
       expect(outcome).toBe("decrypt_failed");
+    });
+  });
+
+  describe("receiver audits the sink's verdict, not an assumed enqueue", () => {
+    // ZTR-1188: the intake inbox can refuse (push lane at cap). The route still answers 204
+    // either way, but the audit trail is the only wallet-scoped record of the deposit — a
+    // refusal recorded as `push.receive_enqueued` is a lost credit notification with a record
+    // asserting the opposite.
+    const insertActiveRow = async (
+      store: ReturnType<typeof makeInMemoryStore>,
+      walletId: string,
+      endpointId: string,
+    ): Promise<void> => {
+      await store.insert({
+        walletId,
+        walletPublicKey: makeWalletRef(walletId).publicKey,
+        endpointId,
+        receiverEcdhPublic: "ecdh-public",
+        receiverEcdhPrivateSealed: "sealed:private",
+        receiverAuthSecretSealed: "sealed:auth",
+        status: "ACTIVE",
+        appServerPublicKey: "app-key",
+      });
+    };
+
+    it("audits push.receive_refused and never push.receive_enqueued when the inbox refuses", async () => {
+      const store = makeInMemoryStore();
+      await insertActiveRow(store, "wallet-5", "wp_abcdefghijklmnopqrs5");
+
+      const audit = makeMockAudit();
+      const receiver = createPushReceiver({
+        store,
+        sealer: makeMockSealer(),
+        decryptor: makeMockDecryptor(false),
+        sink: () => false,
+        audit,
+      });
+
+      const outcome = await receiver.receive("wp_abcdefghijklmnopqrs5", Buffer.from("body"));
+      expect(outcome).toBe("refused");
+      expect(audit.records).toEqual([{ type: "push.receive_refused", walletId: "wallet-5" }]);
+
+      // The row is not flipped: a shed deposit says nothing about the subscription's health.
+      expect((await store.findByWalletId("wallet-5"))?.status).toBe("ACTIVE");
+    });
+
+    it("still audits push.receive_enqueued when the inbox accepts", async () => {
+      const store = makeInMemoryStore();
+      await insertActiveRow(store, "wallet-6", "wp_abcdefghijklmnopqrs6");
+
+      const audit = makeMockAudit();
+      const receiver = createPushReceiver({
+        store,
+        sealer: makeMockSealer(),
+        decryptor: makeMockDecryptor(false),
+        sink: () => true,
+        audit,
+      });
+
+      const outcome = await receiver.receive("wp_abcdefghijklmnopqrs6", Buffer.from("body"));
+      expect(outcome).toBe("enqueued");
+      expect(audit.records).toEqual([{ type: "push.receive_enqueued", walletId: "wallet-6" }]);
     });
   });
 

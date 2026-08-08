@@ -158,6 +158,7 @@ import {
   createSqlSendPartialLoader,
   enqueueReceiverChannelDeposit,
   startMoneyWorkers,
+  type CandidateIntakeSource,
   type MoneyWorkersHandle,
 } from "./money-workers/index.js";
 import { createMoveAdvancedPorts } from "./money-workers/move-advanced-ports.js";
@@ -673,7 +674,32 @@ async function main(): Promise<void> {
   // Shared candidate inbox lives for the process lifetime. HTTP receiver
   // channel enqueues here; money workers drain under leadership. Handle retained // contract-allow:drain:frozen structural vocabulary
   // so stop + enqueue🎚 paths are not GC-dropped after armMoneySurface.
-  const candidateIntake = createCandidateIntakeInbox();
+  // Per-lane cap = RECEIVE_QUEUE_CAP (= POOL_CAP_TOTAL): a deposit is only useful if it
+  // matches a live receive, so the pool cap is the ceiling on genuinely distinct backlog.
+  const candidateIntake = createCandidateIntakeInbox(receiveQueueCap(config));
+  // Single accounting seam for both producers: enqueue, count, log. A refusal is never
+  // silent — an uncounted one is a lost credit notification presenting as slowness.
+  // Refusals are counted on every event but logged only on the leading edge of a
+  // refusing run per lane, so a flood cannot trade a memory-exhaustion DoS for a
+  // log-volume one. The counter is the continuous signal; the log names the reason.
+  // Returns the verdict so a producer that keeps a per-deposit record (push) can audit the
+  // refusal truthfully rather than reporting an enqueue that never happened.
+  const refusingIntakeSources = new Set<CandidateIntakeSource>();
+  const depositToCandidateIntake = (source: CandidateIntakeSource, rawBody: unknown): boolean => {
+    const result = enqueueReceiverChannelDeposit(candidateIntake, rawBody, source);
+    if (result.enqueued) {
+      refusingIntakeSources.delete(source);
+      logger.info(`node: candidate intake deposit enqueued source=${source}`);
+      return true;
+    }
+    const reason = result.reason ?? "malformed_body";
+    metricsHooks.onCandidateIntakeRefused(source, reason);
+    if (!refusingIntakeSources.has(source)) {
+      refusingIntakeSources.add(source);
+      logger.info(`node: candidate intake deposit refused source=${source} reason=${reason}`);
+    }
+    return false;
+  };
   // the Web Push slices — push composition is built after the vault root exists (below) and
   // held here so the listener, money workers and shutdown can all reach it.
   let push: PushComposition | null = null;
@@ -704,18 +730,13 @@ async function main(): Promise<void> {
       pushApiBase,
       nodePublicUrl: publicBaseUrl,
       sign: (walletId, preimage) => pushSigner.sign(walletId, preimage),
-      // Same inbox the origin relay feeds — one intake path, two producers.
-      sink: (transferCodeEncoded) => {
-        const result = enqueueReceiverChannelDeposit(candidateIntake, {
+      // Same inbox the origin relay feeds — one intake path, two producers, but the
+      // authenticated lane has its own capacity and is served first.
+      sink: (transferCodeEncoded) =>
+        depositToCandidateIntake("push", {
           action_name: RECEIVER_CHANNEL_ACTION_NAME,
           action_data: { [RECEIVER_CHANNEL_ACTION_DATA_FIELD]: transferCodeEncoded },
-        });
-        if (result.enqueued) {
-          logger.info("push: delivery enqueued for candidate intake");
-        } else {
-          logger.info(`push: delivery not enqueued reason=${result.reason}`);
-        }
-      },
+        }),
       logger,
     });
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);
@@ -743,14 +764,15 @@ async function main(): Promise<void> {
       discoveryDocument: routeSurface.discoveryDocument,
       reportingListener: routeSurface.reportingListener,
       subscribeDeps: routeSurface.subscribeDeps,
+      // Anonymous lane. Capped at RECEIVE_QUEUE_CAP and served only with the budget the
+      // authenticated lane leaves; the route answers 204 either way (non-oracular).
       onReceiverChannelDeposit: (rawBody) => {
-        const result = enqueueReceiverChannelDeposit(candidateIntake, rawBody);
-        if (result.enqueued) {
-          logger.info("node: receiver-channel deposit enqueued for candidate intake");
-        }
+        depositToCandidateIntake("relay", rawBody);
       },
       // Channel-1 Web Push. Absent until the vault root is derived, so a delivery that beats
-      // composition is discarded rather than half-handled; the push service retries.
+      // composition is discarded rather than half-handled. The route answers 204 regardless
+      // (non-oracular), so nothing upstream retries — the discard is final and is why the
+      // window is closed inside the boot lane rather than tolerated.
       onPushDelivery: async (endpointId, body) => {
         await push?.onPushDelivery(endpointId, body);
       },

@@ -887,7 +887,8 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
           nodeId: parked.nodeId,
           ownerInstanceId: parked.nodeId,
           poolCapTotal: 5,
-          receiveQueueCap: 0,
+          // Production derives receiveQueueCap = POOL_CAP_TOTAL; keep the pair consistent.
+          receiveQueueCap: 5,
           receiveQueueMaxWaitSecs: 600,
           receiveTtlDefaultSecs: 300,
           receiveTtlMinSecs: 60,

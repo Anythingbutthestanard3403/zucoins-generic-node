@@ -44,8 +44,12 @@ export interface ComposePushDeps {
   readonly nodePublicUrl: string;
   /** Signs the id-proof with the wallet's own Ed25519 key (vault seam). */
   readonly sign: (walletId: string, preimage: Uint8Array) => Promise<string>;
-  /** Hands a decoded transfer code to the shared candidate-intake inbox. */
-  readonly sink: (transferCodeEncoded: string) => void;
+  /**
+   * Hands a decoded transfer code to the shared candidate-intake inbox and returns its
+   * verdict — `false` when the push lane was at cap, so the receiver can audit the refusal
+   * instead of asserting an enqueue that did not happen.
+   */
+  readonly sink: (transferCodeEncoded: string) => boolean;
   readonly logger: PushCompositionLogger;
 }
 

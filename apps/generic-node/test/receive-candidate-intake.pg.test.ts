@@ -447,10 +447,14 @@ describe.runIf(PG_AVAILABLE)(
         try {
           // Production producer path: receiver-channel decode → handle.candidateIntake.enqueue.
           const encoded = buildSendTransferCodeText(inner, step1);
-          const deposited = enqueueReceiverChannelDeposit(handle.candidateIntake, {
-            action_name: RECEIVER_CHANNEL_ACTION_NAME,
-            action_data: { sender_transfer_code_encoded: encoded },
-          });
+          const deposited = enqueueReceiverChannelDeposit(
+            handle.candidateIntake,
+            {
+              action_name: RECEIVER_CHANNEL_ACTION_NAME,
+              action_data: { sender_transfer_code_encoded: encoded },
+            },
+            "relay",
+          );
           expect(deposited.enqueued, JSON.stringify(deposited)).toBe(true);
           expect(handle.candidateIntake.size()).toBe(1);
 
@@ -488,12 +492,16 @@ describe.runIf(PG_AVAILABLE)(
           [operationId],
         );
         const inner = buildInner(operationId);
-        const inbox = createCandidateIntakeInbox();
-        inbox.enqueue({
-          locate: { receiverPubkey: RECEIVER_PUBLIC, discriminator: operationId, expiry: EXPIRY },
-          inner_preimage_text: inner,
-          step_1_signature: signPayer(inner),
-        });
+        // Any per-lane cap above the single deposit this case queues.
+        const inbox = createCandidateIntakeInbox(16);
+        inbox.enqueue(
+          {
+            locate: { receiverPubkey: RECEIVER_PUBLIC, discriminator: operationId, expiry: EXPIRY },
+            inner_preimage_text: inner,
+            step_1_signature: signPayer(inner),
+          },
+          "relay",
+        );
         expect(
           await runReceiveCandidateIntakeStep({ query, inbox, observeSender: senderPreflight, logger }),
         ).toBe(0);

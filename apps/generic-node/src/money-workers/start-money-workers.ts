@@ -958,7 +958,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     receiveQueueCap: deps.config.receiveQueueCap,
     receiveQueueMaxWaitSecs: deps.config.receiveQueueMaxWaitSecs,
   };
-  const candidateIntake = deps.candidateIntakeInbox ?? createCandidateIntakeInbox();
+  // Same derivation as main.ts: the per-lane inbox cap is RECEIVE_QUEUE_CAP.
+  const candidateIntake =
+    deps.candidateIntakeInbox ?? createCandidateIntakeInbox(deps.config.receiveQueueCap);
   const senderPreflightObserver =
     deps.senderPreflightObserver ??
     (deps.submitGateway !== undefined

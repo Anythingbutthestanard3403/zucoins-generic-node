@@ -214,7 +214,10 @@ describe("burn retention across post-burn failure", () => {
     expect(store.listNonceEvidence().length).toBe(1);
     const replay = await handle(request);
     expect(replay.status).toBe(401);
-    expect(JSON.parse(text(replay.bodyBytes)).error.code).toBe("nonce_replay");
+    // nonce_replay is a credential-state rejection, so the wire carries the single collapsed
+    // code; the replay detection itself is asserted on the server-side record.
+    expect(JSON.parse(text(replay.bodyBytes)).error.code).toBe("invalid_api_key");
+    expect(replay.collapsedRejection?.code).toBe("nonce_replay");
     expect(store.listNonceEvidence().length).toBe(1);
   });
 
@@ -228,7 +231,10 @@ describe("burn retention across post-burn failure", () => {
     expect(store.listNonceEvidence().length).toBe(1);
     const replay = await handle(request);
     expect(replay.status).toBe(401);
-    expect(JSON.parse(text(replay.bodyBytes)).error.code).toBe("nonce_replay");
+    // nonce_replay is a credential-state rejection, so the wire carries the single collapsed
+    // code; the replay detection itself is asserted on the server-side record.
+    expect(JSON.parse(text(replay.bodyBytes)).error.code).toBe("invalid_api_key");
+    expect(replay.collapsedRejection?.code).toBe("nonce_replay");
     expect(store.listNonceEvidence().length).toBe(1);
   });
 });

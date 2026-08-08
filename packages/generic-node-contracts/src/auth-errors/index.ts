@@ -16,6 +16,9 @@ export {
   type ReportingRejectionCode,
   REPORTING_REJECTION_CODES,
   REJECTION_STATUS,
+  REPORTING_CREDENTIAL_REJECTION_CODES,
+  REPORTING_REQUEST_SHAPE_401_CODES,
+  reportingWireCode,
 } from "./reporting-rejection.js";
 
 export {

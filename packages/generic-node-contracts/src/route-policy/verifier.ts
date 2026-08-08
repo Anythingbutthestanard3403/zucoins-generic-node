@@ -8,6 +8,12 @@
 import {
   CANONICAL_AUTH_FAILURE_CODE,
   CANONICAL_NOT_FOUND_CODE,
+  REJECTION_STATUS,
+  REPORTING_CREDENTIAL_REJECTION_CODES,
+  REPORTING_REJECTION_CODES,
+  REPORTING_REQUEST_SHAPE_401_CODES,
+  reportingWireCode,
+  type ReportingRejectionCode,
 } from "../auth-errors/index.js";
 import { AUTH_CLASS_POLICY, type AuthClass, type AuthClassPolicy } from "./auth-classes.js";
 import { FORBIDDEN_ROUTE_PREFIXES, routeAuthClasses, type RoutePolicy } from "./routes.js";
@@ -64,6 +70,37 @@ export function firstOracularRoute(routes: readonly RoutePolicy[]): string | nul
   for (const route of routes) {
     if (isForbiddenRoute(route.path)) return route.path;
     if (!isRoutePolicyNonOracular(route)) return route.path;
+  }
+  return null;
+}
+
+// Relate REPORTING_CREDENTIAL's `nonOracularFrozen: true` to the taxonomy that is actually
+// SERVED. `isAuthClassNonOracular` above only reads the policy table; the reporting surface's
+// rejection codes live in a different module, which is exactly how the two frozen contracts
+// drifted — the table asserted a proven collapse while ten distinguishable codes reached the
+// wire. This walks every reporting rejection whose status equals the class's auth-failure
+// status and returns the first code that widens the served taxonomy:
+//
+//   - a 401 declared in neither REPORTING_CREDENTIAL_REJECTION_CODES nor
+//     REPORTING_REQUEST_SHAPE_401_CODES (an undeclared reason cannot be assumed harmless), or
+//     declared in both;
+//   - a credential-state 401 whose wire code is anything other than the class's frozen
+//     `authFailureCode`.
+//
+// Returns null when the served taxonomy is no wider than the freeze allows. A caller requires
+// null. Structural over frozen data, like every other verifier here. `wireCodeOf` defaults to
+// the served mapping; a test passes the pre-collapse identity mapping to prove the gate bites.
+export function firstReportingTaxonomyLeak(
+  wireCodeOf: (code: ReportingRejectionCode) => string = reportingWireCode,
+): ReportingRejectionCode | null {
+  const policy = AUTH_CLASS_POLICY.REPORTING_CREDENTIAL;
+  if (!policy.nonOracularFrozen) return null;
+  const credential = new Set<string>(REPORTING_CREDENTIAL_REJECTION_CODES);
+  const requestShape = new Set<string>(REPORTING_REQUEST_SHAPE_401_CODES);
+  for (const code of REPORTING_REJECTION_CODES) {
+    if (REJECTION_STATUS[code] !== policy.authFailureStatus) continue;
+    if (credential.has(code) === requestShape.has(code)) return code;
+    if (credential.has(code) && wireCodeOf(code) !== policy.authFailureCode) return code;
   }
   return null;
 }

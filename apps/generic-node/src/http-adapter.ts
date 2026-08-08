@@ -56,6 +56,12 @@ export interface ReportingHttpListenerConfig {
   readonly nowMs: () => number;
   readonly maxBodyBytes: number;
   readonly newRequestId: () => string;
+  /**
+   * Server-side sink for the reason behind a collapsed non-oracular 401. The composition root
+   * points this at the operator log; leaving it unset serves the same opaque wire response with
+   * no record kept.
+   */
+  readonly recordCollapsedRejection?: (rejection: CollapsedRejectionRecord) => void;
 }
 
 function headerValues(rawHeaders: readonly string[], name: string): string[] {
@@ -66,7 +72,18 @@ function headerValues(rawHeaders: readonly string[], name: string): string[] {
   return values;
 }
 
-function write(response: RawTransportResponse, produced: ReportingHttpResponse): void {
+/** Server-side record of a rejection whose wire body was collapsed to the canonical 401. */
+export type CollapsedRejectionRecord = NonNullable<ReportingHttpResponse["collapsedRejection"]>;
+
+function write(
+  response: RawTransportResponse,
+  produced: ReportingHttpResponse,
+  record?: (rejection: CollapsedRejectionRecord) => void,
+): void {
+  // The reason the wire deliberately does not carry, emitted at the single point every
+  // reporting response reaches the socket — so no emitter can collapse a code without the
+  // server-side record against its request_id being written.
+  if (produced.collapsedRejection !== undefined) record?.(produced.collapsedRejection);
   response.writeHead(produced.status, {
     ...produced.headers,
     "content-length": produced.bodyBytes.length.toString(),
@@ -86,18 +103,18 @@ export function createReportingHttpListener(
 
     const encodings = headerValues(request.rawHeaders, "content-encoding");
     if (encodings.some((value) => value.trim().toLowerCase() !== "identity")) {
-      write(response, badRequest("unsupported_content_encoding"));
+      write(response, badRequest("unsupported_content_encoding"), config.recordCollapsedRejection);
       return;
     }
 
     const contentLengths = headerValues(request.rawHeaders, "content-length");
     if (new Set(contentLengths).size > 1) {
-      write(response, badRequest("invalid_reporting_headers"));
+      write(response, badRequest("invalid_reporting_headers"), config.recordCollapsedRejection);
       return;
     }
     const declared = contentLengths.length === 1 ? Number(contentLengths[0]) : null;
     if (declared !== null && Number.isSafeInteger(declared) && declared > config.maxBodyBytes) {
-      write(response, badRequest("request_too_large"));
+      write(response, badRequest("request_too_large"), config.recordCollapsedRejection);
       return;
     }
 
@@ -113,7 +130,7 @@ export function createReportingHttpListener(
       chunks.push(chunk);
     }
     if (oversized) {
-      write(response, badRequest("request_too_large"));
+      write(response, badRequest("request_too_large"), config.recordCollapsedRejection);
       return;
     }
     const bodyBytes = new Uint8Array(total);
@@ -169,7 +186,7 @@ export function createReportingHttpListener(
       return;
     }
 
-    write(response, produced);
+    write(response, produced, config.recordCollapsedRejection);
   };
 }
 

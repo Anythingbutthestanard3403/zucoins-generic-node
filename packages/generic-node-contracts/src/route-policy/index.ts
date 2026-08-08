@@ -32,6 +32,7 @@ export {
   isRoutePolicyNonOracular,
   isForbiddenRoute,
   firstOracularRoute,
+  firstReportingTaxonomyLeak,
   fullyFrozenAuthClasses,
 } from "./verifier.js";
 

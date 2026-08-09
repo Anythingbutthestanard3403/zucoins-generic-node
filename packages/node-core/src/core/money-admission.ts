@@ -31,6 +31,7 @@ export const MONEY_ADMISSION_REFUSAL_CODES = [
   "database_unreachable",
   "vault_unavailable",
   "observation_not_read_capable",
+  "event_signer_unavailable",
   "stopping",
 ] as const;
 
@@ -62,6 +63,9 @@ export function isGatingReadyForMoney(
   if (!databaseReachable) return false;
   if (!(state.vaultKeyRingLoaded && state.vaultCensusVerified)) return false;
   if (!state.observationReadCapable) return false;
+  // Runtime EVENT_SIGNING authority loss quiesces the money surface; admission
+  // must refuse in lockstep with the readiness verdict (ZTR-1179).
+  if (!state.eventSignerAvailable) return false;
   return true;
 }
 
@@ -75,6 +79,7 @@ export function moneyAdmissionRefusal(
   if (!databaseReachable) return "database_unreachable";
   if (!(state.vaultKeyRingLoaded && state.vaultCensusVerified)) return "vault_unavailable";
   if (!state.observationReadCapable) return "observation_not_read_capable";
+  if (!state.eventSignerAvailable) return "event_signer_unavailable";
   return null;
 }
 

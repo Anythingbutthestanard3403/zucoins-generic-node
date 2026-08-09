@@ -12,6 +12,12 @@
 // Additional reported-only detail outside the closed check
 // set: halt, storage_pressure. Neither gates the ready verdict.
 //
+// Two verdict-forcing inputs gate WITHOUT joining the closed check set
+// (readiness-checks.contract.ts census stays frozen): `stopping` (graceful
+// stop) and `eventSignerAvailable` (runtime EVENT_SIGNING authority loss —
+// armed only after leadership is held, so gating it cannot reproduce the
+// overlap-deploy deadlock; ZTR-1179).
+//
 // Liveness is zero-dependency: never touches the database or the gateway and
 // must never flap on a transient dependency blip.
 //
@@ -137,7 +143,9 @@ export function evaluateReadinessFromProbes(
   );
 
   const failing = GATING_READINESS_CHECK_IDS.filter((id) => !checkValues[id]);
-  const gatesPass = failing.length === 0 && !state.stopping;
+  // eventSignerAvailable gates like `stopping`: verdict-forcing, outside the
+  // frozen reported check set (see module header; ZTR-1179).
+  const gatesPass = failing.length === 0 && !state.stopping && state.eventSignerAvailable;
   const ready = gatesPass;
 
   let status: ReadinessStatus;

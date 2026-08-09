@@ -2,7 +2,8 @@
 //
 // Delegates to `@zucoins/node-core`'s NodeCoreReadinessState, which
 // implements the readiness gating policy:
-//   GATING: schema, vault, observation (gateway read within failure budget)
+//   GATING: schema, vault, observation (gateway read within failure budget),
+//           event signer (verdict-forcing like `stopping`; ZTR-1179)
 //   NON-GATING (reported): signer leadership, halt, storage pressure
 //
 // The shell keeps a thin compatibility facade so boot-lane / graceful-stop call
@@ -22,9 +23,10 @@ export interface ReadinessChecks {
   readonly leadership: boolean;
   readonly gateway: boolean;
   /**
-   * EVENT_SIGNING signer availability. Shell-local gating conjunct,
-   * NOT part of node-core's frozen GATING_READINESS_CHECK_IDS — safe
-   * to gate here because EVENT_SIGNING ensure always runs after leadership is
+   * EVENT_SIGNING signer availability. Node-core gating conjunct
+   * (ReadinessStateInputs.eventSignerAvailable) — verdict-forcing like
+   * `stopping`, still outside the frozen GATING_READINESS_CHECK_IDS census.
+   * Safe to gate because EVENT_SIGNING ensure always runs after leadership is
    * already held, so this cannot reproduce the overlap-deploy deadlock class.
    */
   readonly eventSigner: boolean;
@@ -49,12 +51,15 @@ export interface ReadinessSnapshot {
  */
 export class NodeReadiness {
   private readonly inner: NodeCoreReadinessState;
-  private eventSignerAvailable = false;
 
   constructor(gatewayFailureBudget: number) {
     this.inner = new NodeCoreReadinessState({
       observationFailureBudget: gatewayFailureBudget,
     });
+    // This shell installs an EVENT_SIGNING authority, so the conjunct starts
+    // closed: arm (event-signer-authority.ts) is the only thing that opens it.
+    // Node-core's default is open only for deployments with no such authority.
+    this.inner.setEventSignerAvailable(false);
   }
 
   /** Expose the node-core state for createHealthHandlers wiring. */
@@ -77,10 +82,12 @@ export class NodeReadiness {
   /**
    * EVENT_SIGNING signer availability. Fail-closed: gates readiness
    * shut on boot failure or runtime signer loss; must be explicitly re-armed
-   * on successful (re-)ensure.
+   * on successful (re-)ensure. Pure forwarder — node-core's readiness state is
+   * the single source of truth, so /health/ready and money admission see the
+   * same conjunct (ZTR-1179).
    */
   setEventSignerAvailable(available: boolean): void {
-    this.eventSignerAvailable = available;
+    this.inner.setEventSignerAvailable(available);
   }
 
   recordGatewayReadSuccess(): void {
@@ -119,10 +126,10 @@ export class NodeReadiness {
       vault,
       leadership: inputs.leadershipLockHeld,
       gateway: inputs.observationReadCapable,
-      eventSigner: this.eventSignerAvailable,
+      eventSigner: inputs.eventSignerAvailable,
     };
     // Stamp-side ready (DB probe applied by the health handler). Leadership
-    // deliberately excluded. EVENT_SIGNING is shell-local gating
+    // deliberately excluded. EVENT_SIGNING gates in node-core
     // (see ReadinessChecks.eventSigner doc).
     const ready =
       !inputs.stopping &&

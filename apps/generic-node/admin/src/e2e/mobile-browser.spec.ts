@@ -160,9 +160,12 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
 
   test("topbar controls stay in viewport and the document does not overflow", async ({ page }) => {
     await authenticated(page, "/");
+    // The topbar (App.tsx `header.top`) carries exactly two icon buttons and the identity chip.
+    // The second one is the attention bell, whose accessible name comes from its `title`: with
+    // the fixture's zero-item needs-attention summary that name is "Approve inbox".
     const controls = [
       page.getByRole("button", { name: "Toggle theme" }),
-      page.getByRole("button", { name: "Operations" }),
+      page.getByRole("button", { name: "Approve inbox" }),
       page.locator(".who"),
     ];
     for (const control of controls) {
@@ -191,13 +194,36 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     expect(box!.x + box!.width).toBeLessThanOrEqual(wrapBox!.x + wrapBox!.width + 1);
   });
 
-  test("Settings and Transfer fields resolve by real accessible name", async ({ page }) => {
+  test("Settings renders the effective config as a read-only definition list", async ({ page }) => {
     await authenticated(page, "/settings");
-    for (const name of ["Reporting pubkey", "Pool cap", "Treasury count", "Currency display"]) {
-      await expect(page.getByLabel(name)).toBeVisible();
+    // SettingsPage.tsx is deliberately read-only — no <label>, no htmlFor, no aria-label — so the
+    // name to resolve by is the <dt> term, and each term must carry the fixture's own value.
+    const rows: readonly (readonly [string, string])[] = [
+      ["Public base URL", "https://e2e-node.example"],
+      ["Node ID", "11111111-1111-4111-8111-111111111111"],
+      ["Gateway hosts", "gw.e2e.example"],
+      ["Version", "e2e"],
+      ["Backup schedule", "No"],
+      ["Push configured", "Yes"],
+    ];
+    for (const [term, value] of rows) {
+      const row = page
+        .locator("dl > div")
+        .filter({ has: page.locator("dt", { hasText: new RegExp(`^${term}$`) }) });
+      await expect(row).toHaveCount(1);
+      await expect(row.locator("dd")).toContainText(value);
     }
-    await page.goto("/transfers/new");
-    for (const label of await page.locator("label[for]").allTextContents()) {
+    // The page never accepts edits; a form control appearing here is the regression to catch.
+    await expect(page.locator(".form-card input, .form-card select, .form-card textarea")).toHaveCount(0);
+  });
+
+  test("Transfer detail fields resolve by real accessible name", async ({ page }) => {
+    // /transfers/new was never a declared route (main.tsx declares /transfers and /transfers/:id),
+    // so the loop below used to iterate an empty list on the catch-all redirect and assert nothing.
+    await authenticated(page, `/transfers/${E2E_OPERATION_ID}`);
+    const labels = await page.locator("label[for]").allTextContents();
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
       await expect(page.getByLabel(label.trim(), { exact: true })).toBeVisible();
     }
   });

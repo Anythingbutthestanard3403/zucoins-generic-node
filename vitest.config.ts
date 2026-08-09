@@ -14,6 +14,12 @@ export default defineConfig({
       // drops the guard again.
       "packages/generic-node-consumer",
       "packages/consumer-example",
+      // The operator SPA. Its 37 test files ran only under an explicit package filter, so the
+      // documented green-build gate proved nothing about any console screen. Referenced as a
+      // path (not an inline entry) so the SPA keeps its own jsdom environment, react plugin and
+      // setup files — folding it into apps/generic-node's include globs would run React tests
+      // under the node environment instead.
+      "apps/generic-node/admin",
     ],
   },
 });

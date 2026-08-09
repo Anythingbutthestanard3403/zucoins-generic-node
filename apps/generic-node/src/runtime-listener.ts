@@ -19,16 +19,20 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   apiErrorResponse,
+  buildTransportHardeningConfig,
   CachedDbProbe,
   createDestinationsRouter,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
+  enforceTransportGuards,
   handleOperationSubscribe,
   InMemoryReportingRateLimiter,
   handleWellKnown,
   matchOperationSubscribeRoute,
+  MIN_HTTP_VERSION,
   PUSH_RECEIVER_PATH_PREFIX,
   REPORTING_HEADER_NAMES,
+  type ApiErrorCode,
   type ApiErrorResponse,
   type DestinationService,
   type MetricsSnapshotSource,
@@ -39,6 +43,7 @@ import {
   type OperationRouter,
   type OperationSubscribeRouteDeps,
   type StorageBackpressure,
+  type TransportRejectionCode,
   type WellKnownDeps,
 } from "@zucoins/node-core";
 
@@ -86,6 +91,35 @@ const NOOP_RUNTIME_LISTENER_LOGGER: RuntimeListenerLogger = {
 // gains nothing to validate.
 export const OPERATION_CREATE_RATE_WINDOW_MS = 60_000;
 export const OPERATION_CREATE_RATE_MAX_REQUESTS = 600;
+
+// Transport hardening, applied at both layers node gives us: the server options main.ts
+// spreads into createServer, and the intake guards handleJsonRoute runs below. The module
+// (node-core api/transport-hardening.ts) is deliberately framework-agnostic, so the mapping
+// onto node's option names and the API error taxonomy is the composition root's job.
+//
+// buildHardenedTlsConfig stays deliberately uncalled: nothing in this repository terminates
+// TLS. See the note above it in api/transport-hardening.ts.
+const TRANSPORT_HARDENING = buildTransportHardeningConfig();
+// Same limits with the JSON Content-Type requirement lifted — the config used for a request
+// that declares no body, where there is no Content-Type to check.
+const TRANSPORT_HARDENING_BODYLESS = buildTransportHardeningConfig({
+  requireJsonContentType: false,
+});
+
+/**
+ * The options object main.ts passes as createServer's FIRST argument. Without them node's own
+ * defaults hold — requestTimeout 300 s, headersTimeout 60 s — so a client that dribbles its
+ * headers, or declares a Content-Length and then sends the body one byte at a time, keeps a
+ * socket and a request slot for five minutes on a surface with no other admission control.
+ *
+ * maxHeaderSize is enforced by node's own parser, which answers 431 and closes the connection
+ * before any listener runs, so the header cap needs no in-listener guard.
+ */
+export const HARDENED_HTTP_SERVER_OPTIONS = Object.freeze({
+  requestTimeout: TRANSPORT_HARDENING.requestTimeoutMs,
+  headersTimeout: TRANSPORT_HARDENING.headersTimeoutMs,
+  maxHeaderSize: TRANSPORT_HARDENING.maxHeaderBytes,
+});
 
 export interface NodeRuntimeListenerDeps {
   readonly readiness: NodeReadiness;
@@ -306,6 +340,58 @@ function duplicateSensitiveHeaderError(
   return null;
 }
 
+// TransportRejectionCode → wire code.
+//
+// request_too_large and headers_too_large are unreachable from the call below and are mapped
+// only to keep the table total: body size stays with readBoundedBody, which is the single
+// enforcement point for the cap, and the header cap is enforced by node's own parser from
+// maxHeaderSize (HARDENED_HTTP_SERVER_OPTIONS) before any listener runs.
+const TRANSPORT_REJECTION_WIRE_CODE: Readonly<Record<TransportRejectionCode, ApiErrorCode>> = {
+  http_version_too_old: "http_version_too_old",
+  unsupported_content_type: "unsupported_content_type",
+  request_too_large: "request_too_large",
+  headers_too_large: "request_too_large",
+};
+
+// A request only has to declare JSON when it actually carries a body. Every GET, and the
+// bodiless POSTs on the admin surface (bless / retire), legitimately send no Content-Type and
+// must not be rejected for the absence of one.
+function declaresBody(request: IncomingMessage): boolean {
+  if (request.headers["transfer-encoding"] !== undefined) return true;
+  const declared = Number.parseInt(request.headers["content-length"] ?? "", 10);
+  return Number.isFinite(declared) && declared > 0;
+}
+
+// Pre-pipeline transport rejection for the JSON route surface: HTTP version floor and, for a
+// request that carries a body, the application/json Content-Type requirement. Applied here in
+// handleJsonRoute because every JSON router (admin, destinations, operations) routes through
+// it, and only through it — the binary Web Push delivery route, the origin-relay deposit, the
+// SPA/asset paths, health and /metrics all dispatch earlier and are untouched.
+//
+// The verdict depends on nothing but the request's own headers, so it cannot distinguish an
+// existing route from an absent one.
+function transportRejection(
+  request: IncomingMessage,
+  newRequestId: () => string,
+): ApiErrorResponse | null {
+  const outcome = enforceTransportGuards(
+    {
+      // node always populates httpVersion on a real socket; the fallback keeps the
+      // in-process listener seam the unit tests drive from failing the floor.
+      httpVersion: request.httpVersion ?? MIN_HTTP_VERSION,
+      contentType: request.headers["content-type"],
+      // Deliberately 0: body size is NOT re-checked here. readBoundedBody is the single
+      // enforcement point for the cap, and a second check keyed on the DECLARED
+      // Content-Length could disagree with the bytes actually read.
+      contentLength: 0,
+    },
+    declaresBody(request) ? TRANSPORT_HARDENING : TRANSPORT_HARDENING_BODYLESS,
+  );
+  return outcome.ok
+    ? null
+    : apiErrorResponse(TRANSPORT_REJECTION_WIRE_CODE[outcome.code], newRequestId());
+}
+
 // Read the request body with a hard cap. The chunk that crosses the cap is kept so
 // the accumulated length exceeds it, then reading stops — the buffer is bounded to
 // cap + one socket chunk, and the pipeline's strict-JSON gate turns the over-cap
@@ -358,6 +444,13 @@ async function handleJsonRoute(
   const method = request.method ?? "";
   const url = request.url ?? "";
   try {
+    // Outermost layer: decided from request headers alone, before any credential is read,
+    // so a rejection here reveals nothing about the key, the route, or the store.
+    const transportError = transportRejection(request, newRequestId);
+    if (transportError) {
+      writeJson(response, transportError.status, transportError.body, { ...transportError.headers });
+      return;
+    }
     const rawHeaders = request.rawHeaders;
     const duplicateError = duplicateSensitiveHeaderError(rawHeaders, newRequestId);
     if (duplicateError) {

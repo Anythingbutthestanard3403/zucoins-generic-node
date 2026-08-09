@@ -116,6 +116,7 @@ import { acquireSignerLeadershipWithBoundedRetry } from "./boot/signer-leadershi
 import { PlaceholderSecretError } from "./config/placeholders.js";
 import {
   createNodeRuntimeListener,
+  HARDENED_HTTP_SERVER_OPTIONS,
   type RuntimeListenerLogger,
 } from "./runtime-listener.js";
 import { createProductionRouteSurface, applyLabTotpBinding, resolveLabTotp } from "./full-http-mount.js";
@@ -750,7 +751,10 @@ async function main(): Promise<void> {
     pushConfiguredRef.current = true;
   }
 
+  // Options first, listener second: without them node's defaults hold a socket and a request
+  // slot for 300 s on a request that never finishes arriving.
   const server = createServer(
+    HARDENED_HTTP_SERVER_OPTIONS,
     createNodeRuntimeListener({
       readiness,
       pingDb,

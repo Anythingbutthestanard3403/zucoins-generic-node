@@ -10,6 +10,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertNewMoneyWorkAdmitted,
+  evaluateReadinessFromProbes,
+  MoneyAdmissionRefusedError,
+} from "@zucoins/node-core";
+
+import {
   createEventSignerAuthority,
   installEventSigner,
   NodeReadiness,
@@ -116,6 +122,40 @@ describe("EVENT_SIGNING authority", () => {
 
     expect(() => authority.withdraw(new Error("loss"))).toThrow(/readiness stamp exploded/);
     expect(calls).toEqual(["SIGNER_AUTHORITY_WITHDRAW", "ENGINE_QUIESCE"]);
+  });
+});
+
+// One conjunct, every consumer: withdrawal must reach /health/ready's evaluator and
+// money admission through the SAME node-core snapshot the shell forwards into (ZTR-1179).
+describe("EVENT_SIGNING withdrawal reaches every readiness consumer (ZTR-1179)", () => {
+  it("money admission refuses with event_signer_unavailable after a runtime loss", () => {
+    const { authority, readiness } = harness();
+    armEverythingElse(readiness);
+    authority.arm(okSigner);
+    expect(() => assertNewMoneyWorkAdmitted(readiness.core.snapshot(), true)).not.toThrow();
+
+    authority.withdraw(new Error("sealed row unreadable"));
+
+    let thrown: unknown;
+    try {
+      assertNewMoneyWorkAdmitted(readiness.core.snapshot(), true);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(MoneyAdmissionRefusedError);
+    expect((thrown as MoneyAdmissionRefusedError).code).toBe("event_signer_unavailable");
+  });
+
+  it("the node-core readiness verdict (/health/ready's evaluator) goes not-ready on the same snapshot", () => {
+    const { authority, readiness } = harness();
+    armEverythingElse(readiness);
+    authority.arm(okSigner);
+    expect(evaluateReadinessFromProbes(readiness.core.snapshot(), true).ready).toBe(true);
+
+    authority.withdraw(new Error("loss"));
+    const verdict = evaluateReadinessFromProbes(readiness.core.snapshot(), true);
+    expect(verdict.ready).toBe(false);
+    expect(verdict.status).toBe("not_ready");
   });
 });
 

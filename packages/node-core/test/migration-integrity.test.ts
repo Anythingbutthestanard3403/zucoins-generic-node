@@ -168,6 +168,10 @@ const SCHEMA_FILES = [
   // verification_acknowledgements + ack wallet evidence. References
   // operations / nodes / reporting_request_nonces / reporting_mutation_idempotency.
   "verification-acknowledgements.sql",
+  // vault_root_kdf_salt — the per-node vault root-KDF salt, persisted beside the `vault`
+  // envelopes it opens. No foreign key and it re-declares the shared immutability trigger
+  // function, so it has no out-of-slice reference at all.
+  "vault-root-kdf-salt.sql",
   // The two correlation functions + three deferred constraint triggers. Declares no table
   // and no index (so it is also in NO_TABLE_SCHEMA_FILES below); it attaches to
   // reporting_mutation_idempotency / receive_arms / verification_acknowledgements.
@@ -408,6 +412,10 @@ const GREENFIELD: Record<
     applies: false,
     missingRelation: "reporting_request_class",
   },
+  // No foreign key, no shared domain, and it re-declares the immutability trigger function
+  // it attaches — the salt row must be readable at vault-unlock on a node whose `nodes` row
+  // genesis writes in the same boot, so it deliberately references nothing.
+  "vault-root-kdf-salt.sql": { applies: true },
   // Function-then-trigger slice. plpgsql bodies are only syntax-checked at CREATE FUNCTION,
   // so both functions create alone; the first CREATE CONSTRAINT TRIGGER then fails on its
   // attachment target — the first relation this slice cannot self-supply.

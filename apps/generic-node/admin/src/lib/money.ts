@@ -947,8 +947,10 @@ export async function getRecoveryCeremonyStatus(
 
 export interface RecoveryPackCreateResponse {
   readonly object: "recovery_pack_create";
-  readonly format: "zp-node-recovery-pack-v1";
+  readonly format: "zp-node-recovery-pack-v2";
   readonly pack_content_sha256: string;
+  /** Digest of the artifact a re-issue replaced — the one to destroy. */
+  readonly previous_pack_content_sha256: string | null;
   readonly filename: string;
   readonly pack_file_b64: string;
   readonly content_type: string;
@@ -962,10 +964,44 @@ export interface RecoveryPackProveResponse {
   readonly verified_wallet_count: number | null;
   readonly status: string;
   readonly in_flight: boolean;
+  /** 1 = a superseded digit-passcode pack was proven; it must be re-issued and destroyed. */
+  readonly pack_version?: 1 | 2;
+}
+
+/**
+ * Crockford base32 — the same 32 symbols the node generates with, chosen so a
+ * secret can be transcribed off a screen without I/L/O/U ambiguity.
+ */
+const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/** 26 × log2(32) = 130 bits, over the node's 128-bit creation floor. */
+const RECOVERY_SECRET_CHARS = 26;
+
+/**
+ * Generate the secret a new pack is sealed under. The operator never chooses it:
+ * the pack is designed to leave the host, so its seal key has to be beyond
+ * offline search. Drawn from the platform CSPRNG, shown once, never stored — the
+ * node re-checks the entropy floor at creation regardless of what is sent.
+ */
+export function generateRecoveryPackSecret(): string {
+  const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
+  crypto.getRandomValues(draws);
+  let out = "";
+  for (const d of draws) {
+    // 256 % 32 === 0, so the byte-to-symbol fold stays uniform.
+    out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
+  }
+  return out;
 }
 
 export async function postRecoveryPackCreate(
-  body: { readonly passcode: string; readonly vault_master_key?: string },
+  body: {
+    readonly recovery_secret: string;
+    readonly vault_master_key?: string;
+    /** Re-issue source: the existing pack file, opened server-side. */
+    readonly from_pack?: string;
+    readonly from_pack_secret?: string;
+    readonly allow_legacy_v1?: boolean;
+  },
   totp: string,
 ): Promise<RecoveryPackCreateResponse> {
   assertLiveMoneySession("create recovery pack");
@@ -978,7 +1014,11 @@ export async function postRecoveryPackCreate(
 }
 
 export async function postRecoveryPackProve(
-  body: { readonly passcode: string; readonly pack_file: string },
+  body: {
+    readonly recovery_secret: string;
+    readonly pack_file: string;
+    readonly allow_legacy_v1?: boolean;
+  },
   totp: string,
 ): Promise<RecoveryPackProveResponse> {
   assertLiveMoneySession("prove recovery pack");

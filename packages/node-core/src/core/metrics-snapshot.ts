@@ -98,10 +98,19 @@ SELECT count(*)::int AS wallets
     .replace(/\s+/g, " ")
     .trim(),
 
+  // Only the post-delivery park counts. A NEEDS_ATTENTION send that never reached a
+  // delivered partial (a formation failure) holds no source-wallet lease, so counting it
+  // would overstate what is held against the wallet cap — the one thing this gauge is read
+  // for. The two reasons are the two the completion lander parks under (F1.1's post-expiry
+  // hold and B4's head anomaly); both are non-terminal and both keep the lease.
   COUNT_PARKED_EXTERNAL_SENDS: `
 SELECT count(*)::int AS parked
-  FROM send_operations
- WHERE status = 'NEEDS_ATTENTION'`
+  FROM send_operations s
+ WHERE s.status = 'NEEDS_ATTENTION'
+   AND s.attention_reason IN ('POST_EXPIRY_RECONCILING', 'UNEXPECTED_HEAD_CHANGE')
+   AND EXISTS (SELECT 1 FROM external_send_partials p
+                WHERE p.operation_id = s.operation_id
+                  AND p.first_delivered_at IS NOT NULL)`
     .replace(/\s+/g, " ")
     .trim(),
 

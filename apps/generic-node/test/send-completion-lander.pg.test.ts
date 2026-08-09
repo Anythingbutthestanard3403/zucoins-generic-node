@@ -27,6 +27,8 @@
 //        POST_EXPIRY_RECONCILING; never terminal, lease held (ZTR-1129).
 //   F2.2 a send already parked at NEEDS_ATTENTION still lands when the recipient submits late
 //        — the scan covers both landing entry statuses (ZTR-1129).
+//   F2.2 …and covering both statuses does NOT let the parked population starve the live one:
+//        batchSize + 1 older parked sends, and a live send still lands on the first tick.
 
 import { createHash, createPrivateKey, sign, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -325,9 +327,15 @@ function scriptedExchange(
       const body = Buffer.from(request.bodyBytes).toString("utf8");
       expect(request.rpc).toBe("get_transaction__v1");
       expect(body).not.toMatch(/submit_transaction__v1/);
-      const match = body.match(/key_public__base64urlsafe=([^&]+)/);
-      const key = match ? decodeURIComponent(match[1]!) : "";
-      const responseBytes = respond(key);
+      // The wire form is `v=<encodeURIComponent(JSON.stringify({action_name, action_data}))>`
+      // (gateway/request.ts), so the wallet key sits INSIDE the encoded JSON — a
+      // `key_public__base64urlsafe=` scan of the raw body never matches and every caller
+      // silently got "". Decode it the way the gateway does, so a drill can answer two
+      // wallets differently.
+      const decoded = JSON.parse(decodeURIComponent(body.replace(/^v=/, ""))) as {
+        action_data?: { key_public__base64urlsafe?: string };
+      };
+      const responseBytes = respond(decoded.action_data?.key_public__base64urlsafe ?? "");
       return {
         endpoint,
         endpointFingerprint: fingerprintEndpoint(endpoint),
@@ -449,10 +457,19 @@ interface ParkedSend {
   readonly nodeId: string;
   readonly operationId: string;
   readonly walletId: string;
-  readonly observerId: string;
+  readonly implementerId: string;
 }
 
-async function seedParkedSend(options: { buried?: boolean } = {}): Promise<ParkedSend> {
+/**
+ * `sourcePubkey` overrides the golden SOURCE_PUBKEY so a drill can seed several sends whose
+ * source heads the scripted exchange answers DIFFERENTLY (it dispatches on the requested
+ * pubkey). Only the FIFO drill uses it, and only for filler rows that never assemble
+ * evidence — the golden bodies below stay bound to SOURCE_PUBKEY.
+ */
+async function seedParkedSend(
+  options: { buried?: boolean; sourcePubkey?: string } = {},
+): Promise<ParkedSend> {
+  const sourcePubkey = options.sourcePubkey ?? SOURCE_PUBKEY;
   const nodeId = randomUUID();
   const implementerId = randomUUID();
   const operationId = randomUUID();
@@ -480,7 +497,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
   await pool.query(
     `INSERT INTO wallets (id, node_id, public_key, key_origin, state)
      VALUES ($1::uuid, $2::uuid, $3, 'node_generated', 'PINNED')`,
-    [walletId, nodeId, SOURCE_PUBKEY],
+    [walletId, nodeId, sourcePubkey],
   );
 
   const observerId = randomUUID();
@@ -495,7 +512,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
     implementer_id: implementerId,
     operation_id: operationId,
     source_selector: { kind: "WALLET_ID", wallet_id: walletId },
-    source_pubkey: SOURCE_PUBKEY,
+    source_pubkey: sourcePubkey,
     destination_address: DEST_PUBKEY,
     amount_zkz: AMOUNT_ZKZ,
     references_operation_id: null,
@@ -518,7 +535,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
        $12, $13, $14, $15, $16
      )`,
     [
-      sourceT0ObsId, observerId, fingerprintEndpoint(GATEWAY_A), walletId, SOURCE_PUBKEY,
+      sourceT0ObsId, observerId, fingerprintEndpoint(GATEWAY_A), walletId, sourcePubkey,
       Buffer.from(headEnvelopeBytes(PREDECESSOR_SETTLED_TEXT)),
       sha256HexOfText(PREDECESSOR_SETTLED_TEXT),
       PREDECESSOR_SEMANTIC_FINGERPRINT,
@@ -561,7 +578,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
        last_raw_response_sha256, last_semantic_fingerprint, last_seen_at,
        next_wallet_seq)
      VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, now(), 2)`,
-    [observerId, walletId, SOURCE_PUBKEY, sourceT0ObsId,
+    [observerId, walletId, sourcePubkey, sourceT0ObsId,
      sha256HexOfText(PREDECESSOR_SETTLED_TEXT),
      PREDECESSOR_SEMANTIC_FINGERPRINT],
   );
@@ -600,7 +617,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
          $13, $14, $15, $16, $17
        )`,
       [
-        targetObsId, observerId, fingerprintEndpoint(GATEWAY_A), walletId, SOURCE_PUBKEY,
+        targetObsId, observerId, fingerprintEndpoint(GATEWAY_A), walletId, sourcePubkey,
         Buffer.from(headEnvelopeBytes(TARGET_SETTLED_TEXT)),
         sha256HexOfText(TARGET_SETTLED_TEXT),
         TARGET_SEMANTIC_FINGERPRINT,
@@ -615,7 +632,7 @@ async function seedParkedSend(options: { buried?: boolean } = {}): Promise<Parke
               last_semantic_fingerprint = $3, next_wallet_seq = 3, last_seen_at = now()
         WHERE observer_id = $4::uuid AND wallet_public_key = $5`,
       [targetObsId, sha256HexOfText(TARGET_SETTLED_TEXT), TARGET_SEMANTIC_FINGERPRINT,
-       observerId, SOURCE_PUBKEY],
+       observerId, sourcePubkey],
     );
   }
 
@@ -1048,6 +1065,55 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       );
       expect(record.rowCount).toBe(1);
       expect((record.rows[0] as { entry_status: string }).entry_status).toBe("NEEDS_ATTENTION");
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "parked sends never starve the live arm: batchSize + 1 older parked sends and a live send still lands",
+    async () => {
+      // The failure this pins is a live send-path outage, not a slow queue. A parked send has
+      // no terminal path while the close is RESERVED (CONTINUE_EXTERNAL_WAIT needs
+      // !protocolExpiredPlusMargin, which the post-expiry park makes false), so it stays
+      // NEEDS_ATTENTION indefinitely. Under one shared oldest-first FIFO, `batchSize` such rows
+      // take every slot on every tick, forever, and external sends stop landing entirely.
+      const BATCH = 2;
+      const fillers: ParkedSend[] = [];
+      for (let i = 0; i < BATCH + 1; i += 1) {
+        // Its own source pubkey so the scripted exchange can answer it differently — a filler's
+        // head reads genesis, which is what a genuinely stuck parked send looks like.
+        const filler = await seedParkedSend({ sourcePubkey: paddedBase64Url(randomBytes(32)) });
+        await parkPastExpiryByHand(filler.operationId);
+        fillers.push(filler);
+      }
+      // Backdate every parked row so the shared FIFO would hand them all of `batchSize`.
+      await pool.query(
+        `UPDATE send_operations SET created_at = now() - interval '1 day'
+          WHERE status = 'NEEDS_ATTENTION'`,
+      );
+
+      const live = await seedParkedSend();
+      expect(await sendStatusOf(live.operationId)).toBe("AWAITING_REDEMPTION");
+
+      const result = await tickSendCompletionLander({
+        ...landerDeps(
+          live.nodeId,
+          scriptedExchange((key) =>
+            key === SOURCE_PUBKEY ? headEnvelopeBytes(TARGET_SETTLED_TEXT) : genesisEnvelopeBytes(),
+          ),
+        ),
+        batchSize: BATCH,
+      });
+
+      // The live arm got its own full budget: the send landed on the very first tick.
+      expect(result.landed).toEqual([live.operationId]);
+      expect(await sendStatusOf(live.operationId)).toBe("EXTERNAL_SEND_LANDED");
+      // ...and the parked population is still parked, still re-scanned, still holding leases.
+      for (const filler of fillers) {
+        expect(await sendStatusOf(filler.operationId)).toBe("NEEDS_ATTENTION");
+        expect(await leaseHeld(filler.walletId)).toBe(true);
+      }
+      expect(result.indeterminate).toBe(fillers.length);
     },
     PG_TEST_TIMEOUT_MS,
   );

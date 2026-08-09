@@ -24,6 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   sha256HexUtf8,
   classifyRecovery,
+  derivePermittedActions,
   migrateLeaseFoundation,
   createLeaseGroup,
   acquireLeases,
@@ -59,6 +60,10 @@ const PACK_SLICES = [
   "custody-eligibility",
   "signer-support",
   "operations",
+  // The SEND non-landing exclusion oracle reads its wallet/Ts0/step-1 material off
+  // send_operations (SQL_SEND_NON_LANDING_MATERIAL); the freeze-tripwire drill below is the
+  // only test here that touches it. Depends on wallets only (custody-eligibility, above).
+  "send-external-create",
   "transaction-material",
   "submit-attempts",
   "audit-log",
@@ -1016,6 +1021,170 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       [sourceWalletId],
     );
     expect(heldAgain.rowCount).toBe(1);
+  });
+
+  // ── ZTR-1129 freeze tripwire ────────────────────────────────────────────────────────────
+
+  // The exclusion oracle reads its wallet / Ts0 / step-1 material off send_operations, not
+  // off the operations mirror seedSendOperation writes, so a drill that wants the oracle to
+  // actually run needs this row too. Without it the oracle short-circuits before the gateway.
+  async function seedSendOperationsRow(operationId: string, sourceWalletId: string): Promise<void> {
+    await pool.query(
+      `INSERT INTO send_operations
+         (operation_id, implementer_id, node_id, kind, status, attention_required,
+          formation_state, http_method, route, idempotency_key, request_sha256,
+          source_wallet_id, destination_address, amount_zkz)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', 'NEEDS_ATTENTION', true,
+               'PARTIAL_DELIVERED', 'POST', '/v1/external-sends', $4, $5,
+               $6::uuid, $7, '0.01')`,
+      [operationId, IMPLEMENTER_ID, NODE_ID, `idem-${operationId}`, sha256(randomUUID()),
+        sourceWalletId, `${"B".repeat(43)}=`],
+    );
+  }
+  //
+  // SEND_NON_LANDING_CLOSE_ACTIVATED is a compile-time `false` in sql-recovery-store.ts, and
+  // nothing else stands between the exclusion oracle's positives and a RESERVED action that
+  // rejects an operation and releases a source-wallet lease. The pure predicate drill
+  // (node-core/test/recovery-actions.test.ts) proves derivePermittedActions withholds the
+  // close when both facts are false — it cannot notice the store deciding to set them.
+  //
+  // This drill makes the flag itself the thing under test. It stages the single cheapest
+  // genuine positive the oracle can return — a genesis Ts0 binding under a genesis head, which
+  // proveSendNonLanding answers FRESH_HEAD_EQUALS_T0 on two reads with no path walk — and
+  // asserts the oracle really did produce it (the manifest line) while both predicates, the
+  // classification and the permitted-action set stay exactly where the freeze puts them.
+  // Flipping the constant to true turns this test red, which is the whole point of it.
+  it("freeze tripwire: a real FRESH_HEAD_EQUALS_T0 positive never reaches the RESERVED close through the SQL store", async () => {
+    const sourceWalletId = await insertWallet();
+    const publicKey = await walletPublicKey(sourceWalletId);
+    const operationId = await seedSendOperation({
+      status: "NEEDS_ATTENTION",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "POST_EXPIRY_RECONCILING",
+      sourceWalletId,
+    });
+    await seedApprovalAndPartial(operationId, { delivered: true });
+    await seedSendOperationsRow(operationId, sourceWalletId);
+
+    // Ts0 is genesis: the observation row carries no completed_transaction_text, so the
+    // oracle's baseline is GENESIS and a genesis head is byte-identical to it by definition.
+    const sourceT0ObservationId = randomUUID();
+    await pool.query(
+      `INSERT INTO gateway_observations (
+         id, observer_id, endpoint_fingerprint, wallet_public_key, wallet_seq,
+         observed_at, http_status, raw_response_bytes, raw_response_sha256,
+         parse_result, relationship, semantic_fingerprint, state_changed,
+         wallet_role, s_signature, p_signature, b_amount
+       ) VALUES (
+         $1::uuid, $2::uuid, $3, $4, 1,
+         now(), 200, $5::bytea, $6,
+         'VERIFIED_GENESIS', 'FIRST', $7, false,
+         'genesis', '', '', '0'
+       )`,
+      [
+        sourceT0ObservationId, nodeObserverId, sha256("fixture-endpoint"), publicKey,
+        Buffer.from(`{"status":true,"code":"success","message":"","data":[]}`, "utf8"),
+        sha256(`genesis-raw-${operationId}`), sha256(`genesis-sem-${operationId}`),
+      ],
+    );
+
+    // Past T2 + the 3600s aging margin, with a delivered durable partial: the one window in
+    // which the store asks the oracle at all.
+    const intentApprovalId = randomUUID();
+    await pool.query(`INSERT INTO operation_approvals (id) VALUES ($1::uuid)`, [intentApprovalId]);
+    await pool.query(
+      `INSERT INTO external_send_sign_intents
+         (operation_id, approval_id, source_wallet_id, source_t0_observation_id,
+          destination_t0_observation_id, lease_group_id, lease_epoch,
+          inner_preimage_text, inner_sha256, redemption_expiry_at, prepared_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, 1,
+               $7, $8, now() - interval '3 hours', now() - interval '4 hours')`,
+      [operationId, intentApprovalId, sourceWalletId, sourceT0ObservationId, randomUUID(),
+        randomUUID(), `inner-${operationId}`, sha256(`inner-${operationId}`)],
+    );
+
+    // A head that reads genesis, every time — the positive arm of the oracle.
+    const genesisBytes = new TextEncoder().encode(
+      `{"status":true,"code":"success","message":"","data":[]}`,
+    );
+    const genesisHead: ReadFreshHead = async () => ({
+      observationId: sourceT0ObservationId,
+      envelope: {
+        rawBytes: genesisBytes,
+        rawSha256: sha256HexUtf8(`{"status":true,"code":"success","message":"","data":[]}`),
+        classification: "GENESIS",
+        parsed: null,
+      },
+    });
+
+    const oracleStore = createSqlRecoveryActionStore(pool, genesisHead);
+    const facts = await oracleStore.loadRecoveryFactsLocked(operationId);
+    expect(facts).not.toBeNull();
+    expect(facts!.send).not.toBeUndefined();
+
+    // The oracle window really is open — without this the rest would pass vacuously.
+    expect(facts!.send!.protocolExpiredPlusMargin).toBe(true);
+    expect(facts!.send!.hasDurablePartial).toBe(true);
+
+    // ...and the oracle really did return a positive, recorded verbatim on the manifest.
+    const sourceHead = facts!.evidenceManifest.filter((e) => e.role === "SOURCE_HEAD");
+    expect(sourceHead).toHaveLength(1);
+    expect(sourceHead[0]!.summary).toContain("FRESH_HEAD_EQUALS_T0");
+
+    // The freeze: the positive stops at the manifest. Both predicates stay false, the
+    // classification never becomes PROVEN_NOT_LANDED, and the RESERVED close is not offered.
+    expect(facts!.send!.freshHeadEqualsSourceT0).toBe(false);
+    expect(facts!.send!.completePathExclusionProved).toBe(false);
+    const permitted = derivePermittedActions(facts!);
+    expect(permitted.classification).not.toBe("PROVEN_NOT_LANDED");
+    expect(permitted.permittedActions).not.toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
+    // The manifest says so out loud, so an operator reading evidence sees why.
+    expect(sourceHead[0]!.summary).toContain("RESERVED: not admitted to the close predicates");
+  });
+
+  // The companion half of the tripwire: the listing must not pay for the oracle at all. The
+  // store is handed a readFreshHead that fails the test if it is ever called, because
+  // listNeedsAttention with limit=200 would otherwise run it once per parked row inside one
+  // operator request.
+  it("listNeedsAttention never spends a gateway read, however many parked sends it returns", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "NEEDS_ATTENTION",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "POST_EXPIRY_RECONCILING",
+      sourceWalletId,
+    });
+    await seedApprovalAndPartial(operationId, { delivered: true });
+    // Same shape as the tripwire above — every gate that would make the oracle run is open,
+    // right down to the send_operations row it reads its material from.
+    await seedSendOperationsRow(operationId, sourceWalletId);
+    const intentApprovalId = randomUUID();
+    await pool.query(`INSERT INTO operation_approvals (id) VALUES ($1::uuid)`, [intentApprovalId]);
+    await pool.query(
+      `INSERT INTO external_send_sign_intents
+         (operation_id, approval_id, source_wallet_id, source_t0_observation_id,
+          destination_t0_observation_id, lease_group_id, lease_epoch,
+          inner_preimage_text, inner_sha256, redemption_expiry_at, prepared_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, 1,
+               $7, $8, now() - interval '3 hours', now() - interval '4 hours')`,
+      [operationId, intentApprovalId, sourceWalletId, randomUUID(), randomUUID(),
+        randomUUID(), `inner-${operationId}`, sha256(`inner-${operationId}`)],
+    );
+
+    let headReads = 0;
+    const countingHead: ReadFreshHead = async () => {
+      headReads += 1;
+      throw new Error("listNeedsAttention must not read the gateway");
+    };
+    const listed = await createSqlRecoveryInspectionStore(pool, countingHead)
+      .listNeedsAttention({ limit: 200 });
+
+    expect(listed.map((f) => f.operationId)).toContain(operationId);
+    expect(headReads).toBe(0);
+    const send = listed.find((f) => f.operationId === operationId)!.send!;
+    expect(send.protocolExpiredPlusMargin).toBe(true);
+    expect(send.freshHeadEqualsSourceT0).toBe(false);
+    expect(send.completePathExclusionProved).toBe(false);
   });
 
   it("rejects an expired nonce with recovery_nonce_invalid", async () => {

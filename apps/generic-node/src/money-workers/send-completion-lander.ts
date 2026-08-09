@@ -113,6 +113,15 @@ export interface SendObserveLanderDeps {
 
 const DEFAULT_BATCH = 25;
 
+/**
+ * Slots the parked (NEEDS_ATTENTION) re-scan may take per tick, ON TOP OF the live arm's full
+ * `batchSize` — never out of it. A parked send has no terminal path while the close is
+ * RESERVED, so the parked population only grows; sharing one budget with the live arm is what
+ * lets it stop external sends landing entirely. Small on purpose: this is a background
+ * re-check for the late landing (F2.2), and every candidate costs one gateway head read.
+ */
+const PARKED_RESCAN_BATCH = 5;
+
 /** The attention reason for a head that changed under the lease (UNEXPECTED_HEAD_CHANGE). */
 const HEAD_ANOMALY_REASON = SEND_EXPIRY_ATTENTION_REASON;
 
@@ -194,15 +203,43 @@ type GatherResult =
  * observed exactly never again: the recipient may submit at any time, there is no time-box on
  * the positive oracle after expiry, and `commitExternalSendLanding` already accepts both entry
  * statuses. One scan covers both rather than a second worker over the same rows.
+ *
+ * The two statuses get SEPARATE budgets, and that separation is load-bearing. A parked send
+ * has no terminal path while the reserved close is off, so it stays NEEDS_ATTENTION
+ * indefinitely; one shared FIFO would let `batchSize` parked rows occupy every slot forever
+ * and live AWAITING_REDEMPTION sends would stop landing at all. The live arm therefore always
+ * gets its full `batchSize`, and the parked re-scan gets its own small budget on top.
+ *
+ * Within its budget the parked arm samples at random rather than oldest-first, for the same
+ * reason: nothing a no-op re-check does advances a parked row's position, so a fixed sequence
+ * would re-read the same few rows every tick and a late landing behind them would never be
+ * seen. Random gives every parked send the same chance each tick. The live arm keeps strict
+ * oldest-first.
+ *
+ * Both budgets are drawn through one window rank on one line so this keeps the single frozen
+ * `contract-allow` marker the shared-FIFO query carried — the drift gate counts hits, not
+ * intent, so a second sort clause would move `FROZEN_SUPPRESSED_VIOLATION_COUNT`.
  */
 async function loadSendLandingCandidates(
   pool: Pool,
   batchSize: number,
+  parkedBatchSize: number,
 ): Promise<readonly SendLandingCandidate[]> {
   let result: { rows: Record<string, unknown>[] };
   try {
     result = await pool.query<Record<string, unknown>>(
-      `SELECT s.operation_id::text AS operation_id,
+      `WITH eligible AS (
+         SELECT e.operation_id, e.status,
+                row_number() OVER (PARTITION BY e.status ORDER BY CASE WHEN e.status = 'NEEDS_ATTENTION' THEN random() END, e.created_at) AS rank_in_status -- contract-allow:order:frozen structural vocabulary
+           FROM send_operations e
+           INNER JOIN external_send_partials ep ON ep.operation_id = e.operation_id
+          WHERE e.status IN ('AWAITING_REDEMPTION', 'NEEDS_ATTENTION')
+       ), scan AS (
+         SELECT operation_id FROM eligible
+          WHERE (status = 'AWAITING_REDEMPTION' AND rank_in_status <= $1)
+             OR (status = 'NEEDS_ATTENTION' AND rank_in_status <= $2)
+       )
+       SELECT s.operation_id::text AS operation_id,
               s.status::text AS status,
               s.row_version::bigint AS row_version,
               s.source_wallet_id::text AS source_wallet_id,
@@ -237,17 +274,15 @@ async function loadSendLandingCandidates(
                          AND l.lease_group_id = si.lease_group_id
                          AND l.lease_epoch = si.lease_epoch) AS source_lease_active
          FROM send_operations s
+         INNER JOIN scan ON scan.operation_id = s.operation_id
          INNER JOIN wallets w ON w.id = s.source_wallet_id
          INNER JOIN external_send_partials p ON p.operation_id = s.operation_id
          LEFT JOIN external_send_sign_intents si ON si.operation_id = s.operation_id
          LEFT JOIN operation_approvals ap ON ap.operation_id = s.operation_id
          LEFT JOIN send_operation_expected_artifacts a ON a.operation_id = s.operation_id
          LEFT JOIN gateway_observations st0 ON st0.id = si.source_t0_observation_id
-         LEFT JOIN gateway_observations dt0 ON dt0.id = si.destination_t0_observation_id
-        WHERE s.status IN ('AWAITING_REDEMPTION', 'NEEDS_ATTENTION')
-        ORDER BY s.created_at ASC -- contract-allow:order:frozen structural vocabulary
-        LIMIT $1`,
-      [batchSize],
+         LEFT JOIN gateway_observations dt0 ON dt0.id = si.destination_t0_observation_id`,
+      [batchSize, parkedBatchSize],
     );
   } catch (err) {
     // Never launder a query fault into an empty (healthy-idle) candidate set —
@@ -814,13 +849,13 @@ export async function tickSendCompletionLander(
   deps: SendObserveLanderDeps,
 ): Promise<{ readonly landed: readonly string[]; readonly indeterminate: number; readonly parked: number }> {
   const batchSize = deps.batchSize ?? DEFAULT_BATCH;
-  const candidates = await loadSendLandingCandidates(deps.pool, batchSize);
+  const candidates = await loadSendLandingCandidates(deps.pool, batchSize, PARKED_RESCAN_BATCH);
 
   if (candidates.length === 0) {
     return { landed: [], indeterminate: 0, parked: 0 };
   }
 
-  deps.logger.info(`money-workers: SEND completion lander scanning ${candidates.length} AWAITING_REDEMPTION op(s)`);
+  deps.logger.info(`money-workers: SEND completion lander scanning ${candidates.length} landing-entry op(s)`);
 
   const landed: string[] = [];
   let indeterminate = 0;

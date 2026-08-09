@@ -510,6 +510,15 @@ export function createSqlRecoveryInspectionStore(
     // query.classification / query.kind are accepted by the NeedsAttentionQuery shape but
     // deliberately left unfiltered here (limit-only) — a pre-existing gap, out of this
     // ticket's reviewed scope.
+    //
+    // `readFreshHead` is deliberately NOT threaded into the listing. Every parked SEND in it
+    // is past T2 + the aging margin with a durable partial by construction (that is what
+    // parked MEANS), so passing it would run the non-landing exclusion oracle once per row —
+    // two live gateway head reads plus up to `DEFAULT_MAX_PATH_DEPTH` successor lookups per
+    // send, up to `limit` (200) times, inside one synchronous operator HTTP request. The
+    // oracle belongs on the single-operation paths below, which is where an operator actually
+    // decides an action; a listing that omits it is fail-closed (both predicates false), never
+    // wrong in the permissive direction.
     async listNeedsAttention(query: NeedsAttentionQuery): Promise<readonly RecoveryFacts[]> {
       const limit = query.limit ?? 50;
       const result = await pool.query<{
@@ -526,7 +535,7 @@ export function createSqlRecoveryInspectionStore(
             terminalObservationId: r.terminal_observation_id,
             expiryUnixTimeSecs: r.expiry_unix_time_secs,
             formationState: r.formation_state,
-          }, readFreshHead);
+          });
         if (f !== null) facts.push(f);
       }
       return facts;
@@ -1250,10 +1259,15 @@ async function loadRecoveryFactsFromRow(
     // is recorded on the evidence manifest — but its positives are admitted to the close
     // predicates only through SEND_NON_LANDING_CLOSE_ACTIVATED, which is false while the
     // action is RESERVED. A fault, a thrown read, an absent Ts0 binding, or a send found ON
-    // the source path all leave both predicates false regardless (fail-closed). The oracle is
-    // asked only once the send is past T2 + the aging margin and a durable partial exists:
-    // that is the sole window in which a terminal close may even be considered, so an
-    // ordinary attention listing spends no gateway reads.
+    // the source path all leave both predicates false regardless (fail-closed).
+    //
+    // Two gates decide whether it is asked at all, and BOTH are needed. Past T2 + the aging
+    // margin with a durable partial is the sole window in which a terminal close may even be
+    // considered — but every parked send satisfies it, so that gate alone does not bound the
+    // read volume. `readFreshHead` is the other: only the single-operation callers thread it,
+    // so one operation costs at most one oracle run and the attention listing costs none.
+    // Changing that (threading it into listNeedsAttention) puts `limit` live gateway walks
+    // inside one operator HTTP request — see the comment on listNeedsAttention.
     let freshHeadEqualsSourceT0 = false;
     let completePathExclusionProved = false;
     if (protocolExpiredPlusMargin && hasDurablePartial && readFreshHead !== undefined) {

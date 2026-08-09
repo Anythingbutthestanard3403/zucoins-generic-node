@@ -573,7 +573,7 @@ export function createNodeMetrics(): NodeMetrics {
   );
   const parkedExternalSends = createGauge(
     "gn_send_external_parked",
-    "External-send operations parked at NEEDS_ATTENTION, each holding a source-wallet lease.",
+    "External-send operations parked at NEEDS_ATTENTION after partial delivery (post-expiry hold or head anomaly), each still holding its source-wallet lease against the pool cap.",
     [],
   );
   const operationsByStatus = createGauge(

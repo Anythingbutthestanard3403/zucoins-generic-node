@@ -168,10 +168,15 @@ const SCHEMA_FILES = [
   // verification_acknowledgements + ack wallet evidence. References
   // operations / nodes / reporting_request_nonces / reporting_mutation_idempotency.
   "verification-acknowledgements.sql",
+  // The two correlation functions + three deferred constraint triggers. Declares no table
+  // and no index (so it is also in NO_TABLE_SCHEMA_FILES below); it attaches to
+  // reporting_mutation_idempotency / receive_arms / verification_acknowledgements.
+  "mutation-correlation.sql",
 ] as const;
 
-// SCHEMA_FILES that deliberately contain no CREATE TABLE: either ALTER statements on a
-// table owned by another frozen slice, or CREATE INDEX-only extensions of one.
+// SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
+// by another frozen slice, CREATE INDEX-only extensions of one, or a pure constraint-trigger
+// attachment onto tables other slices own.
 // Exempt from the non-empty parseTables inventory.
 const NO_TABLE_SCHEMA_FILES = [
   "move-observation-evidence.sql",
@@ -180,6 +185,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "admin-sessions-node-id.sql",
   "reporting-rate-limit-buckets-pk-collapse.sql",
   "node-events-seq-composite-pk.sql",
+  "mutation-correlation.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -402,6 +408,13 @@ const GREENFIELD: Record<
     applies: false,
     missingRelation: "reporting_request_class",
   },
+  // Function-then-trigger slice. plpgsql bodies are only syntax-checked at CREATE FUNCTION,
+  // so both functions create alone; the first CREATE CONSTRAINT TRIGGER then fails on its
+  // attachment target — the first relation this slice cannot self-supply.
+  "mutation-correlation.sql": {
+    applies: false,
+    missingRelation: "reporting_mutation_idempotency",
+  },
 };
 
 const sqlText = (file: string): string => readFileSync(resolve(schemaDir, file), "utf8");
@@ -544,7 +557,9 @@ describe("greenfield migration integrity — frozen schema contracts", () => {
         if ((NO_TABLE_SCHEMA_FILES as readonly string[]).includes(file)) {
           expect(Object.keys(tables).length, `${file} must declare no tables`).toBe(0);
           const active = sqlText(file).replace(/--[^\n]*/g, "");
-          expect(active, file).toMatch(/ALTER\s+TABLE\b|CREATE\s+INDEX\b/i);
+          expect(active, file).toMatch(
+            /ALTER\s+TABLE\b|CREATE\s+INDEX\b|CREATE\s+CONSTRAINT\s+TRIGGER\b/i,
+          );
           expect(active, `${file} must not dual-CREATE`).not.toMatch(
             /CREATE\s+TABLE\s+move_observation_evidence\b/i,
           );

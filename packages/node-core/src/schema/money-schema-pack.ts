@@ -156,10 +156,14 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // joins need them once operation_landing_proofs exists.
   // Appended; never renumber prior slices. FK target is landing-proof-verifications.
   "lineage-path-proofs",
-  // verification_acknowledgements + ack wallet evidence + deferred mutation
-  // correlation, required by the live verification-complete mount.
-  // Appended; never renumber prior slices.
+  // verification_acknowledgements + ack wallet evidence, required by the live
+  // verification-complete mount. Appended; never renumber prior slices.
   "verification-acknowledgements",
+  // The deferred parent/child correlation guard (frozen in verification-proofs.sql, which
+  // is contract-only and excluded from this pack). Attaches to reporting_mutation_idempotency,
+  // receive_arms and verification_acknowledgements, so it must follow all three.
+  // Appended; never renumber prior slices.
+  "mutation-correlation",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];
@@ -651,10 +655,11 @@ export function listSchemaSqlFiles(): readonly string[] {
 /**
  * Slices omitted from the pack because reporting-persistence (or its drizzle twin)
  * already owns that surface once generic-node 0000/0001 has applied — OR because the
- * contract carries out-of-scope surface not yet wired into the pack (`verification-proofs.sql`
- * still declares `verification_acknowledgements` and the reporting-mutation idempotency
- * machinery; its `operation_verifications`/`operation_landing_proofs` tables are covered
- * by the `landing-proof-verifications` pack slice instead —).
+ * contract carries surface a narrower pack slice ships instead (`verification-proofs.sql` is
+ * contract text only: its `operation_verifications` tables are covered by
+ * `landing-proof-verifications`, its acknowledgement tables by `verification-acknowledgements`,
+ * and its five deferred correlation objects by `mutation-correlation` — so excluding the file
+ * no longer withholds anything from a deployed database).
  */
 export const MONEY_SCHEMA_PACK_EXCLUDED_AFTER_REPORTING = [
   "reporting-persistence.sql",

@@ -22,6 +22,7 @@
     "lineage-path-proofs.sql",
     "move-baseline-binding.sql",
     "move-observation-evidence.sql",
+    "mutation-correlation.sql",
     "node-events-seq-composite-pk.sql",
     "node-implementer-registry.sql",
     "node-signing-key-sealed-store.sql",

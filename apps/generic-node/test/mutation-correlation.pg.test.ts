@@ -359,29 +359,18 @@ describe.skipIf(databaseUrl === undefined || databaseUrl === "")(
     });
 
     it("rejects a child_record_id belonging to the wrong route", async () => {
-      // A committed, fully correlated verification_complete pair …
-      const landed = await newScenario("wrong-route-landed");
-      const good = await commitInOneTransaction([
-        [INSERT_PARENT, parentParams(landed)],
-        [INSERT_ACK, ackParams(landed)],
-      ]);
-      expect(good.committed).toBe(true);
-
-      // … then an operation_armed parent pointing at that acknowledgement. The route selects
-      // receive_arms, so the ack id resolves to zero matching children.
-      const armed = await newScenario("wrong-route-armed");
+      // `child_record_id` is UNIQUE, so a cross-route child can never be one an earlier
+      // parent already claimed — that clashes immediately and the deferred guard never
+      // speaks. The reachable shape is both rows in ONE transaction: an operation_armed
+      // parent naming an acknowledgement written beside it. The route selects receive_arms,
+      // so the acknowledgement resolves to zero matching children.
+      const s = await newScenario("wrong-route");
       const armedNonce = randomUUID();
-      await insertNonce(armedNonce, "operation_armed", armed.rawTarget, armed.bodySha256);
+      await insertNonce(armedNonce, "operation_armed", s.rawTarget, s.bodySha256);
 
       const outcome = await commitInOneTransaction([
-        [
-          INSERT_PARENT,
-          parentParams(armed, {
-            routeId: "operation_armed",
-            nonceId: armedNonce,
-            childRecordId: landed.childId,
-          }),
-        ],
+        [INSERT_PARENT, parentParams(s, { routeId: "operation_armed", nonceId: armedNonce })],
+        [INSERT_ACK, ackParams(s)],
       ]);
       expect(outcome.committed).toBe(false);
       expect(outcome.midStatement).toBe(false);

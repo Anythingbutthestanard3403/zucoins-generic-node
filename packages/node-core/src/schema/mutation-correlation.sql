@@ -81,10 +81,15 @@ AS $$
 DECLARE
   parent_id uuid;
 BEGIN
-  parent_id := CASE TG_TABLE_NAME
-    WHEN 'reporting_mutation_idempotency' THEN NEW.id
-    ELSE NEW.mutation_idempotency_id
-  END;
+  -- A branch, never a CASE expression: plpgsql resolves EVERY column reference in one
+  -- expression against NEW's actual row type, so the unused arm's
+  -- `NEW.mutation_idempotency_id` raises 42703 on reporting_mutation_idempotency, which
+  -- has no such column. IF arms are planned only when taken.
+  IF TG_TABLE_NAME = 'reporting_mutation_idempotency' THEN
+    parent_id := NEW.id;
+  ELSE
+    parent_id := NEW.mutation_idempotency_id;
+  END IF;
   PERFORM reporting_assert_completed_mutation(parent_id);
   RETURN NULL;
 END

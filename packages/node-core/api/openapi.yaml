@@ -1331,6 +1331,8 @@ components:
                 - nesting_too_deep
                 - invalid_idempotency_key
                 - cursor_mismatch
+                - unsupported_content_type
+                - http_version_too_old
                 - idempotency_conflict
                 - idempotency_key_reused
                 - idempotency_in_progress

@@ -38,6 +38,12 @@ export interface TlsOverrides {
 
 // Certificate validation is enforced unconditionally: rejectUnauthorized is never
 // overridable, so a misconfigured caller cannot silently disable peer verification.
+//
+// Intentionally unreachable in this deployment shape: nothing in this repository terminates
+// TLS — both process entries (apps/generic-node main.ts / stage1-main.ts) create a plain
+// node:http server and TLS is terminated by the ingress in front of it. This function has no
+// production call site by design, and a call site must not be invented to make it look wired;
+// it becomes live only if an in-process TLS listener is ever added.
 export function buildHardenedTlsConfig(overrides: TlsOverrides = {}): HardenedTlsConfig {
   return {
     minVersion: MIN_TLS_VERSION,

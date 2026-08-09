@@ -211,6 +211,10 @@ export class CachedDbProbe {
    * again once the cached verdict has aged past `ttlMs`. A consumer therefore acts on a
    * verdict at most one TTL old, and the answer re-closes on DB loss the moment the next
    * probe records a failure — it can never latch open the way a boot-time flag does.
+   *
+   * Staying open on a healthy node is the composition's job, not this method's: something
+   * must call `refresh()` on a cadence strictly inside `ttlMs`. A `probe()` timer does NOT
+   * satisfy that — see `refresh()`.
    */
   cachedReachable(): boolean {
     if (this.cachedOk !== true) return false;
@@ -230,6 +234,22 @@ export class CachedDbProbe {
     if (this.cachedOk !== undefined && now - this.cachedAtMs < this.ttlMs) {
       return this.cachedOk;
     }
+    return this.refresh();
+  }
+
+  /**
+   * Ping unconditionally and re-date the cached verdict. This is the keep-warm path
+   * (ZTR-1178): `probe()` returns early on a cache hit *without* advancing `cachedAtMs`,
+   * so a timer driven through `probe()` can never hold a verdict inside its own TTL —
+   * every tick that lands before expiry is swallowed, and the first tick that actually
+   * re-pings is by construction one that arrives after `cachedReachable()` has already
+   * read closed. No cadence closes that gap; only re-dating does.
+   *
+   * Unlike `invalidate()` + `probe()`, the last-known verdict stays readable for the
+   * duration of the ping, so the money-admission gate does not read closed on every
+   * refresh cycle. Concurrent calls coalesce onto the one in-flight ping.
+   */
+  async refresh(): Promise<boolean> {
     if (this.inFlight !== undefined) {
       return this.inFlight;
     }

@@ -36,13 +36,21 @@ const here = dirname(fileURLToPath(import.meta.url));
 const mainSrc = readFileSync(join(here, "../src/main.ts"), "utf8");
 
 const TTL_MS = 5_000;
+/** Mirrors main.ts's DB_PROBE_KEEP_WARM_MS = DEFAULT_DB_PING_TTL_MS / 2. */
+const KEEP_WARM_MS = TTL_MS / 2;
 
 /**
  * The production composition, assembled the way main.ts assembles it: one probe over a
  * caller-controlled ping, read synchronously by the admission port. Every stamped
  * conjunct is open, so a refusal can only come from the database one.
+ *
+ * `pingCostMs` charges the virtual clock for the round trip. It defaults to 0 for the
+ * cases that only care about the verdict, but a real ping is never free, and δ = 0 is the
+ * single degenerate case where the staleness window this suite has to police vanishes —
+ * the keep-warm drill below therefore passes a non-zero cost.
  */
-function harness() {
+function harness(opts: { pingCostMs?: number } = {}) {
+  const pingCostMs = opts.pingCostMs ?? 0;
   let dbUp = true;
   let nowMs = 0;
   const pings: number[] = [];
@@ -53,6 +61,7 @@ function harness() {
   const probe = new CachedDbProbe(
     async () => {
       pings.push(nowMs);
+      nowMs += pingCostMs;
       if (!dbUp) throw new Error("connection terminated unexpectedly");
     },
     TTL_MS,
@@ -67,6 +76,7 @@ function harness() {
     ports,
     probe,
     pings,
+    now: () => nowMs,
     advance: (ms: number) => {
       nowMs += ms;
     },
@@ -121,6 +131,26 @@ describe("money-admission database conjunct (ZTR-1178)", () => {
     expect(refusalCode(() => h.ports.assertMoneyAdmitted())).toBeNull();
   });
 
+  it("the boot arm re-pings after a failed keep-warm tick inside the TTL", async () => {
+    // The keep-warm timer starts at boot, before assertPostMigrationReadiness runs, so one
+    // failed tick during boot plants a `false`. A TTL-cached probe() arm would be served
+    // that failure straight back with no re-ping and crash a boot whose pool
+    // assertSchemaCompleteness and assertPrivilegeReadiness had both just passed — turning
+    // a self-healing blip into a crash loop. The arm has to be a real ping.
+    const h = harness();
+
+    h.setDbUp(false);
+    h.advance(2_500);
+    await h.probe.refresh(); // the blip: one failed keep-warm tick
+    expect(h.pings.length).toBe(1);
+
+    h.setDbUp(true);
+    h.advance(500); // still well inside the TTL — probe() would answer `false` from cache
+    expect(await h.probe.refresh()).toBe(true);
+    expect(h.pings.length).toBe(2);
+    expect(refusalCode(() => h.ports.assertMoneyAdmitted())).toBeNull();
+  });
+
   it("a verdict older than one probe TTL reads closed, not stale-open", async () => {
     const h = harness();
     await h.probe.probe();
@@ -129,6 +159,46 @@ describe("money-admission database conjunct (ZTR-1178)", () => {
 
     h.advance(1);
     expect(refusalCode(() => h.ports.assertMoneyAdmitted())).toBe("database_unreachable");
+  });
+
+  it("stays admitted across keep-warm cycles while the database is up", async () => {
+    // The converse of "a stale verdict reads closed", and the case the first cut of this
+    // ticket got wrong: fail-closed on staleness is only safe if something actually keeps
+    // the verdict fresh. Driving the timer through probe() cannot — probe() short-circuits
+    // on its own cache and leaves cachedAtMs where it was, so every tick before expiry is
+    // swallowed and the first tick that re-pings is, by construction, one that lands after
+    // the verdict already read closed. No cadence fixes that; only re-dating does. Charge
+    // the clock for the ping (δ > 0): a free ping is the one degenerate case where the
+    // window closes on its own and the bug hides.
+    const PING_COST_MS = 120;
+    const SAMPLE_MS = 50;
+    // main.ts starts the keep-warm timer at boot (before migrations) and arms the probe
+    // later, from assertPostMigrationReadiness. The tick schedule is therefore NOT phase
+    // locked to the arm — modelling it as if it were is what makes an expiry land exactly
+    // on a tick and hides the window.
+    const ARM_AT_MS = 300;
+    const h = harness({ pingCostMs: PING_COST_MS });
+
+    let nextTickAt = KEEP_WARM_MS;
+    h.advance(ARM_AT_MS);
+    await h.probe.refresh(); // the boot arm
+
+    const refusedAt: number[] = [];
+    const until = KEEP_WARM_MS * 4; // four cadences ≫ the three cycles asked for
+
+    while (h.now() < until) {
+      if (h.now() >= nextTickAt) {
+        await h.probe.refresh(); // the keep-warm tick, charged PING_COST_MS
+        nextTickAt += KEEP_WARM_MS;
+      }
+      if (refusalCode(() => h.ports.assertMoneyAdmitted()) !== null) refusedAt.push(h.now());
+      h.advance(SAMPLE_MS);
+    }
+
+    // A healthy database must never refuse a money operation. Not once, at any sample.
+    expect(refusedAt).toEqual([]);
+    // …and the cadence really did re-ping, rather than passing by never being consulted.
+    expect(h.pings.length).toBeGreaterThanOrEqual(4);
   });
 
   it("admission issues no database round-trip of its own", async () => {
@@ -164,11 +234,26 @@ describe("main.ts wiring census (ZTR-1178)", () => {
     expect(mainSrc).toContain("dbProbe,");
   });
 
-  it("the probe is refreshed on a cadence inside its own TTL", () => {
-    // Without this the money workers — which consult neither /health/ready nor /metrics —
-    // would read a verdict nobody refreshes, and stale-closed would wedge the money path
-    // on a perfectly healthy node.
+  it("the keep-warm timer calls refresh(), not probe()", () => {
+    // The behavioural drill above proves refresh() holds the verdict open on a healthy
+    // node; this pins that main.ts is the thing calling it. A probe() timer type-checks,
+    // reads correctly, and silently reinstates the ~32%-refusal window — nothing but this
+    // assertion notices the one-word difference.
     expect(mainSrc).toContain("const DB_PROBE_KEEP_WARM_MS = DEFAULT_DB_PING_TTL_MS / 2");
-    expect(mainSrc).toMatch(/setInterval\([\s\S]{0,400}?dbProbe\.probe\(\)[\s\S]{0,200}?DB_PROBE_KEEP_WARM_MS/);
+    expect(mainSrc).toMatch(
+      /setInterval\([\s\S]{0,400}?dbProbe\.refresh\(\)[\s\S]{0,200}?DB_PROBE_KEEP_WARM_MS/,
+    );
+  });
+
+  it("the post-migration arm is a real ping, not a cached verdict", () => {
+    // The keep-warm timer starts before assertPostMigrationReadiness runs, so one failed
+    // tick during boot would otherwise be replayed from cache here and crash a boot whose
+    // pool assertSchemaCompleteness and assertPrivilegeReadiness both just passed.
+    const arm = mainSrc.slice(
+      mainSrc.indexOf("assertPostMigrationReadiness:"),
+      mainSrc.indexOf("boot: database probe failed after migrations"),
+    );
+    expect(arm).toContain("await dbProbe.refresh()");
+    expect(arm).not.toContain("await dbProbe.probe()");
   });
 });

@@ -161,10 +161,13 @@ import {
 const DEFAULT_PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
 
 /**
- * Shared DB-probe refresh cadence. Half the probe's own TTL, so a refresh always lands
- * before the previous verdict ages out and CachedDbProbe.cachedReachable() never reads
- * stale-closed on a healthy node. Derived from the TTL rather than pinned, so tightening
- * one moves the other (ZTR-1178).
+ * Shared DB-probe refresh cadence. Half the probe's own TTL, leaving a full half-TTL of
+ * slack for the ping itself, so the re-dated verdict always lands before the previous one
+ * ages out and CachedDbProbe.cachedReachable() never reads stale-closed on a healthy node.
+ * Derived from the TTL rather than pinned, so tightening one moves the other. This only
+ * holds because the timer calls refresh(), which re-dates unconditionally — a probe()
+ * timer is swallowed by its own TTL and cannot keep the verdict warm at any cadence
+ * (ZTR-1178).
  */
 const DB_PROBE_KEEP_WARM_MS = DEFAULT_DB_PING_TTL_MS / 2;
 import {
@@ -302,13 +305,19 @@ async function main(): Promise<void> {
   const dbProbe = new CachedDbProbe(pingDb);
   // /health/ready and /metrics refresh the probe when something calls them; the money
   // workers call neither, and a cached verdict nobody refreshes reads stale-closed. This
-  // keeps the shared verdict inside its own TTL without any external caller. probe() is
-  // TTL-cached, so this costs at most one `SELECT 1` per window whoever asks first.
+  // keeps the shared verdict inside its own TTL without any external caller. refresh(),
+  // not probe(): probe() would short-circuit on its own cache and leave cachedAtMs where
+  // it was, so the verdict would still age out between ticks. One `SELECT 1` per cadence.
   const dbProbeKeepWarm = setInterval(() => {
-    // probe() resolves false on failure rather than rejecting; the catch is only so a
+    // refresh() resolves false on failure rather than rejecting; the catch is only so a
     // future change there cannot become an unhandled rejection on this timer.
-    void dbProbe.probe().catch(() => {});
+    void dbProbe.refresh().catch(() => {});
   }, DB_PROBE_KEEP_WARM_MS);
+  // unref only — deliberately NOT cleared from graceful stop's stopWorkers hook, which
+  // runs before flushInFlight: killing the refresh there would let the shared verdict age
+  // out while in-flight money work is still being flushed, and refuse the very work the
+  // flush exists to finish. unref already keeps it from holding the process open, so there
+  // is nothing left to reclaim.
   dbProbeKeepWarm.unref();
 
   const readiness = new NodeReadiness(config.GATEWAY_READ_FAILURE_BUDGET);
@@ -898,11 +907,20 @@ async function main(): Promise<void> {
       await assertSchemaCompleteness(pool);
       await assertPrivilegeReadiness(pool);
       // Money workers read isDatabaseReachable before any external health probe may have
-      // refreshed the shared verdict — arm it once the pool is proven writable. probe()
-      // collapses a ping failure to `false` rather than throwing, so the boot lane still
-      // has to fail closed on it explicitly.
-      if (!(await dbProbe.probe())) {
-        throw new Error("boot: database probe failed after migrations");
+      // refreshed the shared verdict — arm it once the pool is proven writable. refresh(),
+      // not probe(): the keep-warm timer is already running by now, so a single failed tick
+      // during boot would otherwise be served back from cache here and fail the boot the
+      // pool has just proven healthy. The arm must be a real ping. refresh() collapses a
+      // ping failure to `false` rather than throwing, so the boot lane still has to fail
+      // closed on it explicitly.
+      if (!(await dbProbe.refresh())) {
+        // The driver's reason was collapsed to `false`; re-issue once, on the failure path
+        // only, so the crash carries it instead of a bare sentence.
+        const cause = await pingDb().then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+        throw new Error("boot: database probe failed after migrations", { cause });
       }
       // Restore durable halt BEFORE money engines (fail-closed default).
       const restored = await restoreHaltState(haltStore, haltGate);

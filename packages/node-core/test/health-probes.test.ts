@@ -263,6 +263,62 @@ describe("CachedDbProbe — flood protection + recovery", () => {
     expect(calls).toBe(2);
   });
 
+  it("refresh() re-pings and re-dates inside the TTL, where probe() short-circuits", async () => {
+    // ZTR-1178. probe()'s cache hit returns the old verdict AND leaves cachedAtMs where it
+    // was, so a keep-warm timer built on probe() cannot hold cachedReachable() open: the
+    // ticks that land before expiry do nothing, and the tick that finally re-pings arrives
+    // after the verdict has already aged out. refresh() is the path that re-dates.
+    let calls = 0;
+    let t = 0;
+    const probe = new CachedDbProbe(
+      async () => {
+        calls += 1;
+      },
+      1_000,
+      () => t,
+    );
+    expect(await probe.probe()).toBe(true);
+
+    t = 500;
+    expect(await probe.probe()).toBe(true);
+    expect(calls).toBe(1); // swallowed by the TTL, cachedAtMs still 0
+    expect(await probe.refresh()).toBe(true);
+    expect(calls).toBe(2); // re-pinged despite the live cache…
+
+    t = 1_400;
+    expect(probe.cachedReachable()).toBe(true); // …and re-dated to 500, so 900ms old
+    expect(calls).toBe(2); // cachedReachable never probes
+  });
+
+  it("refresh() leaves the last verdict readable while its ping is in flight", async () => {
+    // Why the keep-warm refresh is refresh() and not invalidate() + probe(): invalidate()
+    // clears cachedOk, so the money-admission gate would read closed for the duration of
+    // every refresh ping — a self-inflicted outage once per cadence (ZTR-1178).
+    // pingDb is invoked from a microtask, so the resolver only exists a tick later.
+    const pending: Array<() => void> = [];
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let t = 0;
+    const probe = new CachedDbProbe(
+      () => new Promise<void>((resolve) => pending.push(resolve)),
+      1_000,
+      () => t,
+    );
+
+    const armed = probe.refresh();
+    await tick();
+    pending.shift()?.();
+    expect(await armed).toBe(true);
+    expect(probe.cachedReachable()).toBe(true);
+
+    t = 500;
+    const inFlight = probe.refresh();
+    await tick();
+    expect(pending.length).toBe(1); // a real ping is out, inside the TTL…
+    expect(probe.cachedReachable()).toBe(true); // …and the gate stayed open through it
+    pending.shift()?.();
+    expect(await inFlight).toBe(true);
+  });
+
   it("matches the default TTL", () => {
     expect(DEFAULT_DB_PING_TTL_MS).toBe(5_000);
     expect(DEFAULT_DB_PING_TIMEOUT_MS).toBe(5_000);

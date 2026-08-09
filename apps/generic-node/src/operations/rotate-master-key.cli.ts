@@ -5,7 +5,14 @@
 //
 //   VAULT_MASTER_KEY       old master key (≥32 bytes)
 //   VAULT_MASTER_KEY_NEW   new master key (≥32 bytes, ≠ old)
-//   VAULT_ROOT_SALT_B64    base64 (std or url) of the PBKDF2 salt
+//   VAULT_ROOT_SALT_B64    OPTIONAL, and normally leave it unset — rotation changes the master
+//                          key, never the salt, and the salt this node derives under is read
+//                          from `vault_root_kdf_salt` by the injected `resolveRootKdfSalt` port,
+//                          which is the same row boot and both recovery ceremonies derive under.
+//                          Set it only to assert the value you expect: it is checked against the
+//                          persisted row and a disagreement refuses the rotation. Unset is
+//                          correct on every node, including one whose salt was minted at genesis
+//                          and is therefore not reproducible from configuration (ZTR-1159).
 //
 //   node dist/operations/rotate-master-key.cli.js            # rotate + commit
 //   node dist/operations/rotate-master-key.cli.js --dry-run  # prove, roll back
@@ -32,6 +39,8 @@ import {
   type RotationLogger,
   type RotationUnitOfWork,
 } from "@zucoins/node-core";
+
+import type { ResolvedRootKdfSalt } from "../vault/root-kdf-salt.js";
 
 const MIN_MASTER_KEY_BYTES = 32;
 
@@ -72,6 +81,14 @@ export interface RotateMasterKeyCliDeps {
   readonly countPushSecretRows: NonNullable<MasterKeyRotationInput["countPushSecretRows"]>;
   /** Same-UoW persistence port for the complete rewrapped push census. */
   readonly commitPushSecrets?: MasterKeyRotationInput["commitPushSecrets"];
+  /**
+   * The node's authoritative root-KDF salt, read from `vault_root_kdf_salt` on the live
+   * connection. Required, and not defaulted to the config-only resolver: rotation must derive
+   * under the salt the node actually seals under, and on a `genesis_random` node configuration
+   * cannot reproduce it. Wire it as
+   * `() => resolveCeremonyRootKdfSalt({ sql, nodeId, env })` (ZTR-1159).
+   */
+  readonly resolveRootKdfSalt: () => Promise<ResolvedRootKdfSalt>;
   /** Required exclusive TX (advisory lock on begin). */
   readonly unitOfWork: RotationUnitOfWork;
   readonly fromEpoch: number;
@@ -102,7 +119,7 @@ function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
   if (value === undefined || value === "") {
     throw new MasterKeyRotationError(
       "ROTATION_REFUSED",
-      `${name} is not set — rotation needs VAULT_MASTER_KEY, VAULT_MASTER_KEY_NEW, and VAULT_ROOT_SALT_B64`,
+      `${name} is not set — rotation needs VAULT_MASTER_KEY and VAULT_MASTER_KEY_NEW`,
     );
   }
   return value;
@@ -119,16 +136,32 @@ function parseMasterKey(raw: string, label: string): Buffer {
   return buf;
 }
 
-function parseSalt(raw: string): Buffer {
-  const normalized = raw.replace(/-/g, "+").replace(/_/g, "/");
-  const buf = Buffer.from(normalized, "base64");
-  if (buf.length < 8) {
+/**
+ * The salt this rotation must derive under (ZTR-1159).
+ *
+ * This used to be `requireEnv(env, "VAULT_ROOT_SALT_B64")` with nothing constraining the value
+ * beyond an 8-byte floor — so an operator following this CLI's own error message could re-seal
+ * every envelope under a root key that boot and both recovery ceremonies cannot reproduce. The
+ * rotation reported success and the loss surfaced at the next boot, or at the recovery ceremony.
+ *
+ * Configuration alone is not enough to answer this. A node whose salt was minted at genesis
+ * keeps it in `vault_root_kdf_salt` and nowhere else, so a config-only resolver would derive the
+ * historical literal here and unwrap nothing. The composition root injects
+ * {@link RotateMasterKeyCliDeps.resolveRootKdfSalt} — `resolveCeremonyRootKdfSalt` bound to the
+ * live connection, exactly as both recovery ceremonies do — which reads the persisted row and
+ * refuses when `VAULT_ROOT_SALT_B64` disagrees with it.
+ */
+async function resolveSalt(
+  resolve: RotateMasterKeyCliDeps["resolveRootKdfSalt"],
+): Promise<Buffer> {
+  try {
+    return Buffer.from((await resolve()).salt);
+  } catch (err) {
     throw new MasterKeyRotationError(
       "ROTATION_REFUSED",
-      "VAULT_ROOT_SALT_B64 decodes to fewer than 8 bytes",
+      err instanceof Error ? err.message : String(err),
     );
   }
-  return buf;
 }
 
 const defaultLogger: RotationLogger = {
@@ -154,7 +187,6 @@ export async function runRotateMasterKeyCli(
 
   const oldRaw = requireEnv(env, "VAULT_MASTER_KEY");
   const newRaw = requireEnv(env, "VAULT_MASTER_KEY_NEW");
-  const saltRaw = requireEnv(env, "VAULT_ROOT_SALT_B64");
 
   if (oldRaw === newRaw) {
     throw new MasterKeyRotationError(
@@ -191,7 +223,7 @@ export async function runRotateMasterKeyCli(
   let result;
   try {
     newMaster = parseMasterKey(newRaw, "VAULT_MASTER_KEY_NEW");
-    salt = parseSalt(saltRaw);
+    salt = await resolveSalt(deps.resolveRootKdfSalt);
     oldRoot = deriveRootKey(oldMaster, salt);
     newRoot = deriveRootKey(newMaster, salt);
 
@@ -303,7 +335,7 @@ export async function main(_argv: readonly string[] = process.argv): Promise<voi
     { event: "rotate.refused", reason: "adapters_not_wired" },
     "rotate-master-key REFUSED — durable vault census/journal/unit-of-work adapters are not wired in this binary. " +
       "Call runRotateMasterKeyCli(deps) from the node composition root that injects real ports " +
-      `(advisory lock id=${MASTER_KEY_ROTATION_ADVISORY_LOCK_ID}), including NODE_SIGNING_KEYS and PUSH_RECEIVER_SECRETS census + authoritative count + same-UoW commit ports.`,
+      `(advisory lock id=${MASTER_KEY_ROTATION_ADVISORY_LOCK_ID}), including NODE_SIGNING_KEYS and PUSH_RECEIVER_SECRETS census + authoritative count + same-UoW commit ports, and the resolveRootKdfSalt port reading vault_root_kdf_salt.`,
   );
   process.exitCode = 1;
 }

@@ -443,6 +443,10 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   "ops/sql-restored-instance.ts": "@zucoins/node-core:1 (SQL restored instance; no submit write call site)",
   "ops/run-recovery-ceremony.ts": "@zucoins/node-core:1 (ceremony composition; no submit write call site)",
   "ops/admin-recovery-ceremony.ts": "@zucoins/node-core:1 (Mode A in-process ceremony; no submit write call site)",
+  // The single vault root-KDF salt resolver every derivation path calls (ZTR-1159). Reaches
+  // the barrel for deriveRootKey / openWalletSecret only; it chooses a salt and proves the
+  // derived key opens an envelope — no submit write call site.
+  "vault/root-kdf-salt.ts": "@zucoins/node-core:1 (root-KDF salt resolution; no submit write call site)",
   // Recovery_verified ceremony pack (landed separately on main).
   // Pre-existing gap, unrelated to this suite's slice; latent barrel reach only, no submit
   // write call site.

@@ -21,8 +21,11 @@ import {
   deriveLiveConnectionParams,
 } from "./run-recovery-ceremony.js";
 import { createSqlRestoredInstance } from "./sql-restored-instance.js";
+import {
+  assertRootKeyOpensSealedEnvelope,
+  resolveCeremonyRootKdfSalt,
+} from "../vault/root-kdf-salt.js";
 
-const VAULT_ROOT_KDF_SALT = Buffer.from("zupayments-vault-root-kdf-salt-v1", "utf8");
 export const MIN_MASTER_KEY_CHARS = 32;
 
 export type CeremonyStage =
@@ -214,9 +217,31 @@ export async function runInProcessRecoveryCeremony(
 
   try {
     emit("accepted");
-    rootKey = deriveRootKey(masterHolder.value, VAULT_ROOT_KDF_SALT);
+    // ZTR-1159: one resolver, the salt persisted beside the envelopes, and a derivation
+    // self-check against a real envelope before any further stage. A mismatch surfaces here
+    // as a named VaultRootSaltError, not as a decrypt failure three stages in.
+    const ceremonySql = {
+      query: async <R>(text: string, params?: readonly unknown[]) => {
+        const result = await input.liveSql.query(text, params as never);
+        return { rows: result.rows as R[] };
+      },
+    };
+    const rootSalt = await resolveCeremonyRootKdfSalt({
+      sql: ceremonySql,
+      nodeId: input.nodeId,
+      env: {},
+    });
+    rootKey = deriveRootKey(masterHolder.value, rootSalt.salt);
+    await assertRootKeyOpensSealedEnvelope({
+      sql: ceremonySql,
+      nodeId: input.nodeId,
+      rootKey,
+      saltSource: rootSalt.source,
+    });
     if (archiveHolder !== null) {
-      archiveRootKey = deriveRootKey(archiveHolder.value, VAULT_ROOT_KDF_SALT);
+      // Rotation re-seals under the SAME salt (only the master key changes), so a
+      // prior-epoch archive derives under this node's one salt too.
+      archiveRootKey = deriveRootKey(archiveHolder.value, rootSalt.salt);
     }
 
     emit("exporting_archive");

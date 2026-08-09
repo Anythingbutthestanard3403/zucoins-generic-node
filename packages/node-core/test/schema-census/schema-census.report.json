@@ -50,6 +50,7 @@
     "signing-key-registry.sql",
     "submit-attempts.sql",
     "transaction-material.sql",
+    "vault-root-kdf-salt.sql",
     "vault.sql",
     "verification-access-windows.sql",
     "verification-acknowledgements.sql",

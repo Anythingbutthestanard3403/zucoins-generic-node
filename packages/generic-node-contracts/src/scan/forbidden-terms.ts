@@ -64,7 +64,7 @@ export const EXEMPTION_MARKER_PREFIX = "contract-allow:";
  * should be reworded meaning-preserving instead of exempted (see CONTRACT.md files for
  * concern-specific frozen vocabulary).
  */
-export const FROZEN_EXEMPTION_COUNT = 203 as const;
+export const FROZEN_EXEMPTION_COUNT = 205 as const;
 
 /**
  *  AC3 — the companion freeze that `FROZEN_EXEMPTION_COUNT` cannot provide. The marked-LINE
@@ -75,7 +75,7 @@ export const FROZEN_EXEMPTION_COUNT = 203 as const;
  * that edit moves this number and `forbidden-terms.test.ts` fails. Any lane adding, removing, or
  * widening a marker MUST update this count in the same change, exactly as for the line count.
  */
-export const FROZEN_SUPPRESSED_VIOLATION_COUNT = 201 as const;
+export const FROZEN_SUPPRESSED_VIOLATION_COUNT = 203 as const;
 
 const FORBIDDEN_TERM_BY_LOWER = new Map<string, ForbiddenTerm>(
   FORBIDDEN_TERMS.map((term) => [term.toLowerCase(), term]),

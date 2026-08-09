@@ -160,6 +160,11 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // correlation, required by the live verification-complete mount.
   // Appended; never renumber prior slices.
   "verification-acknowledgements",
+  // vault_root_kdf_salt — the per-node PBKDF2 salt the vault root key is derived under,
+  // persisted beside the `vault` envelopes it opens (ZTR-1159). Self-contained (no FK,
+  // re-declares the shared immutability trigger function), so its position is not
+  // dependency-forced. Appended; never renumber prior slices.
+  "vault-root-kdf-salt",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

@@ -30,6 +30,15 @@ function isTotpChallenge(err: unknown): err is ApiError {
   );
 }
 
+/**
+ * Retry ceiling. The 401 challenge is ambiguous by design, so a repeat of it may
+ * be a mistyped code *or* a session that died mid-ceremony — the loop has to
+ * terminate either way (`lib/api.ts` re-checks the session on a 401 and forces
+ * re-auth on the real expiry). Three retries after the first rejection: three
+ * wrong codes then a correct one still succeeds.
+ */
+const MAX_TOTP_RETRIES = 3;
+
 function assertCurrent(signal: AbortSignal, isCurrent: () => boolean) {
   if (signal.aborted || !isCurrent()) throw new TotpCancelledError();
 }
@@ -43,7 +52,7 @@ async function withTotpRetry<T>(
   attempt: (totp: string) => Promise<T>,
 ): Promise<T> {
   let errorMessage: string | undefined;
-  for (;;) {
+  for (let retries = 0; ; retries += 1) {
     assertCurrent(signal, isCurrent);
     const totp = await requestCode({ title, detail, errorMessage, signal });
     // Promise continuation is a separate mutation sink: re-check even when a
@@ -52,7 +61,7 @@ async function withTotpRetry<T>(
     try {
       return await attempt(totp);
     } catch (err) {
-      if (isTotpChallenge(err)) {
+      if (isTotpChallenge(err) && retries < MAX_TOTP_RETRIES) {
         errorMessage = totpErrorMessage(err.code);
         continue;
       }

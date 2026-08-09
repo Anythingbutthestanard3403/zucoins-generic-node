@@ -90,6 +90,32 @@ async function doFetch(path: string, init: ApiOptions = {}): Promise<Response> {
   });
 }
 
+/**
+ * Ambiguous-401 recovery. The server deliberately collapses session-gone,
+ * CSRF-token-fail and wrong-TOTP into one `invalid_credentials` envelope
+ * (`node-core/src/http/admin-mutation-chain.ts` header — they "must not oracle"),
+ * so the client cannot, and must not try to, tell them apart from the response.
+ * It asks the authoritative endpoint instead: `me()` re-reads /admin/v1/me and
+ * returns null once the session is gone; only then does it force re-auth through
+ * the existing `logout()` (clears the user *and* the in-memory CSRF token, then
+ * lands on /login). A still-live session leaves the store untouched, so a
+ * mistyped code keeps its re-prompt.
+ */
+let sessionRecheck: Promise<unknown> | null = null;
+
+function recheckSessionOn401(): void {
+  const { user, me, logout } = useAuth.getState();
+  // No session held — a failed login has nothing to expire and nowhere to send.
+  if (user === null) return;
+  // One probe covers a whole page of parallel reads failing together.
+  sessionRecheck ??= me()
+    .then((live) => (live === null ? logout() : undefined))
+    .catch(() => undefined)
+    .finally(() => {
+      sessionRecheck = null;
+    });
+}
+
 export async function api<T>(path: string, init?: ApiOptions): Promise<T> {
   const res = await doFetch(path, init);
   if (!res.ok) {
@@ -107,6 +133,7 @@ export async function api<T>(path: string, init?: ApiOptions): Promise<T> {
     } catch {
       /* keep default */
     }
+    if (res.status === 401) recheckSessionOn401();
     throw new ApiError(res.status, body, extras);
   }
   if (res.status === 204) return undefined as T;

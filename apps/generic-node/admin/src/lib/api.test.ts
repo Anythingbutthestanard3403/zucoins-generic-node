@@ -49,6 +49,9 @@ describe("api client", () => {
   });
 
   it("apiOrDemo rethrows 401 so the shell can force re-auth", async () => {
+    // Every route 401s here, /admin/v1/me included, so this also trips the
+    // session recheck — capture the redirect rather than letting jsdom navigate.
+    Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -58,6 +61,7 @@ describe("api client", () => {
       ),
     );
     await expect(apiOrDemo("/operations/needs-attention", { x: 1 })).rejects.toBeInstanceOf(ApiError);
+    await vi.waitFor(() => expect(useAuth.getState().user).toBeNull());
   });
 
   it.each([400, 404, 409, 429, 500, 503])(
@@ -106,6 +110,73 @@ describe("api client", () => {
     const r = await apiOrDemo("/anything", { demo: true });
     expect(r).toEqual({ data: { demo: true }, live: false });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("ambiguous 401 recovery (ZTR-1195)", () => {
+    /** jsdom cannot navigate; capture the href the logout path assigns. */
+    function captureRedirect(): { readonly to: () => string | undefined } {
+      const assign = vi.fn();
+      Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
+      Object.defineProperty(window.location, "href", {
+        configurable: true,
+        set: assign,
+        get: () => "",
+      });
+      return { to: () => assign.mock.calls[0]?.[0] as string | undefined };
+    }
+
+    const AUTH_401 = JSON.stringify({
+      error: { code: "invalid_credentials", message: "authentication required" },
+    });
+
+    function routeFetch(me: Response | (() => Response)) {
+      return vi.fn(async (url: string) => {
+        if (url === "/admin/v1/me") return typeof me === "function" ? me() : me;
+        if (url === "/admin/v1/logout") return new Response(null, { status: 204 });
+        return new Response(AUTH_401, { status: 401 });
+      });
+    }
+
+    it("a dead session clears the store and lands the operator on /login", async () => {
+      const redirect = captureRedirect();
+      const fetchMock = routeFetch(() => new Response(AUTH_401, { status: 401 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(api("/operations/needs-attention")).rejects.toBeInstanceOf(ApiError);
+      await vi.waitFor(() => expect(redirect.to()).toBe("/login"));
+
+      expect(fetchMock.mock.calls.map((c) => c[0])).toContain("/admin/v1/me");
+      // logout() nulls the user, which is where the in-memory CSRF token lives.
+      expect(useAuth.getState().user).toBeNull();
+    });
+
+    it("a live session survives the 401 — a mistyped code must keep its re-prompt", async () => {
+      const redirect = captureRedirect();
+      const me = new Response(
+        JSON.stringify({ userId: "u1", role: "admin", csrfToken: "csrf-fresh" }),
+        { status: 200 },
+      );
+      vi.stubGlobal("fetch", routeFetch(me));
+
+      await expect(
+        api("/external-sends/op/approve", { method: "POST", body: "{}", totp: "123456" }),
+      ).rejects.toMatchObject({ status: 401, code: "invalid_credentials" });
+      await vi.waitFor(() => expect(useAuth.getState().user?.csrfToken).toBe("csrf-fresh"));
+
+      expect(redirect.to()).toBeUndefined();
+    });
+
+    it("a failed login does not probe or redirect — there is no session to expire", async () => {
+      useAuth.setState({ user: null });
+      const redirect = captureRedirect();
+      const fetchMock = routeFetch(new Response(AUTH_401, { status: 401 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(api("/overview")).rejects.toBeInstanceOf(ApiError);
+
+      expect(fetchMock.mock.calls.map((c) => c[0])).not.toContain("/admin/v1/me");
+      expect(redirect.to()).toBeUndefined();
+    });
   });
 
   it("mutations without CSRF throw before fetch", async () => {

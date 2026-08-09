@@ -13,7 +13,11 @@ import {
 } from "./dr/index.js";
 import { installFatalExceptionHandler } from "./boot/fatal-exception.js";
 import { createSafeConsoleLogger } from "./boot/safe-logger.js";
-import { installStage1GracefulStop } from "./stage1-shutdown.js";
+import {
+  installStage1GracefulStop,
+  type InstallStage1GracefulStopOptions,
+  type Stage1GracefulStop,
+} from "./stage1-shutdown.js";
 
 // Zero-custody or not, Stage 1 holds the backup master key and a database URL,
 // and its errors come from the same drivers. Every log line goes through the
@@ -32,11 +36,21 @@ export interface Stage1ServiceDependencies {
    * (startStage1Service rejects rather than starting the scheduler).
    */
   readonly probeBackupClient?: () => Promise<PgClientProbeResult>;
+  /**
+   * Signal wiring for the graceful stop installed before migrations. Production
+   * (main) supplies exit/logger; a test supplies a fake emitter so no handler is
+   * registered on the test process. Omitting it still installs the handler — on
+   * the real `process` — because a missing handler is the defect this ordering
+   * exists to close.
+   */
+  readonly shutdown?: Omit<InstallStage1GracefulStopOptions, "stop">;
 }
 
 export interface Stage1Service {
   readonly server: Server;
   readonly backupScheduler: BackupSchedulerHandle | undefined;
+  /** Installed before migrations — see the boot ordering on startStage1Service. */
+  readonly gracefulStop: Stage1GracefulStop;
   stop(): Promise<void>;
 }
 
@@ -79,55 +93,27 @@ function defaultCreateScheduler(config: Stage1Config): BackupSchedulerHandle | u
  * When production (or explicitly enabled) backup policy is present,
  * the encrypted-backup scheduler is constructed here so the Dockerfile's
  * stage1-main entrypoint actually produces durable RPO artifacts.
+ *
+ * Boot sequencing mirrors the custody boot lane (boot/boot-lane.ts:1-54, rule at
+ * :12-13 — migrations run with the health surface already answering):
+ * listen → install the graceful stop → migrate → open readiness. Migrating first
+ * left nothing bound for the whole migration, so a supervisor probe got
+ * ECONNREFUSED ("container dead", restart the pod) instead of a 503 ("alive, not
+ * ready"), and a SIGTERM arriving before the handler existed was an uncatchable
+ * kill. A migration failure stays fatal: the surface is torn back down and the
+ * error rethrown.
  */
 export async function startStage1Service(
   config: Stage1Config,
   dependencies: Stage1ServiceDependencies,
 ): Promise<Stage1Service> {
-  await dependencies.runMigrations();
-
-  if (config.backup !== undefined) {
-    const probeBackupClient = dependencies.probeBackupClient ?? probePgClientBinaries;
-    const probe = await probeBackupClient();
-    if (!probe.ok) {
-      throw new Error(
-        `postgresql-client probe failed — refusing to start with backup schedule enabled ` +
-          `: ${probe.reason}`,
-      );
-    }
-  }
-
-  const createScheduler = dependencies.createScheduler ?? defaultCreateScheduler;
-  const backupScheduler = createScheduler(config);
-  backupScheduler?.start();
-
-  // RPO monitor: poll newest artifact age without serving backup bytes over HTTP.
-  let rpoTimer: ReturnType<typeof setInterval> | undefined;
-  if (config.backup !== undefined) {
-    const outputDir = config.backup.outputDir;
-    const intervalMs = Math.min(config.backup.scheduleIntervalMs, 60 * 60 * 1000);
-    const check = async (): Promise<void> => {
-      try {
-        const newest = await newestBackupArtifactMtimeMs(outputDir);
-        const status = backupScheduler?.status();
-        if (isRpoBreached(newest, Date.now()) || status?.rpoBreached === true) {
-          logger.error(
-            `dr: RPO BREACHED newestArtifactAtMs=${newest ?? "none"} consecutiveFailures=${status?.consecutiveFailures ?? "n/a"} — run \`node dist/dr/cli.js status\` / restore drill`,
-          );
-        }
-      } catch (err) {
-        logger.error("dr: RPO monitor probe failed", err);
-      }
-    };
-    void check();
-    rpoTimer = setInterval(() => {
-      void check();
-    }, intervalMs);
-    // Do not keep the process alive solely for monitoring.
-    rpoTimer.unref?.();
-  }
-
   let stopping = false;
+  // Readiness gate: false until migrations (and the backup wiring behind them)
+  // complete, so /health/ready answers 503 while the schema is being applied.
+  let migrationsComplete = false;
+  let backupScheduler: BackupSchedulerHandle | undefined;
+  let rpoTimer: ReturnType<typeof setInterval> | undefined;
+
   const server = createServer((request, response) => {
     const path = (request.url ?? "").split(/[?#]/, 1)[0];
     if (request.method === "GET" && path === "/health") {
@@ -135,8 +121,14 @@ export async function startStage1Service(
       return;
     }
     if (request.method === "GET" && path === "/health/ready") {
-      if (stopping) {
-        json(response, 503, { status: "not_ready", checks: { migrations: true, database: false } });
+      if (!migrationsComplete || stopping) {
+        // Bound but not ready. Liveness above stays unconditional — it must never
+        // depend on the database (readiness-state.ts:49-51 for the custody path).
+        json(response, 503, {
+          status: "not_ready",
+          stage: "zero-custody",
+          checks: { migrations: migrationsComplete, database: false },
+        });
         return;
       }
       void dependencies.pingDatabase().then(
@@ -184,7 +176,69 @@ export async function startStage1Service(
     });
     await dependencies.closeDatabase();
   };
-  return Object.freeze({ server, backupScheduler, stop });
+
+  // Installed BEFORE the migration, not after it. Chosen posture on a SIGTERM
+  // that lands mid-migration: stop rather than wait. The migration owns a
+  // separate pool (db/migrate.ts runMigrations builds its own), so `stop` only
+  // closes the HTTP surface and the service pool; the migration's pinned
+  // connection dies with the process, and Postgres rolls back its open
+  // transaction and drops the migrator advisory lock on disconnect
+  // (db/migrate.ts:87-90). Waiting instead would risk outliving the platform's
+  // SIGTERM→SIGKILL grace and losing the log line entirely; every migration is
+  // idempotent and additive (boot-lane.ts:43-48), so the retry converges.
+  const gracefulStop = installStage1GracefulStop({ ...dependencies.shutdown, stop });
+
+  try {
+    await dependencies.runMigrations();
+
+    if (config.backup !== undefined) {
+      const probeBackupClient = dependencies.probeBackupClient ?? probePgClientBinaries;
+      const probe = await probeBackupClient();
+      if (!probe.ok) {
+        throw new Error(
+          `postgresql-client probe failed — refusing to start with backup schedule enabled ` +
+            `: ${probe.reason}`,
+        );
+      }
+    }
+
+    const createScheduler = dependencies.createScheduler ?? defaultCreateScheduler;
+    backupScheduler = createScheduler(config);
+    backupScheduler?.start();
+
+    // RPO monitor: poll newest artifact age without serving backup bytes over HTTP.
+    if (config.backup !== undefined) {
+      const outputDir = config.backup.outputDir;
+      const intervalMs = Math.min(config.backup.scheduleIntervalMs, 60 * 60 * 1000);
+      const check = async (): Promise<void> => {
+        try {
+          const newest = await newestBackupArtifactMtimeMs(outputDir);
+          const status = backupScheduler?.status();
+          if (isRpoBreached(newest, Date.now()) || status?.rpoBreached === true) {
+            logger.error(
+              `dr: RPO BREACHED newestArtifactAtMs=${newest ?? "none"} consecutiveFailures=${status?.consecutiveFailures ?? "n/a"} — run \`node dist/dr/cli.js status\` / restore drill`,
+            );
+          }
+        } catch (err) {
+          logger.error("dr: RPO monitor probe failed", err);
+        }
+      };
+      void check();
+      rpoTimer = setInterval(() => {
+        void check();
+      }, intervalMs);
+      // Do not keep the process alive solely for monitoring.
+      rpoTimer.unref?.();
+    }
+  } catch (error) {
+    // Still fatal — only later than before. The port is already bound, so tear
+    // it back down (best effort; the boot error is what the operator needs).
+    await stop().catch(() => {});
+    throw error;
+  }
+
+  migrationsComplete = true;
+  return Object.freeze({ server, backupScheduler, gracefulStop, stop });
 }
 
 async function main(): Promise<void> {
@@ -210,6 +264,13 @@ async function main(): Promise<void> {
     closeDatabase: async () => {
       await pool.end();
     },
+    // Installed inside startStage1Service, before migrations — see its boot
+    // sequencing note. Registered on the real `process` by default.
+    shutdown: {
+      // A fatal left the process in unknown state — even a clean stop exits non-zero.
+      exit: (code) => process.exit(fatal.tripped() ? 1 : code),
+      logger,
+    },
   });
   if (config.backup !== undefined) {
     logger.info(
@@ -220,13 +281,7 @@ async function main(): Promise<void> {
       "generic-node Stage 1 backup scheduler disabled — set BACKUP_SCHEDULE_ENABLED=true (required in production)",
     );
   }
-  const stop = installStage1GracefulStop({
-    stop: () => service.stop(),
-    // A fatal left the process in unknown state — even a clean stop exits non-zero.
-    exit: (code) => process.exit(fatal.tripped() ? 1 : code),
-    logger,
-  });
-  fatal.wire(() => stop.handleSignal("uncaughtException"));
+  fatal.wire(() => service.gracefulStop.handleSignal("uncaughtException"));
   logger.info(`generic-node Stage 1 listening on ${config.bindHost}:${config.port}`);
 }
 

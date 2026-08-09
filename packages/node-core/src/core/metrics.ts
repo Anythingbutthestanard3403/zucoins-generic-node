@@ -317,6 +317,12 @@ export interface OperationalMetricsSnapshot {
    * (quarantine_reason ∈ {GENESIS_AFTER_HISTORY, REGRESSION}).
    */
   readonly quarantinedUnexpectedHead: number;
+  /**
+   * External-send operations parked at NEEDS_ATTENTION. Each one holds a source-wallet
+   * lease against the pool cap, and the cap never recovers capacity, so this is the level
+   * that makes a stuck send visible before it is a wall.
+   */
+  readonly parkedExternalSends: number;
   /** Non-terminal / all ops by status (closed OPERATION_STATUS). */
   readonly operationsByStatus: Readonly<Partial<Record<MetricOperationStatus, number>>>;
   /** Oldest non-terminal operation age by status, seconds (optional series). */
@@ -376,6 +382,7 @@ export function emptyOperationalSnapshot(): OperationalMetricsSnapshot {
     poolCapTotal: 0,
     oldestLeaseAgeSecs: 0,
     quarantinedUnexpectedHead: 0,
+    parkedExternalSends: 0,
     operationsByStatus: {},
     operationsOldestAgeSecsByStatus: {},
     storagePressure: 0,
@@ -425,6 +432,7 @@ export interface NodeMetrics {
   readonly poolCapTotal: GaugeMetric;
   readonly oldestLeaseAgeSecs: GaugeMetric;
   readonly quarantinedUnexpectedHead: GaugeMetric;
+  readonly parkedExternalSends: GaugeMetric;
   readonly operationsByStatus: GaugeMetric;
   readonly operationsOldestAgeSecs: GaugeMetric;
   readonly storagePressure: GaugeMetric;
@@ -563,6 +571,11 @@ export function createNodeMetrics(): NodeMetrics {
     "Wallets quarantined for unexpected head movement (GENESIS_AFTER_HISTORY or REGRESSION).",
     [],
   );
+  const parkedExternalSends = createGauge(
+    "gn_send_external_parked",
+    "External-send operations parked at NEEDS_ATTENTION, each holding a source-wallet lease.",
+    [],
+  );
   const operationsByStatus = createGauge(
     "gn_operations",
     "Operation count by closed status.",
@@ -661,6 +674,7 @@ export function createNodeMetrics(): NodeMetrics {
     poolCapTotal,
     oldestLeaseAgeSecs,
     quarantinedUnexpectedHead,
+    parkedExternalSends,
     operationsByStatus,
     operationsOldestAgeSecs,
     storagePressure,
@@ -703,6 +717,7 @@ export function createNodeMetrics(): NodeMetrics {
       poolCapTotal.set({}, snapshot.poolCapTotal);
       oldestLeaseAgeSecs.set({}, snapshot.oldestLeaseAgeSecs);
       quarantinedUnexpectedHead.set({}, snapshot.quarantinedUnexpectedHead);
+      parkedExternalSends.set({}, snapshot.parkedExternalSends);
       for (const status of METRIC_OPERATION_STATUSES) {
         operationsByStatus.set({ status }, snapshot.operationsByStatus[status] ?? 0);
         operationsOldestAgeSecs.set(
@@ -762,6 +777,7 @@ export function createNodeMetrics(): NodeMetrics {
       poolCapTotal.reset();
       oldestLeaseAgeSecs.reset();
       quarantinedUnexpectedHead.reset();
+      parkedExternalSends.reset();
       operationsByStatus.reset();
       operationsOldestAgeSecs.reset();
       storagePressure.reset();
@@ -883,6 +899,7 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderGauge(metrics.poolCapTotal),
     renderGauge(metrics.oldestLeaseAgeSecs),
     renderGauge(metrics.quarantinedUnexpectedHead),
+    renderGauge(metrics.parkedExternalSends),
     renderGauge(metrics.operationsByStatus),
     renderGauge(metrics.operationsOldestAgeSecs),
     renderGauge(metrics.storagePressure),

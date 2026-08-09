@@ -19,9 +19,14 @@
 // Proves:
 //   AC1  AWAITING_REDEMPTION → EXTERNAL_SEND_LANDED; landing record + event committed,
 //        operations mirror synced (B2), source lease still held (One-in-flight); re-run idempotent.
-//   AC3  a head that is unchanged T0 → WAITING (stay AWAITING_REDEMPTION, no park).
-//   B4   a head that is a different transaction → PARK NEEDS_ATTENTION; genesis → WAITING.
+//   AC3  a head that is unchanged T0 and still inside the signed redemption window → WAITING
+//        (stay AWAITING_REDEMPTION, no park).
+//   B4   a head that is a different transaction → PARK NEEDS_ATTENTION; genesis → INDETERMINATE.
 //   AC3  gateway unreachable → INDETERMINATE (row stays AWAITING_REDEMPTION, lease untouched).
+//   F1.1 unchanged T0 head PAST the signed expiry + aging margin → PARK NEEDS_ATTENTION with
+//        POST_EXPIRY_RECONCILING; never terminal, lease held (ZTR-1129).
+//   F2.2 a send already parked at NEEDS_ATTENTION still lands when the recipient submits late
+//        — the scan covers both landing entry statuses (ZTR-1129).
 
 import { createHash, createPrivateKey, sign, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -777,6 +782,54 @@ async function opsTerminalObsOf(operationId: string): Promise<string | null> {
   return row.rows[0]!.terminal_observation_id;
 }
 
+async function attentionReasonOf(operationId: string): Promise<string | null> {
+  const row = await pool.query<{ attention_reason: string | null }>(
+    `SELECT attention_reason FROM send_operations WHERE operation_id = $1::uuid`,
+    [operationId],
+  );
+  return row.rows[0]!.attention_reason;
+}
+
+/**
+ * Pin the signed redemption deadline the F1.1 park reads.
+ *
+ * The lander takes T2 from the sign intent's inner preimage — the bytes the recipient
+ * redeems against — so a drill that wants to sit on one side of expiry says so here rather
+ * than depending on how old the golden fixture happens to be. Only the WAITING/park drills
+ * use it: they never reach evidence assembly, so the preimage's other fields are moot.
+ */
+async function setSignedExpiry(operationId: string, expiryUnixSecs: number): Promise<void> {
+  await pool.query(
+    `UPDATE external_send_sign_intents
+        SET inner_preimage_text = $2
+      WHERE operation_id = $1::uuid`,
+    [operationId, JSON.stringify({ expiry__unix_time_secs: String(expiryUnixSecs) })],
+  );
+}
+
+/** Put a send in the parked state F2.2 starts from, without going through the lander. */
+async function parkPastExpiryByHand(operationId: string): Promise<void> {
+  await pool.query(
+    `UPDATE send_operations
+        SET status = 'NEEDS_ATTENTION', attention_required = true,
+            attention_reason = 'POST_EXPIRY_RECONCILING',
+            attention_episode = attention_episode + 1,
+            row_version = row_version + 1
+      WHERE operation_id = $1::uuid`,
+    [operationId],
+  );
+  await pool.query(
+    `UPDATE operations o
+        SET status = s.status::operation_status,
+            attention_required = s.attention_required,
+            attention_reason = s.attention_reason,
+            row_version = s.row_version
+       FROM send_operations s
+      WHERE s.operation_id = $1::uuid AND o.id = s.operation_id`,
+    [operationId],
+  );
+}
+
 async function leaseHeld(walletId: string): Promise<boolean> {
   const row = await pool.query(
     `SELECT 1 FROM wallet_active_leases WHERE wallet_id = $1::uuid`,
@@ -906,9 +959,10 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   );
 
   it(
-    "AC3: unchanged T0 head → WAITING (stay AWAITING_REDEMPTION, no park, no landing)",
+    "AC3: unchanged T0 head BEFORE the signed expiry → WAITING (stay AWAITING_REDEMPTION, no park, no landing)",
     async () => {
       const parked = await seedParkedSend();
+      await setSignedExpiry(parked.operationId, Math.floor(Date.now() / 1000) + 3600);
 
       const result = await tickSendCompletionLander(landerDeps(parked.nodeId, t0Exchange()));
       expect(result.landed).toEqual([]);
@@ -921,7 +975,7 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   );
 
   it(
-    "B4: genesis head → WAITING (stay AWAITING_REDEMPTION)",
+    "B4: genesis head → INDETERMINATE (stay AWAITING_REDEMPTION)",
     async () => {
       const parked = await seedParkedSend();
 
@@ -931,6 +985,69 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       expect(result.indeterminate).toBe(1);
       expect(await sendStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
       expect(await leaseHeld(parked.walletId)).toBe(true);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "F1.1: unchanged T0 head PAST expiry + aging margin → PARK NEEDS_ATTENTION/POST_EXPIRY_RECONCILING (never terminal, lease held)",
+    async () => {
+      const parked = await seedParkedSend();
+      // The golden partial's own signed expiry is already in the past; pin it explicitly so
+      // the drill states the boundary it is testing rather than depending on fixture age.
+      await setSignedExpiry(parked.operationId, Math.floor(Date.now() / 1000) - 7200);
+
+      const result = await tickSendCompletionLander(landerDeps(parked.nodeId, t0Exchange()));
+      expect(result.landed).toEqual([]);
+      expect(result.parked).toBe(1);
+      expect(result.indeterminate).toBe(0);
+
+      expect(await sendStatusOf(parked.operationId)).toBe("NEEDS_ATTENTION");
+      expect(await opsStatusOf(parked.operationId)).toBe("NEEDS_ATTENTION");
+      expect(await attentionReasonOf(parked.operationId)).toBe("POST_EXPIRY_RECONCILING");
+      // Park is attention-only: the source lease is exactly where it was (golden rule 2).
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+
+      // The attention episode is appended once, not on every subsequent tick.
+      const second = await tickSendCompletionLander(landerDeps(parked.nodeId, t0Exchange()));
+      expect(second.parked).toBe(0);
+      const ev = await pool.query(
+        `SELECT 1 FROM external_send_attention_events WHERE operation_id = $1::uuid`,
+        [parked.operationId],
+      );
+      expect(ev.rowCount).toBe(1);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "F2.2: a send parked at NEEDS_ATTENTION that lands after expiry is still detected and reconciled to EXTERNAL_SEND_LANDED",
+    async () => {
+      const parked = await seedParkedSend();
+      // The row is already parked past expiry (F1.1 owns getting it here; this drill owns
+      // what happens next). The signed preimage is left exactly as formed — the
+      // nine-predicate verifier reads it.
+      await parkPastExpiryByHand(parked.operationId);
+      expect(await sendStatusOf(parked.operationId)).toBe("NEEDS_ATTENTION");
+
+      // The recipient submits after the deadline. The parked row is still scanned — the
+      // whole point of F2.2 — and the late landing reconciles.
+      const second = await tickSendCompletionLander(landerDeps(parked.nodeId, headExchange()));
+      expect(second.landed).toEqual([parked.operationId]);
+      expect(await sendStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
+      expect(await opsStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
+      expect(await opsTerminalObsOf(parked.operationId)).not.toBeNull();
+      expect(await attentionReasonOf(parked.operationId)).toBeNull();
+      // Landing does not release the source lease — verification-complete does.
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+
+      const record = await pool.query(
+        `SELECT entry_status::text AS entry_status FROM external_send_landing_records
+          WHERE operation_id = $1::uuid`,
+        [parked.operationId],
+      );
+      expect(record.rowCount).toBe(1);
+      expect((record.rows[0] as { entry_status: string }).entry_status).toBe("NEEDS_ATTENTION");
     },
     PG_TEST_TIMEOUT_MS,
   );

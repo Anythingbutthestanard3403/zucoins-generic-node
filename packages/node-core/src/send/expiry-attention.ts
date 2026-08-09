@@ -47,6 +47,16 @@ export { SEND_REDEMPTION_WINDOW_SECS };
  */
 export const SEND_EXPIRY_ATTENTION_REASON: AttentionReason = "UNEXPECTED_HEAD_CHANGE";
 
+/**
+ * The park reason for the other shape of a stuck send: past the signed redemption deadline
+ * with the source head still on Ts0. Nothing is wrong with the chain — the recipient simply
+ * has not submitted — so UNEXPECTED_HEAD_CHANGE would misreport it. POST_EXPIRY_RECONCILING
+ * is the frozen value for exactly that hold, and parking under it is what makes the send
+ * visible to the operator and countable as parked. Still attention-only: no terminal status,
+ * no lease release.
+ */
+export const SEND_POST_EXPIRY_ATTENTION_REASON: AttentionReason = "POST_EXPIRY_RECONCILING";
+
 export const OPERATION_NEEDS_ATTENTION_EVENT = "operation.needs_attention" as const;
 
 // ── Pure evaluation ────────────────────────────────────────────────────────────

@@ -108,3 +108,12 @@ export {
   type SqlQueryPort,
   type SqlRetainedPathBodySourceDeps,
 } from "./retained-path-body-source-sql.js";
+
+// F1.2's two live chain reads for a parked SEND_EXTERNAL: head-unchanged-from-Ts0 and
+// complete-path exclusion. The negative counterpart of the walkers above — it mints no
+// proof and admits no negative short of a complete path.
+export {
+  proveSendNonLanding,
+  type SendNonLandingExclusionInput,
+  type SendNonLandingOutcome,
+} from "./non-landing-exclusion.js";

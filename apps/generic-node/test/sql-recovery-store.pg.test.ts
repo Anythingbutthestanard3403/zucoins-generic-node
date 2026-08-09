@@ -260,15 +260,16 @@ async function insertLease(
   walletId: string,
   operationId: string,
   role: "MOVE_SOURCE" | "SEND_SOURCE" = "MOVE_SOURCE",
-): Promise<void> {
+): Promise<{ leaseGroupId: string; membershipId: string; leaseEpoch: bigint }> {
   const leaseGroupId = await createLeaseGroup(pool, operationId);
-  await acquireLeases(pool, {
+  const [acquired] = await acquireLeases(pool, {
     wallets: [{ walletId, leaseRole: role }],
     leaseGroupId,
     rootOperationId: operationId,
     operationId,
     ownerInstanceId: randomUUID(),
   });
+  return { leaseGroupId, membershipId: acquired!.membershipId, leaseEpoch: acquired!.leaseEpoch };
 }
 
 async function seedMoveOperation(opts: {
@@ -940,6 +941,81 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       [operationId],
     );
     expect((op.rows[0] as { status: string }).status).toBe("REJECTED");
+  });
+
+  it("closing a send releases the source lease ONLY through a consumed lease_release_proofs row, and the wallet is re-leasable", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "NEEDS_ATTENTION",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "UNEXPECTED_HEAD_CHANGE",
+      sourceWalletId,
+    });
+    await seedApprovalAndPartial(operationId, { delivered: true });
+    const lease = await insertLease(sourceWalletId, operationId, "SEND_SOURCE");
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+          nextStatus: "REJECTED",
+          releaseSourceLease: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+        classification: "PROVEN_NOT_LANDED",
+      }),
+    );
+    expect(result).toMatchObject({ ok: true, status: "REJECTED" });
+
+    // The active lease is gone and its membership is closed out.
+    const activeLease = await pool.query(
+      `SELECT 1 FROM wallet_active_leases WHERE operation_id = $1::uuid`,
+      [operationId],
+    );
+    expect(activeLease.rowCount).toBe(0);
+    const membership = await pool.query(
+      `SELECT released_at FROM wallet_lease_memberships WHERE id = $1::uuid`,
+      [lease.membershipId],
+    );
+    expect((membership.rows[0] as { released_at: Date | null }).released_at).not.toBeNull();
+
+    // AC5 — the release went through the guarded proof path: a minted proof row for this
+    // exact (wallet, operation, group, epoch), and it is CONSUMED. No other release path.
+    const leaseProof = await pool.query(
+      `SELECT proof_kind, proof_digest, consumed_at FROM lease_release_proofs
+        WHERE wallet_id = $1::uuid AND operation_id = $2::uuid
+          AND lease_group_id = $3::uuid AND lease_epoch = $4`,
+      [sourceWalletId, operationId, lease.leaseGroupId, lease.leaseEpoch.toString()],
+    );
+    expect(leaseProof.rowCount).toBe(1);
+    const proofRow = leaseProof.rows[0] as {
+      proof_kind: string;
+      proof_digest: string;
+      consumed_at: Date | null;
+    };
+    expect(proofRow.proof_kind).toBe("EXTERNAL_SEND_LANDED");
+    expect(proofRow.consumed_at).not.toBeNull();
+    expect(proofRow.proof_digest).toMatch(/^[0-9a-f]{64}$/);
+
+    // AC6 — the wallet is back in the pool and a fresh lease may be taken on it. That is the
+    // whole point: a parked send used to hold this slot against the cap forever.
+    expect(await walletState(sourceWalletId)).toBe("AVAILABLE");
+    const nextOperationId = await seedSendOperation({
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+      sourceWalletId,
+    });
+    const relet = await insertLease(sourceWalletId, nextOperationId, "SEND_SOURCE");
+    expect(relet.leaseEpoch).toBeGreaterThan(lease.leaseEpoch);
+    const heldAgain = await pool.query(
+      `SELECT 1 FROM wallet_active_leases WHERE wallet_id = $1::uuid`,
+      [sourceWalletId],
+    );
+    expect(heldAgain.rowCount).toBe(1);
   });
 
   it("rejects an expired nonce with recovery_nonce_invalid", async () => {

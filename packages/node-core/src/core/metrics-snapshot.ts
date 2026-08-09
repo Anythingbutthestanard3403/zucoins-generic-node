@@ -98,6 +98,13 @@ SELECT count(*)::int AS wallets
     .replace(/\s+/g, " ")
     .trim(),
 
+  COUNT_PARKED_EXTERNAL_SENDS: `
+SELECT count(*)::int AS parked
+  FROM send_operations
+ WHERE status = 'NEEDS_ATTENTION'`
+    .replace(/\s+/g, " ")
+    .trim(),
+
   COUNT_OPERATIONS_BY_STATUS: `
 SELECT status::text AS status,
        count(*)::int AS ops,
@@ -146,7 +153,15 @@ export async function collectOperationalMetricsSnapshot(
     );
   }
 
-  const [byStateRows, availableRows, leaseRows, queueRows, quarantineRows, opRows] =
+  const [
+    byStateRows,
+    availableRows,
+    leaseRows,
+    queueRows,
+    quarantineRows,
+    opRows,
+    parkedSendRows,
+  ] =
     await Promise.all([
       db.query<{ state: string; wallets: number }>(
         METRICS_SNAPSHOT_STATEMENTS.COUNT_WALLETS_BY_STATE,
@@ -164,6 +179,7 @@ export async function collectOperationalMetricsSnapshot(
       db.query<{ status: string; ops: number; oldest_age_secs: number }>(
         METRICS_SNAPSHOT_STATEMENTS.COUNT_OPERATIONS_BY_STATUS,
       ),
+      db.query<{ parked: number }>(METRICS_SNAPSHOT_STATEMENTS.COUNT_PARKED_EXTERNAL_SENDS),
     ]);
 
   const walletsByState: Partial<Record<MetricWalletState, number>> = {};
@@ -211,6 +227,7 @@ export async function collectOperationalMetricsSnapshot(
     poolCapTotal,
     oldestLeaseAgeSecs,
     quarantinedUnexpectedHead: Number(quarantineRows.rows[0]?.wallets ?? 0),
+    parkedExternalSends: Number(parkedSendRows.rows[0]?.parked ?? 0),
     operationsByStatus,
     operationsOldestAgeSecsByStatus,
     storagePressure: stamps.storagePressure ? 1 : 0,
@@ -244,6 +261,7 @@ export function snapshotFromPoolPressure(
     readonly activeLeasesByRole?: Readonly<Partial<Record<MetricLeaseRole, number>>>;
     readonly oldestLeaseAgeSecs?: number;
     readonly quarantinedUnexpectedHead?: number;
+    readonly parkedExternalSends?: number;
     readonly operationsByStatus?: Readonly<Partial<Record<MetricOperationStatus, number>>>;
     readonly operationsOldestAgeSecsByStatus?: Readonly<
       Partial<Record<MetricOperationStatus, number>>
@@ -271,6 +289,7 @@ export function snapshotFromPoolPressure(
     poolCapTotal: pressure.poolCapTotal,
     oldestLeaseAgeSecs: extras?.oldestLeaseAgeSecs ?? pressure.oldestReceiveLeaseAgeSecs,
     quarantinedUnexpectedHead: extras?.quarantinedUnexpectedHead ?? 0,
+    parkedExternalSends: extras?.parkedExternalSends ?? 0,
     operationsByStatus: extras?.operationsByStatus ?? {},
     operationsOldestAgeSecsByStatus: extras?.operationsOldestAgeSecsByStatus ?? {},
     storagePressure: stamps.storagePressure ? 1 : 0,

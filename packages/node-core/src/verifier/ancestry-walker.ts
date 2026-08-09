@@ -315,7 +315,7 @@ const sha256Hex = (text: string): string =>
 // A body that has passed the whole per-hop gate, carried with the exact text it verified
 // against so nothing downstream can pair a verified signature with a different body.
 // Every field is taken from the SIGNED BYTES, never from a retained column.
-interface VerifiedHop {
+export interface VerifiedHop {
   readonly source_kind: LineagePathBodySourceKind;
   readonly role: "sender" | "receiver";
   readonly transaction: SettledSplitChainTransaction;
@@ -382,7 +382,10 @@ function parseCompletedBody(text: string): ParsedSettledTransaction | null {
  * preimage, inner digest, step signatures, or A.7 fingerprint says one thing while its
  * bytes say another is a forgery attempt, not a stale index.
  */
-function verifyHop(body: RetainedPathBody, walletPublicKey: string): VerifiedHop | LandingProofFault {
+export function verifyHop(
+  body: RetainedPathBody,
+  walletPublicKey: string,
+): VerifiedHop | LandingProofFault {
   if (!(LINEAGE_PATH_BODY_SOURCE_KINDS as readonly string[]).includes(body.source_kind)) {
     return "ANOMALOUS_OR_CONTRADICTORY";
   }

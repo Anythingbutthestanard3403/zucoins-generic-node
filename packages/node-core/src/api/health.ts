@@ -203,6 +203,20 @@ export class CachedDbProbe {
     }
   }
 
+  /**
+   * Last completed verdict, read without probing — for synchronous consumers that must
+   * not issue a query of their own (money admission; see money-path-admission.ts).
+   *
+   * Fail-closed on both unknown and stale: `false` before the first probe completes and
+   * again once the cached verdict has aged past `ttlMs`. A consumer therefore acts on a
+   * verdict at most one TTL old, and the answer re-closes on DB loss the moment the next
+   * probe records a failure — it can never latch open the way a boot-time flag does.
+   */
+  cachedReachable(): boolean {
+    if (this.cachedOk !== true) return false;
+    return this.clock() - this.cachedAtMs < this.ttlMs;
+  }
+
   /** Force the next call to re-probe (tests / post-recovery). */
   invalidate(): void {
     this.generation += 1;

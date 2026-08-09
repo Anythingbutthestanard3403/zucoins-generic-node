@@ -219,6 +219,113 @@ export interface DualChainEventAppender {
   append(input: DualChainAppendInput): Promise<DualChainAppendOutcome>;
 }
 
+export interface ImplementerEventLegInput {
+  readonly nodeId: string;
+  readonly implementerId: string;
+  /** Both chains carry the same event id — the caller minted it with the node leg. */
+  readonly eventId: string;
+  readonly eventType: NodeEventType;
+  readonly operationId: string | null;
+  readonly walletId: string | null;
+  readonly dataSha256: string;
+  /** The non-invertible link back to the node-global row (NC2 — the tenant never sees the global seq). */
+  readonly nodeEventHash: string;
+  readonly createdAt: string;
+  readonly signer: NodeEventSigner;
+}
+
+export interface ImplementerEventLegResult {
+  readonly seq: bigint;
+  readonly proofRepresentation: string;
+}
+
+/**
+ * Append the tenant zp-implementer-event-v1 leg alone, for a node-global row the CALLER
+ * already minted and inserted.
+ *
+ * `append()` above owns both legs and is what almost every slice wants. The exception is
+ * MOVE_INTERNAL: `core/move-internal-landing-store.ts` inserts the node_events row inside its
+ * own compare-and-swap CTE (one statement, so the state change and its event cannot tear), so
+ * the node leg cannot be delegated here without double-inserting. That caller mints and signs
+ * the node tuple, hands it to the CAS, and then calls this with the resulting node event hash
+ * — on the same transaction, so the tenant proof is durable exactly when the state change is.
+ *
+ * The rolling implementer quota is NOT probed here; `append()` owns that decision, because a
+ * quota refusal must be able to abort the whole append and only the two-leg entry point can.
+ */
+export async function appendImplementerEventLeg(
+  query: SqlQueryFn,
+  input: ImplementerEventLegInput,
+): Promise<ImplementerEventLegResult> {
+  const { nodeId, implementerId, eventId, nodeEventHash, signer } = input;
+  await query(ENSURE_IMPLEMENTER_COUNTER, [nodeId, implementerId]);
+  const locked = await query(LOCK_IMPLEMENTER_COUNTER, [nodeId, implementerId]);
+  const lockRow = locked[0];
+  if (lockRow === undefined) {
+    throw new EventLogError("implementer_event_seq_counters row missing after ensure");
+  }
+  const nextSeq = asBigint(lockRow.next_seq);
+  const previousRows =
+    nextSeq === 1n
+      ? []
+      : await query(SELECT_IMPLEMENTER_PREVIOUS, [
+          nodeId,
+          implementerId,
+          (nextSeq - 1n).toString(),
+        ]);
+  const previousRow = previousRows[0];
+  if (nextSeq > 1n && previousRow === undefined) {
+    throw new EventLogError(
+      `implementer chain gap: seq ${(nextSeq - 1n).toString()} missing for ${implementerId}`,
+    );
+  }
+  const implementerPreviousEventHash =
+    previousRow === undefined
+      ? null
+      : implementerEventHashOf(String(previousRow.proof_representation));
+
+  const preimageText = buildImplementerEventPreimage({
+    purpose: IMPLEMENTER_EVENT_PURPOSE,
+    canonical_version: IMPLEMENTER_EVENT_CANONICAL_VERSION,
+    node_id: nodeId,
+    implementer_id: implementerId,
+    event_id: eventId,
+    implementer_seq: nextSeq.toString(),
+    operation_id: input.operationId,
+    wallet_id: input.walletId,
+    event_type: input.eventType,
+    data_sha256: input.dataSha256,
+    node_event_hash: nodeEventHash,
+    implementer_previous_event_hash: implementerPreviousEventHash,
+    created_at: input.createdAt,
+  });
+  const proofRepresentation = buildArtifactEnvelope({
+    keyId: signer.signingKeyId,
+    preimageText,
+    signature: signer.sign(Buffer.from(preimageText, "utf8")),
+  });
+
+  await query(INSERT_IMPLEMENTER_EVENT, [
+    nodeId,
+    implementerId,
+    nextSeq.toString(),
+    eventId,
+    input.eventType,
+    proofRepresentation,
+    input.createdAt,
+  ]);
+  const advanced = await query(ADVANCE_IMPLEMENTER_COUNTER, [
+    nodeId,
+    implementerId,
+    (nextSeq + 1n).toString(),
+    nextSeq.toString(),
+  ]);
+  if (advanced[0] === undefined) {
+    throw new EventLogError("implementer_seq counter advance lost the race under lock");
+  }
+  return { seq: nextSeq, proofRepresentation };
+}
+
 export function createDualChainEventAppender(
   config: DualChainAppenderConfig,
 ): DualChainEventAppender {
@@ -301,74 +408,19 @@ export function createDualChainEventAppender(
     input: ResolvedDualChainAppendInput,
     eventId: string,
     nodeEventHash: string,
-  ): Promise<{ readonly seq: bigint; readonly proofRepresentation: string }> => {
-    await query(ENSURE_IMPLEMENTER_COUNTER, [nodeId, input.implementerId]);
-    const locked = await query(LOCK_IMPLEMENTER_COUNTER, [nodeId, input.implementerId]);
-    const lockRow = locked[0];
-    if (lockRow === undefined) {
-      throw new EventLogError("implementer_event_seq_counters row missing after ensure");
-    }
-    const nextSeq = asBigint(lockRow.next_seq);
-    const previousRows =
-      nextSeq === 1n
-        ? []
-        : await query(SELECT_IMPLEMENTER_PREVIOUS, [
-            nodeId,
-            input.implementerId,
-            (nextSeq - 1n).toString(),
-          ]);
-    const previousRow = previousRows[0];
-    if (nextSeq > 1n && previousRow === undefined) {
-      throw new EventLogError(
-        `implementer chain gap: seq ${(nextSeq - 1n).toString()} missing for ${input.implementerId}`,
-      );
-    }
-    const implementerPreviousEventHash =
-      previousRow === undefined
-        ? null
-        : implementerEventHashOf(String(previousRow.proof_representation));
-
-    const preimageText = buildImplementerEventPreimage({
-      purpose: IMPLEMENTER_EVENT_PURPOSE,
-      canonical_version: IMPLEMENTER_EVENT_CANONICAL_VERSION,
-      node_id: nodeId,
-      implementer_id: input.implementerId,
-      event_id: eventId,
-      implementer_seq: nextSeq.toString(),
-      operation_id: input.operationId,
-      wallet_id: input.walletId,
-      event_type: input.eventType,
-      data_sha256: input.dataSha256,
-      node_event_hash: nodeEventHash,
-      implementer_previous_event_hash: implementerPreviousEventHash,
-      created_at: input.createdAt,
-    });
-    const proofRepresentation = buildArtifactEnvelope({
-      keyId: signer.signingKeyId,
-      preimageText,
-      signature: signer.sign(Buffer.from(preimageText, "utf8")),
-    });
-
-    await query(INSERT_IMPLEMENTER_EVENT, [
+  ): Promise<ImplementerEventLegResult> =>
+    appendImplementerEventLeg(query, {
       nodeId,
-      input.implementerId,
-      nextSeq.toString(),
+      implementerId: input.implementerId,
       eventId,
-      input.eventType,
-      proofRepresentation,
-      input.createdAt,
-    ]);
-    const advanced = await query(ADVANCE_IMPLEMENTER_COUNTER, [
-      nodeId,
-      input.implementerId,
-      (nextSeq + 1n).toString(),
-      nextSeq.toString(),
-    ]);
-    if (advanced[0] === undefined) {
-      throw new EventLogError("implementer_seq counter advance lost the race under lock");
-    }
-    return { seq: nextSeq, proofRepresentation };
-  };
+      eventType: input.eventType,
+      operationId: input.operationId,
+      walletId: input.walletId,
+      dataSha256: input.dataSha256,
+      nodeEventHash,
+      createdAt: input.createdAt,
+      signer,
+    });
 
   return {
     async append(input: DualChainAppendInput): Promise<DualChainAppendOutcome> {

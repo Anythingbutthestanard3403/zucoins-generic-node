@@ -54,8 +54,43 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
   it("shows pack create/prove on the pack step", () => {
     renderPage();
     fireEvent.click(screen.getByText(/Continue to recovery pack/i));
-    expect(screen.getByTestId("pack-passcode-create")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-secret-create")).toBeInTheDocument();
     expect(screen.getByTestId("pack-file")).toBeInTheDocument();
+  });
+
+  it("generates the pack secret instead of accepting a passcode", () => {
+    renderPage();
+    fireEvent.click(screen.getByText(/Continue to recovery pack/i));
+
+    // No digit-passcode field survives: a ≤10^6 keyspace is enumerable offline
+    // against a pack copy, so the operator never gets to pick the seal.
+    expect(screen.queryByTestId("pack-passcode-create")).not.toBeInTheDocument();
+    const secret = screen.getByTestId("pack-secret-create") as HTMLInputElement;
+    expect(secret).toHaveAttribute("readonly");
+    expect(secret.value).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(secret.value).not.toMatch(/^\d+$/);
+
+    // Create stays disabled until the operator confirms the secret is written down —
+    // it is shown once and the node never returns it.
+    const create = screen.getByRole("button", { name: /Create & download pack/i });
+    expect(create).toBeDisabled();
+    fireEvent.click(screen.getByTestId("pack-secret-saved"));
+    expect(create).toBeEnabled();
+
+    // Regenerating draws a fresh secret and re-arms the confirmation.
+    const first = secret.value;
+    fireEvent.click(screen.getByTestId("pack-secret-regenerate"));
+    expect((screen.getByTestId("pack-secret-create") as HTMLInputElement).value).not.toBe(first);
+    expect(screen.getByRole("button", { name: /Create & download pack/i })).toBeDisabled();
+  });
+
+  it("offers the v1 legacy opt-in and the re-issue path for superseded packs", () => {
+    renderPage();
+    fireEvent.click(screen.getByText(/Continue to recovery pack/i));
+    expect(screen.getByTestId("pack-legacy-v1")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-from-file")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-from-secret")).toBeInTheDocument();
+    expect(screen.getByText(/destroy every copy of the old file/i)).toBeInTheDocument();
   });
 
   it("shows a one-shot master key field on the break-glass run step (Mode A)", () => {

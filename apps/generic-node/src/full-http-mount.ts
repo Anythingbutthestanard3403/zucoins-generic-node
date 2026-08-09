@@ -751,8 +751,12 @@ export function createProductionRouteSurface(
       readonly at: string;
       readonly verified_wallet_count?: number;
       readonly recovery_verification_id?: string | null;
+      readonly previous_pack_content_sha256?: string;
+      readonly pack_version?: 1 | 2;
     }) => {
       // Digests only — never passcode / master. Structured log for operators.
+      // previous_pack_content_sha256 / pack_version are the destruction trail: they
+      // name the superseded artifact an operator must now destroy copies of.
       console.info(
         JSON.stringify({
           event: "recovery_pack_audit",
@@ -762,6 +766,8 @@ export function createProductionRouteSurface(
           at: event.at,
           verified_wallet_count: event.verified_wallet_count ?? null,
           recovery_verification_id: event.recovery_verification_id ?? null,
+          previous_pack_content_sha256: event.previous_pack_content_sha256 ?? null,
+          pack_version: event.pack_version ?? null,
         }),
       );
     },

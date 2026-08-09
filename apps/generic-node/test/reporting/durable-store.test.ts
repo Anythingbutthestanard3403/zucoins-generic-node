@@ -962,6 +962,16 @@ describe.skipIf(!PG_AVAILABLE)(
         ALTER TABLE durable_store_uow_child
           ADD COLUMN IF NOT EXISTS mutation_idempotency_id uuid
       `);
+      // The shipped correlation guard (mutation-correlation.sql) resolves child_record_id in
+      // receive_arms / verification_acknowledgements, selected by route_id — a stand-in child
+      // table can never satisfy it, and every parent here names one. These tests are about the
+      // store's transaction envelope, not correlation; the guard is proven against a
+      // production-built database in apps/generic-node/test/mutation-correlation.pg.test.ts.
+      // Scoped to this suite's throwaway database, which afterAll drops.
+      await pool.query(
+        `ALTER TABLE reporting_mutation_idempotency
+           DISABLE TRIGGER reporting_completed_parent_has_child`,
+      );
     }
 
     async function insertNonceReturningId(

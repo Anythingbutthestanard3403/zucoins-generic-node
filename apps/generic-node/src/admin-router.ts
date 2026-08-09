@@ -168,10 +168,14 @@ import {
 } from "./ops/recovery-pack-lockout.js";
 import {
   createRecoveryPack,
-  isValidRecoveryPasscode,
+  isAcceptableRecoverySecretShape,
   openRecoveryPack,
   peekPackContentSha256,
+  recoverySecretWeakness,
+  reissueRecoveryPack,
+  RecoveryPackError,
   RECOVERY_PACK_FORMAT,
+  RECOVERY_PACK_SECRET_MAX_CHARS,
 } from "./ops/recovery-pack.js";
 import { createMemorySetupStateStore, type SetupStateStore } from "./setup-state-store.js";
 import {
@@ -697,32 +701,50 @@ function haltWire(
  */
 /**
  * POST /admin/v1/recovery-pack/create body.
- * Passcode only — server holds/resolves vault master (pending show-once or body).
- * Optional vault_master_key when bootstrap is sealed/configured (operator re-supplies).
+ * `recovery_secret` seals the pack and must clear the entropy floor at creation —
+ * the operator PWA generates it; a digit passcode is refused here, not at prove.
+ * Master source is one of: `vault_master_key`, pending show-once plaintext, or a
+ * `from_pack` re-issue (`from_pack` + `from_pack_secret`, which never exposes the
+ * master). The secret itself is never persisted: it stays in the request body,
+ * whose idempotency fingerprint is a structural sentinel, and never reaches the
+ * durable response row.
  */
 function parseRecoveryPackCreateBody(
   raw: unknown,
 ): ParseOk<{
-  readonly passcode: string;
+  readonly recovery_secret: string;
   readonly vault_master_key?: string;
+  readonly from_pack?: string;
+  readonly from_pack_secret?: string;
+  readonly allow_legacy_v1?: boolean;
 }> | ParseFail {
   if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
   }
-  const known = new Set(["passcode", "vault_master_key"]);
+  const known = new Set([
+    "recovery_secret",
+    "vault_master_key",
+    "from_pack",
+    "from_pack_secret",
+    "allow_legacy_v1",
+  ]);
   for (const key of Object.keys(raw)) {
     if (!known.has(key)) {
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
-  const passcode = raw.passcode;
-  if (typeof passcode !== "string" || !isValidRecoveryPasscode(passcode)) {
+  const secret = raw.recovery_secret;
+  if (typeof secret !== "string") {
     return {
       ok: false,
       status: 400,
       code: "invalid_scalar",
-      message: "passcode must be 4–6 digits",
+      message: "recovery_secret required",
     };
+  }
+  const weakness = recoverySecretWeakness(secret);
+  if (weakness !== null) {
+    return { ok: false, status: 400, code: "weak_recovery_secret", message: weakness };
   }
   let master: string | undefined;
   if (raw.vault_master_key !== undefined && raw.vault_master_key !== null) {
@@ -736,9 +758,53 @@ function parseRecoveryPackCreateBody(
     }
     master = raw.vault_master_key;
   }
+  let fromPack: string | undefined;
+  let fromPackSecret: string | undefined;
+  if (raw.from_pack !== undefined && raw.from_pack !== null) {
+    if (typeof raw.from_pack !== "string" || raw.from_pack.length === 0) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "from_pack must be the pack file JSON" };
+    }
+    // Bound upload size (~256 KiB) — pack is small JSON.
+    if (raw.from_pack.length > 256 * 1024) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "from_pack too large" };
+    }
+    if (typeof raw.from_pack_secret !== "string" || !isAcceptableRecoverySecretShape(raw.from_pack_secret)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_scalar",
+        message: "from_pack_secret required with from_pack",
+      };
+    }
+    fromPack = raw.from_pack;
+    fromPackSecret = raw.from_pack_secret;
+  } else if (raw.from_pack_secret !== undefined) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "from_pack_secret requires from_pack",
+    };
+  }
+  if (master !== undefined && fromPack !== undefined) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "supply vault_master_key or from_pack, not both",
+    };
+  }
+  if (raw.allow_legacy_v1 !== undefined && typeof raw.allow_legacy_v1 !== "boolean") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "allow_legacy_v1 must be a boolean" };
+  }
   return {
     ok: true,
-    body: master === undefined ? { passcode } : { passcode, vault_master_key: master },
+    body: {
+      recovery_secret: secret,
+      ...(master === undefined ? {} : { vault_master_key: master }),
+      ...(fromPack === undefined ? {} : { from_pack: fromPack, from_pack_secret: fromPackSecret }),
+      ...(raw.allow_legacy_v1 === true ? { allow_legacy_v1: true } : {}),
+    },
   };
 }
 
@@ -750,26 +816,32 @@ function parseRecoveryPackCreateBody(
 function parseRecoveryPackProveBody(
   raw: unknown,
 ): ParseOk<{
-  readonly passcode: string;
+  readonly recovery_secret: string;
   readonly packFileUtf8: string;
+  readonly allow_legacy_v1: boolean;
 }> | ParseFail {
   if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
   }
-  const known = new Set(["passcode", "pack_file", "pack_file_b64"]);
+  const known = new Set(["recovery_secret", "pack_file", "pack_file_b64", "allow_legacy_v1"]);
   for (const key of Object.keys(raw)) {
     if (!known.has(key)) {
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
-  const passcode = raw.passcode;
-  if (typeof passcode !== "string" || !isValidRecoveryPasscode(passcode)) {
+  // No entropy floor on the open path — a legacy v1 pack legitimately carries a
+  // digit passcode, and refusing to open it would strand the operator holding one.
+  const secret = raw.recovery_secret;
+  if (typeof secret !== "string" || !isAcceptableRecoverySecretShape(secret)) {
     return {
       ok: false,
       status: 400,
       code: "invalid_scalar",
-      message: "passcode must be 4–6 digits",
+      message: `recovery_secret must be 1–${RECOVERY_PACK_SECRET_MAX_CHARS} characters`,
     };
+  }
+  if (raw.allow_legacy_v1 !== undefined && typeof raw.allow_legacy_v1 !== "boolean") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "allow_legacy_v1 must be a boolean" };
   }
   let packFileUtf8: string | null = null;
   if (typeof raw.pack_file === "string" && raw.pack_file.length > 0) {
@@ -803,7 +875,10 @@ function parseRecoveryPackProveBody(
       message: "pack file too large",
     };
   }
-  return { ok: true, body: { passcode, packFileUtf8 } };
+  return {
+    ok: true,
+    body: { recovery_secret: secret, packFileUtf8, allow_legacy_v1: raw.allow_legacy_v1 === true },
+  };
 }
 
 function parseCeremonyStartBody(
@@ -1010,6 +1085,10 @@ export interface AdminRouteDeps {
     readonly at: string;
     readonly verified_wallet_count?: number;
     readonly recovery_verification_id?: string | null;
+    /** Digest of the pack a re-issue replaced — the destruction trail for v1 artifacts. */
+    readonly previous_pack_content_sha256?: string;
+    /** Sealed payload version that was opened (1 = superseded digit-passcode pack). */
+    readonly pack_version?: 1 | 2;
   }) => void | Promise<void>;
   /**
    * Durable operator setup wizard flags. When omitted, in-memory store.
@@ -2511,25 +2590,56 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             validateBody: parseRecoveryPackCreateBody,
             nowMs: nowMs(),
             mutate: async ({ body, user }) => {
-              // Resolve master: body override → pending show-once plaintext.
-              // Never re-read sealed/configured plaintext (show-once wiped).
-              let master: string | null =
-                body.vault_master_key !== undefined ? body.vault_master_key : null;
-              if (master === null && vaultMasterBootstrap.pendingPlaintext !== null) {
-                master = vaultMasterBootstrap.pendingPlaintext;
+              // Re-issue: re-seal an existing pack as v2 without the master ever
+              // being handled by the operator. Refuses a v1 source unless the
+              // caller opted in, so a v1 artifact is never silently carried over.
+              let built: ReturnType<typeof createRecoveryPack>;
+              let previousPackSha: string | null = null;
+              if (body.from_pack !== undefined && body.from_pack_secret !== undefined) {
+                try {
+                  const reissued = reissueRecoveryPack({
+                    fileBytes: body.from_pack,
+                    secret: body.from_pack_secret,
+                    newSecret: body.recovery_secret,
+                    allowLegacyV1: body.allow_legacy_v1 === true,
+                  });
+                  previousPackSha = reissued.previousPackContentSha256;
+                  built = reissued;
+                } catch (err) {
+                  const code =
+                    err instanceof RecoveryPackError && err.code === "legacy_pack_v1"
+                      ? "legacy_pack_v1"
+                      : "from_pack_unreadable";
+                  throw Object.assign(
+                    new Error(
+                      code === "legacy_pack_v1"
+                        ? (err as RecoveryPackError).message
+                        : "from_pack could not be opened with from_pack_secret",
+                    ),
+                    { code, status: 400 },
+                  );
+                }
+              } else {
+                // Resolve master: body override → pending show-once plaintext.
+                // Never re-read sealed/configured plaintext (show-once wiped).
+                let master: string | null =
+                  body.vault_master_key !== undefined ? body.vault_master_key : null;
+                if (master === null && vaultMasterBootstrap.pendingPlaintext !== null) {
+                  master = vaultMasterBootstrap.pendingPlaintext;
+                }
+                if (master === null || master.length < MIN_MASTER_KEY_CHARS) {
+                  throw Object.assign(
+                    new Error(
+                      "vault master key required — provide vault_master_key, from_pack, or create pack while show-once plaintext is still pending ack",
+                    ),
+                    { code: "vault_master_unavailable", status: 422 },
+                  );
+                }
+                built = createRecoveryPack({
+                  vaultMasterKey: master,
+                  secret: body.recovery_secret,
+                });
               }
-              if (master === null || master.length < MIN_MASTER_KEY_CHARS) {
-                throw Object.assign(
-                  new Error(
-                    "vault master key required — provide vault_master_key or create pack while show-once plaintext is still pending ack",
-                  ),
-                  { code: "vault_master_unavailable", status: 422 },
-                );
-              }
-              const built = createRecoveryPack({
-                vaultMasterKey: master,
-                passcode: body.passcode,
-              });
               const at = new Date(nowMs()).toISOString();
               try {
                 await deps.recoveryPackAudit?.({
@@ -2537,16 +2647,22 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   operator_id: user.id,
                   pack_content_sha256: built.envelope.pack_content_sha256,
                   at,
+                  ...(previousPackSha === null
+                    ? {}
+                    : { previous_pack_content_sha256: previousPackSha }),
                 });
               } catch {
                 // audit must not block download
               }
               // Return digests + file as base64 so AdminRouterResponse stays string body.
               // Content-Disposition signals download; SPA decodes to octet-stream blob.
+              // NEVER put `built.secret` here: this body is the durable idempotency
+              // replay row, so the seal key and the sealed pack would land in one row.
               return {
                 object: "recovery_pack_create",
                 format: RECOVERY_PACK_FORMAT,
                 pack_content_sha256: built.envelope.pack_content_sha256,
+                previous_pack_content_sha256: previousPackSha,
                 filename: `zp-node-recovery-pack-${built.envelope.pack_content_sha256.slice(0, 12)}.json`,
                 // File bytes once — client downloads; server does not retain.
                 pack_file_b64: built.fileBytes.toString("base64"),
@@ -2667,9 +2783,18 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               try {
                 opened = openRecoveryPack({
                   fileBytes: body.packFileUtf8,
-                  passcode: body.passcode,
+                  secret: body.recovery_secret,
+                  allowLegacyV1: body.allow_legacy_v1,
                 });
-              } catch {
+              } catch (err) {
+                // A v1 payload is only reachable with the correct secret, so naming
+                // it is no decrypt oracle — and it must not burn a lockout attempt.
+                if (err instanceof RecoveryPackError && err.code === "legacy_pack_v1") {
+                  throw Object.assign(new Error(err.message), {
+                    code: "legacy_pack_v1",
+                    status: 400,
+                  });
+                }
                 await recordProveFailure(lockoutStore, nodeId, user.id, nowMs());
                 try {
                   await deps.recoveryPackAudit?.({
@@ -2719,6 +2844,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                     pack_content_sha256: packSha,
                     at: new Date(nowMs()).toISOString(),
                     recovery_verification_id: job.ceremony_id,
+                    pack_version: opened.v,
                   });
                 } catch {
                   /* ignore */
@@ -2733,6 +2859,9 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   verified_wallet_count: null,
                   status: job.status,
                   in_flight: true,
+                  // 1 means the operator just proved a superseded pack — the SPA
+                  // turns this into the re-issue-and-destroy prompt.
+                  pack_version: opened.v,
                 };
               } finally {
                 masterHolder.value = "";

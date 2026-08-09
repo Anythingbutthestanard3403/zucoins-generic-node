@@ -48,6 +48,10 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   "RECEIVE_TTL_DEFAULT_SECS",
   "RECEIVE_TTL_MIN_SECS",
   "RECEIVE_TTL_MAX_SECS",
+  // The most first-boot field in the schema. The vault root-KDF salt is pinned to the row
+  // persisted beside the envelopes at first vault-unlock and is insert-only from then on;
+  // changing it on a running node would derive a root key that opens nothing (ZTR-1159).
+  "VAULT_ROOT_SALT_B64",
   "BACKUP_SCHEDULE_ENABLED",
   "BACKUP_MASTER_KEY",
   "BACKUP_OUTPUT_DIR",

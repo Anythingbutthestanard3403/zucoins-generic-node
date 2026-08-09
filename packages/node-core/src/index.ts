@@ -31,6 +31,11 @@ export {
 export {
   type PathObservation as ReconcilePathObservation,
 } from "./protocol/reconcile/observation-input.js";
+// The reconcile-reason → closed `attention_reason` mapper. Exported for the same reason as the
+// classifier above: the composition root builds the operation.needs_attention event payload and
+// must name the SAME vocabulary member persistMoveOutcome writes to the column, not a second
+// hand-maintained mapping that could drift from it.
+export { toAttentionReason } from "./protocol/reconcile/types.js";
 export * from "./reporting/index.js";
 export * from "./send/index.js";
 // MOVE_INTERNAL admission is mostly via "@zucoins/node-core/move" (not star-re-exported:

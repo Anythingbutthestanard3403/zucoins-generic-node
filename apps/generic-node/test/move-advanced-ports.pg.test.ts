@@ -26,6 +26,8 @@ import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client, Pool } from "pg";
 
+import { ATTENTION_REASONS } from "@zucoins/generic-node-contracts/api-schema";
+
 import {
   advanceAttemptPhase,
   createSqlRecoveryLiveDatabase,
@@ -226,6 +228,45 @@ function landedHeadExchange(): GatewayExchangeTransport {
   return {
     async exchange(endpoint: string, request: GatewayRequest): Promise<GatewayExchangeCapture> {
       expect(request.rpc).toBe("get_transaction__v1");
+      return {
+        endpoint,
+        endpointFingerprint: fingerprintEndpoint(endpoint),
+        requestBytes: request.bodyBytes,
+        requestSha256: sha256Hex(request.bodyBytes),
+        statusCode: 200,
+        responseBytes,
+        responseSha256: sha256Hex(responseBytes),
+      };
+    },
+  };
+}
+
+/**
+ * Answers the named wallet's read with the settled MOVE body and every OTHER wallet's with
+ * the authoritative virgin-wallet genesis shape (`status:true`, exact empty history array —
+ * gateway-envelope.ts's isAuthoritativeEmptyHistory).
+ *
+ * One leg then proves LANDED and the other anchors no path at all (a genesis head is a
+ * legitimate observation the oracle turns into a MISSING_BODY fault), which is exactly the
+ * reconcile row "one wallet appears landed and the other cannot connect to the same
+ * transaction": INDETERMINATE / PATH_DISAGREEMENT, with both leases still ACTIVE.
+ */
+function pathDisagreementExchange(landedForPublicKey: string): GatewayExchangeTransport {
+  const headText = `{"status":true,"code":"success","message":"","data":[${WALLET_SETTLED_TRANSACTION_TEXT}]}`;
+  const genesisText = `{"status":true,"code":"success","message":"","data":[]}`;
+  return {
+    async exchange(endpoint: string, request: GatewayRequest): Promise<GatewayExchangeCapture> {
+      expect(request.rpc).toBe("get_transaction__v1");
+      // The read carries the wallet in its canonical key_public__base64urlsafe action-data
+      // field, so which leg is asking is readable off the request bytes — through the frozen
+      // form-body codec, which is `v=<encodeURIComponent(json)>`, so the key's base64 padding
+      // arrives percent-escaped and a raw substring test would match neither leg.
+      const asked = decodeURIComponent(
+        new TextDecoder().decode(request.bodyBytes).replace(/^v=/, ""),
+      );
+      const responseBytes = new TextEncoder().encode(
+        asked.includes(landedForPublicKey) ? headText : genesisText,
+      );
       return {
         endpoint,
         endpointFingerprint: fingerprintEndpoint(endpoint),
@@ -802,9 +843,187 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
 
       const result = await reconcile(seeded.nodeId, seeded.operationId, {
         gatewayExchange: landedHeadExchange(),
+        nodeIdentitySigner: stubNodeIdentitySigner(seeded.signingKeyId),
       });
       expect(result).toEqual({ ok: false, reason: "reconcile: INVARIANT_BREACH", holdReconcile: true });
     },
+  );
+
+  // ZTR-1130. MOVE_INTERNAL declares NEEDS_ATTENTION as a reachable state and
+  // move-internal-landing-store.ts projects both non-landing verdicts onto it, but the
+  // production caller used to return before persistMoveOutcome on every kind except
+  // LANDED_VERIFIED. An ambiguous move therefore sat at CREATED forever holding BOTH wallet
+  // leases with no flag and no event — against a hard wallet cap that never restores capacity,
+  // so the only symptom was a slow drift toward pool exhaustion. These tests drive the real
+  // reconcile to each non-landing verdict and prove the durable escalation now happens.
+
+  /** The operation row's attention columns plus the owner the tenant stream is keyed on. */
+  async function readAttention(operationId: string): Promise<{
+    readonly status: string;
+    readonly attention_required: boolean;
+    readonly attention_reason: string | null;
+    readonly attention_detail: string | null;
+    readonly no_terminal: boolean;
+    readonly implementer_id: string;
+  }> {
+    const rows = await pool.query(
+      `SELECT status::text AS status, attention_required, attention_reason, attention_detail,
+              (terminal_at IS NULL) AS no_terminal, implementer_id::text AS implementer_id
+         FROM operations WHERE id = $1::uuid`,
+      [operationId],
+    );
+    return rows.rows[0] as never;
+  }
+
+  const nodeEventTypes = async (operationId: string): Promise<readonly string[]> =>
+    (
+      await pool.query(
+        `SELECT event_type FROM node_events WHERE operation_id = $1::uuid ORDER BY seq`,
+        [operationId],
+      )
+    ).rows.map((r) => (r as { event_type: string }).event_type);
+
+  /** What GET /v1/events would serve this tenant: the zp-implementer-event-v1 chain. */
+  const implementerEventTypes = async (implementerId: string): Promise<readonly string[]> =>
+    (
+      await pool.query(
+        `SELECT event_type FROM implementer_events WHERE implementer_id = $1::uuid
+          ORDER BY implementer_seq`,
+        [implementerId],
+      )
+    ).rows.map((r) => (r as { event_type: string }).event_type);
+
+  /** Wallet ids that still hold an ACTIVE lease, sorted for a stable comparison. */
+  const heldLeases = async (walletIds: readonly string[]): Promise<readonly string[]> =>
+    (
+      await pool.query(
+        `SELECT wallet_id::text AS wallet_id FROM wallet_active_leases
+          WHERE wallet_id = ANY($1::uuid[]) ORDER BY wallet_id`,
+        [walletIds],
+      )
+    ).rows.map((r) => (r as { wallet_id: string }).wallet_id);
+
+  it(
+    "INDETERMINATE: an ambiguous move parks at NEEDS_ATTENTION with a frozen attention reason, an operation.needs_attention event on both chains, and BOTH leases still held",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.destinationWalletId,
+        leaseRole: "MOVE_DESTINATION",
+      });
+      const wallets = [seeded.sourceWalletId, seeded.destinationWalletId];
+      const leasesBefore = await heldLeases(wallets);
+      expect(leasesBefore).toHaveLength(2);
+
+      const result = await reconcile(seeded.nodeId, seeded.operationId, {
+        // Source lands, destination reads genesis — neither wallet can be released and
+        // neither a landing nor a non-landing can be concluded.
+        gatewayExchange: pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY),
+        nodeIdentitySigner: stubNodeIdentitySigner(seeded.signingKeyId),
+      });
+
+      // Still holds and still licenses no retry — that part was always right.
+      expect(result).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+
+      const attention = await readAttention(seeded.operationId);
+      expect(attention.status).toBe("NEEDS_ATTENTION");
+      expect(attention.attention_required).toBe(true);
+      // PATH_DISAGREEMENT maps onto exactly one closed-vocabulary member; the free-text
+      // specifics live in attention_detail, never in a new reason.
+      expect(attention.attention_reason).toBe("VERIFICATION_INDETERMINATE");
+      expect(ATTENTION_REASONS).toContain(attention.attention_reason);
+      expect(attention.attention_detail).toContain("PATH_DISAGREEMENT");
+      // No landing was proven, so no terminal instant was stamped.
+      expect(attention.no_terminal).toBe(true);
+
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+      expect(await implementerEventTypes(attention.implementer_id)).toEqual([
+        "operation.needs_attention",
+      ]);
+
+      // Doc 01 §12: possible landing retains the leases and escalates. Both, not either.
+      expect(await heldLeases(wallets)).toEqual(leasesBefore);
+
+      // A later tick reaching the same verdict must not re-append: the frozen transition table
+      // has no NEEDS_ATTENTION → NEEDS_ATTENTION edge, so the park is a one-shot escalation.
+      const second = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY),
+        nodeIdentitySigner: stubNodeIdentitySigner(seeded.signingKeyId),
+      });
+      expect(second).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+
+      // NEEDS_ATTENTION → INTERNAL_MOVE_LANDED: a later reconciliation that CAN see both legs
+      // recovers through the very same production path, out of the state this fix introduced.
+      const recovered = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: landedHeadExchange(),
+        nodeIdentitySigner: stubNodeIdentitySigner(seeded.signingKeyId),
+      });
+      expect(recovered.ok).toBe(true);
+      if (!recovered.ok) return;
+      expect(recovered.land.persist.kind).toBe("PERSISTED");
+      const landed = await readAttention(seeded.operationId);
+      expect(landed.status).toBe("INTERNAL_MOVE_LANDED");
+      expect(landed.attention_required).toBe(false);
+      expect(landed.attention_reason).toBeNull();
+      expect(await nodeEventTypes(seeded.operationId)).toEqual([
+        "operation.needs_attention",
+        "internal_move.landed",
+      ]);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "INVARIANT_BREACH: a lease that is no longer ACTIVE parks at NEEDS_ATTENTION with LEASE_INVARIANT_VIOLATION and releases nothing",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      // Only the source is leased: reconciling while the destination lease has already been
+      // released contradicts the release precondition outright.
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+
+      const result = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: landedHeadExchange(),
+        nodeIdentitySigner: stubNodeIdentitySigner(seeded.signingKeyId),
+      });
+      expect(result).toEqual({ ok: false, reason: "reconcile: INVARIANT_BREACH", holdReconcile: true });
+
+      const attention = await readAttention(seeded.operationId);
+      expect(attention.status).toBe("NEEDS_ATTENTION");
+      expect(attention.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
+      expect(ATTENTION_REASONS).toContain(attention.attention_reason);
+      expect(attention.attention_detail).toContain("LEASE_NOT_ACTIVE_DURING_RECONCILE");
+      expect(attention.no_terminal).toBe(true);
+
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+      expect(await implementerEventTypes(attention.implementer_id)).toEqual([
+        "operation.needs_attention",
+      ]);
+      // The park is not a release: the lease that WAS held is still held.
+      expect(await heldLeases([seeded.sourceWalletId])).toEqual([seeded.sourceWalletId]);
+    },
+    PG_TEST_TIMEOUT_MS,
   );
 
   it(

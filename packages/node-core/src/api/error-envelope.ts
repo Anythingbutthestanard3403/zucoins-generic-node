@@ -33,6 +33,11 @@ export const API_ERROR_CODES = [
   { code: "nesting_too_deep", http: 400 },
   { code: "invalid_idempotency_key", http: 400 },
   { code: "cursor_mismatch", http: 400 },
+  // 415 / 505 — transport-layer rejection, decided by enforceTransportGuards
+  // (transport-hardening.ts) BEFORE the eight-stage pipeline runs. Neither code depends on
+  // whether the requested route exists, so a transport rejection is not an existence oracle.
+  { code: "unsupported_content_type", http: 415 },
+  { code: "http_version_too_old", http: 505 },
   // 409 — concurrent-state conflict
   { code: "idempotency_conflict", http: 409 },
   // rules 2–3 — distinct wire codes (UP-04)
@@ -76,6 +81,8 @@ const DIAGNOSTIC_MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   nesting_too_deep: "The request body exceeds the maximum nesting depth.",
   invalid_idempotency_key: "The Idempotency-Key header is absent, repeated, or malformed.",
   cursor_mismatch: "The Last-Event-ID does not equal the after_implementer_seq cursor.",
+  unsupported_content_type: "The request Content-Type is not application/json.",
+  http_version_too_old: "The request HTTP version is below the supported minimum.",
   idempotency_conflict: "The idempotency key was completed with a different request fingerprint.",
   idempotency_key_reused: "The idempotency key was already used with a different request fingerprint.",
   idempotency_in_progress: "The idempotency key is currently being processed by a concurrent request.",

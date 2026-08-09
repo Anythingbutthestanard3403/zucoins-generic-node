@@ -169,6 +169,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // receive_arms and verification_acknowledgements, so it must follow all three.
   // Appended; never renumber prior slices.
   "mutation-correlation",
+  // wallet_settled_ledger's per-wallet index, a pure index extension on a table created
+  // far earlier above (whose own file is already applied, so its sql_sha256 must not
+  // change). Appended; never renumber prior slices.
+  "wallet-settled-ledger-indexes",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

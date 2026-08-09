@@ -1,0 +1,55 @@
+-- Per-wallet index on the canonical settled ledger: the one index wallet_settled_ledger's
+-- wallet_id foreign key needs so a wallets row can be removed without scanning the ledger.
+--
+-- Frozen schema contract. This file is contract text: it is executed only by the schema-apply
+-- phase against a live database; nothing in this package runs it. Every invariant below is
+-- inventoried in wallet-settled-ledger-indexes.contract.ts.
+--
+-- Scope: one index on the already-created wallet_settled_ledger table (wallet-settled-
+-- ledger.sql, applied first; this file is an extension and does not re-declare it). It creates
+-- no table, no column, no trigger, no domain.
+--
+-- Pack position: appended after mutation-correlation so earlier money-pack version numbers
+-- (and their schema_migrations sql_sha256 journal entries) stay stable for already-applied
+-- databases. wallet-settled-ledger.sql is itself already applied, so the index cannot be added
+-- by editing it: runMigrations pins each applied file's sql_sha256 and rejects an in-place
+-- edit, which is the intended behaviour. Mirrors the gateway-observation-successor-indexes.sql
+-- precedent (pure index extension, appended, version-stable).
+--
+-- WHY ONE COLUMN AND NOT A COMPOSITE (a judgement call, from the query census rather than
+-- from the column list). Every statement this repo issues against wallet_settled_ledger was
+-- enumerated. There is exactly one, an INSERT (core/wallet-settled-ledger-writer.ts). No
+-- production code SELECTs this table, so there is no WHERE beyond wallet_id, no ORDER BY and
+-- no aggregate whose shape could justify a second index column. Balances are derived from the
+-- gateway-observed chain (protocol/send-baseline.ts, core/move-baseline-binding.ts), not by
+-- aggregating these rows -- the table's own header reserves per-wallet derivation as a
+-- property of the design, and this index is what will serve it when it is written, but a
+-- settled_at or operation_role suffix added today would index a query that does not exist and
+-- would be paid for on every append.
+--
+-- The access pattern that IS live is foreign-key enforcement. wallet_id REFERENCES wallets(id)
+-- makes PostgreSQL verify no referencing row survives whenever a wallets row is deleted, and
+-- PostgreSQL does not index a foreign key's referencing column. Two production sites delete a
+-- wallet (apps/generic-node/src/main.ts and money-workers/start-money-workers.ts, both
+-- compensating for a failed vault seal on a freshly minted wallet), and each one runs the RI
+-- check `SELECT 1 FROM ONLY wallet_settled_ledger WHERE $1 = wallet_id FOR KEY SHARE`. That
+-- predicate is an equality on wallet_id alone; no second column narrows it. Unindexed it is a
+-- sequential scan of an append-only table that only ever grows, to return zero rows.
+--
+-- NOT CONCURRENTLY, deliberately. db/migrate.ts wraps migration application in
+-- `BEGIN ISOLATION LEVEL ...` and CREATE INDEX CONCURRENTLY cannot run inside a transaction
+-- block, so CONCURRENTLY here would abort the migration. A plain CREATE INDEX takes a SHARE
+-- lock that blocks appends for the duration of the build; that is the correct trade while the
+-- table is small, and is the reason this index is added now rather than after the table has
+-- grown large enough to make building it an operational event.
+--
+-- The other three foreign keys on this table need no index. operation_id REFERENCES
+-- operations(id) and (operation_id, attempt_no) REFERENCES operation_transactions are both
+-- served as a left prefix of wallet_settled_ledger_one_row_per_role_uniq
+-- (operation_id, attempt_no, operation_role); (operation_id, wallet_id) REFERENCES
+-- operation_wallets is served by that same index's operation_id prefix, and nothing in this
+-- repo deletes from operations, operation_transactions or operation_wallets, so those RI
+-- checks never fire.
+
+CREATE INDEX wallet_settled_ledger_wallet_id_idx
+  ON wallet_settled_ledger(wallet_id);

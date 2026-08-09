@@ -11,6 +11,7 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import {
   formatMoneyError,
+  generateRecoveryPackSecret,
   getRecoveryCeremonyStatus,
   isCancelled,
   listWalletsInventory,
@@ -135,9 +136,11 @@ function ExplainStep({ onNext }: { onNext: () => void }) {
         (receive-eligibility gate).
       </p>
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
-        <strong>Happy path:</strong> download an encrypted recovery pack once, then prove
-        it later with a short passcode. The pack is sealed with Argon2id + AES-256-GCM — TOTP is
-        never the file key. Prefer 6 digits and keep the file private.
+        <strong>Happy path:</strong> download an encrypted recovery pack once, then prove it
+        later with the secret shown at creation. The pack is sealed with Argon2id +
+        AES-256-GCM — TOTP is never the file key. The secret is generated here, not chosen:
+        copies of the pack are meant to live off this node, so its seal has to survive being
+        in someone else&apos;s hands.
       </p>
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
         Break-glass Mode A still accepts the raw vault master key when the pack is lost. The UI
@@ -174,27 +177,52 @@ export function PackStep({
   /** Fired after successful create (day-0 local marker). */
   onCreated?: () => void;
 }) {
-  const [createPasscode, setCreatePasscode] = useState("");
-  const [provePasscode, setProvePasscode] = useState("");
+  // Generated once per mounted form, regenerable on demand. Held in component
+  // state only — never SPA storage, never a query string.
+  const [createSecret, setCreateSecret] = useState(generateRecoveryPackSecret);
+  const [secretSaved, setSecretSaved] = useState(false);
+  const [proveSecret, setProveSecret] = useState("");
+  const [proveLegacy, setProveLegacy] = useState(false);
   const [masterKey, setMasterKey] = useState("");
   const [packText, setPackText] = useState("");
+  // Re-issue inputs: the pack being replaced travels with its own secret and is
+  // opened server-side, so the operator never handles the vault master key.
+  const [fromPackText, setFromPackText] = useState("");
+  const [fromPackSecret, setFromPackSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [createDigest, setCreateDigest] = useState<string | null>(null);
+  const [destroyDigest, setDestroyDigest] = useState<string | null>(null);
+  const [shownSecret, setShownSecret] = useState<string | null>(null);
   const [proveId, setProveId] = useState<string | null>(null);
+  const [provenLegacy, setProvenLegacy] = useState(false);
 
   const createMut = useTotpGatedMutation<
     RecoveryPackCreateResponse,
-    { passcode: string; vault_master_key?: string }
+    {
+      recovery_secret: string;
+      vault_master_key?: string;
+      from_pack?: string;
+      from_pack_secret?: string;
+      allow_legacy_v1?: boolean;
+    }
   >(
     async (body, totp) => postRecoveryPackCreate(body, totp),
     {
       title: "Create recovery pack",
-      detail: "Fresh TOTP required. Passcode seals the pack; TOTP is not the file key.",
-      onSuccess: (result) => {
-        setCreatePasscode("");
+      detail:
+        "Fresh TOTP required. The generated secret seals the pack; TOTP is not the file key.",
+      onSuccess: (result, body) => {
         setMasterKey("");
+        setFromPackText("");
+        setFromPackSecret("");
+        setSecretSaved(false);
         setError(null);
         setCreateDigest(result.pack_content_sha256);
+        setDestroyDigest(result.previous_pack_content_sha256);
+        // Show-once: the node never returns the secret, so this is the only place
+        // it exists after the download. Next pack gets a fresh draw.
+        setShownSecret(body.recovery_secret);
+        setCreateSecret(generateRecoveryPackSecret());
         const blob = recoveryPackFileBlob(result);
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -205,8 +233,8 @@ export function PackStep({
         onCreated?.();
       },
       onError: (err: unknown) => {
-        setCreatePasscode("");
         setMasterKey("");
+        setFromPackSecret("");
         if (isCancelled(err)) return;
         setError(formatMoneyError(err, "Pack create failed."));
       },
@@ -215,21 +243,28 @@ export function PackStep({
 
   const proveMut = useTotpGatedMutation<
     RecoveryPackProveResponse,
-    { passcode: string; pack_file: string }
+    { recovery_secret: string; pack_file: string; allow_legacy_v1?: boolean }
   >(
     async (body, totp) => postRecoveryPackProve(body, totp),
     {
       title: "Prove recovery pack",
       detail: "Fresh TOTP required. Decrypt runs server-side; ceremony stamps wallets.",
       onSuccess: (result) => {
-        setProvePasscode("");
+        setProveSecret("");
         setPackText("");
         setError(null);
         setProveId(result.recovery_verification_id);
+        if (result.pack_version === 1) {
+          // A v1 pack opened. It is compromised-if-leaked; do not advance the
+          // operator past the re-issue prompt as if this were a clean result.
+          setProvenLegacy(true);
+          return;
+        }
+        setProvenLegacy(false);
         onNext();
       },
       onError: (err: unknown) => {
-        setProvePasscode("");
+        setProveSecret("");
         if (isCancelled(err)) return;
         setError(formatMoneyError(err, "Pack prove failed."));
       },
@@ -239,28 +274,40 @@ export function PackStep({
   function onCreate(e: FormEvent) {
     e.preventDefault();
     if (demoMode) return;
-    const pc = createPasscode;
     const mk = masterKey.trim();
-    setCreatePasscode("");
+    const from = fromPackText;
+    const fromSecret = fromPackSecret;
     setMasterKey("");
-    createMut.mutate(mk.length >= 32 ? { passcode: pc, vault_master_key: mk } : { passcode: pc });
+    setFromPackSecret("");
+    createMut.mutate({
+      recovery_secret: createSecret,
+      ...(from.length > 0 && fromSecret.length > 0
+        ? { from_pack: from, from_pack_secret: fromSecret, allow_legacy_v1: true }
+        : mk.length >= 32
+          ? { vault_master_key: mk }
+          : {}),
+    });
   }
 
   function onProve(e: FormEvent) {
     e.preventDefault();
     if (demoMode) return;
-    const pc = provePasscode;
+    const secret = proveSecret;
     const file = packText;
-    setProvePasscode("");
+    setProveSecret("");
     setPackText("");
-    proveMut.mutate({ passcode: pc, pack_file: file });
+    proveMut.mutate({
+      recovery_secret: secret,
+      pack_file: file,
+      ...(proveLegacy ? { allow_legacy_v1: true } : {}),
+    });
   }
 
-  function onFile(file: File | null) {
+  function readPackFile(file: File | null, into: (text: string) => void) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") setPackText(reader.result);
+      if (typeof reader.result === "string") into(reader.result);
     };
     reader.readAsText(file);
   }
@@ -269,9 +316,18 @@ export function PackStep({
     <div className="card form-card">
       <h3>Recovery pack (happy path)</h3>
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
-        Create downloads an encrypted file (<code>zp-node-recovery-pack-v1</code>). Prove uploads
-        that file + passcode; the node decrypts and runs the ceremony engine. Prefer 6-digit
-        passcodes. Online prove locks after 5 failures for 15 minutes.
+        Create downloads an encrypted file (<code>zp-node-recovery-pack-v2</code>) sealed under
+        a generated 130-bit secret. Prove uploads that file + the secret; the node decrypts and
+        runs the ceremony engine. Online prove locks after 5 failures for 15 minutes — that
+        limit protects this API only, never a copy of the file someone else is holding, which
+        is why the secret is not yours to choose.
+      </p>
+      <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+        <strong>Holding an old v1 pack?</strong> Packs sealed under a 4–6 digit passcode are
+        enumerable offline and must be treated as compromised if a copy ever left this host.
+        Re-issue it below (upload it under &ldquo;Replace an existing pack&rdquo;), then destroy
+        every copy of the old file — the digest of the replaced artifact is recorded in the
+        audit trail so the destruction can be signed off.
       </p>
 
       {demoMode ? (
@@ -285,9 +341,27 @@ export function PackStep({
           {error}
         </p>
       ) : null}
+      {shownSecret ? (
+        <div className="banner" role="alert" data-testid="pack-secret-shown">
+          <strong>Save this secret now — it is shown once and never again.</strong>
+          <p className="mono" style={{ fontSize: 14, wordBreak: "break-all", marginTop: 6 }}>
+            {shownSecret}
+          </p>
+          <p className="muted" style={{ fontSize: 12 }}>
+            The node does not keep it. Without it the pack cannot be opened, by you or by
+            anyone who takes a copy.
+          </p>
+        </div>
+      ) : null}
       {createDigest ? (
         <p className="muted" style={{ fontSize: 12 }} role="status">
           Pack downloaded. content_sha256={createDigest.slice(0, 16)}…
+        </p>
+      ) : null}
+      {destroyDigest ? (
+        <p className="err" role="alert" data-testid="pack-destroy-notice">
+          Replaced pack {destroyDigest.slice(0, 16)}… — destroy every copy of that file now
+          (offsite backups, object storage, laptops, mail).
         </p>
       ) : null}
       {proveId ? (
@@ -295,24 +369,55 @@ export function PackStep({
           Prove accepted — ceremony {proveId}. Check Verify for stamps.
         </p>
       ) : null}
+      {provenLegacy ? (
+        <p className="err" role="alert" data-testid="pack-legacy-proven-notice">
+          That was a superseded v1 pack sealed under a digit passcode. Treat it as compromised:
+          re-issue it under &ldquo;Replace an existing pack&rdquo; and destroy every copy of the
+          old file before relying on this node&apos;s custody again.
+        </p>
+      ) : null}
 
       {mode === "create" || mode === "both" ? (
         <form onSubmit={(e) => void onCreate(e)} autoComplete="off" style={{ marginTop: 12 }}>
           <h4 style={{ fontSize: 13 }}>Create pack</h4>
           <div className="field">
-            <label htmlFor="pack-passcode-create">Passcode (4–6 digits)</label>
+            <label htmlFor="pack-secret-create">
+              Pack secret (generated — write it down before continuing)
+            </label>
             <input
-              id="pack-passcode-create"
-              data-testid="pack-passcode-create"
-              type="password"
-              inputMode="numeric"
-              pattern="\d{4,6}"
-              autoComplete="off"
-              value={createPasscode}
-              onChange={(e) => setCreatePasscode(e.target.value)}
-              disabled={demoMode || createMut.isPending}
-              placeholder="••••••"
+              id="pack-secret-create"
+              data-testid="pack-secret-create"
+              type="text"
+              readOnly
+              value={createSecret}
+              style={{ fontFamily: "var(--mono, monospace)", fontSize: 13 }}
             />
+            <button
+              type="button"
+              className="mini-btn"
+              data-testid="pack-secret-regenerate"
+              style={{ marginTop: 6 }}
+              onClick={() => {
+                setCreateSecret(generateRecoveryPackSecret());
+                setSecretSaved(false);
+              }}
+              disabled={demoMode || createMut.isPending}
+            >
+              Generate a different secret
+            </button>
+          </div>
+          <div className="field">
+            <label htmlFor="pack-secret-saved" style={{ fontWeight: 400 }}>
+              <input
+                id="pack-secret-saved"
+                data-testid="pack-secret-saved"
+                type="checkbox"
+                checked={secretSaved}
+                onChange={(e) => setSecretSaved(e.target.checked)}
+                disabled={demoMode || createMut.isPending}
+              />{" "}
+              I have written this secret down somewhere the pack file is not.
+            </label>
           </div>
           <div className="field">
             <label htmlFor="pack-master-optional">
@@ -330,12 +435,48 @@ export function PackStep({
               style={{ fontFamily: "var(--mono, monospace)", fontSize: 13 }}
             />
           </div>
+          <details style={{ marginBottom: 12 }}>
+            <summary style={{ fontSize: 13, cursor: "pointer" }}>
+              Replace an existing pack (re-issue a v1 or rotate a v2)
+            </summary>
+            <p className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
+              The node opens the old pack, re-seals the same master under the new secret above,
+              and reports the digest to destroy. The master key never reaches this browser.
+            </p>
+            <div className="field">
+              <label htmlFor="pack-from-file">Existing pack file</label>
+              <input
+                id="pack-from-file"
+                data-testid="pack-from-file"
+                type="file"
+                accept="application/json,.json"
+                disabled={demoMode || createMut.isPending}
+                onChange={(e) => readPackFile(e.target.files?.[0] ?? null, setFromPackText)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="pack-from-secret">Its secret (or old digit passcode)</label>
+              <input
+                id="pack-from-secret"
+                data-testid="pack-from-secret"
+                type="password"
+                autoComplete="off"
+                value={fromPackSecret}
+                onChange={(e) => setFromPackSecret(e.target.value)}
+                disabled={demoMode || createMut.isPending}
+              />
+            </div>
+          </details>
           <button
             type="submit"
             className="mini-btn primary"
-            disabled={demoMode || createMut.isPending || !/^\d{4,6}$/.test(createPasscode)}
+            disabled={demoMode || createMut.isPending || !secretSaved}
           >
-            {createMut.isPending ? "Creating…" : "Create & download pack"}
+            {createMut.isPending
+              ? "Creating…"
+              : fromPackText.length > 0
+                ? "Re-issue & download pack"
+                : "Create & download pack"}
           </button>
         </form>
       ) : null}
@@ -351,22 +492,33 @@ export function PackStep({
               type="file"
               accept="application/json,.json"
               disabled={demoMode || proveMut.isPending}
-              onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => readPackFile(e.target.files?.[0] ?? null, setPackText)}
             />
           </div>
           <div className="field">
-            <label htmlFor="pack-passcode-prove">Passcode</label>
+            <label htmlFor="pack-secret-prove">Pack secret</label>
             <input
-              id="pack-passcode-prove"
-              data-testid="pack-passcode-prove"
+              id="pack-secret-prove"
+              data-testid="pack-secret-prove"
               type="password"
-              inputMode="numeric"
-              pattern="\d{4,6}"
               autoComplete="off"
-              value={provePasscode}
-              onChange={(e) => setProvePasscode(e.target.value)}
+              value={proveSecret}
+              onChange={(e) => setProveSecret(e.target.value)}
               disabled={demoMode || proveMut.isPending}
             />
+          </div>
+          <div className="field">
+            <label htmlFor="pack-legacy-v1" style={{ fontWeight: 400 }}>
+              <input
+                id="pack-legacy-v1"
+                data-testid="pack-legacy-v1"
+                type="checkbox"
+                checked={proveLegacy}
+                onChange={(e) => setProveLegacy(e.target.checked)}
+                disabled={demoMode || proveMut.isPending}
+              />{" "}
+              This is an old v1 pack sealed under a 4–6 digit passcode.
+            </label>
           </div>
           <button
             type="submit"
@@ -375,7 +527,7 @@ export function PackStep({
               demoMode ||
               proveMut.isPending ||
               packText.length === 0 ||
-              !/^\d{4,6}$/.test(provePasscode)
+              proveSecret.length === 0
             }
           >
             {proveMut.isPending ? "Proving…" : "Test backup (prove pack)"}

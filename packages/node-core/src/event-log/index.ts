@@ -34,6 +34,7 @@ export {
 } from "./pg-event-store.js";
 
 export {
+  appendImplementerEventLeg,
   buildArtifactEnvelope,
   createDualChainEventAppender,
   implementerEventHashOf,
@@ -43,5 +44,7 @@ export {
   type DualChainAppenderConfig,
   type DualChainEventAppender,
   type DualChainEventQuota,
+  type ImplementerEventLegInput,
+  type ImplementerEventLegResult,
   type NodeEventSigner,
 } from "./dual-chain-appender.js";

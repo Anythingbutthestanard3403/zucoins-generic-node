@@ -19,6 +19,8 @@ import {
   makeSubmitDecisionClaimStore,
   MOVE_INTERNAL_ARTIFACT_PURPOSE,
   MOVE_INTERNAL_CANONICAL_VERSION,
+  appendImplementerEventLeg,
+  toAttentionReason,
   parseGatewayEnvelope,
   parsePositiveZkzAmount,
   persistMoveInnerAttemptSql,
@@ -62,6 +64,7 @@ import {
   type FreshHeadRead,
   type ReadFreshHead,
   type NodeEventInput,
+  type NodeEventSigner,
   type SignedNodeEvent,
   type SignedMoveSteps,
   recordWalletSettledLedger,
@@ -254,6 +257,34 @@ function buildMoveLandedEventData(
   });
 }
 
+/** The two non-landing verdicts persistMoveOutcome projects onto NEEDS_ATTENTION. */
+type MoveParkingOutcome = Extract<
+  MoveReconcileOutcome,
+  { kind: "INDETERMINATE" } | { kind: "INVARIANT_BREACH" }
+>;
+
+/**
+ * The operation.needs_attention event payload for a parked move. Same four keys the receive
+ * and send attention paths emit (`current_state`, `attention_reason`, `operator_action_required`
+ * plus the slice's own diagnostics), so one operator queue can read every kind's park.
+ *
+ * `attention_reason` is the SAME closed-vocabulary member persistMoveOutcome is about to write
+ * to the column — both sides call toAttentionReason on the one reconcile reason, so the event
+ * and the row can never disagree.
+ */
+function buildMoveNeedsAttentionEventData(
+  outcome: MoveParkingOutcome,
+  parkedAtIso: string,
+): string {
+  return JSON.stringify({
+    current_state: "NEEDS_ATTENTION",
+    attention_reason: toAttentionReason(outcome.reason),
+    reconcile_outcome: outcome.kind,
+    operator_action_required: true,
+    parked_at: parkedAtIso,
+  });
+}
+
 /** Convert a FreshHeadRead to a MoveBaselineObservationOutcome. */
 function freshHeadToOutcome(read: FreshHeadRead, walletPublicKey: string): MoveBaselineObservationOutcome {
   const envelope = read.envelope;
@@ -322,6 +353,28 @@ function createNodeIdentitySignerAdapter(
       if (signer === null) throw new Error("node identity signer unavailable");
       const signature: string = signer.sign(preimageBytes) as string;
       return { signature, signingKeyId: signer.signingKeyId };
+    },
+  };
+}
+
+/**
+ * The same node identity key, in the synchronous shape the implementer-chain leg needs: that
+ * preimage carries the implementer seq, which is only known under the counter lock, so it must
+ * be signed inline rather than ahead of the append. `sign` is declared `Promise<string> | string`
+ * on the identity signer; the custody signer is the synchronous one, and a promise reaching the
+ * envelope would be stringified into a signature field, so this refuses instead of casting.
+ */
+function asSyncEventSigner(signer: ReceiveCodeNodeIdentitySigner): NodeEventSigner {
+  return {
+    signingKeyId: signer.signingKeyId,
+    sign: (preimageBytes: Uint8Array): string => {
+      const signature = signer.sign(preimageBytes);
+      if (typeof signature !== "string") {
+        throw new Error(
+          "node identity signer returned a promise; the implementer event leg requires a synchronous signature",
+        );
+      }
+      return signature;
     },
   };
 }
@@ -623,11 +676,15 @@ export function createMoveAdvancedPorts(
         };
         const outcome: MoveReconcileOutcome = classifyMoveReconcile(reconcileInput);
 
-        if (outcome.kind !== "LANDED_VERIFIED") {
+        // PROVEN_NOT_STARTED is the operator-driven NEEDS_ATTENTION → CREATED rebuild decision,
+        // not a durable write from here — move-internal-landing-store.ts project() throws on it
+        // by design. Every OTHER verdict, landing and non-landing alike, goes through the one
+        // persist path below so the state machine is driven from a single point of truth.
+        if (outcome.kind === "PROVEN_NOT_STARTED") {
           return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
         }
 
-        // Persist the landing: the CAS + evidence attach + event append
+        // Persist the outcome: the CAS + evidence attach + event append
         // commit as ONE statement inside persistMoveOutcome, but allocating the event's seq
         // and hash-chain link needs its own row lock, so the two share one transaction.
         const client = await deps.pool.connect();
@@ -650,9 +707,23 @@ export function createMoveAdvancedPorts(
           }
           const expectedState: "CREATED" | "NEEDS_ATTENTION" = op.status;
 
+          // A parked move has no NEEDS_ATTENTION → NEEDS_ATTENTION edge in the frozen
+          // MOVE_INTERNAL transition table, so a later tick that reaches a non-landing verdict
+          // again must not re-append: it holds, keeps both leases, and leaves the row as it
+          // stands. Without this, assertFrozenTransition would (correctly) throw once per tick.
+          if (outcome.kind !== "LANDED_VERIFIED" && expectedState === "NEEDS_ATTENTION") {
+            await client.query("ROLLBACK");
+            return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
+          }
+
           const seqInfo = await lockNextEventSeq(txQuery, deps.nodeId);
           const nowIso = new Date().toISOString();
-          const dataText = buildMoveLandedEventData(outcome, nowIso);
+          const eventType =
+            outcome.kind === "LANDED_VERIFIED" ? "internal_move.landed" : "operation.needs_attention";
+          const dataText =
+            outcome.kind === "LANDED_VERIFIED"
+              ? buildMoveLandedEventData(outcome, nowIso)
+              : buildMoveNeedsAttentionEventData(outcome, nowIso);
           const dataSha256 = sha256HexUtf8(dataText);
 
           const nodeEventInput: NodeEventInput = {
@@ -661,7 +732,7 @@ export function createMoveAdvancedPorts(
             seq: seqInfo.seq.toString(),
             operation_id: parseUuid(operationId),
             wallet_id: null,
-            event_type: "internal_move.landed",
+            event_type: eventType,
             data_sha256: parseSha256Hex(dataSha256),
             previous_event_hash: seqInfo.previousEventHash === null ? null : parseSha256Hex(seqInfo.previousEventHash),
             created_at: nowIso,
@@ -675,7 +746,7 @@ export function createMoveAdvancedPorts(
             eventId: nodeEventInput.event_id,
             nodeId: nodeEventInput.node_id,
             walletId: null,
-            eventType: "internal_move.landed",
+            eventType,
             dataText,
             dataSha256,
             preimageText: preimage.preimageText,
@@ -693,11 +764,48 @@ export function createMoveAdvancedPorts(
             outcome,
             event,
             occurredAt: nowIso,
+            // New diagnostic detail belongs in attention_detail, never in a new
+            // attention_reason: the column keeps the closed vocabulary, this keeps the specifics.
+            ...(outcome.kind === "LANDED_VERIFIED"
+              ? {}
+              : { attentionDetail: `${outcome.kind} ${JSON.stringify(outcome.reason)}` }),
           });
 
           if (persistResult.kind !== "PERSISTED") {
             await client.query("ROLLBACK");
             return { ok: false, reason: `persist: ${persistResult.kind}`, holdReconcile: true };
+          }
+
+          if (outcome.kind !== "LANDED_VERIFIED") {
+            // The park is now durable on the node-global chain (persistMoveOutcome's CTE
+            // inserted the node_events row inside the same statement as the CAS). The tenant
+            // must see it too — a park the implementer stream never learns about is the same
+            // invisibility as no park at all — so the zp-implementer-event-v1 leg is appended
+            // on THIS transaction, linked to the node row by its event hash.
+            const identity = deps.nodeIdentitySigner();
+            if (identity === null) throw new Error("node identity signer unavailable");
+            await appendImplementerEventLeg(txQuery, {
+              nodeId: deps.nodeId,
+              implementerId: details.implementerId,
+              eventId: event.eventId,
+              eventType: event.eventType,
+              operationId,
+              walletId: null,
+              dataSha256,
+              nodeEventHash: event.eventHash,
+              createdAt: nowIso,
+              signer: asSyncEventSigner(identity),
+            });
+
+            await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
+            await client.query("COMMIT");
+            // Both leases stay held and no retry is licensed: an ambiguous move grants no
+            // release and no non-landing conclusion. What it now also grants is visibility.
+            deps.logger.info(
+              `move reconcile: op=${operationId} parked NEEDS_ATTENTION outcome=${outcome.kind} ` +
+                `reason=${toAttentionReason(outcome.reason)}`,
+            );
+            return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
           }
 
           // Derived wallet_settled_ledger SOURCE + DESTINATION rows.

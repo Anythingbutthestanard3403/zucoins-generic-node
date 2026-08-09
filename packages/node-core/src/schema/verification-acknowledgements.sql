@@ -9,12 +9,11 @@
 --
 -- Correlation discipline: the composition root writes the completed
 -- idempotency parent and the ack child in ONE transaction (verification-complete-route
--- freezeResponse + acknowledgement-sql). We install the CHILD-side deferred trigger
--- only (ack → parent must exist). We deliberately do NOT attach a parent-side
--- deferred trigger on reporting_mutation_idempotency: that would refuse every
--- verification_complete / operation_armed idempotency insert whose child is not yet
--- visible mid-statement, and would break non-ack mutation UoW tests that share the
--- route_id vocabulary. Parent→child completeness is the route composition's job.
+-- freezeResponse + acknowledgement-sql). This slice installs the composite child→parent FK
+-- above and nothing else; the deferred correlation triggers that close the parent→child
+-- direction live in mutation-correlation.sql, the pack slice applied immediately after this
+-- one (both attachment targets have to exist first). They are DEFERRABLE INITIALLY DEFERRED,
+-- so either write sequence inside that single transaction is lawful.
 --
 -- The ack table shape is verbatim from verification-proofs.sql.
 

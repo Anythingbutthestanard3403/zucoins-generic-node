@@ -243,6 +243,53 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[ackIdx]!.sql).toMatch(/reporting_acks_immutable/);
   });
 
+  // The five correlation objects were frozen in verification-proofs.sql, which the pack
+  // excludes — so they never reached a deployed database. mutation-correlation.sql is the
+  // shipping copy; it must survive the assembler's strip and land after all three of its
+  // attachment targets.
+  it("ships the five deferred correlation objects after every attachment target", () => {
+    const correlationIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("mutation-correlation");
+    expect(correlationIdx).toBeGreaterThan(MONEY_SCHEMA_PACK_ORDER.indexOf("receive-arms"));
+    expect(correlationIdx).toBeGreaterThan(
+      MONEY_SCHEMA_PACK_ORDER.indexOf("verification-acknowledgements"),
+    );
+
+    // afterReportingPrefix: true is the production shape — reporting_mutation_idempotency
+    // arrives from drizzle 0000, so the strip must not take the triggers attached to it.
+    for (const files of [
+      loadMoneySchemaMigrations(),
+      loadMoneySchemaMigrations({ afterReportingPrefix: true }),
+    ]) {
+      const sql = files[correlationIdx]!.sql;
+      for (const object of [
+        "CREATE FUNCTION reporting_assert_completed_mutation",
+        "CREATE FUNCTION reporting_validate_mutation_deferred",
+        "CREATE CONSTRAINT TRIGGER reporting_completed_parent_has_child",
+        "CREATE CONSTRAINT TRIGGER reporting_arm_has_completed_parent",
+        "CREATE CONSTRAINT TRIGGER reporting_ack_has_completed_parent",
+      ]) {
+        expect(sql, object).toContain(object);
+      }
+      // On the attachment clause, not in prose: all three defer to COMMIT.
+      expect(sql.match(/DEFERRABLE INITIALLY DEFERRED\n {2}FOR EACH ROW/g)).toHaveLength(3);
+    }
+  });
+
+  // The shipping copy has to stay byte-equal to the frozen contract text it was split out of.
+  it("mutation-correlation.sql is byte-identical to the verification-proofs.sql block", () => {
+    const block = (sql: string): string => {
+      const start = sql.indexOf("CREATE FUNCTION reporting_assert_completed_mutation");
+      const endAnchor = "EXECUTE FUNCTION reporting_validate_mutation_deferred();";
+      const end = sql.lastIndexOf(endAnchor);
+      expect(start, "correlation block start").toBeGreaterThanOrEqual(0);
+      expect(end, "correlation block end").toBeGreaterThan(start);
+      return sql.slice(start, end + endAnchor.length);
+    };
+    const frozen = readFileSync(join(MONEY_SCHEMA_DIR, "verification-proofs.sql"), "utf8");
+    const shipped = readFileSync(join(MONEY_SCHEMA_DIR, "mutation-correlation.sql"), "utf8");
+    expect(block(shipped)).toBe(block(frozen));
+  });
+
   it("AUDIT: multi-slice tables are body-equal OR later owns FK wire-up / first is FK-superset", () => {
     const byTable = new Map<string, { slice: string; full: string }[]>();
     for (const slice of MONEY_SCHEMA_PACK_ORDER) {

@@ -3158,65 +3158,88 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     {
       const m = pathname.match(/^\/admin\/v1\/operations\/([^/]+)\/recovery-actions$/);
       if (m) {
-        const idemHeader = headers["idempotency-key"];
-        if (typeof idemHeader !== "string" || idemHeader.length === 0) {
-          return fail(400, "invalid_idempotency_key", "Idempotency-Key required", requestId);
-        }
-        const guarded = await runGuardedAdminMutation({
-          sessions,
-          request: authReq,
-          csrf,
-          totp: labTotpOrNull(totp),
-          userStore: deps.userStore,
-          totpLog,
-          nodeId,
-          rawBody: parsedBody,
-          validateBody: parseRecoveryBody,
-          nowMs: nowMs(),
-          mutate: async ({ body, user, timestep }) => {
-            const auth: RecoveryActionAuthContext = {
-              operatorId: user.id,
-              totpTimestep: timestep,
-              csrfValidated: true,
-              idempotencyKey: idemHeader,
-            };
-            const result = await handleRecoveryAction(
-              deps.recoveryActionStore,
-              m[1]!,
-              body,
-              auth,
-            );
-            if (!result.ok) {
-              throw Object.assign(new Error(result.reason), {
-                code: result.code,
-                status: result.status,
-              });
+        // Same REQUIRED-idempotency shape as approve/reject/bless/retire: the shared gate
+        // is authoritative at the HTTP boundary. It owns key grammar (^[!-~]{16,255}$),
+        // the completed-row lookup, the fingerprint compare, and the
+        // `idempotency-replayed` header — none of which the DB CHECK on
+        // operations.idempotency_key can answer as a 400 instead of a write failure.
+        //
+        // executeRecoveryAction's own lookupIdempotency/storeIdempotency
+        // (operator/recovery-actions.ts) stays as the *effect*-level de-dup and is
+        // deliberately NOT folded into the gate's transaction: the recovery mutation keeps
+        // its own SERIALIZABLE tx (operations/sql-recovery-store.ts, schema CONVENTIONS.md
+        // money-path rule) rather than joining the executor's READ COMMITTED one. So the
+        // effect can commit before the completed row does; on that crash window the store
+        // replays the effect and the gate records the same bytes under the key.
+        const routeId = "admin_operation_recovery_actions";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore, nodeId, routeId, headers, verb, rawPath, rawBody, requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps, nodeId, routeId, idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint, requestId,
+          action: async () => {
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseRecoveryBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user, timestep }) => {
+                const auth: RecoveryActionAuthContext = {
+                  operatorId: user.id,
+                  totpTimestep: timestep,
+                  csrfValidated: true,
+                  idempotencyKey: idem.idemKey,
+                };
+                const result = await handleRecoveryAction(
+                  deps.recoveryActionStore,
+                  m[1]!,
+                  body,
+                  auth,
+                );
+                if (!result.ok) {
+                  throw Object.assign(new Error(result.reason), {
+                    code: result.code,
+                    status: result.status,
+                  });
+                }
+                return result.body;
+              },
+            });
+            if (!guarded.ok) {
+              const nestedStatus =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "status" in guarded.error &&
+                typeof (guarded.error as { status: unknown }).status === "number"
+                  ? (guarded.error as { status: number }).status
+                  : guarded.status;
+              const nestedCode =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "code" in guarded.error &&
+                typeof (guarded.error as { code: unknown }).code === "string"
+                  ? (guarded.error as { code: string }).code
+                  : guarded.code;
+              return {
+                outcome: "abort",
+                response: fail(nestedStatus, nestedCode, guarded.message, requestId),
+              };
             }
-            return result.body;
+            return { outcome: "commit", status: 200, responseBody: guarded.result };
           },
         });
-        if (!guarded.ok) {
-          const nestedStatus =
-            guarded.reason === "mutation_threw" &&
-            guarded.error !== undefined &&
-            typeof guarded.error === "object" &&
-            guarded.error !== null &&
-            "status" in guarded.error &&
-            typeof (guarded.error as { status: unknown }).status === "number"
-              ? (guarded.error as { status: number }).status
-              : guarded.status;
-          const nestedCode =
-            guarded.reason === "mutation_threw" &&
-            guarded.error !== undefined &&
-            typeof guarded.error === "object" &&
-            guarded.error !== null &&
-            "code" in guarded.error &&
-            typeof (guarded.error as { code: unknown }).code === "string"
-              ? (guarded.error as { code: string }).code
-              : guarded.code;
-          return fail(nestedStatus, nestedCode, guarded.message, requestId);
-        }
-        return ok(200, guarded.result);
       }
     }
 

@@ -176,6 +176,10 @@ const SCHEMA_FILES = [
   // and no index (so it is also in NO_TABLE_SCHEMA_FILES below); it attaches to
   // reporting_mutation_idempotency / receive_arms / verification_acknowledgements.
   "mutation-correlation.sql",
+  // One per-wallet index on the already-created wallet_settled_ledger. CREATE INDEX only (no
+  // CREATE TABLE), so it's also in NO_TABLE_SCHEMA_FILES below; appended after the sequence
+  // closer above (mirrors MONEY_SCHEMA_PACK_ORDER's own append-only placement).
+  "wallet-settled-ledger-indexes.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -190,6 +194,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "reporting-rate-limit-buckets-pk-collapse.sql",
   "node-events-seq-composite-pk.sql",
   "mutation-correlation.sql",
+  "wallet-settled-ledger-indexes.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -422,6 +427,13 @@ const GREENFIELD: Record<
   "mutation-correlation.sql": {
     applies: false,
     missingRelation: "reporting_mutation_idempotency",
+  },
+  // Its only statement indexes wallet_settled_ledger directly, so applied alone it fails
+  // immediately on that missing relation — prerequisite-bound by construction, like
+  // gateway-observation-successor-indexes.
+  "wallet-settled-ledger-indexes.sql": {
+    applies: false,
+    missingRelation: "wallet_settled_ledger",
   },
 };
 

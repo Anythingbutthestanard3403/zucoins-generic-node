@@ -20,6 +20,7 @@ import {
   createPushReceiver,
   createPushSecretSealer,
   createPushSubscriptionService,
+  PushSubscriptionRequiredError,
   type PushSubscriptionService,
   type PushWalletRef,
 } from "@zucoins/node-core";
@@ -27,6 +28,25 @@ import {
 import { createEceDecryptor } from "./ece-decryptor.js";
 import { createPushGatewayActions, probePushActionVocabulary } from "./gateway-actions.js";
 import { createSqlPushSubscriptionStore } from "./sql-store.js";
+
+/**
+ * EXTERNAL send/receive hard gate when Web Push may be uncomposed.
+ *
+ * Boot logs "EXTERNAL receives will refuse" when PUBLIC_BASE_URL is unset and
+ * `push` stays null. The money-path closures must match that claim: refuse
+ * closed rather than no-op. Internal transfers never call this port.
+ *
+ * ZTR-1181 — fail closed when push composition is absent.
+ */
+export async function requireActivePushSubscriptionOrRefuse(
+  push: { readonly service: Pick<PushSubscriptionService, "requireActiveSubscription"> } | null,
+  walletId: string,
+): Promise<void> {
+  if (push === null) {
+    throw new PushSubscriptionRequiredError(walletId);
+  }
+  await push.service.requireActiveSubscription(walletId);
+}
 
 export interface PushCompositionLogger {
   info(message: string): void;

@@ -17,7 +17,10 @@ import {
   VerificationCompleteBody,
   ApproveBody,
   RejectBody,
+  BlessBody,
+  RetireBody,
   ROUTE_SCHEMAS,
+  Rfc3339MsSchema,
   type RouteSchema,
   PositiveZkzAmountSchema,
   UuidSchema,
@@ -579,6 +582,29 @@ describe("valid request acceptance", () => {
     expect(result.success).toBe(true);
   });
 
+  it("rejects bless body with unknown field", () => {
+    const result = BlessBody.safeParse({
+      nonce: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+      issued_at: "2026-07-18T00:00:00.000Z",
+      expires_at: "2026-07-18T00:05:00.000Z",
+      device_signature: "A".repeat(86) + "==",
+      device_key_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+      device_key_ids: "typo-plural",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]!.code).toBe("unrecognized_keys");
+    }
+  });
+
+  it("rejects retire body with unknown field", () => {
+    const result = RetireBody.safeParse({ reason: "nope" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]!.code).toBe("unrecognized_keys");
+    }
+  });
+
   it("accepts a valid approve body", () => {
     const result = ApproveBody.safeParse({
       challenge_nonce: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
@@ -596,6 +622,91 @@ describe("valid request acceptance", () => {
       reason: "Not needed",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// --- BlessBody / RetireBody boundary (ZTR-1199) ---
+
+const VALID_BLESS = {
+  nonce: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+  issued_at: "2026-07-18T00:00:00.000Z",
+  expires_at: "2026-07-18T00:05:00.000Z",
+  // 64 zero bytes → padded base64url "A"*86 + "==" (canonical re-encode of all-zero sig)
+  device_signature: "A".repeat(86) + "==",
+  device_key_id: "66666666-6666-4666-8666-666666666666",
+} as const;
+
+describe("BlessBody field shapes", () => {
+  it("accepts a fully shaped bless body", () => {
+    const result = BlessBody.safeParse(VALID_BLESS);
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects non-UUID nonce", () => {
+    const result = BlessBody.safeParse({ ...VALID_BLESS, nonce: "not-a-uuid" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects uppercase UUID nonce (must be lowercase canonical)", () => {
+    const result = BlessBody.safeParse({
+      ...VALID_BLESS,
+      nonce: "7B8BB326-0F2B-4DAD-A8E7-40115B375EC4",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects issued_at without millisecond precision", () => {
+    const result = BlessBody.safeParse({
+      ...VALID_BLESS,
+      issued_at: "2026-07-18T00:00:00Z",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects calendar-invalid issued_at that matches the structural pattern", () => {
+    // Month 13 matches RFC3339_MS pattern but fails encodeCanonicalTimestamp round-trip.
+    expect(Rfc3339MsSchema.safeParse("2026-13-01T00:00:00.000Z").success).toBe(false);
+    const result = BlessBody.safeParse({
+      ...VALID_BLESS,
+      issued_at: "2026-13-01T00:00:00.000Z",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects unpadded / wrong-length device_signature", () => {
+    const result = BlessBody.safeParse({
+      ...VALID_BLESS,
+      device_signature: "not-a-sig",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing required field", () => {
+    const { device_key_id: _drop, ...rest } = VALID_BLESS;
+    const result = BlessBody.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("ROUTE_SCHEMAS declares BlessBody and RetireBody", () => {
+    const bless = ROUTE_SCHEMAS.find(
+      (r) => r.method === "POST" && r.path === "/admin/v1/destinations/:destination_id/bless",
+    );
+    const retire = ROUTE_SCHEMAS.find(
+      (r) => r.method === "POST" && r.path === "/admin/v1/destinations/:destination_id/retire",
+    );
+    expect(bless?.bodySchema).toBe(BlessBody);
+    expect(retire?.bodySchema).toBe(RetireBody);
+  });
+});
+
+describe("RetireBody empty object", () => {
+  it("accepts empty object", () => {
+    expect(RetireBody.safeParse({}).success).toBe(true);
+  });
+
+  it("rejects non-object", () => {
+    expect(RetireBody.safeParse(null).success).toBe(false);
+    expect(RetireBody.safeParse("x").success).toBe(false);
   });
 });
 

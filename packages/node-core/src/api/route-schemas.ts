@@ -14,6 +14,8 @@ import {
   AnchorSchema,
   Sha256HexSchema,
   DecimalSeqStringSchema,
+  Ed25519SignatureSchema,
+  Rfc3339MsSchema,
 } from "./scalars.js";
 import { NeedsAttentionQuerySchema } from "./recovery-inspection.js";
 import { OPERATOR_RECOVERY_ACTIONS } from "../operator/recovery-inspection.js";
@@ -164,6 +166,28 @@ export const RecoveryActionsBody = z
 
 export type RecoveryActionsBodyInput = z.infer<typeof RecoveryActionsBody>;
 
+// --- Destination bless / retire (admin dual-control) --
+// Field shapes agree with encodeUuid / encodeCanonicalTimestamp / isPaddedSignature
+// (Ed25519SignatureSchema). Do NOT re-check CEREMONY_WINDOW_SECS here —
+// enforceSignedWindow owns the ceiling (suite/serialize.ts).
+
+export const BlessBody = z
+  .object({
+    nonce: UuidSchema,
+    issued_at: Rfc3339MsSchema,
+    expires_at: Rfc3339MsSchema,
+    device_signature: Ed25519SignatureSchema,
+    device_key_id: UuidSchema,
+  })
+  .strict();
+
+export type BlessBodyInput = z.infer<typeof BlessBody>;
+
+/** Empty body — retire accepts no fields; unknown keys rejected at the boundary. */
+export const RetireBody = z.object({}).strict();
+
+export type RetireBodyInput = z.infer<typeof RetireBody>;
+
 // --- Route schema registry --
 // Maps route method+path to its body schema (POST) or query schema (GET).
 
@@ -194,8 +218,8 @@ export const ROUTE_SCHEMAS: readonly RouteSchema[] = [
   { method: "GET", path: "/admin/v1/external-sends/:operation_id/approval-challenge", requiresIdempotencyKey: false },
   { method: "POST", path: "/admin/v1/external-sends/:operation_id/approve", bodySchema: ApproveBody, requiresIdempotencyKey: true },
   { method: "POST", path: "/admin/v1/external-sends/:operation_id/reject", bodySchema: RejectBody, requiresIdempotencyKey: true },
-  { method: "POST", path: "/admin/v1/destinations/:destination_id/bless", requiresIdempotencyKey: true },
-  { method: "POST", path: "/admin/v1/destinations/:destination_id/retire", requiresIdempotencyKey: true },
+  { method: "POST", path: "/admin/v1/destinations/:destination_id/bless", bodySchema: BlessBody, requiresIdempotencyKey: true },
+  { method: "POST", path: "/admin/v1/destinations/:destination_id/retire", bodySchema: RetireBody, requiresIdempotencyKey: true },
   { method: "GET", path: "/admin/v1/operations/needs-attention", querySchema: NeedsAttentionQuerySchema, requiresIdempotencyKey: false },
   { method: "GET", path: "/admin/v1/operations/:operation_id/recovery", requiresIdempotencyKey: false },
   { method: "POST", path: "/admin/v1/operations/:operation_id/recovery-actions", bodySchema: RecoveryActionsBody, requiresIdempotencyKey: true },

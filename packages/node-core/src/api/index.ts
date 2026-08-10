@@ -58,6 +58,8 @@ export {
   ApproveBody,
   RejectBody,
   RecoveryActionsBody,
+  BlessBody,
+  RetireBody,
   ROUTE_SCHEMAS,
   findRouteSchema,
   type RouteSchema,

@@ -7,7 +7,8 @@
 // (sealWalletSecret / openWalletSecret in envelope.ts). N>1 wallet rows, not a singleton.
 // NODE_SIGNING_KEYS — IMPLEMENTED. Crypto rewrap lives in
 // signing-keys/rewrap.ts (vault is a leaf; the rotation coordinator injects the port).
-// - TOTP_SECRET / SESSION_SECRETS — no v2 production seal-write runtime yet.
+// - TOTP_SECRET — IMPLEMENTED in totp/rewrap.ts (injected into master-key-rotation).
+// - SESSION_SECRETS — no v2 production seal-write runtime yet.
 // rewrapStatus DEFERRED_NO_SEAL_RUNTIME; a future createCipheriv site fails the
 // structural census until registered with a real rewrap.
 //

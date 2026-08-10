@@ -153,13 +153,13 @@ describe("rewrapWalletVaultStore", () => {
     expect(rewrappedRows).toEqual([]);
   });
 
-  it("registry marks wallet, signing, and push rewrap IMPLEMENTED", () => {
+  it("registry marks wallet, signing, push, and totp rewrap IMPLEMENTED", () => {
     const byId = Object.fromEntries(SEALED_STORES.map((s) => [s.id, s.rewrapStatus]));
     expect(byId).toEqual({
       WALLET_VAULT: "IMPLEMENTED",
       NODE_SIGNING_KEYS: "IMPLEMENTED",
       PUSH_RECEIVER_SECRETS: "IMPLEMENTED",
-      TOTP_SECRET: "DEFERRED_NO_SEAL_RUNTIME",
+      TOTP_SECRET: "IMPLEMENTED",
       SESSION_SECRETS: "DEFERRED_NO_SEAL_RUNTIME",
     });
   });

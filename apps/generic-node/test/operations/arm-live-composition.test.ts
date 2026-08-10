@@ -42,6 +42,11 @@ import {
   LIVE_ARM_ENGINE,
 } from "../../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const sha256Hex = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -78,6 +83,7 @@ describe("live ARM composition census (AC1, AC2)", () => {
 
   it("AC1: the surface reports operation_armed as a live reporting engine", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},
@@ -92,6 +98,7 @@ describe("live ARM composition census (AC1, AC2)", () => {
 
   it("AC2: no reporting headers → 401, handler never runs", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},
@@ -111,6 +118,7 @@ describe("live ARM composition census (AC1, AC2)", () => {
 
   it("AC2: bare implementer bearer is not a reporting credential → 401", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},
@@ -288,6 +296,7 @@ describe.skipIf(!PG_AVAILABLE)("live ARM offline e2e (real PG)", () => {
     await runMigrationsOnPool(pool);
     await seedOpenAdmission();
     surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool,
       env: {},
@@ -1076,6 +1085,7 @@ describe.skipIf(!PG_AVAILABLE)("live ARM offline e2e (real PG)", () => {
     });
     try {
       const pinnedSurface = createProductionRouteSurface({
+        vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
         nodeId: NODE_ID,
         pool: pinnedPool,
         env: {},

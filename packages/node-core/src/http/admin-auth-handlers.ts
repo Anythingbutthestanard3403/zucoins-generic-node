@@ -17,8 +17,10 @@ import {
   generateTotpSecret,
   otpauthUri,
   totpSecretBytes,
+  TotpOpenError,
   type TotpConfig,
 } from "../totp/index.js";
+import { VaultSealingNotArmedError } from "./admin-user-sql-store.js";
 import {
   DEFAULT_ADMIN_USERNAME,
   MIN_PASSWORD_LENGTH,
@@ -380,7 +382,15 @@ export async function handleAdminEnrolTotp(
   }
 
   const secret = generateTotpSecret();
-  const stored = await deps.userStore.setPendingTotpSecret(user.id, secret);
+  let stored: "ok" | "already_active" | "missing";
+  try {
+    stored = await deps.userStore.setPendingTotpSecret(user.id, secret);
+  } catch (err) {
+    if (err instanceof VaultSealingNotArmedError) {
+      return errorJson(503, "vault_locked", "vault not ready for TOTP enrolment");
+    }
+    throw err;
+  }
   if (stored === "missing") {
     return errorJson(500, "internal_error", "internal error");
   }
@@ -531,10 +541,15 @@ export async function resolveOperatorTotpConfig(
   userId: string,
   labFallback: TotpConfig | null | undefined,
 ): Promise<TotpConfig | null> {
-  const factor = await userStore.getTotpFactor(userId);
-  if (factor.status === "active") {
-    const bytes = totpSecretBytes(factor.secretBase32);
-    if (bytes !== null) return { secret: bytes, windowSteps: 1 };
+  try {
+    const factor = await userStore.getTotpFactor(userId);
+    if (factor.status === "active") {
+      const bytes = totpSecretBytes(factor.secretBase32);
+      if (bytes !== null) return { secret: bytes, windowSteps: 1 };
+    }
+  } catch (err) {
+    // Open failure: treat as no active factor. Lab only if explicitly armed.
+    if (!(err instanceof TotpOpenError)) throw err;
   }
   if (isUsableLabTotp(labFallback)) {
     return labFallback ?? null;

@@ -4430,7 +4430,8 @@ async function collectReadinessSignals(
       totpEnrolled = factor.status === "active";
     }
   } catch {
-    totpEnrolled = null;
+    // Unreadable sealed factor → not enrolled (force re-enrol), not unknown.
+    totpEnrolled = false;
   }
 
   let deviceEnrolled: boolean | null = null;

@@ -455,7 +455,9 @@ export async function runRecoveryCeremony(deps: {
   // code, and a retry needs a fresh one. The verifier identity is derived from the authenticated
   // operator's id, never caller-forged.
   const totpCode = requireEnv(env, "ADMIN_TOTP_CODE");
-  const userStore = new SqlAdminUserStore(createPoolAdminUserExecutor(pool));
+  const userStore = new SqlAdminUserStore(createPoolAdminUserExecutor(pool), rootKey);
+  // Ceremony runs post-unlock with the final root already bound.
+  userStore.armVaultRoot();
   await userStore.ensureSchema();
   const totpBurnStore = new SqlTotpBurnStore(createPoolTotpBurnExecutor(pool));
   await totpBurnStore.ensureSchema();

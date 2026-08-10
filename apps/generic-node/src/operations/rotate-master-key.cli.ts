@@ -33,6 +33,7 @@ import {
   deriveRootKey,
   rewrapNodeSigningKeyStore,
   rewrapPushSecretStore,
+  rewrapTotpSecretStore,
   rotateMasterKey,
   type MasterKeyRotationInput,
   type MasterKeyRotationInterlock,
@@ -81,6 +82,14 @@ export interface RotateMasterKeyCliDeps {
   readonly countPushSecretRows: NonNullable<MasterKeyRotationInput["countPushSecretRows"]>;
   /** Same-UoW persistence port for the complete rewrapped push census. */
   readonly commitPushSecrets?: MasterKeyRotationInput["commitPushSecrets"];
+  /** Full TOTP_SECRET snapshot loaded from admin_operators sealed envelopes. */
+  readonly loadTotpSecretsCensus:
+    | NonNullable<MasterKeyRotationInput["totpSecrets"]>
+    | (() => Promise<NonNullable<MasterKeyRotationInput["totpSecrets"]>>);
+  /** Authoritative live TOTP secret count on the ceremony connection inside the fence. */
+  readonly countTotpSecretRows: NonNullable<MasterKeyRotationInput["countTotpSecretRows"]>;
+  /** Same-UoW persistence port for the complete rewrapped TOTP census. */
+  readonly commitTotpSecrets?: MasterKeyRotationInput["commitTotpSecrets"];
   /**
    * The node's authoritative root-KDF salt, read from `vault_root_kdf_salt` on the live
    * connection. Required, and not defaulted to the config-only resolver: rotation must derive
@@ -214,6 +223,13 @@ export async function runRotateMasterKeyCli(
       "PUSH_RECEIVER_SECRETS rows present but commitPushSecrets port is not wired",
     );
   }
+  const totpCountProbe = await deps.countTotpSecretRows();
+  if (totpCountProbe > 0 && deps.commitTotpSecrets === undefined) {
+    throw new MasterKeyRotationError(
+      "ROTATION_REFUSED",
+      "TOTP_SECRET rows present but commitTotpSecrets port is not wired",
+    );
+  }
 
   const oldMaster = parseMasterKey(oldRaw, "VAULT_MASTER_KEY");
   let newMaster: Buffer | undefined;
@@ -241,6 +257,10 @@ export async function runRotateMasterKeyCli(
       typeof deps.loadPushSecretsCensus === "function"
         ? await deps.loadPushSecretsCensus()
         : deps.loadPushSecretsCensus;
+    const totpSecrets =
+      typeof deps.loadTotpSecretsCensus === "function"
+        ? await deps.loadTotpSecretsCensus()
+        : deps.loadTotpSecretsCensus;
     const keyRing = buildKeyRing({
       writerEpoch: toEpoch,
       writerRoot: newRoot,
@@ -252,6 +272,7 @@ export async function runRotateMasterKeyCli(
       walletVault: census,
       nodeSigningKeys,
       pushReceiverSecrets,
+      totpSecrets,
       keyRing,
       fromEpoch,
       toEpoch,
@@ -265,6 +286,8 @@ export async function runRotateMasterKeyCli(
       commitNodeSigningKeys: deps.commitNodeSigningKeys,
       countPushSecretRows: deps.countPushSecretRows,
       commitPushSecrets: deps.commitPushSecrets,
+      countTotpSecretRows: deps.countTotpSecretRows,
+      commitTotpSecrets: deps.commitTotpSecrets,
       rewrapNodeSigningKeyStore: (input) => {
         // Rotation census types purpose as string; rewrap asserts exact purpose at seal/open.
         return rewrapNodeSigningKeyStore({
@@ -280,6 +303,14 @@ export async function runRotateMasterKeyCli(
           fromEpoch: input.fromEpoch,
           toEpoch: input.toEpoch,
           rows: input.rows as Parameters<typeof rewrapPushSecretStore>[0]["rows"],
+        }),
+      rewrapTotpSecretStore: (input) =>
+        rewrapTotpSecretStore({
+          keyRing: input.keyRing,
+          newRootKey: input.newRootKey,
+          fromEpoch: input.fromEpoch,
+          toEpoch: input.toEpoch,
+          rows: input.rows as Parameters<typeof rewrapTotpSecretStore>[0]["rows"],
         }),
       unitOfWork: deps.unitOfWork,
       dryRun,

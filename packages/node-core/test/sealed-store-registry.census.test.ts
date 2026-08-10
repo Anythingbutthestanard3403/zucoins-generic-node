@@ -39,6 +39,8 @@ import {
   PUSH_RECEIVER_DEK_HKDF_LABEL,
   buildPushReceiverDekInfo,
 } from "../src/push/seal.js";
+// TOTP seal site — independent HKDF label source (same pattern as push).
+import { TOTP_SECRET_HKDF_LABEL } from "../src/totp/seal.js";
 import {
   NON_NODE_SEALED_SECRET_IDS,
   admitNonNodeSealedSecret,
@@ -62,6 +64,10 @@ import {
 // NODE_SIGNING_KEYS — COVERAGE_TABLES contains node_signing_key_sealed_store
 //   TOTP_SECRET  — COVERAGE_EXCLUSIONS.totp_and_session_secrets + label
 //   SESSION_SECRETS  — same exclusion key (auth factor, not custody material)
+
+// frozen TOTP HKDF info — independent of the registry string (also shipped at
+// apps/node/src/auth/totp-secret.ts TOTP_SECRET_HKDF_INFO; node-core cannot import apps/node).
+const D8_119_TOTP_HKDF_INFO = "zupayments/totp-secret/v1";
 
 const INDEPENDENT_STORE_ANCHORS: Record<
   SealedStoreId,
@@ -96,9 +102,17 @@ const INDEPENDENT_STORE_ANCHORS: Record<
     },
   },
   TOTP_SECRET: {
-    reason: "COVERAGE_EXCLUSIONS.totp_and_session_secrets + label",
+    reason: "COVERAGE_EXCLUSIONS.totp_and_session_secrets + production seal site label",
     check: () => {
       expect(COVERAGE_EXCLUSIONS.totp_and_session_secrets).toMatch(/authentication factors/i);
+      const totp = sealedStore("TOTP_SECRET");
+      expect(totp?.storage.table).toBe("admin_operators");
+      expect(totp?.storage.tableState).toBe("FROZEN");
+      // Independence: label comes from the production seal site, not the registry alone.
+      expect(totp?.encryption.hkdfLabel).toBe(TOTP_SECRET_HKDF_LABEL);
+      expect(TOTP_SECRET_HKDF_LABEL).toBe(D8_119_TOTP_HKDF_INFO);
+      expect(totp?.productionSealSite).toBe("packages/node-core/src/totp/seal.ts");
+      expect(totp?.rewrapStatus).toBe("IMPLEMENTED");
     },
   },
   SESSION_SECRETS: {
@@ -108,10 +122,6 @@ const INDEPENDENT_STORE_ANCHORS: Record<
     },
   },
 };
-
-// frozen TOTP HKDF info — independent of the registry string (also shipped at
-// apps/node/src/auth/totp-secret.ts TOTP_SECRET_HKDF_INFO; node-core cannot import apps/node).
-const D8_119_TOTP_HKDF_INFO = "zupayments/totp-secret/v1";
 
 describe("sealed-store registry — closed set completeness (independent anchors)", () => {
   it("registers exactly the five independently-anchored stores", () => {
@@ -170,11 +180,12 @@ describe("sealed-store registry — closed set completeness (independent anchors
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("wallet, signing, and push stores have IMPLEMENTED rewrap support", () => {
+  it("wallet, signing, push, and totp stores have IMPLEMENTED rewrap support", () => {
     const implemented = SEALED_STORES.filter((s) => s.rewrapStatus === "IMPLEMENTED");
     expect(implemented.map((s) => s.id).sort()).toEqual([
       "NODE_SIGNING_KEYS",
       "PUSH_RECEIVER_SECRETS",
+      "TOTP_SECRET",
       "WALLET_VAULT",
     ]);
     expect(sealedStore("WALLET_VAULT")?.productionSealSite).toBe(
@@ -186,11 +197,15 @@ describe("sealed-store registry — closed set completeness (independent anchors
     expect(sealedStore("PUSH_RECEIVER_SECRETS")?.productionSealSite).toBe(
       "packages/node-core/src/push/seal.ts",
     );
+    expect(sealedStore("TOTP_SECRET")?.productionSealSite).toBe(
+      "packages/node-core/src/totp/seal.ts",
+    );
     for (const s of SEALED_STORES) {
       if (
         s.id === "WALLET_VAULT" ||
         s.id === "NODE_SIGNING_KEYS" ||
-        s.id === "PUSH_RECEIVER_SECRETS"
+        s.id === "PUSH_RECEIVER_SECRETS" ||
+        s.id === "TOTP_SECRET"
       ) continue;
       expect(s.rewrapStatus).toBe("DEFERRED_NO_SEAL_RUNTIME");
       expect(s.productionSealSite).toBeNull();
@@ -231,12 +246,17 @@ describe("wallet vault store bound to frozen vault sub-freeze", () => {
 });
 
 describe("TOTP_SECRET binds frozen HKDF label (independent token)", () => {
-  it("hkdfLabel equals the register token, state FROZEN", () => {
+  it("hkdfLabel equals the register token, state FROZEN, seal site live", () => {
     const totp = sealedStore("TOTP_SECRET");
     expect(totp?.encryption.hkdfLabel).toBe(D8_119_TOTP_HKDF_INFO);
     expect(totp?.encryption.hkdfLabelState).toBe("FROZEN");
     // Independence: the constant above is local to this test file, not imported from the registry.
     expect(D8_119_TOTP_HKDF_INFO).toBe("zupayments/totp-secret/v1");
+    expect(totp?.storage.table).toBe("admin_operators");
+    expect(totp?.storage.tableState).toBe("FROZEN");
+    expect(totp?.rewrapStatus).toBe("IMPLEMENTED");
+    expect(totp?.productionSealSite).toBe("packages/node-core/src/totp/seal.ts");
+    expect(totp?.backupCoverage).toBe("EXCLUDED_AUTH_FACTOR");
   });
 });
 
@@ -316,6 +336,7 @@ describe("seal-site SOURCE census — every packages/** AES-GCM site is register
     expect(found).toContain("packages/node-core/src/vault/envelope.ts");
     expect(found).toContain("packages/node-core/src/signing-keys/sealed-store.ts");
     expect(found).toContain("packages/node-core/src/push/seal.ts");
+    expect(found).toContain("packages/node-core/src/totp/seal.ts");
     expect(found).toContain("packages/generic-node-contracts/src/recovery-drill/envelope.ts");
   });
 

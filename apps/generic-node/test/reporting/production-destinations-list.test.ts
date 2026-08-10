@@ -33,6 +33,11 @@ import {
 import { createLiveReportingReads } from "../../src/reporting/live-reporting-reads.js";
 import type { ReportingHandlerResult } from "@zucoins/node-core";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const NODE_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NODE_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const IMPLEMENTER_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -107,6 +112,7 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 describe("destinations_list composition census (no PG)", () => {
   it("AC3: engine is absent from the census while the route maps to fail-closed", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
       env: {},
@@ -122,6 +128,7 @@ describe("destinations_list composition census (no PG)", () => {
 
   it("AC3: engine appears once a real DestinationService is composed", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
       env: {},
@@ -167,6 +174,7 @@ describe("destinations_list composition census (no PG)", () => {
 
   it("the credential gate still holds: unsigned GET /v1/destinations is 401", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
       env: {},

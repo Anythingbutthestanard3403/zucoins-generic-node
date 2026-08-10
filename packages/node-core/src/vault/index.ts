@@ -102,6 +102,8 @@ export {
   type NodeSigningKeyRotationRow,
   type PushSecretRotationCensus,
   type PushSecretRotationRow,
+  type TotpSecretRotationCensus,
+  type TotpSecretRotationRow,
   type RegisteredSealedStore,
   type RegisteredStoreRewrapStatus,
   type RotationLogger,

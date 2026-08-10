@@ -113,6 +113,8 @@ function census(rows: readonly WalletVaultRewrapRow[]): {
   countNodeSigningKeyRows: () => Promise<number>;
   pushReceiverSecrets: { rows: readonly [] };
   countPushSecretRows: () => Promise<number>;
+  totpSecrets: { rows: readonly [] };
+  countTotpSecretRows: () => Promise<number>;
 } {
   return {
     walletVault: { rows },
@@ -121,6 +123,8 @@ function census(rows: readonly WalletVaultRewrapRow[]): {
     countNodeSigningKeyRows: async () => 0,
     pushReceiverSecrets: { rows: [] },
     countPushSecretRows: async () => 0,
+    totpSecrets: { rows: [] },
+    countTotpSecretRows: async () => 0,
   };
 }
 
@@ -179,7 +183,13 @@ describe("rotateMasterKey", () => {
     expect(result.walletCount).toBe(3);
     const vaultReport = result.stores.find((s) => s.storeId === "WALLET_VAULT");
     expect(vaultReport?.result).toEqual({ rowsBefore: 3, rowsAfter: 3, rewrapped: 3 });
-    expect(result.stores.filter((s) => s.status === "DEFERRED_NO_SEAL_RUNTIME")).toHaveLength(2);
+    expect(result.stores.filter((s) => s.status === "DEFERRED_NO_SEAL_RUNTIME")).toHaveLength(1);
+    expect(result.stores.find((s) => s.storeId === "TOTP_SECRET")?.status).toBe("REWRAPPED");
+    expect(result.stores.find((s) => s.storeId === "TOTP_SECRET")?.result).toEqual({
+      rowsBefore: 0,
+      rowsAfter: 0,
+      rewrapped: 0,
+    });
     expect(result.stores.find((s) => s.storeId === "NODE_SIGNING_KEYS")?.status).toBe("REWRAPPED");
     expect(result.stores.find((s) => s.storeId === "NODE_SIGNING_KEYS")?.result).toEqual({
       rowsBefore: 0,
@@ -1549,6 +1559,8 @@ describe("D-A2 — census/store parity", () => {
     countNodeSigningKeyRows: async () => 0,
     pushReceiverSecrets: { rows: [] as const },
     countPushSecretRows: async () => 0,
+    totpSecrets: { rows: [] as const },
+    countTotpSecretRows: async () => 0,
     keyRing: makeKeyRing(),
     fromEpoch: FROM_EPOCH,
     toEpoch: TO_EPOCH,
@@ -1701,6 +1713,8 @@ describe("D-A2 — census/store parity", () => {
       countNodeSigningKeyRows: async () => 1,
       pushReceiverSecrets: { rows: [] },
       countPushSecretRows: async () => 0,
+      totpSecrets: { rows: [] },
+      countTotpSecretRows: async () => 0,
       rewrapNodeSigningKeyStore: ({ oldRootKey, newRootKey, rows }) =>
         rewrapNodeSigningKeyStore({ oldRootKey, newRootKey, rows }),
       commitNodeSigningKeys: async (rows) => {

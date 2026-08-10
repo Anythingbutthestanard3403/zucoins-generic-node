@@ -111,8 +111,9 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // persist module here. It never imports `leases` — the release decision travels back to the
   // composition root, which drives the proof-backed release itself (the one-in-flight-per-wallet rule).
   verification: ["reporting"],
-  // Canonical HOTP/window TOTP matcher  — leaf shared by send approval + http chain.
-  totp: [],
+  // Canonical HOTP/window TOTP matcher + TOTP_SECRET seal/rewrap (vault root DEK).
+  // Leaf shared by send approval + http chain; seal site mirrors push/signing-keys.
+  totp: ["vault"],
   // Web Push declares its own transport ports. Rotation may reuse only vault key-ring
   // primitives for sealed receive material; it cannot reach into the money path.
   push: ["vault"],

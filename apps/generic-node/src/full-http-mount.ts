@@ -280,6 +280,12 @@ export interface ProductionSurfaceConfig {
   readonly databaseUrl?: string;
   readonly vaultMasterKey?: string | null;
   readonly backupMasterKey?: string | null;
+  /**
+   * 32-byte vault root (or supplier) for sealing TOTP factors at rest (ZTR-1134).
+   * Required whenever the production SqlAdminUserStore is used (not test overrides).
+   * Pass the same buffer boot unlock mutates on salt rederive.
+   */
+  readonly vaultRootKey?: Uint8Array | (() => Uint8Array);
   readonly newRequestId?: () => string;
   readonly nowMs?: () => number;
   /**
@@ -560,7 +566,34 @@ export function createProductionRouteSurface(
   const sessionStore = config.adminSessionStore ?? sqlSessionStore!;
   const sqlUserStore =
     config.adminUserStore === undefined
-      ? new SqlAdminUserStore(createPoolAdminUserExecutor(config.pool))
+      ? (() => {
+          const root = config.vaultRootKey;
+          if (root === undefined) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey required when defaulting SqlAdminUserStore",
+            );
+          }
+          const resolved = typeof root === "function" ? root() : root;
+          if (!(resolved instanceof Uint8Array) || resolved.byteLength !== 32) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey must be a 32-byte Uint8Array (or supplier)",
+            );
+          }
+          // Reject known all-zero root — never seal durable rows under a trivial DEK.
+          let nonzero = false;
+          for (let i = 0; i < resolved.byteLength; i++) {
+            if (resolved[i] !== 0) {
+              nonzero = true;
+              break;
+            }
+          }
+          if (!nonzero) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey must not be all-zero",
+            );
+          }
+          return new SqlAdminUserStore(createPoolAdminUserExecutor(config.pool), root);
+        })()
       : null;
   const userStore = config.adminUserStore ?? sqlUserStore!;
   // Shared durable (node_id,timestep) burns — confirm + money approve/reject.

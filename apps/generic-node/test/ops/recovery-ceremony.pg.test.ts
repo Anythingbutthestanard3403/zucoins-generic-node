@@ -418,7 +418,11 @@ describe("recovery ceremony pack (real Postgres, fail-closed)", () => {
         // archive touches the filesystem in a test run.
         // enrol an active TOTP factor on the default admin operator and pass a
         // FRESH single-use code. The CLI burns it via the durable SqlTotpBurnStore.
-        const userStore = new SqlAdminUserStore(createPoolAdminUserExecutor(pool));
+        const userStore = new SqlAdminUserStore(
+          createPoolAdminUserExecutor(pool),
+          deriveRootKey(MASTER, VAULT_ROOT_KDF_SALT),
+        );
+        userStore.armVaultRoot();
         await userStore.ensureSchema();
         // Seed the default admin operator (production main.ts does this on first boot).
         await bootstrapInitialAdmin(userStore, { INITIAL_ADMIN_PASSWORD: "bootstrap-pw!!!!!!!!!!" });

@@ -231,18 +231,19 @@ export const SEALED_STORES: readonly SealedStoreDescriptor[] = [
     },
     storage: {
       databaseResident: true,
-      // v2 04-data-model commits no totp_secret table; operator surface residency is legacy admin_users.
-      table: null,
-      tableState: "DEFERRED",
+      // Operator surface residency is admin_operators (reporting-prefix journal; not money pack).
+      table: "admin_operators",
+      tableState: "FROZEN",
       grain: "PER_OPERATOR_ENVELOPE_ROW",
     },
     accessPattern: "AUTH_FACTOR_SEAL_AND_VERIFY",
+    // Auth factor: restore without envelopes forces re-enrol; do not ship secrets in backup.
     backupCoverage: "EXCLUDED_AUTH_FACTOR",
     rotationTreatment:
-      "rewrapped under a fresh key derived from the new VAULT_MASTER_KEY once a v2 " +
-      "seal site exists (a future slice is expected to create the seal site the census will catch)",
-    rewrapStatus: "DEFERRED_NO_SEAL_RUNTIME",
-    productionSealSite: null,
+      "value-preserving master-key rewrap through the old/new key ring: open with the " +
+      "admin-row-id AAD and reseal under the new root (totp/rewrap.ts)",
+    rewrapStatus: "IMPLEMENTED",
+    productionSealSite: "packages/node-core/src/totp/seal.ts",
   },
   {
     id: "SESSION_SECRETS",
@@ -343,6 +344,14 @@ export const REGISTERED_SEAL_SITES: readonly RegisteredSealSite[] = [
     note:
       "destroy-restore drill: seals/opens the SAME WALLET_VAULT bytes (deriveWalletDek, " +
       "6-field AAD); new_ciphertext_class_introduced === false — rewraps in lockstep with production.",
+  },
+  {
+    path: "packages/node-core/src/totp/seal.ts",
+    store: "TOTP_SECRET",
+    kind: "PRODUCTION",
+    note:
+      "production TOTP_SECRET seal/open (sealTotpSecret / openTotpSecret). " +
+      "DEK via HKDF zupayments/totp-secret/v1; AAD is the admin_operators row id reconstructed at open.",
   },
 ] as const;
 

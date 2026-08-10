@@ -19,6 +19,11 @@ import { ensureNodeRow } from "../src/bootstrap/genesis.js";
 import { publicKeyFromSeed } from "../src/ops/ed25519-ops.js";
 import { createProductionRouteSurface } from "../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const PG_TEST_TIMEOUT_MS = 180_000;
 const PG_HOST = process.env.PGHOST ?? "127.0.0.1";
 const PG_PORT = Number(process.env.PGPORT ?? "5432");
@@ -201,7 +206,8 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       const identity = await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "NODE_IDENTITY" });
       const event = await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "EVENT_SIGNING" });
 
-      const surface = createProductionRouteSurface({ nodeId, pool });
+      const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const doc = await surface.discoveryDocument();
 
       expect(doc.expected_artifact_public_keys).toEqual([
@@ -238,7 +244,8 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       // in this file or mints one fresh — either way there is exactly one active row after.
       const baseline = await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "NODE_IDENTITY" });
 
-      const surface = createProductionRouteSurface({ nodeId, pool });
+      const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const before = await surface.discoveryDocument();
       const priorKeyId = before.expected_artifact_public_keys[0]!.key_id;
       const priorPublicKey = before.expected_artifact_public_keys[0]!.public_key;
@@ -297,13 +304,15 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "NODE_IDENTITY" });
       await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "EVENT_SIGNING" });
 
-      const surface = createProductionRouteSurface({ nodeId, pool });
+      const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const first = await surface.discoveryDocument();
 
       // A brand-new surface (as boot would construct on restart) reading the same pool must
       // see byte-identical keys — proving the document comes from durable storage, not from
       // whatever a single process happened to ensure in memory at boot.
-      const restartedSurface = createProductionRouteSurface({ nodeId, pool });
+      const restartedSurface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const second = await restartedSurface.discoveryDocument();
 
       expect(JSON.stringify(second)).toBe(JSON.stringify(first));

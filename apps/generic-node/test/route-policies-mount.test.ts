@@ -31,6 +31,11 @@ import type {
 } from "@zucoins/node-core";
 import type { SqlVerificationAccessStore } from "../src/reporting/durable-security-ports.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 // createProductionRouteSurface production hard-stops on missing durable security
 // ports. Mirrors the lightweight fakes in reporting/durable-security-ports.pg.test.ts — this
 // test never exercises rate-limiting/proof-body/verification-material/vault-audit behavior.
@@ -106,6 +111,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
 
   it("production surface exposes mount keys + live halt", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       rateLimiter: fakeRateLimiter,
@@ -135,6 +141,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
 
   it("admin money challenge+send+recovery-action+attention-retraction all live", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       env: {},
@@ -159,6 +166,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
       "POST /admin/v1/operations/:operation_id/attention-retraction",
     );
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
     });
@@ -169,6 +177,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
   it("ADMIN_TOTP_SECRET alone does not lab-bind (explicit flag required)", () => {
     const secretHex = Buffer.alloc(20, 7).toString("hex");
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       env: { ADMIN_TOTP_SECRET: secretHex },
@@ -184,6 +193,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
   it("lab mode + secret arms process TOTP (undurable)", () => {
     const secretHex = Buffer.alloc(20, 7).toString("hex");
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       env: { ADMIN_TOTP_LAB_MODE: "1", ADMIN_TOTP_SECRET: secretHex },
@@ -214,6 +224,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     } })).toBeNull();
 
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       env: prodEnv,
@@ -253,6 +264,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     ).toEqual(["https://node.merchant.example", "http://localhost:5174"]);
 
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       publicBaseUrl: "https://node.merchant.example/",
@@ -280,6 +292,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     expect(src).toMatch(/createPoolAdminSessionExecutor/);
 
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
       env: {},
@@ -307,6 +320,7 @@ describe("durable reporting PG store on custody production surface", () => {
 
   it("AC1/AC2: composition binds DurableReportingRequestStore (durable-pg kind)", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }), connect: async () => ({}) } as never,
       env: {},
@@ -342,5 +356,26 @@ describe("B2 source census: main.ts wires only durable security ports", () => {
     expect(src).not.toMatch(
       /InMemory(ReportingRateLimiter|VaultAccessAuditLog|ProofBodyStore|VerificationAccessStore)/,
     );
+  });
+});
+
+describe("ZTR-1134 B3 vaultRootKey composition", () => {
+  it("throws when defaulting SqlAdminUserStore without vaultRootKey", () => {
+    expect(() =>
+      createProductionRouteSurface({
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        pool: { query: async () => ({ rows: [] }) } as never,
+      }),
+    ).toThrow(/vaultRootKey required/);
+  });
+
+  it("throws on all-zero vaultRootKey", () => {
+    expect(() =>
+      createProductionRouteSurface({
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        pool: { query: async () => ({ rows: [] }) } as never,
+        vaultRootKey: Buffer.alloc(32, 0),
+      }),
+    ).toThrow(/all-zero/);
   });
 });

@@ -55,6 +55,8 @@ function emptyOtherStores() {
     countWalletVaultRows: async () => 0,
     nodeSigningKeys: { rows: [] },
     countNodeSigningKeyRows: async () => 0,
+    totpSecrets: { rows: [] },
+    countTotpSecretRows: async () => 0,
   } as const;
 }
 

@@ -19,6 +19,11 @@ import {
   DurableReportingRequestStore,
 } from "../../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -142,6 +147,7 @@ const uniquePubkey = (): string => `${randomUUID().replace(/-/g, "")}AAAAAAAAAAA
 describe("production factory binds durable reporting (no PG)", () => {
   it("createProductionRouteSurface constructs DurableReportingRequestStore", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: randomUUID(),
       pool: { query: async () => ({ rows: [] }), connect: async () => ({}) } as never,
       env: {},
@@ -430,6 +436,7 @@ describe.skipIf(!PG_AVAILABLE)(
         await seedOpenAdmission(nodeId, implementerId, keyId);
 
         const surface = createProductionRouteSurface({
+          vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
           nodeId,
           pool,
           env: {},

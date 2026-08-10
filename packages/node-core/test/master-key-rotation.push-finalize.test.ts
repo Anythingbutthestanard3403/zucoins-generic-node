@@ -63,6 +63,8 @@ function input(
     countNodeSigningKeyRows: async () => 0,
     pushReceiverSecrets: { rows },
     countPushSecretRows: async () => rows.length,
+    totpSecrets: { rows: [] },
+    countTotpSecretRows: async () => 0,
     rewrapPushSecretStore,
     keyRing: buildKeyRing({
       writerEpoch: TO_EPOCH,

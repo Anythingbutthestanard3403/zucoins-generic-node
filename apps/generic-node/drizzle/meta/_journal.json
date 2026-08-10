@@ -50,6 +50,20 @@
       "when": 1784500000006,
       "tag": "0006_operator_recovery_pack_prove_lockout",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784500000007,
+      "tag": "0007_admin_totp_secret_sealed",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784500000008,
+      "tag": "0008_admin_totp_drop_plaintext",
+      "breakpoints": true
     }
   ]
 }

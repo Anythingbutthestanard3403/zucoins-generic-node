@@ -163,6 +163,20 @@ export interface PushSecretRotationCensus {
   readonly rows: readonly PushSecretRotationRow[];
 }
 
+/** Structural TOTP_SECRET row; crypto is injected from totp/rewrap. */
+export interface TotpSecretRotationRow {
+  readonly identity: {
+    /** admin_operators.id — GCM AAD source. */
+    readonly adminOperatorId: string;
+  };
+  /** Opaque canonical `zp-totp-seal-v1` envelope text. */
+  readonly envelope: string;
+}
+
+export interface TotpSecretRotationCensus {
+  readonly rows: readonly TotpSecretRotationRow[];
+}
+
 export interface MasterKeyRotationInput {
   /** Registry snapshot (typically `SEALED_STORES` from the schema contract). */
   readonly sealedStores: readonly RegisteredSealedStore[];
@@ -175,6 +189,8 @@ export interface MasterKeyRotationInput {
   readonly nodeSigningKeys?: NodeSigningKeyRotationCensus;
   /** PUSH_RECEIVER_SECRETS census; required when that registered store is IMPLEMENTED. */
   readonly pushReceiverSecrets?: PushSecretRotationCensus;
+  /** TOTP_SECRET census; required when that registered store is IMPLEMENTED. */
+  readonly totpSecrets?: TotpSecretRotationCensus;
   /**
    * Key-ring carrying BOTH the old root (retained) and the new root (writer during
    * rotation). writerEpoch must equal journal.toEpoch once begin succeeds; for a
@@ -207,6 +223,8 @@ export interface MasterKeyRotationInput {
   ) => Promise<void>;
   /** Persist every rewrapped push secret row in the same rotation transaction. */
   readonly commitPushSecrets?: (rows: readonly PushSecretRotationRow[]) => Promise<void>;
+  /** Persist every rewrapped TOTP secret row in the same rotation transaction. */
+  readonly commitTotpSecrets?: (rows: readonly TotpSecretRotationRow[]) => Promise<void>;
   /**
    * Injected NODE_SIGNING_KEYS rewrap (composition wires signing-keys/rewrap). Required
    * when census is non-empty.
@@ -230,6 +248,22 @@ export interface MasterKeyRotationInput {
     readonly result: SealedStoreRewrapResult;
     readonly rewrappedRows: readonly PushSecretRotationRow[];
   }>;
+  /** Injected key-ring-aware TOTP_SECRET rewrap primitive. */
+  readonly rewrapTotpSecretStore?: (input: {
+    readonly keyRing: VaultKeyRing;
+    readonly newRootKey: Uint8Array;
+    readonly fromEpoch: number;
+    readonly toEpoch: number;
+    readonly rows: readonly TotpSecretRotationRow[];
+  }) =>
+    | {
+        readonly result: SealedStoreRewrapResult;
+        readonly rewrappedRows: readonly TotpSecretRotationRow[];
+      }
+    | Promise<{
+        readonly result: SealedStoreRewrapResult;
+        readonly rewrappedRows: readonly TotpSecretRotationRow[];
+      }>;
   /**
    * Authoritative live `vault` row count, re-read INSIDE the ceremony fence (D-A2).
    *
@@ -253,6 +287,8 @@ export interface MasterKeyRotationInput {
   readonly countNodeSigningKeyRows?: () => Promise<number>;
   /** Authoritative push secret row count inside the ceremony fence. */
   readonly countPushSecretRows?: () => Promise<number>;
+  /** Authoritative TOTP secret row count inside the ceremony fence. */
+  readonly countTotpSecretRows?: () => Promise<number>;
   /**
    * Required exclusive unit of work. begin takes the ceremony session advisory lock
    * (+ nested vault TX); commit ends the vault TX only; end releases the session
@@ -757,6 +793,7 @@ export async function rotateMasterKey(
     let walletRewrapped: readonly WalletVaultRewrapRow[] = [];
     let nodeSigningRewrapped: readonly NodeSigningKeyRotationRow[] = [];
     let pushSecretsRewrapped: readonly PushSecretRotationRow[] = [];
+    let totpSecretsRewrapped: readonly TotpSecretRotationRow[] = [];
 
     for (const store of input.sealedStores) {
       if (store.rewrapStatus === "DEFERRED_NO_SEAL_RUNTIME") {
@@ -918,6 +955,71 @@ export async function rotateMasterKey(
         continue;
       }
 
+      if (store.id === "TOTP_SECRET") {
+        if (input.totpSecrets === undefined) {
+          throw new MasterKeyRotationError(
+            "ROTATION_REFUSED",
+            "TOTP_SECRET is IMPLEMENTED but totpSecrets census is missing",
+          );
+        }
+        if (input.countTotpSecretRows === undefined) {
+          throw new MasterKeyRotationError(
+            "ROTATION_REFUSED",
+            "TOTP_SECRET is IMPLEMENTED but countTotpSecretRows port is missing",
+          );
+        }
+        const censusRows = input.totpSecrets.rows;
+        const storeCount = await input.countTotpSecretRows();
+        if (storeCount !== censusRows.length) {
+          throw new MasterKeyRotationError(
+            "ROTATION_ABORTED",
+            `TOTP_SECRET census/count parity failed (census=${censusRows.length} count=${storeCount})`,
+          );
+        }
+        let result: SealedStoreRewrapResult;
+        if (storeCount === 0) {
+          result = { rowsBefore: 0, rowsAfter: 0, rewrapped: 0 };
+          totpSecretsRewrapped = [];
+        } else {
+          if (input.rewrapTotpSecretStore === undefined || input.commitTotpSecrets === undefined) {
+            throw new MasterKeyRotationError(
+              "ROTATION_REFUSED",
+              "TOTP_SECRET rows present but rewrap/commit ports are missing",
+            );
+          }
+          const report = await input.rewrapTotpSecretStore({
+            keyRing: input.keyRing,
+            newRootKey: input.newRootKey,
+            fromEpoch: input.fromEpoch,
+            toEpoch: input.toEpoch,
+            rows: censusRows,
+          });
+          if (
+            report.result.rowsBefore !== storeCount ||
+            report.result.rowsAfter !== storeCount ||
+            report.result.rewrapped !== storeCount
+          ) {
+            throw new MasterKeyRotationError(
+              "ROTATION_ABORTED",
+              `TOTP_SECRET rewrap count parity failed (store=${storeCount} before=${report.result.rowsBefore} after=${report.result.rowsAfter} rewrapped=${report.result.rewrapped})`,
+            );
+          }
+          result = report.result;
+          totpSecretsRewrapped = report.rewrappedRows;
+        }
+        stores.push({ storeId: store.id, status: "REWRAPPED", result });
+        logger.info(
+          {
+            event: "rotate.store_done",
+            store: store.id,
+            rows: result.rowsAfter,
+            rewrapped: result.rewrapped,
+          },
+          "master-key rotation: TOTP_SECRET re-wrapped",
+        );
+        continue;
+      }
+
       // IMPLEMENTED but no rewrap branch here — fail closed rather than silently skip.
       throw new MasterKeyRotationError(
         "REGISTRY_INCOMPLETE",
@@ -972,6 +1074,15 @@ export async function rotateMasterKey(
         );
       }
       await input.commitPushSecrets(pushSecretsRewrapped);
+    }
+    if (totpSecretsRewrapped.length > 0) {
+      if (input.commitTotpSecrets === undefined) {
+        throw new MasterKeyRotationError(
+          "ROTATION_REFUSED",
+          "TOTP_SECRET rewrapped but commitTotpSecrets port is missing",
+        );
+      }
+      await input.commitTotpSecrets(totpSecretsRewrapped);
     }
     await input.unitOfWork.commit();
     // Vault TX closed; session lease still held (uowStarted stays true until end).
@@ -1321,6 +1432,47 @@ async function verifyCompletedStoreCensus(
           throw new MasterKeyRotationError(
             "ROTATION_STATE",
             "PUSH_RECEIVER_SECRETS census does not open under new root during ROTATION_COMPLETE finalize",
+            err,
+          );
+        }
+      }
+      stores.push(completedStoreReport(store.id, count));
+      continue;
+    }
+
+    if (store.id === "TOTP_SECRET") {
+      if (input.totpSecrets === undefined || input.countTotpSecretRows === undefined) {
+        throw new MasterKeyRotationError(
+          "ROTATION_STATE",
+          "TOTP_SECRET finalize requires census and authoritative count ports",
+        );
+      }
+      const count = await input.countTotpSecretRows();
+      assertCompletedCountParity(store.id, input.totpSecrets.rows.length, count);
+      if (count > 0) {
+        if (input.rewrapTotpSecretStore === undefined) {
+          throw new MasterKeyRotationError(
+            "ROTATION_STATE",
+            "TOTP_SECRET finalize requires a new-root open verifier",
+          );
+        }
+        try {
+          const proof = await input.rewrapTotpSecretStore({
+            keyRing: {
+              writerEpoch: input.toEpoch,
+              entries: [{ epoch: input.toEpoch, root: input.newRootKey }],
+            },
+            newRootKey: input.newRootKey,
+            fromEpoch: input.fromEpoch,
+            toEpoch: input.toEpoch,
+            rows: input.totpSecrets.rows,
+          });
+          assertCompletedRewrapParity(store.id, count, proof.result);
+        } catch (err) {
+          if (err instanceof MasterKeyRotationError) throw err;
+          throw new MasterKeyRotationError(
+            "ROTATION_STATE",
+            "TOTP_SECRET census does not open under new root during ROTATION_COMPLETE finalize",
             err,
           );
         }

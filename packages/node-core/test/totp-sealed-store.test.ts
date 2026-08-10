@@ -187,6 +187,12 @@ describe("migrateTotpSecretsAtRest", () => {
           hasBase32Col = false;
           return { rows: [] as T[] };
         }
+        if (s.startsWith("select id, totp_secret_sealed")) {
+          const rows = [...operators.values()]
+            .filter((r) => r.totp_secret_sealed !== null && r.totp_secret_sealed.trim().length > 0)
+            .map((r) => ({ id: r.id, totp_secret_sealed: r.totp_secret_sealed }));
+          return { rows: rows as unknown as T[] };
+        }
         throw new Error(`unexpected sql: ${sql}`);
       },
     };
@@ -203,5 +209,218 @@ describe("migrateTotpSecretsAtRest", () => {
     } finally {
       opened.fill(0);
     }
+  });
+});
+
+
+// --- ZTR-1134 rework: arm gate, sealed census, money-path open mapping ---
+
+describe("SqlAdminUserStore seal arm gate (ZTR-1134 B1)", () => {
+  const ROOT = Buffer.alloc(32, 0x51);
+
+  function memDb() {
+    const operators = new Map<string, Record<string, unknown>>();
+    operators.set(ADMIN_A, {
+      id: ADMIN_A,
+      username: "admin",
+      password_hash: "x",
+      role: "admin",
+      must_change_password: false,
+      must_enrol_totp: true,
+      disabled_at: null,
+      created_at: new Date(1),
+      totp_status: "none",
+      totp_secret_sealed: null,
+    });
+    return {
+      operators,
+      async query<T extends Record<string, unknown>>(sql: string, params: readonly unknown[] = []) {
+        const s = sql.replace(/\s+/g, " ").trim().toLowerCase();
+        if (s.startsWith("select totp_status from admin_operators")) {
+          const id = String(params[0]);
+          const row = operators.get(id);
+          return { rows: (row ? [{ totp_status: row["totp_status"] }] : []) as T[] };
+        }
+        if (s.startsWith("select totp_status, totp_secret_sealed")) {
+          const id = String(params[0]);
+          const row = operators.get(id);
+          return {
+            rows: (row
+              ? [{ totp_status: row["totp_status"], totp_secret_sealed: row["totp_secret_sealed"] }]
+              : []) as T[],
+          };
+        }
+        if (s.includes("set totp_status = 'pending'")) {
+          const id = String(params[0]);
+          const sealed = String(params[1]);
+          const row = operators.get(id);
+          if (row && String(row["totp_status"]) !== "active") {
+            operators.set(id, { ...row, totp_status: "pending", totp_secret_sealed: sealed });
+          }
+          return { rows: [] as T[] };
+        }
+        if (s.includes("set totp_status = 'active'") && s.includes("totp_secret_sealed")) {
+          const id = String(params[0]);
+          const sealed = String(params[1]);
+          const row = operators.get(id);
+          if (row) {
+            operators.set(id, {
+              ...row,
+              totp_status: "active",
+              totp_secret_sealed: sealed,
+              must_enrol_totp: false,
+            });
+            return { rows: [{ id }] as T[] };
+          }
+          return { rows: [] as T[] };
+        }
+        if (s.startsWith("select * from admin_operators where id")) {
+          const id = String(params[0]);
+          const row = operators.get(id);
+          return { rows: (row ? [row] : []) as T[] };
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      },
+    };
+  }
+
+  it("refuses setPending/setActive while unarmed and writes no sealed row", async () => {
+    const db = memDb();
+    const { SqlAdminUserStore, VaultSealingNotArmedError } = await import(
+      "../src/http/admin-user-sql-store.js"
+    );
+    const store = new SqlAdminUserStore(db, ROOT);
+    await expect(store.setPendingTotpSecret(ADMIN_A, encodeBase32(secretBytes(1)))).rejects.toBeInstanceOf(
+      VaultSealingNotArmedError,
+    );
+    await expect(store.setActiveTotpSecret(ADMIN_A, encodeBase32(secretBytes(2)))).rejects.toBeInstanceOf(
+      VaultSealingNotArmedError,
+    );
+    expect(db.operators.get(ADMIN_A)!["totp_secret_sealed"]).toBeNull();
+  });
+
+  it("after arm, seals under final root and open succeeds", async () => {
+    const db = memDb();
+    const { SqlAdminUserStore } = await import("../src/http/admin-user-sql-store.js");
+    const store = new SqlAdminUserStore(db, ROOT);
+    store.armVaultRoot();
+    const plain = encodeBase32(secretBytes(0x33));
+    expect(await store.setPendingTotpSecret(ADMIN_A, plain)).toBe("ok");
+    const sealed = db.operators.get(ADMIN_A)!["totp_secret_sealed"];
+    expect(typeof sealed).toBe("string");
+    const opened = openTotpSecret(ROOT, ADMIN_A, String(sealed));
+    try {
+      expect(Buffer.from(opened).equals(secretBytes(0x33))).toBe(true);
+    } finally {
+      opened.fill(0);
+    }
+    const factor = await store.getTotpFactor(ADMIN_A);
+    expect(factor.status).toBe("pending");
+  });
+
+  it("provisional≠final: refuse pre-arm; seal under final after arm", async () => {
+    const provisional = Buffer.alloc(32, 0x11);
+    const finalRoot = Buffer.alloc(32, 0x22);
+    const shared = Buffer.from(provisional);
+    const db = memDb();
+    const { SqlAdminUserStore, VaultSealingNotArmedError } = await import(
+      "../src/http/admin-user-sql-store.js"
+    );
+    const store = new SqlAdminUserStore(db, shared);
+    await expect(store.setPendingTotpSecret(ADMIN_A, encodeBase32(secretBytes(4)))).rejects.toBeInstanceOf(
+      VaultSealingNotArmedError,
+    );
+    shared.set(finalRoot);
+    store.armVaultRoot();
+    const plain = encodeBase32(secretBytes(5));
+    expect(await store.setActiveTotpSecret(ADMIN_A, plain)).toBe("ok");
+    const sealed = String(db.operators.get(ADMIN_A)!["totp_secret_sealed"]);
+    expect(() => openTotpSecret(provisional, ADMIN_A, sealed)).toThrow(TotpOpenError);
+    const opened = openTotpSecret(finalRoot, ADMIN_A, sealed);
+    opened.fill(0);
+  });
+});
+
+describe("migrateTotpSecretsAtRest sealed census fail-closed (ZTR-1134 B1b/c)", () => {
+  it("throws when a sealed row is unreadable under final root", async () => {
+    const wrongRoot = Buffer.alloc(32, 0x99);
+    const orphan = sealTotpSecret(wrongRoot, ADMIN_A, secretBytes(0x44));
+    type Row = { id: string; totp_secret_base32: string | null; totp_secret_sealed: string | null };
+    const operators = new Map<string, Row>([
+      [ADMIN_A, { id: ADMIN_A, totp_secret_base32: null, totp_secret_sealed: orphan }],
+    ]);
+    const db = {
+      async query<T extends Record<string, unknown>>(sql: string, _params: readonly unknown[] = []) {
+        const s = sql.replace(/\s+/g, " ").trim().toLowerCase();
+        if (s.includes("information_schema.columns") && s.includes("in ('totp_secret_base32'")) {
+          return { rows: [{ column_name: "totp_secret_sealed" }] as T[] };
+        }
+        if (s.includes("information_schema.columns") && s.includes("= 'totp_secret_base32'")) {
+          return { rows: [] as T[] };
+        }
+        if (s.startsWith("select id, totp_secret_sealed")) {
+          const rows = [...operators.values()]
+            .filter((r) => r.totp_secret_sealed)
+            .map((r) => ({ id: r.id, totp_secret_sealed: r.totp_secret_sealed }));
+          return { rows: rows as unknown as T[] };
+        }
+        throw new Error(`unexpected sql: ${sql}`);
+      },
+    };
+    await expect(migrateTotpSecretsAtRest({ db, rootKey: OLD_ROOT })).rejects.toThrow(
+      /sealed TOTP envelope unreadable/,
+    );
+  });
+});
+
+describe("money-path TotpOpenError mapping (ZTR-1134 B2)", () => {
+  const user = {
+    id: ADMIN_A,
+    username: "admin",
+    passwordHash: "x",
+    role: "admin" as const,
+    mustChangePassword: false,
+    mustEnrolTotp: false,
+    disabledAt: null,
+    createdAt: 1,
+  };
+
+  it("requireActiveTotpFactor returns totp_required on TotpOpenError", async () => {
+    const { requireActiveTotpFactor } = await import("../src/http/admin-session.js");
+    const store = {
+      async getTotpFactor() {
+        throw new TotpOpenError("envelope authentication failed");
+      },
+    } as never;
+    const gate = await requireActiveTotpFactor(store, user);
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) {
+      expect(gate.status).toBe(401);
+      expect(gate.code).toBe("totp_required");
+    }
+  });
+
+  it("resolveOperatorTotpConfig returns null on open error without lab", async () => {
+    const { resolveOperatorTotpConfig } = await import("../src/http/admin-auth-handlers.js");
+    const store = {
+      async getTotpFactor() {
+        throw new TotpOpenError("envelope authentication failed");
+      },
+    } as never;
+    const cfg = await resolveOperatorTotpConfig(store, ADMIN_A, null);
+    expect(cfg).toBeNull();
+  });
+
+  it("resolveOperatorTotpConfig falls through to lab when armed", async () => {
+    const { resolveOperatorTotpConfig } = await import("../src/http/admin-auth-handlers.js");
+    const store = {
+      async getTotpFactor() {
+        throw new TotpOpenError("envelope authentication failed");
+      },
+    } as never;
+    const lab = { secret: Buffer.alloc(20, 0x7e), windowSteps: 1 as const };
+    const cfg = await resolveOperatorTotpConfig(store, ADMIN_A, lab);
+    expect(cfg).not.toBeNull();
+    expect(cfg!.secret).toBe(lab.secret);
   });
 });

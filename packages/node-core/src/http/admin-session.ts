@@ -13,6 +13,8 @@
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
+import { TotpOpenError } from "../totp/seal.js";
+
 // --- Constants ---
 
 /** Absolute session cap fixed at create time; never extended (admin lockout model). */
@@ -722,7 +724,23 @@ export async function requireActiveTotpFactor(
 ): Promise<AuthGateOutcome | { readonly ok: true }> {
   const enrol = requireTotpEnrolled(user);
   if (!enrol.ok) return enrol;
-  const factor = await userStore.getTotpFactor(user.id);
+  let factor;
+  try {
+    factor = await userStore.getTotpFactor(user.id);
+  } catch (err) {
+    // Unreadable sealed factor (wrong root / tamper) — same as missing factor.
+    // Never 500 the money path on TotpOpenError (ZTR-1134 B2).
+    if (err instanceof TotpOpenError) {
+      return {
+        ok: false,
+        status: 401,
+        code: "totp_required",
+        message: "totp enrolment required",
+        reason: "totp_enrolment_required",
+      };
+    }
+    throw err;
+  }
   if (factor.status !== "active" || factor.secretBase32.length < 16) {
     return {
       ok: false,

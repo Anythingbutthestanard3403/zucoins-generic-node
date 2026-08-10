@@ -18,6 +18,11 @@ import { describe, expect, it } from "vitest";
 
 import { createProductionRouteSurface } from "../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const here = dirname(fileURLToPath(import.meta.url));
 const mainSrc = readFileSync(join(here, "../src/main.ts"), "utf8");
 
@@ -43,6 +48,7 @@ describe("DUAL_CONTROL_MODE production wiring", () => {
     const surface = createProductionRouteSurface({
       nodeId: NODE_ID,
       pool: fakePool,
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       dualControlMode: "two_human",
     });
     // Reads back through the same deps object the admin router mounts, so this also
@@ -54,6 +60,7 @@ describe("DUAL_CONTROL_MODE production wiring", () => {
     const surface = createProductionRouteSurface({
       nodeId: NODE_ID,
       pool: fakePool,
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       dualControlMode: "single_operator",
     });
     expect(surface.adminRouteDeps.dualControlPolicy?.getMode()).toBe("single_operator");

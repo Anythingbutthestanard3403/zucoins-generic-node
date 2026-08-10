@@ -27,6 +27,11 @@ import {
   LIVE_VERIFICATION_MATERIAL_ENGINE,
 } from "../../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const sha256Hex = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -80,6 +85,7 @@ describe("reporting list/stream/snapshot composition census (no PG)", () => {
 
   it("surface reports the reporting engines live + durable subscription_handles", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},
@@ -96,6 +102,7 @@ describe("reporting list/stream/snapshot composition census (no PG)", () => {
 
   it("AC: no reporting headers on GET /v1/events → 401 (credential gate still holds)", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},

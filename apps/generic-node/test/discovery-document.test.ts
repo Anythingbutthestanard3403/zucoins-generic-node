@@ -16,6 +16,11 @@ import { describe, expect, it } from "vitest";
 
 import { createProductionRouteSurface } from "../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const NODE_ID = "11111111-1111-4111-8111-111111111111";
 const IDENTITY_KEY_ID = "22222222-2222-4222-8222-222222222222";
 const EVENT_KEY_ID = "33333333-3333-4333-8333-333333333333";
@@ -66,6 +71,7 @@ function fakePool(rows: readonly FakeRow[]) {
 describe("discovery document reads the durable signing-key registry", () => {
   it("publishes the active NODE_IDENTITY key as expected_artifact_public_keys and EVENT_SIGNING as event_signing_public_keys", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -105,6 +111,7 @@ describe("discovery document reads the durable signing-key registry", () => {
 
   it("publishes the active key PLUS a retained (retired) prior key, oldest first, with lifecycle metadata", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -149,6 +156,7 @@ describe("discovery document reads the durable signing-key registry", () => {
   it("excludes a not-yet-active (future activated_at) key", async () => {
     const futureKeyId = "55555555-5555-4555-8555-555555555555";
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -178,6 +186,7 @@ describe("discovery document reads the durable signing-key registry", () => {
 
   it("normalizes a pg-driver Date-typed timestamp column to RFC3339-ms", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -199,6 +208,7 @@ describe("discovery document reads the durable signing-key registry", () => {
 
   it("never forwards private/vault-reference fields onto the wire document", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -224,6 +234,7 @@ describe("discovery document reads the durable signing-key registry", () => {
 
   it("returns non-empty arrays when active keys exist (the defect returned [] unconditionally)", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([
         {
@@ -251,6 +262,7 @@ describe("discovery document reads the durable signing-key registry", () => {
 
   it("still returns empty arrays (not a throw) when the node has no active keys yet", async () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool: fakePool([]),
     });

@@ -543,8 +543,10 @@ async function main(): Promise<void> {
   // to consult yet. `unlockVault` binds this to the salt persisted beside the envelopes and
   // re-derives IN PLACE if the two differ, which is only ever the case on a node whose salt
   // was minted at genesis while VAULT_ROOT_SALT_B64 stays unset. Every downstream holder
-  // (EncryptedWalletKeyStore, composePush, the sealed signing-key store) keeps this
-  // reference rather than a copy, and none of them touches it before the vault gate opens.
+  // (EncryptedWalletKeyStore, composePush, the sealed signing-key store, SqlAdminUserStore)
+  // keeps this reference rather than a copy. Holders MAY retain the buffer before the vault
+  // gate opens; seal-on-write (TOTP factors) MUST NOT run until unlock arms the store under
+  // the final root — provisional composition-time bytes must never seal durable rows.
   const configuredRootSalt = resolveConfiguredRootKdfSalt(config);
   const rootKey = deriveRootKey(config.VAULT_MASTER_KEY, configuredRootSalt.salt);
   const reportingRateLimiter = new SqlReportingRateLimiter(pool, 60_000, 600);
@@ -994,9 +996,10 @@ async function main(): Promise<void> {
       });
       if (rootSalt.rederive) {
         // Only reachable when the durable salt is not the configured one, which the
-        // reconcile above permits only while VAULT_ROOT_SALT_B64 is unset. Nothing has
-        // been sealed under the composition-time key: the durable row predates any use of
-        // this buffer, and holders read it by reference.
+        // reconcile above permits only while VAULT_ROOT_SALT_B64 is unset. TOTP seal-on-write
+        // stays disarmed until after this rederive + sealed census, so no durable TOTP
+        // envelope can exist under the composition-time provisional bytes. Holders read
+        // this buffer by reference; set() replaces bytes in place for the final root.
         const rederived = deriveRootKey(config.VAULT_MASTER_KEY, rootSalt.salt);
         rootKey.set(rederived);
         rederived.fill(0);
@@ -1034,7 +1037,15 @@ async function main(): Promise<void> {
           `already_sealed=${totpMigrate.alreadySealed} ` +
           `plaintext_dropped=${totpMigrate.plaintextColumnDropped}`,
       );
-      logger.info("boot: vault sealed store initialised (root key derived)");
+      // Arm TOTP seal-on-write only after final root is bound + sealed census passed.
+      // Pre-unlock enrol cannot create durable sealed rows under provisional bytes.
+      const adminUsers = routeSurface.adminUserStore as unknown as {
+        armVaultRoot?: () => void;
+      };
+      if (typeof adminUsers.armVaultRoot === "function") {
+        adminUsers.armVaultRoot();
+      }
+      logger.info("boot: vault sealed store initialised (root key derived; TOTP sealing armed)");
     },
     acquireSignerLeadership: async (): Promise<SignerLeadershipHandle> => {
       // The outgoing container during a rolling deploy still holds

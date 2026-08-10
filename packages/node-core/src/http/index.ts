@@ -69,6 +69,7 @@ export type {
 
 export {
   SqlAdminUserStore,
+  VaultSealingNotArmedError,
   createPoolAdminUserExecutor,
 } from "./admin-user-sql-store.js";
 export type { AdminUserSqlExecutor, TotpVaultRootKey } from "./admin-user-sql-store.js";

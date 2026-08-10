@@ -422,6 +422,7 @@ describe("recovery ceremony pack (real Postgres, fail-closed)", () => {
           createPoolAdminUserExecutor(pool),
           deriveRootKey(MASTER, VAULT_ROOT_KDF_SALT),
         );
+        userStore.armVaultRoot();
         await userStore.ensureSchema();
         // Seed the default admin operator (production main.ts does this on first boot).
         await bootstrapInitialAdmin(userStore, { INITIAL_ADMIN_PASSWORD: "bootstrap-pw!!!!!!!!!!" });

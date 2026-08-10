@@ -566,13 +566,34 @@ export function createProductionRouteSurface(
   const sessionStore = config.adminSessionStore ?? sqlSessionStore!;
   const sqlUserStore =
     config.adminUserStore === undefined
-      ? new SqlAdminUserStore(
-          createPoolAdminUserExecutor(config.pool),
-          // main.ts always injects the process vault root. Mount/unit tests that omit it
-          // get an ephemeral zero key so composition still builds; those suites must not
-          // share durable operator rows with a differently-rooted production process.
-          config.vaultRootKey ?? Buffer.alloc(32, 0),
-        )
+      ? (() => {
+          const root = config.vaultRootKey;
+          if (root === undefined) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey required when defaulting SqlAdminUserStore",
+            );
+          }
+          const resolved = typeof root === "function" ? root() : root;
+          if (!(resolved instanceof Uint8Array) || resolved.byteLength !== 32) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey must be a 32-byte Uint8Array (or supplier)",
+            );
+          }
+          // Reject known all-zero root — never seal durable rows under a trivial DEK.
+          let nonzero = false;
+          for (let i = 0; i < resolved.byteLength; i++) {
+            if (resolved[i] !== 0) {
+              nonzero = true;
+              break;
+            }
+          }
+          if (!nonzero) {
+            throw new Error(
+              "createProductionRouteSurface: vaultRootKey must not be all-zero",
+            );
+          }
+          return new SqlAdminUserStore(createPoolAdminUserExecutor(config.pool), root);
+        })()
       : null;
   const userStore = config.adminUserStore ?? sqlUserStore!;
   // Shared durable (node_id,timestep) burns — confirm + money approve/reject.

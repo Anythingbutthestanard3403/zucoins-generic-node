@@ -5,6 +5,10 @@
 // admin_operators.totp_secret_sealed column holds only the opaque envelope;
 // plaintext base32 never persists. Opening reconstructs AAD from the operator id.
 //
+// Seal-on-write is armed only after vault unlock binds the final root
+// (armVaultRoot). Until then setPending/setActive refuse so no durable
+// ciphertext is written under a provisional composition-time key.
+//
 // Table is operational (apps composition root ensures DDL). Not part of the
 // frozen money-schema pack census — same class as harness ops tables.
 
@@ -24,6 +28,15 @@ export interface AdminUserSqlExecutor {
  * buffer (same reference boot unlock mutates in place on salt rederive).
  */
 export type TotpVaultRootKey = Uint8Array | (() => Uint8Array);
+
+/** Thrown when setPending/setActive run before {@link SqlAdminUserStore.armVaultRoot}. */
+export class VaultSealingNotArmedError extends Error {
+  readonly code = "vault_locked" as const;
+  constructor(message = "vault sealing not armed — refuse TOTP seal until unlock completes") {
+    super(message);
+    this.name = "VaultSealingNotArmedError";
+  }
+}
 
 function resolveRootKey(root: TotpVaultRootKey): Uint8Array {
   return typeof root === "function" ? root() : root;
@@ -93,12 +106,35 @@ function sealSecretBase32(rootKey: Uint8Array, adminId: string, secretBase32: st
  * bootstrapInitialAdmin so a cold node does not re-seed after every reboot.
  *
  * Requires a vault root key so TOTP factors seal at rest (registry TOTP_SECRET).
+ * Sealing stays disarmed until {@link armVaultRoot} after unlock binds the final root.
  */
 export class SqlAdminUserStore implements AdminUserStore {
+  private sealingArmed = false;
+
   constructor(
     private readonly db: AdminUserSqlExecutor,
     private readonly vaultRootKey: TotpVaultRootKey,
   ) {}
+
+  /**
+   * Enable seal-on-write. Call only after vault unlock has finished salt reconcile,
+   * optional in-place rederive, and root self-check — never under the provisional
+   * composition-time key alone.
+   */
+  armVaultRoot(): void {
+    this.sealingArmed = true;
+  }
+
+  /** True after {@link armVaultRoot}. Seal paths refuse while false. */
+  isVaultSealingArmed(): boolean {
+    return this.sealingArmed;
+  }
+
+  private requireSealingArmed(): void {
+    if (!this.sealingArmed) {
+      throw new VaultSealingNotArmedError();
+    }
+  }
 
   async ensureSchema(): Promise<void> {
     // DDL owned by apps/generic-node/src/db/migrate.ts. No runtime DDL here.
@@ -186,6 +222,8 @@ export class SqlAdminUserStore implements AdminUserStore {
     );
     const row = rows[0];
     if (row === undefined) return { status: "none" };
+    // Open may run pre-arm (readiness / recovery); open under current root bytes.
+    // Unreadable envelopes throw TotpOpenError — callers map fail-closed.
     return openFactor(
       resolveRootKey(this.vaultRootKey),
       id,
@@ -198,6 +236,7 @@ export class SqlAdminUserStore implements AdminUserStore {
     id: string,
     secretBase32: string,
   ): Promise<"ok" | "already_active" | "missing"> {
+    this.requireSealingArmed();
     const { rows } = await this.db.query(
       `SELECT totp_status FROM admin_operators WHERE id = $1`,
       [id],
@@ -216,6 +255,7 @@ export class SqlAdminUserStore implements AdminUserStore {
   }
 
   async activateTotpEnrolment(id: string): Promise<"ok" | "no_pending" | "missing"> {
+    // Status flip only — envelope already sealed under armed root.
     const { rows } = await this.db.query(
       `UPDATE admin_operators
           SET totp_status = 'active', must_enrol_totp = false
@@ -230,6 +270,7 @@ export class SqlAdminUserStore implements AdminUserStore {
   }
 
   async setActiveTotpSecret(id: string, secretBase32: string): Promise<"ok" | "missing"> {
+    this.requireSealingArmed();
     const sealed = sealSecretBase32(resolveRootKey(this.vaultRootKey), id, secretBase32);
     const { rows } = await this.db.query(
       `UPDATE admin_operators

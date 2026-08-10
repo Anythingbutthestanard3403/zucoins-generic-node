@@ -32,6 +32,11 @@ import { toBase64UrlPadded, type CapturedReportRequest } from "@zucoins/node-cor
 import { enrolBootstrapReportingKey } from "../../src/bootstrap/reporting-key-enrol.js";
 import { createProductionRouteSurface } from "../../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const sha256Hex = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -255,6 +260,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-key enrol → ARM RELEASED offline e2e
     expect(joined).toContain(outcome.publicKey);
 
     surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool,
       env: {},
@@ -672,6 +678,7 @@ describe.skipIf(!PG_AVAILABLE)("FAIL-fix: OUT-before-COMMIT + restore_hold hold"
     expect(hold.rows[0]?.restore_hold).toBe(true);
 
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: heldNode,
       pool,
       env: {},
@@ -1082,6 +1089,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-key re-enrolment after genesis seed lo
     signingKey = privateKeyFromSeedHex(recovered.seed_hex);
 
     surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool,
       env: {},

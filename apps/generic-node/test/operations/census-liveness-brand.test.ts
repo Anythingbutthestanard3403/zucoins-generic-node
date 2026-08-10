@@ -12,6 +12,11 @@ import {
   type LiveReportingRouteHandler,
 } from "../../src/full-http-mount.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const stubPool = () =>
   ({
     query: async () => ({ rows: [] }),
@@ -52,6 +57,7 @@ describe("behavioural liveness census (brand, not reference identity)", () => {
 
   it("the production surface still reports the 5 live routes (brand does not drop existing liveness)", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},

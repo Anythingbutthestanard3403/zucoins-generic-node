@@ -18,6 +18,11 @@ import {
 } from "../../src/full-http-mount.js";
 import { createVerificationCompleteRouteHandler } from "../../src/operations/verification-complete-route.js";
 
+
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
+
 const stubPool = () =>
   ({
     query: async () => ({ rows: [] }),
@@ -42,6 +47,7 @@ describe("verification-complete LIVE mount (schema + route composition)", () => 
 
   it("AC4: the surface advertises verification_complete as a live engine", () => {
     const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
       env: {},

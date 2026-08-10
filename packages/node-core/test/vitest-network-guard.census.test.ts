@@ -23,6 +23,10 @@ const GUARD_EXEMPT_PROJECTS = new Map<string, string>([
 
 const GUARD_FILENAME = "setup-network-guard.ts";
 const REPO_ROOT = new URL("../../../", import.meta.url);
+// The order vitest itself resolves a project directory in. The operator SPA declares its test
+// block in vite.config.ts (one config for dev server, build and tests); looking only for
+// vitest.config.ts would report it as having no setup files at all.
+const CONFIG_FILENAMES = ["vitest.config.ts", "vite.config.ts"];
 
 interface ProjectConfig {
   test?: { setupFiles?: string | string[] };
@@ -34,8 +38,10 @@ const projectEntries = (rootConfig as { test?: { projects?: (string | ProjectCon
 async function setupFilesOf(entry: string | ProjectConfig): Promise<string[]> {
   let config: ProjectConfig;
   if (typeof entry === "string") {
-    const configPath = new URL(`${entry}/vitest.config.ts`, REPO_ROOT);
-    if (!existsSync(configPath)) return [];
+    const configPath = CONFIG_FILENAMES.map(
+      (filename) => new URL(`${entry}/${filename}`, REPO_ROOT),
+    ).find((candidate) => existsSync(candidate));
+    if (configPath === undefined) return [];
     config = ((await import(pathToFileURL(fileURLToPath(configPath)).href)) as {
       default: ProjectConfig;
     }).default;

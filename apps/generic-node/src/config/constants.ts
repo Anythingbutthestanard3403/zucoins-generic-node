@@ -34,6 +34,10 @@ export const RECEIVE_TTL_MAX_SECS_DEFAULT = 3600;
 export const PROOF_ACCESS_WINDOW_DEFAULT_SECONDS = 30 * 24 * 60 * 60;
 export const PROOF_ACCESS_WINDOW_MIN_SECONDS = 60 * 60;
 
+// Default push-notification relay base. Staging may override via
+// ZUCOINS_PUSH_API_BASE; the schema validates the override at boot (ZTR-1182).
+export const DEFAULT_PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
+
 // Pool target is derived, never a free knob. The v2 draft's
 // `POOL_TARGET_AVAILABLE` was DELETED; the target is the canonical
 // proportional headroom over live demand, floored and capped:

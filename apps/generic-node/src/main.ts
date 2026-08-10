@@ -162,9 +162,6 @@ import {
   RECEIVER_CHANNEL_ACTION_NAME,
 } from "./money-workers/receiver-channel-producer.js";
 
-/** Push API base. Overridable via ZUCOINS_PUSH_API_BASE for staging. */
-const DEFAULT_PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
-
 /**
  * Shared DB-probe refresh cadence. Half the probe's own TTL so idle age stays well inside
  * one TTL under normal ping cost (refresh() re-dates unconditionally — a probe() timer is
@@ -761,7 +758,7 @@ async function main(): Promise<void> {
   // is required: the push service delivers to a URL we publish, so without a reachable
   // base there is nothing to subscribe and push stays unavailable rather than silently
   // registering an endpoint nobody can reach.
-  const pushApiBase = process.env.ZUCOINS_PUSH_API_BASE?.trim() || DEFAULT_PUSH_API_BASE;
+  const pushApiBase = config.ZUCOINS_PUSH_API_BASE;
   const publicBaseUrl = config.PUBLIC_BASE_URL?.trim() ?? "";
   if (publicBaseUrl.length === 0) {
     logger.info(

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONFIG_FIELD_SCHEMAS,
+  DEFAULT_PUSH_API_BASE,
   FIRST_BOOT_CONFIG_FIELDS,
   loadNodeConfig,
   MUTABLE_CONFIG_FIELDS,
@@ -67,6 +68,45 @@ describe("frozen configuration schema — happy path", () => {
     ]);
     expect(config.BACKUP_SCHEDULE_ENABLED).toBe(false);
     expect(config.DUAL_CONTROL_MODE).toBe("single_operator");
+    expect(config.ZUCOINS_PUSH_API_BASE).toBe(DEFAULT_PUSH_API_BASE);
+  });
+
+  // ZTR-1182 — push relay base is a schema field, not a raw process.env read.
+  it("defaults ZUCOINS_PUSH_API_BASE to the production relay when unset or blank", () => {
+    expect(loadNodeConfig(validEnv()).ZUCOINS_PUSH_API_BASE).toBe(DEFAULT_PUSH_API_BASE);
+    expect(loadNodeConfig(validEnv({ ZUCOINS_PUSH_API_BASE: undefined })).ZUCOINS_PUSH_API_BASE).toBe(
+      DEFAULT_PUSH_API_BASE,
+    );
+    expect(loadNodeConfig(validEnv({ ZUCOINS_PUSH_API_BASE: "   " })).ZUCOINS_PUSH_API_BASE).toBe(
+      DEFAULT_PUSH_API_BASE,
+    );
+    expect(DEFAULT_PUSH_API_BASE).toBe("https://wallet.zucoins.com/api__v1/");
+  });
+
+  it("accepts an explicit https push relay override", () => {
+    const config = loadNodeConfig(
+      validEnv({ ZUCOINS_PUSH_API_BASE: "https://push.staging.example/api__v1/" }),
+    );
+    expect(config.ZUCOINS_PUSH_API_BASE).toBe("https://push.staging.example/api__v1/");
+  });
+
+  it("accepts a loopback http push relay for local development", () => {
+    const config = loadNodeConfig(
+      validEnv({ ZUCOINS_PUSH_API_BASE: "http://127.0.0.1:8787/api__v1/" }),
+    );
+    expect(config.ZUCOINS_PUSH_API_BASE).toBe("http://127.0.0.1:8787/api__v1/");
+  });
+
+  it.each([
+    ["http://push.example.com/api__v1/", "non-loopback http"],
+    ["https://user:pass@push.example.com/api__v1/", "embedded credentials"],
+    ["not-a-url", "malformed URL"],
+    ["ftp://push.example.com/api__v1/", "non-http(s) scheme"],
+  ])("rejects ZUCOINS_PUSH_API_BASE=%s (%s)", (value) => {
+    const issues = loadIssues(validEnv({ ZUCOINS_PUSH_API_BASE: value }));
+    expect(issues.some((issue) => issue.startsWith("ZUCOINS_PUSH_API_BASE:"))).toBe(true);
+    // Error-message discipline: name the field and the constraint, never echo input.
+    expect(issues.join("\n")).not.toContain(value);
   });
 
   it("requires KEK + durable sink when backup schedule is enabled; rejects /tmp sink", () => {

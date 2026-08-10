@@ -17,6 +17,17 @@ export function isHttpsOrLoopbackHttp(raw: string): boolean {
   return url.protocol === "http:" && LOOPBACK_HOSTNAMES.has(url.hostname);
 }
 
+/** True when the URL has no embedded userinfo (matches gateway allowlist:47-51). */
+export function hasNoUrlCredentials(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  return url.username === "" && url.password === "";
+}
+
 export function isExactHttpOrigin(raw: string): boolean {
   if (!isHttpsOrLoopbackHttp(raw)) return false;
   return new URL(raw).origin === raw;

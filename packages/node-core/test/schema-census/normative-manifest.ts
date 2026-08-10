@@ -889,6 +889,41 @@ export const WORKER_ACCESS_PATTERNS: readonly AccessPattern[] = [
     source:
       "wallet_id REFERENCES wallets(id) RI check on DELETE FROM wallets (main.ts, start-money-workers.ts) + per-wallet settled derivation / wallet_settled_ledger_wallet_id_idx",
   },
+  {
+    id: "ops.receive-queue",
+    table: "operations",
+    columns: ["created_at", "id"],
+    source:
+      "pool-scaler.ts / pool-allocator.ts unassigned CREATED receive queue + operations_receive_queue_created_idx",
+  },
+  {
+    id: "ops.receive-expiry",
+    table: "operations",
+    columns: ["created_at", "id"],
+    source:
+      "expiry-release.ts SELECT_EXPIRY_CANDIDATES + operations_receive_expiry_candidates_idx",
+  },
+  {
+    id: "ops.receive-ready",
+    table: "operations",
+    columns: ["created_at", "id"],
+    source:
+      "receive-settle-step.ts / receive-landing-step.ts READY batch + operations_receive_ready_idx",
+  },
+  {
+    id: "ops.receive-landed-handoff",
+    table: "operations",
+    columns: ["created_at", "id"],
+    source:
+      "receive-child-handoff-step.ts LOAD_HANDOFF_CANDIDATES_SQL + operations_receive_landed_handoff_idx",
+  },
+  {
+    id: "ops.move-pending",
+    table: "operations",
+    columns: ["created_at", "id"],
+    source:
+      "move-internal-worker.ts LOAD_PENDING_MOVES_SQL + operations_move_pending_idx",
+  },
 ] as const;
 
 /**

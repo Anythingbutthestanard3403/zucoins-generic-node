@@ -265,7 +265,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function parseApproveBody(raw: unknown): ParseOk<ReturnType<typeof ApproveBody.parse>> | ParseFail {
   const r = ApproveBody.safeParse(raw);
   if (!r.success) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: r.error.message };
+    return { ok: false, status: 400, code: "invalid_scalar", message: "request body failed validation" };
   }
   return { ok: true, body: r.data };
 }
@@ -273,7 +273,7 @@ function parseApproveBody(raw: unknown): ParseOk<ReturnType<typeof ApproveBody.p
 function parseRejectBody(raw: unknown): ParseOk<ReturnType<typeof RejectBody.parse>> | ParseFail {
   const r = RejectBody.safeParse(raw);
   if (!r.success) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: r.error.message };
+    return { ok: false, status: 400, code: "invalid_scalar", message: "request body failed validation" };
   }
   return { ok: true, body: r.data };
 }
@@ -283,7 +283,7 @@ function parseRecoveryBody(
 ): ParseOk<ReturnType<typeof RecoveryActionsBody.parse>> | ParseFail {
   const r = RecoveryActionsBody.safeParse(raw);
   if (!r.success) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: r.error.message };
+    return { ok: false, status: 400, code: "invalid_scalar", message: "request body failed validation" };
   }
   return { ok: true, body: r.data };
 }

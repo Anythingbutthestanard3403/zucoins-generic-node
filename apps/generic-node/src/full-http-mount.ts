@@ -97,7 +97,9 @@ import {
   InMemoryDualControlPolicy,
   InMemoryApprovalChallengeIssuerStore,
   InMemoryOperatorPushSubscriptionStore,
+  createSqlDeviceSignaturePolicy,
   type DualControlMode,
+  type DeviceSignaturePolicyPort,
 } from "@zucoins/node-core";
 
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
@@ -365,6 +367,12 @@ export interface ProductionSurfaceConfig {
    * every test passing. Dropping the wire is now a compile error at the call site.
    */
   readonly dualControlMode: DualControlMode;
+  /**
+   * Additive device-signature policy port. Production wires SQL over node_settings;
+   * tests may inject InMemoryDeviceSignaturePolicy. When omitted, mount builds a
+   * SQL port from config.pool (fail closed on read).
+   */
+  readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   /** Optional readiness probes (node health, backup schedule, break-glass). */
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   /**
@@ -702,6 +710,9 @@ export function createProductionRouteSurface(
   // this constructor as the weaker mode. No `?? "single_operator"` — the schema owns
   // the default, and a fallback here would re-open the downgrade one level up.
   const dualControlPolicy = new InMemoryDualControlPolicy(config.dualControlMode);
+  // Additive device-signature policy (ZTR-1143): durable node_settings row, fail closed.
+  const deviceSignaturePolicy: DeviceSignaturePolicyPort =
+    config.deviceSignaturePolicy ?? createSqlDeviceSignaturePolicy(config.pool);
   const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
   const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();
   // Real sealed auth (not length-only discard). Env OPERATOR_PUSH_SEAL_KEY preferred;
@@ -810,6 +821,7 @@ export function createProductionRouteSurface(
     backupMasterKey: config.backupMasterKey ?? null,
     // G4
     dualControlPolicy,
+    deviceSignaturePolicy,
     challengeIssuerStore,
     secondDeviceEnrol: {
       enrollmentChallengeStore: deviceEnrollmentChallengeStore,
@@ -847,6 +859,12 @@ export function createProductionRouteSurface(
         store: createNodeSettingsHaltStore(client),
         evidence: createNodeSettingsHaltEvidenceRecorder(client),
       };
+      // Device-signature policy writes must share the mutation PoolClient so a
+      // ROLLBACK undoes node_settings + audit_log with the idempotency row (ZTR-1143).
+      // Prefer the TX SQL port over any injected process-level fixed/in-memory port:
+      // production always uses SQL; tests that inject InMemory rebind via createTestAdminAtomicDeps.
+      const txDeviceSignaturePolicy: DeviceSignaturePolicyPort =
+        createSqlDeviceSignaturePolicy(client);
       return {
         challengeStore: createSqlApprovalChallengeStore(client),
         sendDecisionStore: new SqlSendDecisionStore(client),
@@ -854,6 +872,7 @@ export function createProductionRouteSurface(
         destinationService: config.destinationServiceForSql?.(client) ?? createFailClosedDestinationService(),
         halt: shadowHalt,
         credentialService: new CredentialService(new SqlCredentialStore(client, config.nodeId)),
+        deviceSignaturePolicy: txDeviceSignaturePolicy,
       };
     },
   });

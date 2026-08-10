@@ -203,6 +203,20 @@
   ],
   "concerns": [
     {
+      "concernDir": "admin-auth-errors",
+      "concernId": "admin-auth-errors",
+      "decisionRefs": [
+        "operator-session-admin-auth-errors",
+        "non-oracular-auth-errors"
+      ],
+      "sourceDocCitations": [
+        "API error envelope and authentication classes",
+        "OPERATOR_SESSION admin-auth taxonomy (ZTR-1196)",
+        "route-policy auth-classes J2"
+      ],
+      "goldenRefs": []
+    },
+    {
       "concernDir": "amounts",
       "concernId": "amounts",
       "decisionRefs": [

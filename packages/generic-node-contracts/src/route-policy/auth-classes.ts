@@ -26,7 +26,7 @@ export interface AuthClassPolicy {
   // never authenticates (PUBLIC). Frozen invariant: this is NEVER 403.
   readonly authFailureStatus: number | null;
   // The canonical credential-failure code for this class, or null when the specific code is
-  // deferred to a later owner (the OPERATOR_SESSION admin-auth taxonomy) or not applicable.
+  // OPERATOR_SESSION taxonomy lives in admin-auth-errors (ZTR-1196); null here keeps this freeze status-only.
   readonly authFailureCode: string | null;
   // The canonical code for a cross-tenant/absent object on this class, or null when the class
   // does not resolve tenant-scoped objects.

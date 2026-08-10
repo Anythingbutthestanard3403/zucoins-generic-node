@@ -3,7 +3,14 @@ import { useAuth } from "../store/auth.js";
 const ADMIN_BASE = "/admin/v1";
 
 export interface ApiErrorBody {
-  error: { code: string; message: string; param?: string; request_id?: string };
+  error: {
+    code: string;
+    message: string;
+    param?: string;
+    request_id?: string;
+    /** Present on server envelopes (ZTR-1196); always {} today. */
+    details?: Record<string, never>;
+  };
 }
 
 export class ApiError extends Error {

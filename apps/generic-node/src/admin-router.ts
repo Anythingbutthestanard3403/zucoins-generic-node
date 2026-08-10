@@ -149,6 +149,12 @@ import {
   type LabReceivePorts,
 } from "./lab-receive.js";
 import {
+  buildAdminErrorBody,
+  buildAdminLabReceiveErrorBody,
+  coerceAdminErrorCode,
+  type AdminErrorCode,
+} from "@zucoins/generic-node-contracts/admin-auth-errors";
+import {
   ceremonyJobToWire,
   getCeremonyJob,
   getLatestCeremonyJob,
@@ -1154,9 +1160,11 @@ function fail(
   message: string,
   requestId: string,
 ): AdminRouterResponse {
+  // ZTR-1196: canonical admin envelope (details: {}) + frozen ADMIN_ERROR_CODES.
+  const frozen: AdminErrorCode = coerceAdminErrorCode(code);
   return {
     status,
-    body: JSON.stringify({ error: { code, message, request_id: requestId } }),
+    body: buildAdminErrorBody(frozen, message, requestId),
     headers: { ...JSON_HEADERS },
   };
 }
@@ -1206,7 +1214,18 @@ function authFail(
   );
 }
 
-function fromAuthResult(result: AuthHttpResult): AdminRouterResponse {
+function fromAuthResult(result: AuthHttpResult, requestId: string): AdminRouterResponse {
+  // Auth handlers historically omitted request_id/details. Non-2xx bodies are
+  // re-rendered through the admin envelope so every error matches the frozen schema.
+  if (result.status >= 400) {
+    const body = result.body as { error?: { code?: string; message?: string } };
+    return fail(
+      result.status,
+      body.error?.code ?? "internal_error",
+      body.error?.message ?? "request failed",
+      requestId,
+    );
+  }
   return {
     status: result.status,
     body: JSON.stringify(result.body),
@@ -1525,21 +1544,21 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           },
           { username: body.username ?? "", password: body.password ?? "" },
         );
-        return fromAuthResult(result);
+        return fromAuthResult(result, requestId);
       } catch {
         return fail(400, "validation_error", "invalid login body", requestId);
       }
     }
     if (verb === "GET" && pathname === "/admin/v1/me") {
       try {
-        return fromAuthResult(await handleAdminMe(sessions, authReq));
+        return fromAuthResult(await handleAdminMe(sessions, authReq), requestId);
       } catch {
         return fail(503, "service_unavailable", "session lookup unavailable", requestId);
       }
     }
     if (verb === "POST" && pathname === "/admin/v1/logout") {
       try {
-        return fromAuthResult(await handleAdminLogout(sessions, authReq));
+        return fromAuthResult(await handleAdminLogout(sessions, authReq), requestId);
       } catch {
         return fail(503, "service_unavailable", "logout unavailable", requestId);
       }
@@ -1558,7 +1577,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             new_password: body.new_password ?? "",
           },
         );
-        return fromAuthResult(result);
+        return fromAuthResult(result, requestId);
       } catch {
         return fail(400, "validation_error", "invalid password body", requestId);
       }
@@ -1603,7 +1622,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           authReq,
           { totp: body.totp ?? "" },
         );
-        return fromAuthResult(result);
+        return fromAuthResult(result, requestId);
       } catch {
         return fail(400, "validation_error", "invalid confirm body", requestId);
       }
@@ -2964,18 +2983,18 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               })
             : null;
         if (errObj && typeof errObj.status === "number" && typeof errObj.code === "string") {
-          const errBody: Record<string, unknown> = {
-            error: {
-              code: errObj.code,
-              message: errObj.message ?? guarded.message,
-              request_id: requestId,
-            },
-          };
-          if (errObj.checklist_links !== undefined) errBody.checklist_links = errObj.checklist_links;
-          if (errObj.operation_id !== undefined) errBody.operation_id = errObj.operation_id;
+          // ZTR-1196: named lab-receive sibling envelope (checklist_links/operation_id).
           return {
             status: errObj.status,
-            body: JSON.stringify(errBody),
+            body: buildAdminLabReceiveErrorBody(
+              coerceAdminErrorCode(errObj.code),
+              errObj.message ?? guarded.message,
+              requestId,
+              {
+                checklist_links: errObj.checklist_links,
+                operation_id: errObj.operation_id,
+              },
+            ),
             headers: { ...JSON_HEADERS },
           };
         }

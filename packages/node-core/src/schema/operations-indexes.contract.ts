@@ -34,7 +34,7 @@ export const OPERATIONS_INDEX_INVARIANTS: readonly OperationsIndexInvariant[] = 
       "    AND status IN ('CREATED', 'READY', 'EXPIRED')\n" +
       "    AND receive_release_status IS NULL;",
     rule:
-      "partial index on the receive expiry sweep set (expiry-release.ts SELECT_EXPIRY_CANDIDATES), matching kind/status IN / receive_release_status IS NULL verbatim.",
+      "partial index on the receive expiry candidate set (expiry-release.ts SELECT_EXPIRY_CANDIDATES), matching kind/status IN / receive_release_status IS NULL verbatim.",
   },
   {
     id: "RECEIVE_READY_INDEX",

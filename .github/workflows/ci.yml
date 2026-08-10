@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+
+jobs:
+  quality-and-tests:
+    name: Build, lint, contracts, full tests, and structural gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PG_REQUIRED: "1"
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.0
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Verify PostgreSQL is reachable
+        run: pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres
+      - name: Build
+        run: pnpm build
+      - name: Lint
+        run: pnpm lint
+      - name: Contracts suite
+        run: pnpm --filter @zucoins/generic-node-contracts test
+      - name: Full test suite with PostgreSQL required
+        run: pnpm test
+      - name: Boundary gates
+        run: pnpm test:boundaries
+      - name: Schema census
+        run: node scripts/check-schema-census.mjs
+      - name: Admin unit tests (explicit required surface)
+        run: pnpm --filter @zucoins/generic-node-ui test
+
+  admin-playwright:
+    name: Admin Playwright (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.0
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build contracts consumed by the admin bundle
+        run: pnpm --filter @zucoins/generic-node-contracts build
+      - name: Install Chromium
+        run: pnpm --filter @zucoins/generic-node-ui exec playwright install --with-deps chromium
+      - name: Run Playwright
+        run: pnpm --filter @zucoins/generic-node-ui test:e2e

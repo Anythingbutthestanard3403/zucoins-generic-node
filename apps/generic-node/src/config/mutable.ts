@@ -39,6 +39,9 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   "SPLITCHAIN_GATEWAY_URLS",
   "GATEWAY_TLS_CERT_SHA256_PINS",
   "PUBLIC_BASE_URL",
+  // Push relay base is read once at compose time; a runtime write would not
+  // re-point the already-built gateway client (ZTR-1182).
+  "ZUCOINS_PUSH_API_BASE",
   "NODE_ID",
   "INITIAL_ADMIN_USERNAME",
   "INITIAL_ADMIN_PASSWORD",

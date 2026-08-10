@@ -33,6 +33,7 @@ import {
 
 
 import {
+  DEFAULT_PUSH_API_BASE,
   POOL_CAP_CEILING,
   POOL_CAP_DEFAULT,
   POOL_FLOOR,
@@ -48,6 +49,7 @@ import {
 import {
   commaSeparatedOptional,
   endpointUrl,
+  hasNoUrlCredentials,
   isExactHttpOrigin,
   isHttpsOrLoopbackHttp,
   splitCommaSeparated,
@@ -134,6 +136,33 @@ export const CONFIG_FIELD_SCHEMAS = {
       isHttpsOrLoopbackHttp,
       "PUBLIC_BASE_URL must be an https URL (http is accepted only for loopback addresses)",
     ),
+
+  // Push-notification relay base. Carries subscribe key material (id-proof,
+  // ECE auth secret, p256dh) so it is validated like every other network
+  // endpoint: well-formed URL, https unless loopback, no embedded credentials.
+  // Unset / blank keeps the production relay default (byte-identical to the
+  // pre-schema `|| DEFAULT` path). Not joined to the chain gateway allowlist —
+  // the push host is a delivery relay, not a chain source (ZTR-1182).
+  ZUCOINS_PUSH_API_BASE: z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return undefined;
+      if (typeof value !== "string") return value;
+      const trimmed = value.trim();
+      return trimmed === "" ? undefined : trimmed;
+    },
+    z
+      .string()
+      .url("ZUCOINS_PUSH_API_BASE must be a well-formed URL")
+      .refine(
+        isHttpsOrLoopbackHttp,
+        "ZUCOINS_PUSH_API_BASE must be an https URL (http is accepted only for loopback addresses)",
+      )
+      .refine(
+        hasNoUrlCredentials,
+        "ZUCOINS_PUSH_API_BASE must not contain credentials",
+      )
+      .default(DEFAULT_PUSH_API_BASE),
+  ),
 
   // Initial admin bootstrap — gates irreversible genesis state; first-boot only.
   INITIAL_ADMIN_USERNAME: z

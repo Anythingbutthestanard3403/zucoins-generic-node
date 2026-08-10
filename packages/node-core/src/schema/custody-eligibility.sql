@@ -63,6 +63,9 @@ CREATE TABLE destinations (
   id uuid PRIMARY KEY,
   node_id uuid NOT NULL REFERENCES nodes (id),
   wallet_id uuid NOT NULL UNIQUE REFERENCES wallets (id),
+  -- Operator-facing display name (GN-025.2). Advisory and unsigned. The
+  -- destinations-label pack slice also ALTERs this column onto already-applied DBs.
+  label text NOT NULL DEFAULT '',
   state destination_state NOT NULL DEFAULT 'PENDING',
   blessed_at timestamptz,
   blessed_by_device_key_id uuid,
@@ -80,10 +83,9 @@ CREATE TABLE destinations (
 );
 
 -- At most one active lease per wallet, structurally (primary key).
--- The lease_role vocabulary is reconciled to the frozen LEASE_ROLES enum in
--- generic-node-contracts/src/wallet-state/leases.ts. It stays text + CHECK rather than the
--- wallet_lease_role enum type so the parity binding (test/lease-role-parity.test.ts) keeps
--- reading it from this file.
+-- lease_role is the real wallet_lease_role enum (base-enums-domains.sql); value set
+-- is pinned to LEASE_ROLES by test/lease-role-parity.test.ts. The lease-role-enum
+-- pack slice value-preserves text columns on already-applied DBs.
 -- The lease-fencing columns and both UNIQUEs are required: without them lease liveness,
 -- ownership and epoch fencing have no structural carrier.
 CREATE TABLE wallet_active_leases (
@@ -92,8 +94,7 @@ CREATE TABLE wallet_active_leases (
   lease_group_id uuid NOT NULL,
   root_operation_id uuid NOT NULL,
   operation_id uuid NOT NULL,
-  lease_role text NOT NULL
-    CHECK (lease_role IN ('RECEIVE_WINDOW', 'MOVE_SOURCE', 'MOVE_DESTINATION', 'SEND_SOURCE', 'RECONCILIATION')),
+  lease_role wallet_lease_role NOT NULL,
   lease_epoch bigint NOT NULL CHECK (lease_epoch > 0),
   acquired_at timestamptz NOT NULL,
   heartbeat_at timestamptz NOT NULL,
@@ -204,7 +205,9 @@ BEGIN
     -- G3: origin + acquisition rule 3 state allowlist (both enforced above).
     NULL;
   ELSE
-    -- Unknown role fails closed so a wallet_lease_role member added without a branch is DENIED.
+    -- Unknown role fails closed so a wallet_lease_role member added (ALTER TYPE ADD VALUE)
+    -- without a matching branch is DENIED. Unreachable for the closed five-value enum at
+    -- CREATE time; load-bearing when the enum grows (04:1409).
     RAISE EXCEPTION 'CUSTODY_LEASE_ROLE_UNKNOWN';
   END IF;
   RETURN NEW;

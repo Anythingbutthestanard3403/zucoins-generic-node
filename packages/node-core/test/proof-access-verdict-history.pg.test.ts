@@ -29,7 +29,7 @@
 // * receive_release_proofs base DDL (.1-owned; receive-expiry-release.sql
 //     carries the CREATE TABLE; only ALTERs the ack FK)
 // * full operation_landing_proofs / lineage_path_proofs / lineage_path_bodies /
-//     observation_relationship_adjudications frozen slices (still unlanded) — the
+//     observation_relationship_adjudications frozen slices (landed ZTR-1169; local stub retained for hermetic suite) — the
 //     zero/arbitrary-depth round-trip (test 17), gap/cycle INDETERMINATE matrix (test 18),
 //     and COMPLETE_PATH_SUCCESSOR adjudication-only path (test 19 half) therefore use a
 //     SPEC-TRANSCRIBED fixture block applied only inside this test database. That fixture

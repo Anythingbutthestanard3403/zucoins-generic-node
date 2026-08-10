@@ -61,7 +61,7 @@ const extractObjectName = (kind: StatementKind, masked: string): string | null =
 };
 
 const FROZEN_CUSTODY_SQL_SHA256 =
-  "4db5d9318efbc0a9fee146e57c3b9fd1501bf74d804c303c03080d3a0988324e";
+  "908d3f088283a14f1662c8a65c6897bc128dc676cb1b976b52f9e4d09341799c";
 
 describe("custody-eligibility schema census", () => {
   it("every frozen invariant anchors to the literal SQL text", () => {

@@ -44,6 +44,11 @@ export const CUSTODY_SCHEMA_INVARIANTS: readonly CustodySchemaInvariant[] = [
     rule: "recovery verification rows exist only for audited exports, unique per wallet/export digest.",
   },
   {
+    id: "DESTINATION_LABEL",
+    sqlAnchor: "label text NOT NULL DEFAULT ''",
+    rule: "destinations.label is the operator-facing display name (GN-025.2); advisory and unsigned.",
+  },
+  {
     id: "BLESSED_IFF_AT",
     sqlAnchor: "destinations_blessed_iff",
     rule: "(state IN ('BLESSED','RETIRED')) = (blessed_at IS NOT NULL) on destinations.",
@@ -82,6 +87,11 @@ export const CUSTODY_SCHEMA_INVARIANTS: readonly CustodySchemaInvariant[] = [
     id: "ONE_ACTIVE_LEASE_PER_WALLET",
     sqlAnchor: "wallet_id uuid PRIMARY KEY REFERENCES wallets (id)",
     rule: "wallet_active_leases is keyed by wallet_id: at most one active lease per wallet, structurally.",
+  },
+  {
+    id: "LEASE_ROLE_IS_ENUM",
+    sqlAnchor: "lease_role wallet_lease_role NOT NULL",
+    rule: "lease_role is the real wallet_lease_role Postgres ENUM (not text + CHECK).",
   },
   {
     id: "LEASE_ORIGIN_CONJUNCT_AT_CLAIM",

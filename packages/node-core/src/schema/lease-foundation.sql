@@ -13,8 +13,8 @@
 -- until verified evacuation / quarantine (never fabricated defaults, never silent DELETE).
 --
 -- RECONCILIATION never occupies this exclusive table: acquisition
--- rejects it at the service boundary; the role remains in the CHECK so the G0 branch
--- stays expressible for any future observation-only surface that does NOT write here.
+-- rejects it at the service boundary; the role remains on wallet_lease_role so the G0
+-- branch stays expressible for any future observation-only surface that does NOT write here.
 --
 -- Operations FKs are bare uuid (operations.sql is not yet on main) -- same deferred-FK pattern
 -- as the closed lease bundle. wallets(id) is the live custody key; the
@@ -71,14 +71,7 @@ CREATE TABLE wallet_lease_memberships (
   lease_group_id uuid NOT NULL REFERENCES lease_groups (id),
   wallet_id uuid NOT NULL,
   operation_id uuid NOT NULL,
-  lease_role text NOT NULL
-    CHECK (lease_role IN (
-      'RECEIVE_WINDOW',
-      'MOVE_SOURCE',
-      'MOVE_DESTINATION',
-      'SEND_SOURCE',
-      'RECONCILIATION'
-    )),
+  lease_role wallet_lease_role NOT NULL,
   lease_epoch bigint NOT NULL CHECK (lease_epoch > 0),
   acquired_at timestamptz NOT NULL,
   released_at timestamptz,
@@ -169,6 +162,12 @@ CREATE TABLE lease_schema_fence (
 );
 
 -- Full exclusive projection. wallet_id is the structural one-active-row authority.
+-- When the money pack already applied custody-eligibility.sql, CREATE TABLE is stripped
+-- and only the membership/group FKs are wired via money-schema-pack ALTER. The
+-- eligibility trigger lives solely in custody-eligibility.sql
+-- (custody_reject_ineligible_lease) - no shadowed second copy here (ZTR-1169).
+-- Standalone lease-foundation migrate (no prior custody table) creates this table and
+-- attaches the custody eligibility function from custody-eligibility.sql.
 CREATE TABLE wallet_active_leases (
   wallet_id uuid PRIMARY KEY,
   membership_id uuid NOT NULL UNIQUE
@@ -177,14 +176,7 @@ CREATE TABLE wallet_active_leases (
     REFERENCES lease_groups (id),
   root_operation_id uuid NOT NULL,
   operation_id uuid NOT NULL,
-  lease_role text NOT NULL
-    CHECK (lease_role IN (
-      'RECEIVE_WINDOW',
-      'MOVE_SOURCE',
-      'MOVE_DESTINATION',
-      'SEND_SOURCE',
-      'RECONCILIATION'
-    )),
+  lease_role wallet_lease_role NOT NULL,
   lease_epoch bigint NOT NULL CHECK (lease_epoch > 0),
   acquired_at timestamptz NOT NULL,
   heartbeat_at timestamptz NOT NULL,
@@ -196,59 +188,3 @@ CREATE TABLE wallet_active_leases (
 
 CREATE INDEX wallet_active_leases_operation_idx
   ON wallet_active_leases (operation_id);
-
--- Structural receive-gate (disposition branches). Requires wallets/destinations
--- relations at INSERT time (custody-eligibility.sql supplies them in assembled schemas).
-CREATE FUNCTION lease_foundation_reject_ineligible_lease() RETURNS trigger AS $$
-DECLARE
-  wallet_row wallets%ROWTYPE;
-  destination_row destinations%ROWTYPE;
-BEGIN
-  -- Lock the wallet row. An unlocked read on the path that exists to catch
-  -- concurrent quarantine is not a backstop - quarantine mutates wallets.state.
-  -- The wallets primary key is `id`.
-  SELECT * INTO wallet_row FROM wallets WHERE id = NEW.wallet_id FOR UPDATE;
-
-  IF wallet_row.key_origin IS DISTINCT FROM 'node_generated' THEN
-    RAISE EXCEPTION 'CUSTODY_LEASE_ORIGIN_REJECTED';
-  END IF;
-
-  IF NEW.lease_role = 'RECONCILIATION' THEN
-    RETURN NEW;
-  END IF;
-
-  IF NEW.lease_role = 'RECEIVE_WINDOW' THEN
-    IF wallet_row.recovery_verified_at IS NULL THEN
-      RAISE EXCEPTION 'CUSTODY_LEASE_RECOVERY_UNVERIFIED';
-    END IF;
-    IF wallet_row.state IS DISTINCT FROM 'AVAILABLE' THEN
-      RAISE EXCEPTION 'CUSTODY_LEASE_WALLET_STATE_REJECTED';
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  IF NEW.lease_role = 'MOVE_DESTINATION' THEN
-    SELECT * INTO destination_row FROM destinations WHERE wallet_id = NEW.wallet_id FOR UPDATE;
-    IF destination_row.state IS DISTINCT FROM 'BLESSED' THEN
-      RAISE EXCEPTION 'CUSTODY_LEASE_DESTINATION_NOT_BLESSED';
-    END IF;
-    IF wallet_row.recovery_verified_at IS NULL THEN
-      RAISE EXCEPTION 'CUSTODY_LEASE_RECOVERY_UNVERIFIED';
-    END IF;
-    IF wallet_row.state NOT IN ('AVAILABLE', 'PINNED') THEN
-      RAISE EXCEPTION 'CUSTODY_LEASE_WALLET_STATE_REJECTED';
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  IF NEW.lease_role IN ('MOVE_SOURCE', 'SEND_SOURCE') THEN
-    RETURN NEW;
-  END IF;
-
-  RAISE EXCEPTION 'CUSTODY_LEASE_ROLE_UNKNOWN';
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER wallet_active_leases_eligibility_guard
-  BEFORE INSERT ON wallet_active_leases
-  FOR EACH ROW EXECUTE FUNCTION lease_foundation_reject_ineligible_lease();

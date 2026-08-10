@@ -11,7 +11,7 @@
 // A custody-schema projection carrying the fencing columns without membership/group FKs is
 // NOT already_current until those FKs are installed.
 // * Mid-apply failure leaves zero foundation tables / no fence (cleanup + no writeFence).
-// * Fence is never written without lease_foundation_reject_ineligible_lease +
+// * Fence is never written without custody_reject_ineligible_lease +
 // wallet_active_leases_eligibility_guard present (structural backstop).
 // * Old writers without the fence fail closed via assertLeaseFoundationReady.
 
@@ -44,8 +44,10 @@ const FULL_REQUIRED_COLUMNS = [
 
 const LEGACY_ONLY_COLUMNS = new Set(["wallet_id", "lease_role", "acquired_at"]);
 
-const ELIGIBILITY_FUNCTION = "lease_foundation_reject_ineligible_lease";
+// Single owner: custody-eligibility.sql (ZTR-1169 removed the lease-foundation shadow).
+const ELIGIBILITY_FUNCTION = "custody_reject_ineligible_lease";
 const ELIGIBILITY_TRIGGER = "wallet_active_leases_eligibility_guard";
+const CUSTODY_SCHEMA_FILE = "custody-eligibility.sql";
 
 /** Foundation tables only — never drop shared domains (sha256_hex) or wallets. */
 const FOUNDATION_TABLES_DROP_ORDER = [
@@ -185,9 +187,8 @@ function isAlreadyExists(err: unknown): boolean {
 }
 
 /**
- * structural backstop presence: foundation-named function + BEFORE INSERT trigger
- * on wallet_active_leases. The custody three-column trigger name collides; we require the
- * foundation function specifically so a custody-only schema never satisfies readiness.
+ * structural backstop presence: custody eligibility function + BEFORE INSERT trigger
+ * on wallet_active_leases. Single owner is custody-eligibility.sql (ZTR-1169).
  */
 export async function eligibilityGuardPresent(db: SqlExecutor): Promise<boolean> {
   const fn = await db.query<{ exists: boolean }>(
@@ -233,24 +234,32 @@ function pickStatement(
  * Throws SCHEMA_NOT_READY when wallets/destinations are absent or compile fails —
  * caller must not write the fence.
  */
+function loadCustodyEligibilityStatements(): readonly string[] {
+  const sql = readFileSync(resolve(here, "../schema", CUSTODY_SCHEMA_FILE), "utf8");
+  return splitSqlStatements(sql);
+}
+
 async function ensureEligibilityGuard(
   db: SqlExecutor,
-  statements: readonly string[],
+  _foundationStatements: readonly string[],
 ): Promise<void> {
+  // Eligibility lives in custody-eligibility.sql only (ZTR-1169). Foundation SQL no
+  // longer carries a second copy — load the custody statements explicitly.
+  const custodyStatements = loadCustodyEligibilityStatements();
   const fnStmt = pickStatement(
-    statements,
-    /CREATE FUNCTION lease_foundation_reject_ineligible_lease/i,
+    custodyStatements,
+    /CREATE FUNCTION custody_reject_ineligible_lease/i,
     ELIGIBILITY_FUNCTION,
   );
   const trgStmt = pickStatement(
-    statements,
+    custodyStatements,
     /CREATE TRIGGER wallet_active_leases_eligibility_guard/i,
     ELIGIBILITY_TRIGGER,
   );
 
-  // Always CREATE OR REPLACE the function body so receive arm barrier FOR UPDATE / receive-gate enforcement branch
-  // repairs land on re-migrate even when the trigger name already exists. Trigger is
-  // recreated only when missing to avoid DROP races on a live claim path.
+  // Always CREATE OR REPLACE the function body so receive-gate repairs land on
+  // re-migrate even when the trigger name already exists. Trigger is recreated
+  // only when missing to avoid DROP races on a live claim path.
   const replaceFn = fnStmt.replace(/^CREATE\s+FUNCTION/i, "CREATE OR REPLACE FUNCTION");
 
   try {
@@ -378,7 +387,7 @@ async function ensureSatelliteObjects(
   for (const stmt of statements) {
     if (/CREATE TABLE wallet_active_leases/i.test(stmt)) continue;
     if (/CREATE TRIGGER wallet_active_leases_eligibility_guard/i.test(stmt)) continue;
-    if (/CREATE FUNCTION lease_foundation_reject_ineligible_lease/i.test(stmt)) continue;
+    if (/CREATE FUNCTION (?:lease_foundation_reject_ineligible_lease|custody_reject_ineligible_lease)/i.test(stmt)) continue;
     if (/CREATE DOMAIN sha256_hex/i.test(stmt)) {
       try {
         await db.query(stmt);
@@ -508,7 +517,14 @@ async function ensureActiveLeaseFoundationFks(
       `DROP TRIGGER IF EXISTS ${ELIGIBILITY_TRIGGER} ON wallet_active_leases`,
     );
     await db.query(`DROP TABLE wallet_active_leases`);
-    await db.query(createActive);
+    try {
+      await db.query(createActive);
+    } catch (err) {
+      throw new LeaseError(
+        "SCHEMA_NOT_READY",
+        `cannot recreate wallet_active_leases from foundation SQL (${errMessage(err)}); refusing fence`,
+      );
+    }
     // Indexes dropped with the table — re-apply via satellite pass is caller's job when
     // they re-enter ensureSatelliteObjects; do the operation index here from statements.
     for (const stmt of statements) {

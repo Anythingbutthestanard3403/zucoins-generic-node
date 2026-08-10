@@ -35,7 +35,8 @@
  * Multi-slice tables in this pack (audit fix round):
  * - wallet_active_leases: custody-eligibility (first: wallet_id→wallets) then
  * lease-foundation (membership_id/lease_group_id FKs via wire-up).
- * Eligibility trigger owner: custody_reject_ineligible_lease (recovery_verified_at gate; receive-gate enforcement).
+ * Eligibility trigger owner: custody_reject_ineligible_lease only — lease-foundation no
+ * longer ships a shadowed second copy (ZTR-1169).
  * - operation_expected_artifacts: expected-artifacts first (stronger FKs);
  * move-baseline CREATE stripped (bodies diverge; first is strict FK superset).
  * - operator_device_keys: device-keys first; approval-stores CREATE stripped
@@ -178,6 +179,15 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // change). Appended; never renumber prior slices. Depends on receive-expiry-release
   // for the receive_release_status column used by one partial predicate.
   "operations-indexes",
+  // observation_relationship_adjudications — complete-path derived relationship store
+  // (doc 04 §11). Appended after lineage-path-proofs FK target; never renumber prior slices.
+  "observation-relationship-adjudications",
+  // destinations.label column (GN-025.2). Pure column extension on custody destinations.
+  // Appended; never renumber prior slices.
+  "destinations-label",
+  // lease_role text→wallet_lease_role enum on active leases + memberships. Value-preserving
+  // USING cast for already-applied DBs; cold CREATE already uses the enum. Appended.
+  "lease-role-enum",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

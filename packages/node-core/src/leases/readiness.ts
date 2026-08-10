@@ -33,7 +33,7 @@ export async function assertLeaseFoundationReady(
   if (!(await eligibilityGuardPresent(db))) {
     throw new LeaseError(
       "SCHEMA_NOT_READY",
-      "lease eligibility guard (lease_foundation_reject_ineligible_lease + " +
+      "lease eligibility guard (custody_reject_ineligible_lease + " +
         "wallet_active_leases_eligibility_guard) is missing; refusing money-path work",
     );
   }

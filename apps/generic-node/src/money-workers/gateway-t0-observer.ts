@@ -15,6 +15,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   GENESIS_PROJECTION,
   buildGenesisWalletHeadFingerprint,
@@ -56,6 +59,8 @@ export interface GatewayT0ObserverDeps {
   readonly backoffMaxMs?: number;
   /** T0 read failure / observation anomaly / gateway duration, at the real seam. */
   readonly metricsHooks?: MetricsHooks;
+  /** Transaction-local money-path statement_timeout (ZTR-1156). */
+  readonly moneyPathStatementTimeoutMs?: number;
 }
 
 function genesisProjection(): WalletStateProjection {
@@ -242,6 +247,10 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
       const client = await deps.pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(
+          client,
+          deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+        );
         const observerId = await ensureNodeObserver(
           client,
           deps.nodeId,

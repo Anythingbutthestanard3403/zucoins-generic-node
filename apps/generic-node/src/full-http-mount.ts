@@ -106,6 +106,7 @@ import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-liv
 import { createSqlRecoveryActionStore, createSqlRecoveryInspectionStore } from "./operations/sql-recovery-store.js";
 import { createSqlAttentionRetractionStore } from "./operations/sql-attention-retraction-store.js";
 import { createSqlFreshHeadReader } from "./money-workers/sql-fresh-head-reader.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "./config/constants.js";
 import {
   createLiveReportingReads,
   DURABLE_SUBSCRIPTION_HANDLES,
@@ -373,6 +374,12 @@ export interface ProductionSurfaceConfig {
    * SQL port from config.pool (fail closed on read).
    */
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
+  /**
+   * Transaction-local money-path statement_timeout for recovery / attention
+   * custody TXs (ZTR-1156). Defaults to MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT
+   * inside the store factories when omitted.
+   */
+  readonly moneyPathStatementTimeoutMs?: number;
   /** Optional readiness probes (node health, backup schedule, break-glass). */
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   /**
@@ -838,6 +845,8 @@ export function createProductionRouteSurface(
   // recovery-action confirm-read reader (Route A). Mirrors the
   // start-money-workers.ts landing-deps precedent: null without gatewayUrls, so the
   // release path fails closed rather than fabricating fresh=t0.
+  const moneyPathStatementTimeoutMs =
+    config.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   const readFreshHead =
     config.gatewayUrls !== undefined && config.gatewayUrls.length > 0
       ? createSqlFreshHeadReader({
@@ -845,6 +854,7 @@ export function createProductionRouteSurface(
           nodeId: config.nodeId,
           gatewayUrls: config.gatewayUrls,
           exchange: config.gatewayExchange,
+          moneyPathStatementTimeoutMs,
         })
       : undefined;
 
@@ -886,10 +896,16 @@ export function createProductionRouteSurface(
       // readFreshHead threads the Route A confirm-read into RELEASE_EXPIRED_RECEIVE and into
       // the SEND non-landing exclusion oracle. Both stores take it, and both spend it only on
       // their single-operation fact loads — the attention listing runs no gateway reads.
-      recoveryActionStore: createSqlRecoveryActionStore(config.pool, readFreshHead),
-      recoveryInspectionStore: createSqlRecoveryInspectionStore(config.pool, readFreshHead),
+      recoveryActionStore: createSqlRecoveryActionStore(config.pool, readFreshHead, {
+        moneyPathStatementTimeoutMs,
+      }),
+      recoveryInspectionStore: createSqlRecoveryInspectionStore(config.pool, readFreshHead, {
+        moneyPathStatementTimeoutMs,
+      }),
       // Live audited attention-retraction store.
-      attentionRetractionStore: createSqlAttentionRetractionStore(config.pool),
+      attentionRetractionStore: createSqlAttentionRetractionStore(config.pool, {
+        moneyPathStatementTimeoutMs,
+      }),
     },
   );
 

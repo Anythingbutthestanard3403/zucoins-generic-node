@@ -655,6 +655,7 @@ async function main(): Promise<void> {
     nodeId: config.NODE_ID,
     pool,
     databaseUrl: config.DATABASE_URL,
+    moneyPathStatementTimeoutMs,
     // Env vault key ⇒ configured (no re-generate); backup KEK for ≠ check only.
     vaultMasterKey: config.VAULT_MASTER_KEY,
     backupMasterKey: config.BACKUP_MASTER_KEY ?? null,
@@ -1335,6 +1336,7 @@ async function main(): Promise<void> {
                 gatewayMaxAttempts: config.GATEWAY_READ_RETRY_MAX_ATTEMPTS,
                 gatewayBackoffMaxMs: config.GATEWAY_READ_BACKOFF_MAX_MS,
                 gatewayUrls: config.SPLITCHAIN_GATEWAY_URLS,
+                moneyPathStatementTimeoutMs,
                 nodeIdentitySigner: () => {
                   const held = sendSignerHolder.current;
                   if (!identityEnsured || held.signingKeyId === DEFERRED_SIGNING_KEY_ID) {

@@ -24,6 +24,9 @@ import { randomUUID } from "node:crypto";
 
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   GENESIS_PROJECTION,
   OPERATION_NEEDS_ATTENTION_EVENT,
@@ -109,6 +112,8 @@ export interface SendObserveLanderDeps {
   /** Lifecycle metrics fire only after the landing CAS is APPLIED. */
   readonly metricsHooks?: MetricsHooks;
   readonly batchSize?: number;
+  /** Transaction-local money-path statement_timeout (ZTR-1156). */
+  readonly moneyPathStatementTimeoutMs?: number;
 }
 
 const DEFAULT_BATCH = 25;
@@ -796,10 +801,12 @@ async function parkSendNeedsAttention(
   pool: Pool,
   operationId: string,
   reason: string,
+  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
 ): Promise<boolean> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const cas = await client.query<{ operation_id: string; row_version: string }>(
       SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION,
       [operationId, reason, OPERATION_NEEDS_ATTENTION_EVENT],
@@ -880,7 +887,12 @@ export async function tickSendCompletionLander(
         // status stays non-terminal and the source lease is untouched.
         if (candidate.status === "AWAITING_REDEMPTION" && isPastOracleEligibility(candidate)) {
           try {
-            if (await parkSendNeedsAttention(deps.pool, candidate.operationId, POST_EXPIRY_REASON)) {
+            if (await parkSendNeedsAttention(
+              deps.pool,
+              candidate.operationId,
+              POST_EXPIRY_REASON,
+              deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+            )) {
               parked += 1;
               deps.logger.info(
                 `send-landing: op=${candidate.operationId} PARKED NEEDS_ATTENTION: ${gather.detail} and past redemption expiry + aging margin`,
@@ -901,7 +913,12 @@ export async function tickSendCompletionLander(
       }
       case "PARK_ATTENTION": {
         try {
-          const didPark = await parkSendNeedsAttention(deps.pool, candidate.operationId, gather.reason);
+          const didPark = await parkSendNeedsAttention(
+            deps.pool,
+            candidate.operationId,
+            gather.reason,
+            deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+          );
           if (didPark) {
             parked += 1;
             deps.logger.info(

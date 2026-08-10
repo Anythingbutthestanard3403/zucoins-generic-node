@@ -4,6 +4,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   isOperationKind,
   isUniqueViolation,
@@ -506,7 +509,10 @@ const SQL_HAS_SUBMIT_ATTEMPT = `
 export function createSqlRecoveryInspectionStore(
   pool: Pool,
   readFreshHead?: ReadFreshHead,
+  options: { readonly moneyPathStatementTimeoutMs?: number } = {},
 ): RecoveryInspectionStore {
+  const statementTimeoutMs =
+    options.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     // kind is bound into SQL before LIMIT (ZTR-1198). classification is derived at read
     // time by classifyRecovery (not a durable column), so it still filters in
@@ -553,6 +559,7 @@ export function createSqlRecoveryInspectionStore(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
         // Supersede prior ISSUED nonces for this operation before inserting the new one —
         // the partial unique index on (operation_id) WHERE status='ISSUED' is immediate
         // and non-deferrable, so this ordering (supersede, then insert) inside one
@@ -579,7 +586,13 @@ export function createSqlRecoveryInspectionStore(
   };
 }
 
-export function createSqlRecoveryActionStore(pool: Pool, readFreshHead?: ReadFreshHead): RecoveryActionStore {
+export function createSqlRecoveryActionStore(
+  pool: Pool,
+  readFreshHead?: ReadFreshHead,
+  options: { readonly moneyPathStatementTimeoutMs?: number } = {},
+): RecoveryActionStore {
+  const statementTimeoutMs =
+    options.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async lookupIdempotency(operationId: string, idempotencyKey: string) {
       const result = await pool.query<{ body: string }>(SQL_LOOKUP_IDEMPOTENCY, [operationId, idempotencyKey]);
@@ -630,6 +643,7 @@ export function createSqlRecoveryActionStore(pool: Pool, readFreshHead?: ReadFre
         const client: PoolClient = await pool.connect();
         try {
           await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+          await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
 
           // Consume the recovery nonce; expiry and prior-consumption are both folded into
           // the WHERE clause so both fail the same way (recovery_nonce_invalid).

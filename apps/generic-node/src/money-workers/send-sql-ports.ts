@@ -3,6 +3,9 @@
 
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   CLAIM_AND_OBSERVE_SQL,
   acquireLeases,
@@ -44,10 +47,12 @@ type SqlTx = {
 export async function withPoolTransaction<T>(
   pool: Pool,
   fn: (tx: SqlTx) => Promise<T>,
+  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
 ): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const tx: SqlTx = {
       query: async <R>(text: string, params?: readonly unknown[]) => {
         const result = await client.query(text, params as never);
@@ -525,12 +530,16 @@ async function promoteSendCompletedBodyOnAttempt(
 export function createSqlExternalSendLandingStore(
   pool: Pool,
   eventSigner: NodeEventSigner | null,
+  options: { readonly statementTimeoutMs?: number } = {},
 ): ExternalSendLandingStore {
+  const statementTimeoutMs =
+    options.statementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async commitLanding(command: CommitExternalSendLandingCommand) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
         const inner = new SqlExternalSendLandingStore(
           {
             // Pass-through: node-core's statements run on the transaction opened above.

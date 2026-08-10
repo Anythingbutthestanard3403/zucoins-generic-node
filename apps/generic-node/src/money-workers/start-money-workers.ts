@@ -858,6 +858,7 @@ export function resolveMoneyPathT0Observer(deps: {
   readonly t0Observer?: ReceiveT0Observer;
   readonly allowGenesisT0Stub?: boolean;
   readonly metricsHooks?: MetricsHooks;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): { readonly observer: ReceiveT0Observer; readonly kind: "gateway" | "genesis_stub" | "injected" } {
   if (deps.t0Observer !== undefined) {
     return { observer: deps.t0Observer, kind: "injected" };
@@ -879,13 +880,22 @@ export function resolveMoneyPathT0Observer(deps: {
           ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
           : {}),
         ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+        ...(deps.moneyPathStatementTimeoutMs !== undefined
+          ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
+          : {}),
       }),
       kind: "gateway",
     };
   }
   if (deps.allowGenesisT0Stub === true) {
     return {
-      observer: createGenesisT0Observer({ pool: deps.pool, nodeId: deps.nodeId }),
+      observer: createGenesisT0Observer({
+        pool: deps.pool,
+        nodeId: deps.nodeId,
+        ...(deps.moneyPathStatementTimeoutMs !== undefined
+          ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
+          : {}),
+      }),
       kind: "genesis_stub",
     };
   }
@@ -921,6 +931,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     t0Observer: deps.t0Observer,
     allowGenesisT0Stub: deps.config.allowGenesisT0Stub,
     ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+    moneyPathStatementTimeoutMs: statementTimeoutMs,
   });
   const observer = resolved.observer;
   deps.logger.info(
@@ -1020,8 +1031,11 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             ...(deps.gatewayBackoffMaxMs !== undefined
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
+            moneyPathStatementTimeoutMs: statementTimeoutMs,
           }),
-          store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null),
+          store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
+            statementTimeoutMs,
+          }),
         }
       : null;
 
@@ -1181,11 +1195,15 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             ...(deps.gatewayBackoffMaxMs !== undefined
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
+            moneyPathStatementTimeoutMs: statementTimeoutMs,
           }),
-          store: createSqlExternalSendLandingStore(deps.pool, deps.eventSigner?.() ?? null),
+          store: createSqlExternalSendLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
+            statementTimeoutMs,
+          }),
           nodeId: deps.config.nodeId,
           deviceKeyStore: deps.deviceKeyStore ?? new InMemoryDeviceKeyStore(),
           ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
       } catch (err) {
         deps.logger.error("money-workers: SEND completion lander tick failed", err);
@@ -1276,6 +1294,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           pool: deps.pool,
           ownerInstanceId: deps.config.ownerInstanceId,
           logger: deps.logger,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         if (handoff.spawned > 0 || handoff.failed > 0) {
           deps.logger.info(
@@ -1318,6 +1337,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           pool: deps.pool,
           ownerInstanceId: deps.config.ownerInstanceId,
           advanced: deps.moveInternalPorts,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         await tickMoveInternalMoneyWorkers({
           pool: deps.pool,

@@ -206,12 +206,19 @@ export async function tryAcquireSignerLeadership(
   // From here the connection is dedicated: it is never returned until release or loss, so
   // the session-scoped lock persists for as long as this process holds leadership.
   let lost = false;
+  /**
+   * True only when the dedicated connection's transport died (`error`/`end`).
+   * Transport death frees the session advisory lock server-side, so unlock is skipped.
+   * Ownership-assert loss is the opposite: the backend is often still alive and still
+   * holds the lock — never treat it as transport-dead (ZTR-1156 bare-pool SPOF).
+   */
+  let transportDead = false;
   // release disposition for this handle. Separates connection-loss (`lost`) from the
   // terminal outcome of release so unlock-fail never looks like a clean unlock on
   // re-entry (boot-lane retains the handle after unlock-fail — re-entrancy SPOF).
   // open — no terminal release yet
-  // pooled — confirmed unlock (or prior connection loss); connection returned to pool
-  // failed — unlock failed; session destroyed or deliberately NOT pooled; sticky error
+  // pooled — confirmed unlock / transport death / ownership destroy; session not locked-in-pool
+  // failed — unlock/destroy failed; session deliberately NOT pooled; sticky error
   let releaseOutcome: "open" | "pooled" | "failed" = "open";
   let stickyReleaseErr: Error | undefined;
   // Single-flight: installed synchronously on first entry, before any await. Concurrent
@@ -226,9 +233,71 @@ export async function tryAcquireSignerLeadership(
       ownershipTimer = undefined;
     }
   };
+
+  const destroySessionMandatory = async (context: string, cause?: unknown): Promise<void> => {
+    const causeMsg =
+      cause === undefined ? undefined : cause instanceof Error ? cause.message : String(cause);
+    if (typeof client.end !== "function") {
+      stickyReleaseErr = new Error(
+        `${context} and session has no end() destroy path${
+          causeMsg === undefined ? "" : `: cause=${causeMsg}`
+        }`,
+        cause === undefined ? undefined : { cause },
+      );
+      releaseOutcome = "failed";
+      throw stickyReleaseErr;
+    }
+    let destroyErr: unknown;
+    try {
+      await Promise.resolve(client.end());
+    } catch (err) {
+      destroyErr = err;
+    }
+    if (destroyErr !== undefined) {
+      const destroyMsg =
+        destroyErr instanceof Error ? destroyErr.message : String(destroyErr);
+      stickyReleaseErr = new Error(
+        `${context} and session destroy also failed${
+          causeMsg === undefined ? "" : `: cause=${causeMsg}`
+        }; destroy=${destroyMsg}`,
+        { cause: cause ?? destroyErr },
+      );
+      releaseOutcome = "failed";
+      throw stickyReleaseErr;
+    }
+  };
+
+  /**
+   * Ownership loss while the session may still be alive: destroy the dedicated
+   * connection so the advisory lock cannot outlive local authority. Standbys must
+   * not wait for process shutdown. Prefer destroy over unlock+pool-return so a
+   * flaky unlock cannot bare-pool a still-locked client (ZTR-1156 SPOF).
+   */
+  const disposeAfterOwnershipLoss = async (): Promise<void> => {
+    stopOwnershipWatch();
+    client.removeListener("error", onError);
+    client.removeListener("end", onEnd);
+    // Already latched lost by onLoss. Destroy is the terminal disposition — do not
+    // client.release() afterward (end/release(true) already retired the session).
+    try {
+      await destroySessionMandatory(
+        "signer leadership ownership lost",
+      );
+    } catch (err) {
+      // stickyReleaseErr + failed already set inside destroySessionMandatory.
+      throw err;
+    }
+    // Destroy succeeded — lock free server-side with the session. Terminal OK for
+    // later release() joins; never pool-return after end.
+    releaseOutcome = "pooled";
+  };
+
   const onLoss = (event: "error" | "end" | "ownership") => (err?: Error): void => {
     if (lost) return;
     lost = true;
+    if (event === "error" || event === "end") {
+      transportDead = true;
+    }
     stopOwnershipWatch();
     const reason =
       event === "ownership"
@@ -236,10 +305,20 @@ export async function tryAcquireSignerLeadership(
         : `signer leadership lock connection ${event}${
             err === undefined ? "" : `: ${err.message}`
           }`;
-    // Latch first, synchronously, before any observer runs: the lock is already free
-    // server-side, so another instance may acquire at any moment from now.
+    // Latch first, synchronously, before any observer runs.
+    // Transport death: lock is already free server-side — another instance may acquire now.
+    // Ownership loss: lock may still be held — disposeAfterOwnershipLoss frees it next.
     latch.markLost(reason);
     for (const listener of listeners) listener(reason);
+
+    if (event === "ownership" && releaseFlight === undefined) {
+      // Arm single-flight immediately (sync) so concurrent release() joins destroy
+      // instead of observing open+lost and bare-pooling (d72fd92 class).
+      releaseFlight = disposeAfterOwnershipLoss();
+      void releaseFlight.catch(() => {
+        // Rejection retained on releaseFlight for release() / boot quarantine.
+      });
+    }
   };
   const onError = onLoss("error");
   const onEnd = onLoss("end");
@@ -250,8 +329,8 @@ export async function tryAcquireSignerLeadership(
   latch.markAcquired();
 
   // Positive ownership watch — converts silence into a definite answer. A failed
-  // assertion or a transport error on the probe drives the same onLoss path as
-  // error/end; the single-flight release invariant is unchanged.
+  // assertion latches lost and destroys the live session (not the transport-death
+  // skip-unlock path). Transport error/end on the probe still uses onError/onEnd.
   if (ownershipAssertIntervalMs > 0) {
     let assertInFlight = false;
     ownershipTimer = setIntervalFn(() => {
@@ -291,11 +370,13 @@ export async function tryAcquireSignerLeadership(
     client.removeListener("error", onError);
     client.removeListener("end", onEnd);
     latch.markLost("signer leadership released");
-    // A dead connection has already freed the lock server-side; unlocking would only
-    // reject. Live unlock must succeed OR the session must be destroyed — never return a
+    // Skip unlock ONLY on true transport death — the server already dropped the
+    // session lock. Ownership-assert loss must NOT take this branch (transportDead
+    // stays false); that path destroys via disposeAfterOwnershipLoss instead.
+    // Live unlock must succeed OR the session must be destroyed — never return a
     // still-locked connection to the pool (idle pooled holder = permanent SPOF).
     let unlockErr: unknown;
-    if (!lost) {
+    if (!transportDead) {
       try {
         const result = await client.query(RELEASE_LEADERSHIP_SQL, [lockId]);
         const unlocked =
@@ -317,9 +398,6 @@ export async function tryAcquireSignerLeadership(
       const unlockMsg =
         unlockErr instanceof Error ? unlockErr.message : String(unlockErr);
       if (typeof client.end !== "function") {
-        // Structural cast / JS adapter slipped past the type boundary — refuse the
-        // SPOF path rather than pool-return. Lock may still be held server-side;
-        // boot-lane quarantines on this throw (step 8 failed unlock).
         stickyReleaseErr = new Error(
           `signer leadership unlock failed and session has no end() destroy path: unlock=${unlockMsg}`,
           { cause: unlockErr },
@@ -351,6 +429,7 @@ export async function tryAcquireSignerLeadership(
       throw stickyReleaseErr;
     }
     releaseOutcome = "pooled";
+    // Transport-dead or confirmed unlock: return the (unlocked / dead) client to the pool.
     client.release();
   };
 
@@ -375,6 +454,7 @@ export async function tryAcquireSignerLeadership(
       }
       // Single-flight BEFORE any await: concurrent callers during unlock/end join the
       // in-flight promise instead of observing open+lost and bare-pooling.
+      // Ownership-loss already arms releaseFlight with disposeAfterOwnershipLoss.
       if (releaseFlight === undefined) {
         releaseFlight = runRelease();
       }

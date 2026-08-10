@@ -18,23 +18,29 @@ import {
 interface FakeClient extends LeadershipLockClient {
   readonly queries: Array<{ sql: string; values?: readonly unknown[] }>;
   readonly released: () => boolean;
+  readonly ended: () => boolean;
   emit(event: "error" | "end", err?: Error): void;
 }
 
 function fakeClient(
   outcome: boolean | Error,
-  options: { owned?: boolean | (() => boolean) } = {},
+  options: {
+    owned?: boolean | (() => boolean) | Error;
+  } = {},
 ): FakeClient {
   const listeners = new Map<string, Array<(err?: Error) => void>>();
   const queries: Array<{ sql: string; values?: readonly unknown[] }> = [];
   let released = false;
+  let ended = false;
   return {
     queries,
     released: () => released,
+    ended: () => ended,
     async query(sql, values) {
       queries.push({ sql, values });
       if (outcome instanceof Error) throw outcome;
       if (sql === ASSERT_LEADERSHIP_OWNED_SQL) {
+        if (options.owned instanceof Error) throw options.owned;
         const owned =
           typeof options.owned === "function" ? options.owned() : (options.owned ?? true);
         return { rows: [{ owned }] };
@@ -53,8 +59,8 @@ function fakeClient(
       released = true;
     },
     end() {
-      // Session destroy — for happy-path fakes this is a no-op; unlock-fail tests override.
-      released = true;
+      // Session destroy — marks ended; must NOT be confused with idle pool-return.
+      ended = true;
     },
     emit(event, err) {
       for (const listener of [...(listeners.get(event) ?? [])]) listener(err);
@@ -666,6 +672,64 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
     expect(latch.reason).toMatch(/ownership assertion failed/);
     expect(seen).toHaveLength(1);
     expect(client.queries.some((q) => q.sql === ASSERT_LEADERSHIP_OWNED_SQL)).toBe(true);
+  });
+
+  it("ownership assert query error destroys session — never bare-pools still-locked (ZTR-1156 SPOF)", async () => {
+    // Review A/B @ ddd055d: onLoss("ownership") set lost=true then release() skipped
+    // unlock and client.release()'d a live still-locked session → permanent bare-pool SPOF.
+    const handlers: Array<() => void> = [];
+    const client = fakeClient(true, {
+      owned: new Error("transient assert network blip"),
+    });
+    const latch = new SignerLeadership();
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 1_000,
+      setIntervalFn: (handler) => {
+        handlers.push(handler);
+        return 1;
+      },
+      clearIntervalFn: () => {},
+    });
+    expect(held).not.toBeNull();
+    expect(latch.held).toBe(true);
+
+    handlers[0]!();
+    // Ownership dispose is async (end()); drain microtasks then join releaseFlight.
+    await Promise.resolve();
+    await Promise.resolve();
+    await held!.release();
+
+    expect(latch.held).toBe(false);
+    expect(latch.reason).toMatch(/ownership assertion failed/);
+    // Must destroy — never idle-pool while the advisory lock may still be held.
+    expect(client.ended()).toBe(true);
+    expect(client.released()).toBe(false);
+    // No graceful unlock attempt required on ownership destroy path; assert ran.
+    expect(client.queries.some((q) => q.sql === ASSERT_LEADERSHIP_OWNED_SQL)).toBe(true);
+    expect(client.queries.some((q) => q.sql === RELEASE_LEADERSHIP_SQL)).toBe(false);
+  });
+
+  it("ownership owned=false destroys session before release joins (ZTR-1156 SPOF)", async () => {
+    const handlers: Array<() => void> = [];
+    const client = fakeClient(true, { owned: false });
+    const latch = new SignerLeadership();
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 1_000,
+      setIntervalFn: (handler) => {
+        handlers.push(handler);
+        return 1;
+      },
+      clearIntervalFn: () => {},
+    });
+    handlers[0]!();
+    await Promise.resolve();
+    await Promise.resolve();
+    await held!.release();
+
+    expect(latch.held).toBe(false);
+    expect(client.ended()).toBe(true);
+    expect(client.released()).toBe(false);
+    expect(client.queries.some((q) => q.sql === RELEASE_LEADERSHIP_SQL)).toBe(false);
   });
 
   it("keepAlive-style connection error still latches lost with ownership watch armed", async () => {

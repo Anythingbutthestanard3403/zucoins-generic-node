@@ -1159,13 +1159,15 @@ function fail(
   code: string,
   message: string,
   requestId: string,
+  extraHeaders: Record<string, string> = {},
 ): AdminRouterResponse {
   // ZTR-1196: canonical admin envelope (details: {}) + frozen ADMIN_ERROR_CODES.
+  // extraHeaders forward auth-handler headers (e.g. retry-after on 429); JSON content-type wins.
   const frozen: AdminErrorCode = coerceAdminErrorCode(code);
   return {
     status,
     body: buildAdminErrorBody(frozen, message, requestId),
-    headers: { ...JSON_HEADERS },
+    headers: { ...JSON_HEADERS, ...extraHeaders, ...JSON_HEADERS },
   };
 }
 
@@ -1217,6 +1219,7 @@ function authFail(
 function fromAuthResult(result: AuthHttpResult, requestId: string): AdminRouterResponse {
   // Auth handlers historically omitted request_id/details. Non-2xx bodies are
   // re-rendered through the admin envelope so every error matches the frozen schema.
+  // Handler headers (retry-after, etc.) are merged; JSON content-type is forced via fail().
   if (result.status >= 400) {
     const body = result.body as { error?: { code?: string; message?: string } };
     return fail(
@@ -1224,6 +1227,7 @@ function fromAuthResult(result: AuthHttpResult, requestId: string): AdminRouterR
       body.error?.code ?? "internal_error",
       body.error?.message ?? "request failed",
       requestId,
+      result.headers,
     );
   }
   return {
@@ -1595,11 +1599,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           authReq,
           { password: body.password ?? "" },
         );
-        return {
-          status: result.status,
-          body: JSON.stringify(result.body),
-          headers: { ...result.headers },
-        };
+        return fromAuthResult(result, requestId);
       } catch {
         return fail(400, "validation_error", "invalid enrol body", requestId);
       }

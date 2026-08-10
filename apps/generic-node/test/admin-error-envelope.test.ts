@@ -3,7 +3,7 @@
  * (details present, code ∈ ADMIN_ERROR_CODES).
  */
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   AdminErrorEnvelopeSchema,
@@ -16,6 +16,9 @@ import {
   hashPassword,
   InMemoryAdminSessionStore,
   InMemoryAdminUserStore,
+  LOGIN_RATE_MAX_REQUESTS,
+  LOGIN_RATE_WINDOW_MS,
+  _resetLoginRateLimitForTests,
   type AdminUser,
 } from "@zucoins/node-core";
 
@@ -60,6 +63,10 @@ function cookieFrom(setCookie: string | undefined): string {
 }
 
 describe("admin error envelope (ZTR-1196)", () => {
+  beforeEach(() => {
+    _resetLoginRateLimitForTests();
+  });
+
   it("401 unauthenticated inventory GET carries details + frozen code", async () => {
     const userStore = new InMemoryAdminUserStore();
     await seedAdmin(userStore, "pw-envelope-1");
@@ -130,5 +137,51 @@ describe("admin error envelope (ZTR-1196)", () => {
     const raw = JSON.parse(res.body) as unknown;
     const parsed = AdminErrorEnvelopeSchema.safeParse(raw);
     expect(parsed.success, JSON.stringify(raw)).toBe(true);
+  });
+
+  it("enrol-totp unauthenticated error is canonical envelope (fromAuthResult)", async () => {
+    const userStore = new InMemoryAdminUserStore();
+    await seedAdmin(userStore, "pw-envelope-enrol");
+    const { router } = buildRouter(userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/enrol-totp",
+      Buffer.from(JSON.stringify({ password: "x" })),
+      { "content-type": "application/json" },
+    );
+    expect(res.status).toBe(401);
+    const raw = JSON.parse(res.body) as unknown;
+    const parsed = AdminErrorEnvelopeSchema.safeParse(raw);
+    expect(parsed.success, JSON.stringify(raw)).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.error.code).toBe("invalid_credentials");
+      expect(parsed.data.error.details).toEqual({});
+      expect(ADMIN_ERROR_CODE_SET.has(parsed.data.error.code)).toBe(true);
+    }
+  });
+
+  it("login 429 keeps Retry-After and canonical envelope", async () => {
+    _resetLoginRateLimitForTests();
+    const userStore = new InMemoryAdminUserStore();
+    await seedAdmin(userStore, "pw-envelope-rl");
+    const { router } = buildRouter(userStore);
+    const remote = "203.0.113.50";
+    const body = Buffer.from(JSON.stringify({ username: "admin", password: "wrong-password" }));
+    const headers = { "content-type": "application/json" };
+    for (let i = 0; i < LOGIN_RATE_MAX_REQUESTS; i++) {
+      const admitted = await router("POST", "/admin/v1/login", body, headers, remote);
+      // admitted attempts are auth failures (401), not rate-limited yet
+      expect(admitted.status).not.toBe(429);
+    }
+    const shed = await router("POST", "/admin/v1/login", body, headers, remote);
+    expect(shed.status).toBe(429);
+    const raw = JSON.parse(shed.body) as unknown;
+    const parsed = AdminErrorEnvelopeSchema.safeParse(raw);
+    expect(parsed.success, JSON.stringify(raw)).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.error.code).toBe("rate_limited");
+      expect(parsed.data.error.details).toEqual({});
+    }
+    expect(shed.headers["retry-after"]).toBe(String(LOGIN_RATE_WINDOW_MS / 1000));
   });
 });

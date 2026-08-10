@@ -35,8 +35,9 @@
     --radius-xs: 6px;
     --side: 60px;
     --side-open: 228px;
-    --font: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    /* System stacks only — no third-party font hosts (ZTR-1190; CSP style-src 'self'). */
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
     --ease: cubic-bezier(.2, .8, .2, 1);
   }
 

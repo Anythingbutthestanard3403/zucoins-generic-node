@@ -81,7 +81,23 @@ describe("tryServeAdminSpa", () => {
     expect(headRes.headers["x-frame-options"]).toBe("DENY");
   });
 
-});
+  it("CSP stays self-only — no third-party font hosts (ZTR-1190)", () => {
+    const dist = mkdtempSync(join(tmpdir(), "spa-"));
+    writeFileSync(join(dist, "index.html"), "<!doctype html><title>zu</title>");
+    const headRes = mockRes();
+    expect(
+      tryServeAdminSpa(
+        { method: "HEAD", url: "/" } as never,
+        headRes as never,
+        dist,
+      ),
+    ).toBe(true);
+    const csp = headRes.headers["content-security-policy"] ?? "";
+    expect(csp).toMatch(/style-src 'self' 'unsafe-inline'/);
+    expect(csp).not.toMatch(/fonts\.googleapis\.com|fonts\.gstatic\.com/);
+    // No font-src host allowlist; default-src 'self' covers fonts if self-hosted later.
+    expect(csp).not.toMatch(/font-src[^;]*https?:/);
+  });
 
   it("serves webmanifest with manifest MIME and no-cache", () => {
     const dist = mkdtempSync(join(tmpdir(), "spa-"));
@@ -89,14 +105,22 @@ describe("tryServeAdminSpa", () => {
     writeFileSync(join(dist, "manifest.webmanifest"), '{"name":"Zu Node Operator"}');
     writeFileSync(join(dist, "sw.js"), "/* shell */");
     const man = mockRes();
-    expect(tryServeAdminSpa({ method: "HEAD", url: "/manifest.webmanifest" } as never, man as never, dist)).toBe(true);
+    expect(
+      tryServeAdminSpa(
+        { method: "HEAD", url: "/manifest.webmanifest" } as never,
+        man as never,
+        dist,
+      ),
+    ).toBe(true);
     expect(man.status).toBe(200);
     expect(man.headers["content-type"]).toContain("application/manifest+json");
     expect(man.headers["cache-control"]).toBe("no-cache");
     const sw = mockRes();
-    expect(tryServeAdminSpa({ method: "HEAD", url: "/sw.js" } as never, sw as never, dist)).toBe(true);
+    expect(
+      tryServeAdminSpa({ method: "HEAD", url: "/sw.js" } as never, sw as never, dist),
+    ).toBe(true);
     expect(sw.status).toBe(200);
     expect(sw.headers["content-type"]).toContain("javascript");
     expect(sw.headers["cache-control"]).toBe("no-cache");
   });
-
+});

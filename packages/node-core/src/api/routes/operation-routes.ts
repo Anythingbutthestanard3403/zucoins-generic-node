@@ -2,6 +2,7 @@
 // 5.1–5.2, 6.1–6.2.
 
 import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
+import type { ExecutionPhase } from "../../core/execution-phase.js";
 import type { PipelineContext } from "../pipeline.js";
 import { apiErrorResponse, type ApiErrorResponse } from "../error-envelope.js";
 import { MoveAdmissionError } from "../../move/create.js";
@@ -47,7 +48,10 @@ export interface InternalMoveResponse {
   readonly destination_id: string;
   readonly spawned_from_operation_id: string | null;
   readonly lease_status: string;
+  readonly execution_phase: ExecutionPhase;
   readonly expected_artifact: ExpectedArtifact | null;
+  readonly source_terminal_observation_id: string | null;
+  readonly destination_terminal_observation_id: string | null;
 }
 
 export interface ExternalSendResponse {

@@ -214,6 +214,25 @@ describe("two-directional route inventory diff", () => {
 });
 
 describe("field inventory ↔ Zod / parity", () => {
+  it("freezes the live internal-move read projection fields", () => {
+    const schema = generateOpenApiDocument().components.schemas.InternalMoveResponse as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toEqual([
+      "operation",
+      "source_wallet_id",
+      "destination_id",
+      "spawned_from_operation_id",
+      "lease_status",
+      "execution_phase",
+      "expected_artifact",
+      "source_terminal_observation_id",
+      "destination_terminal_observation_id",
+    ]);
+    expect(Object.keys(schema.properties)).toEqual(schema.required);
+  });
+
   it("openApiScalarConstraintsMatchRuntime is green on live constants", () => {
     const check = openApiScalarConstraintsMatchRuntime();
     expect(check.mismatches).toEqual([]);

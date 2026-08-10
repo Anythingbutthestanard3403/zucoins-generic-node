@@ -1,0 +1,15 @@
+# ZTR-1141 implementation handoff
+- Lane: `/home/aiboi/ztr-1141-live-internal-move-read`
+- Branch: `ztr-1141-live-internal-move-read`
+- Added live `GET /v1/internal-moves/:operation_id` projection from production SQL.
+- Preserves exact persisted artifact preimage/signature bytes; no reconstruction.
+- Derives execution phase from durable facts and fail-closes split dual leases to attention.
+- Projects terminal timestamps, proof window, attention reason, and both terminal observations.
+- Expanded frozen response Zod surface and deterministic OpenAPI generator/snapshot.
+- Added route/adapter tests plus strict real-PostgreSQL production-route coverage.
+- Focused node tests: 59/59 pass (live move 6/6, route 26/26, OpenAPI 27/27).
+- Contract schema tests: 25/25 pass.
+- Real PG route suite: 6/6 pass with `PG_REQUIRED=1` and native PostgreSQL 16 `psql`.
+- Touched-path ESLint: pass.
+- Canonical package test/lint/build: pending final exact-head transaction.
+- No merge performed; handoff target is QA Review.

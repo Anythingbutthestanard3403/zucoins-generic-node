@@ -14,6 +14,7 @@ import { SPLITCHAIN_FUTURE_TIME_CEILING_SECS } from "../../protocol/receive-ttl.
 import {
   ANCHOR_PATTERN,
   DECIMAL_SEQ_PATTERN,
+  ED25519_SIG_PATTERN,
   POSITIVE_ZKZ_OPENAPI_PATTERN,
   SHA256_HEX_PATTERN,
   UUID_PATTERN,
@@ -325,6 +326,39 @@ export const NEEDS_ATTENTION_QUERY: Readonly<Record<string, JsonSchema>> = {
   limit: { type: "integer", minimum: 1, maximum: 200 },
 };
 
+const ed25519Sig: JsonSchema = {
+  type: "string",
+  pattern: ED25519_SIG_PATTERN,
+  description: "Ed25519 signature — padded base64url, 88 chars (86 body + '==').",
+};
+
+const rfc3339Ms: JsonSchema = {
+  type: "string",
+  pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+  description: "Canonical RFC 3339 UTC timestamp with exactly three fractional digits.",
+};
+
+export const BLESS_BODY: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["nonce", "issued_at", "expires_at", "device_signature", "device_key_id"],
+  properties: {
+    nonce: uuid,
+    issued_at: rfc3339Ms,
+    expires_at: rfc3339Ms,
+    device_signature: ed25519Sig,
+    device_key_id: uuid,
+  },
+};
+
+/** Empty body for destination retire — no properties; unknown keys rejected. */
+export const RETIRE_BODY: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [],
+  properties: {},
+};
+
 /** Body schema by method+path for routes that accept a JSON body. */
 export const BODY_BY_ROUTE: ReadonlyMap<string, JsonSchema> = new Map([
   ["POST /v1/receives", CREATE_RECEIVE_BODY],
@@ -335,6 +369,8 @@ export const BODY_BY_ROUTE: ReadonlyMap<string, JsonSchema> = new Map([
   ["POST /v1/operations/:operation_id/verification-complete", VERIFICATION_COMPLETE_BODY],
   ["POST /admin/v1/external-sends/:operation_id/approve", APPROVE_BODY],
   ["POST /admin/v1/external-sends/:operation_id/reject", REJECT_BODY],
+  ["POST /admin/v1/destinations/:destination_id/bless", BLESS_BODY],
+  ["POST /admin/v1/destinations/:destination_id/retire", RETIRE_BODY],
   ["POST /admin/v1/operations/:operation_id/recovery-actions", RECOVERY_ACTIONS_BODY],
 ]);
 

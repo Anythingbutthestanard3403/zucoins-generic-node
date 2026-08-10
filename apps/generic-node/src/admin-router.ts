@@ -8,6 +8,7 @@
 
 import {
   ApproveBody,
+  BlessBody,
   RecoveryActionsBody,
   RejectBody,
   TotpConsumptionLog,
@@ -362,41 +363,19 @@ function parseDeviceRevokeBody(
   };
 }
 
-function parseBlessBody(
-  raw: unknown,
-): ParseOk<{
-  nonce: string;
-  issued_at: string;
-  expires_at: string;
-  device_signature: string;
-  device_key_id: string;
-}> | ParseFail {
-  if (!isRecord(raw)) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+function parseBlessBody(raw: unknown): ParseOk<ReturnType<typeof BlessBody.parse>> | ParseFail {
+  const r = BlessBody.safeParse(raw);
+  if (!r.success) {
+    const issue = r.error.issues[0];
+    const code = issue?.code === "unrecognized_keys" ? "unknown_field" : "invalid_scalar";
+    return {
+      ok: false,
+      status: 400,
+      code,
+      message: code === "unknown_field" ? "unknown field" : "request body failed validation",
+    };
   }
-  const nonce = raw.nonce;
-  const issued_at = raw.issued_at;
-  const expires_at = raw.expires_at;
-  const device_signature = raw.device_signature;
-  const device_key_id = raw.device_key_id;
-  if (
-    typeof nonce !== "string" ||
-    typeof issued_at !== "string" ||
-    typeof expires_at !== "string" ||
-    typeof device_signature !== "string" ||
-    typeof device_key_id !== "string" ||
-    nonce.length === 0 ||
-    issued_at.length === 0 ||
-    expires_at.length === 0 ||
-    device_signature.length === 0 ||
-    device_key_id.length === 0
-  ) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: "blessing fields required" };
-  }
-  return {
-    ok: true,
-    body: { nonce, issued_at, expires_at, device_signature, device_key_id },
-  };
+  return { ok: true, body: r.data };
 }
 
 function parseRetireBody(raw: unknown): ParseOk<Record<string, never>> | ParseFail {

@@ -106,12 +106,18 @@ export const IdempotencyKeySchema = z
   .max(IDEMPOTENCY_KEY_MAX_LENGTH, "must be 16-255 visible ASCII chars")
   .regex(new RegExp(IDEMPOTENCY_KEY_PATTERN), "must be visible ASCII only");
 
+// Structural pattern + Date round-trip — same acceptance as encodeCanonicalTimestamp
+// (protocol/suite/encoders.ts). Pattern alone admits calendar-invalid months/days.
 export const Rfc3339MsSchema = z
   .string()
   .regex(
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
     "must be RFC 3339 UTC with millisecond precision",
-  );
+  )
+  .refine((value) => {
+    const parsed = new Date(value);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
+  }, "must be a calendar-valid RFC 3339 UTC timestamp");
 
 export const DECIMAL_SEQ_PATTERN = "^(0|[1-9][0-9]*)$";
 

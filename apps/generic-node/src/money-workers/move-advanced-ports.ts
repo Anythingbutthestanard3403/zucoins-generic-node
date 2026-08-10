@@ -10,6 +10,9 @@
 
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   captureAndBindMoveBaselines,
   createMoneySignerBoundaryDeps,
@@ -102,6 +105,8 @@ export interface MoveAdvancedPortsDeps {
   readonly gatewayBackoffMaxMs?: number;
   readonly nodeIdentitySigner: () => ReceiveCodeNodeIdentitySigner | null;
   readonly logger: MoveInternalWorkerLogger;
+  /** Transaction-local money-path statement_timeout (ZTR-1156). */
+  readonly moneyPathStatementTimeoutMs?: number;
 }
 
 interface MoveOperationDetails {
@@ -403,6 +408,8 @@ export function createMoveAdvancedPorts(
 ): Partial<MoveInternalMoneyWorkerPorts> {
   const query = createSqlQueryFn(deps.pool);
   const sqlExecutor = createSqlExecutor(deps.pool);
+  const statementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   const readFreshHead = createSqlFreshHeadReader({
     pool: deps.pool,
     nodeId: deps.nodeId,
@@ -410,6 +417,7 @@ export function createMoveAdvancedPorts(
     exchange: deps.gatewayExchange,
     maxAttempts: deps.gatewayMaxAttempts,
     backoffMaxMs: deps.gatewayBackoffMaxMs,
+    moneyPathStatementTimeoutMs: statementTimeoutMs,
   });
   const observer = createMoveBaselineObserver(readFreshHead);
   const destinationReader = createDestinationEligibilityReader(deps.pool);
@@ -690,6 +698,10 @@ export function createMoveAdvancedPorts(
         const client = await deps.pool.connect();
         try {
           await client.query("BEGIN");
+          await applyMoneyPathStatementTimeout(
+            client,
+            deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+          );
           const txQuery = createSqlQueryFn(client);
 
           const opRows = await txQuery(

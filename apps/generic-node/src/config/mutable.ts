@@ -71,6 +71,15 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   // change that never takes effect. Making it changeable at runtime means moving
   // the policy to durable storage behind a guarded mutation, not relabelling it.
   "DUAL_CONTROL_MODE",
+  // Runtime pg.Pool + leadership ownership knobs are read once when the pool /
+  // leadership watch is constructed; a mutable write would not rebuild either
+  // (ZTR-1156).
+  "DB_POOL_MAX",
+  "DB_POOL_CONNECTION_TIMEOUT_MS",
+  "DB_POOL_IDLE_TIMEOUT_MS",
+  "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS",
+  "MONEY_PATH_STATEMENT_TIMEOUT_MS",
+  "SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS",
 ] as const satisfies readonly (keyof NodeConfig)[];
 
 export const MUTABLE_CONFIG_FIELDS = [

@@ -6,6 +6,9 @@
 
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   acquireMoveLeases,
   createSqlMoveWorkerProgressLoader,
@@ -107,10 +110,15 @@ type SqlTx = {
   ) => Promise<{ rows: R[]; rowCount: number | null }>;
 };
 
-async function withTransaction<T>(pool: Pool, fn: (tx: SqlTx) => Promise<T>): Promise<T> {
+async function withTransaction<T>(
+  pool: Pool,
+  fn: (tx: SqlTx) => Promise<T>,
+  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const tx: SqlTx = {
       query: async <R>(text: string, params?: readonly unknown[]) => {
         const result = await client.query(text, params as never);
@@ -149,9 +157,12 @@ export function createMoveInternalLeaseAndProgressPorts(deps: {
   readonly pool: Pool;
   readonly ownerInstanceId: string;
   readonly advanced?: Partial<MoveInternalMoneyWorkerPorts>;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): MoveInternalMoneyWorkerPorts {
   const pool = deps.pool;
   const advanced = deps.advanced ?? {};
+  const statementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
 
   const loadProgress: MoveInternalMoneyWorkerPorts["loadProgress"] =
     advanced.loadProgress ??
@@ -213,13 +224,16 @@ export function createMoveInternalLeaseAndProgressPorts(deps: {
         return { ok: false, reason: "operation not pending or leases incomplete" };
       }
       const moveTx: MoveLeaseTxFn = (body) =>
-        withTransaction(pool, (tx) =>
-          body({
-            query: async <R>(text: string, params?: readonly unknown[]) => {
-              const result = await tx.query<R>(text, params);
-              return { rows: result.rows, rowCount: result.rowCount };
-            },
-          }),
+        withTransaction(
+          pool,
+          (tx) =>
+            body({
+              query: async <R>(text: string, params?: readonly unknown[]) => {
+                const result = await tx.query<R>(text, params);
+                return { rows: result.rows, rowCount: result.rowCount };
+              },
+            }),
+          statementTimeoutMs,
         );
       const outcome = await acquireMoveLeases(moveTx, {
         operationId: row.operationId,

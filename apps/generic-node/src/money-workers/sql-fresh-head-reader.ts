@@ -23,6 +23,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   buildGenesisWalletHeadFingerprint,
   buildGetTransactionActionData,
@@ -66,6 +69,8 @@ export interface SqlFreshHeadReaderDeps {
   readonly maxAttempts?: number;
   /** GATEWAY_READ_BACKOFF_MAX_MS — absent resolves to the read primitive's default. */
   readonly backoffMaxMs?: number;
+  /** Transaction-local money-path statement_timeout (ZTR-1156). */
+  readonly moneyPathStatementTimeoutMs?: number;
 }
 
 /**
@@ -158,6 +163,10 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
     const client = await deps.pool.connect();
     try {
       await client.query("BEGIN");
+      await applyMoneyPathStatementTimeout(
+        client,
+        deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+      );
       const observerId = await ensureNodeObserver(client, deps.nodeId, endpointFingerprint);
       const wallet = await client.query<{ id: string }>(
         `SELECT id::text AS id FROM wallets WHERE public_key = $1 LIMIT 1`,

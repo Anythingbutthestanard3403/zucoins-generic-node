@@ -33,7 +33,16 @@ import {
 
 
 import {
+  DB_POOL_CONNECTION_TIMEOUT_MS_DEFAULT,
+  DB_POOL_IDLE_TIMEOUT_MS_DEFAULT,
+  DB_POOL_KEEPALIVE_INITIAL_DELAY_MS_DEFAULT,
+  DB_POOL_MAX_DEFAULT,
+  DB_POOL_MAX_MAX,
+  DB_POOL_MAX_MIN,
   DEFAULT_PUSH_API_BASE,
+  MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+  MONEY_PATH_STATEMENT_TIMEOUT_MS_MAX,
+  MONEY_PATH_STATEMENT_TIMEOUT_MS_MIN,
   POOL_CAP_CEILING,
   POOL_CAP_DEFAULT,
   POOL_FLOOR,
@@ -45,6 +54,9 @@ import {
   RECEIVE_TTL_DEFAULT_SECS_DEFAULT,
   RECEIVE_TTL_MAX_SECS_DEFAULT,
   RECEIVE_TTL_MIN_SECS_DEFAULT,
+  SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_DEFAULT,
+  SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MAX,
+  SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MIN,
 } from "./constants.js";
 import {
   commaSeparatedOptional,
@@ -200,6 +212,62 @@ export const CONFIG_FIELD_SCHEMAS = {
       `POOL_CAP_TOTAL must be between ${POOL_FLOOR} and ${POOL_CAP_CEILING}`,
     )
     .default(POOL_CAP_DEFAULT),
+
+  // Runtime pg.Pool knobs (ZTR-1156). First-boot: the pool is constructed once
+  // at composition and is never rebuilt from a mutable settings write.
+  DB_POOL_MAX: z.coerce
+    .number()
+    .int("DB_POOL_MAX must be an integer")
+    .min(DB_POOL_MAX_MIN, `DB_POOL_MAX must be between ${DB_POOL_MAX_MIN} and ${DB_POOL_MAX_MAX}`)
+    .max(DB_POOL_MAX_MAX, `DB_POOL_MAX must be between ${DB_POOL_MAX_MIN} and ${DB_POOL_MAX_MAX}`)
+    .default(DB_POOL_MAX_DEFAULT),
+  DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int("DB_POOL_CONNECTION_TIMEOUT_MS must be an integer")
+    .min(100, "DB_POOL_CONNECTION_TIMEOUT_MS must be between 100 and 120000")
+    .max(120_000, "DB_POOL_CONNECTION_TIMEOUT_MS must be between 100 and 120000")
+    .default(DB_POOL_CONNECTION_TIMEOUT_MS_DEFAULT),
+  DB_POOL_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int("DB_POOL_IDLE_TIMEOUT_MS must be an integer")
+    .min(1_000, "DB_POOL_IDLE_TIMEOUT_MS must be between 1000 and 600000")
+    .max(600_000, "DB_POOL_IDLE_TIMEOUT_MS must be between 1000 and 600000")
+    .default(DB_POOL_IDLE_TIMEOUT_MS_DEFAULT),
+  DB_POOL_KEEPALIVE_INITIAL_DELAY_MS: z.coerce
+    .number()
+    .int("DB_POOL_KEEPALIVE_INITIAL_DELAY_MS must be an integer")
+    .min(0, "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS must be between 0 and 120000")
+    .max(120_000, "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS must be between 0 and 120000")
+    .default(DB_POOL_KEEPALIVE_INITIAL_DELAY_MS_DEFAULT),
+  // Transaction-local bound applied after BEGIN on money-path work. Not a
+  // pool-wide default — migrations set their own longer session timeout.
+  MONEY_PATH_STATEMENT_TIMEOUT_MS: z.coerce
+    .number()
+    .int("MONEY_PATH_STATEMENT_TIMEOUT_MS must be an integer")
+    .min(
+      MONEY_PATH_STATEMENT_TIMEOUT_MS_MIN,
+      `MONEY_PATH_STATEMENT_TIMEOUT_MS must be between ${MONEY_PATH_STATEMENT_TIMEOUT_MS_MIN} and ${MONEY_PATH_STATEMENT_TIMEOUT_MS_MAX}`,
+    )
+    .max(
+      MONEY_PATH_STATEMENT_TIMEOUT_MS_MAX,
+      `MONEY_PATH_STATEMENT_TIMEOUT_MS must be between ${MONEY_PATH_STATEMENT_TIMEOUT_MS_MIN} and ${MONEY_PATH_STATEMENT_TIMEOUT_MS_MAX}`,
+    )
+    .default(MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT),
+  // How often the dedicated leadership connection re-asks the server whether
+  // it still holds the session advisory lock (independent of error/end).
+  SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS: z.coerce
+    .number()
+    .int("SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS must be an integer")
+    .min(
+      SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MIN,
+      `SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS must be between ${SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MIN} and ${SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MAX}`,
+    )
+    .max(
+      SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MAX,
+      `SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS must be between ${SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MIN} and ${SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MAX}`,
+    )
+    .default(SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_DEFAULT),
+
   RECEIVE_QUEUE_MAX_WAIT: z.coerce
     .number()
     .int("RECEIVE_QUEUE_MAX_WAIT must be an integer number of seconds")

@@ -23,6 +23,8 @@
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
 import {
   assignReceiveWallet,
   captureReceiveT0,
@@ -159,6 +161,12 @@ export interface StartMoneyWorkersDeps {
   readonly config: MoneyWorkerConfig;
   readonly logger: MoneyWorkerLogger;
   readonly moneyPathGates: WorkerMoneyPathGates;
+  /**
+   * Transaction-local statement_timeout for money-path worker TXs (ZTR-1156).
+   * Defaults to MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT; production main passes
+   * the validated config value. Never applied as a pool-wide default.
+   */
+  readonly moneyPathStatementTimeoutMs?: number;
   readonly nodeIdentitySigner: () => ReceiveCodeNodeIdentitySigner | null;
   /**
    * Sealed EVENT_SIGNING signer for the durable event chains. An unsigned event
@@ -281,10 +289,15 @@ type SqlTx = {
   ) => Promise<{ rows: R[]; rowCount: number | null }>;
 };
 
-async function withTransaction<T>(pool: Pool, fn: (tx: SqlTx) => Promise<T>): Promise<T> {
+async function withTransaction<T>(
+  pool: Pool,
+  fn: (tx: SqlTx) => Promise<T>,
+  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const tx: SqlTx = {
       query: async <R>(text: string, params?: readonly unknown[]) => {
         const result = await client.query(text, params as never);
@@ -479,6 +492,7 @@ async function advanceAssignedReceive(deps: {
   readonly events: (tx: SqlTx) => ReceiveReadyEventAppender;
   /** Push subscription gate (optional; absent = disabled). */
   readonly requireActivePushSubscription?: (walletId: string) => Promise<void>;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): Promise<void> {
   // Defer EXTERNAL receive formation when the wallet has no ACTIVE push
   // subscription. The periodic reconciliation repairs it; the next tick retries. // contract-allow:sweep:frozen structural vocabulary
@@ -594,16 +608,19 @@ async function advanceAssignedReceive(deps: {
     return;
   }
 
-  const commitResult = await withTransaction(deps.pool, async (tx) =>
-    commitReceiveReady({
-      formed: formed.formed,
-      receiverWalletId: deps.row.walletId,
-      leaseEpoch,
-      readyAt: new Date().toISOString(),
-      destinationId: afterLanding.kind === "INTERNAL_MOVE" ? afterLanding.destination_id : null,
-      sql: tx,
-      events: deps.events(tx),
-    }),
+  const commitResult = await withTransaction(
+    deps.pool,
+    async (tx) =>
+      commitReceiveReady({
+        formed: formed.formed,
+        receiverWalletId: deps.row.walletId,
+        leaseEpoch,
+        readyAt: new Date().toISOString(),
+        destinationId: afterLanding.kind === "INTERNAL_MOVE" ? afterLanding.destination_id : null,
+        sql: tx,
+        events: deps.events(tx),
+      }),
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
   );
 
   if (!commitResult.ok) {
@@ -714,6 +731,7 @@ async function runReceiveExpiryReleaseStep(deps: {
   readonly pool: Pool;
   readonly logger: MoneyWorkerLogger;
   readonly stopped: () => boolean;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): Promise<{
   readonly processed: number;
   readonly released: number;
@@ -735,12 +753,15 @@ async function runReceiveExpiryReleaseStep(deps: {
   // pass runs with `freshObservationId: null` (below), so no gateway read and no chain
   // submit can occur inside it — the same discipline sql-recovery-store.ts applies when it
   // wraps this very service.
+  const expiryStatementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   const service = new SqlReceiveExpiryReleaseService({
     withTransaction: async <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> =>
       withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, async () => {
         const client = await deps.pool.connect();
         try {
           await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+          await applyMoneyPathStatementTimeout(client, expiryStatementTimeoutMs);
           const tx: SqlTx = {
             query: async <R>(text: string, params?: readonly unknown[]) => {
               const result = await client.query(text, params as never);
@@ -837,6 +858,7 @@ export function resolveMoneyPathT0Observer(deps: {
   readonly t0Observer?: ReceiveT0Observer;
   readonly allowGenesisT0Stub?: boolean;
   readonly metricsHooks?: MetricsHooks;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): { readonly observer: ReceiveT0Observer; readonly kind: "gateway" | "genesis_stub" | "injected" } {
   if (deps.t0Observer !== undefined) {
     return { observer: deps.t0Observer, kind: "injected" };
@@ -858,13 +880,22 @@ export function resolveMoneyPathT0Observer(deps: {
           ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
           : {}),
         ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+        ...(deps.moneyPathStatementTimeoutMs !== undefined
+          ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
+          : {}),
       }),
       kind: "gateway",
     };
   }
   if (deps.allowGenesisT0Stub === true) {
     return {
-      observer: createGenesisT0Observer({ pool: deps.pool, nodeId: deps.nodeId }),
+      observer: createGenesisT0Observer({
+        pool: deps.pool,
+        nodeId: deps.nodeId,
+        ...(deps.moneyPathStatementTimeoutMs !== undefined
+          ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
+          : {}),
+      }),
       kind: "genesis_stub",
     };
   }
@@ -884,6 +915,10 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
         "(set allowMissingEventSigner only for explicit offline tests)",
     );
   }
+  const statementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
+  const withMoneyTx = <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> =>
+    withTransaction(deps.pool, fn, statementTimeoutMs);
   const leases = createReceiveLeasePort();
   const formationStore = createSqlReceiveCodeFormationStore(deps.pool);
   const resolved = resolveMoneyPathT0Observer({
@@ -896,6 +931,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     t0Observer: deps.t0Observer,
     allowGenesisT0Stub: deps.config.allowGenesisT0Stub,
     ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+    moneyPathStatementTimeoutMs: statementTimeoutMs,
   });
   const observer = resolved.observer;
   deps.logger.info(
@@ -995,8 +1031,11 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             ...(deps.gatewayBackoffMaxMs !== undefined
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
+            moneyPathStatementTimeoutMs: statementTimeoutMs,
           }),
-          store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null),
+          store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
+            statementTimeoutMs,
+          }),
         }
       : null;
 
@@ -1019,7 +1058,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     await mirrorReceiveOperationsToOperations(deps.pool, deps.logger);
 
     let mintedWalletIds: readonly string[] = [];
-    await withTransaction(deps.pool, async (tx) => {
+    await withMoneyTx(async (tx) => {
       const result = await runPoolScaleUp(tx, { limits, mint });
       mintedWalletIds = result.mintedWalletIds;
       if (result.mintedWalletIds.length > 0) {
@@ -1044,7 +1083,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       {
         limits: queueLimits,
         allocate: async (operationId) =>
-          withTransaction(deps.pool, async (tx) =>
+          withMoneyTx(async (tx) =>
             assignReceiveWallet(tx, {
               operationId,
               ownerInstanceId: deps.config.ownerInstanceId,
@@ -1064,7 +1103,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       );
     }
 
-    const expiredReceives = await withTransaction(deps.pool, async (tx) =>
+    const expiredReceives = await withMoneyTx(async (tx) =>
       expireQueueAgedReceives(tx, {
         limits,
         emitExpired: async (_db, p) => {
@@ -1112,6 +1151,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           nodeIdentitySigner: deps.nodeIdentitySigner,
           logger: deps.logger,
           events,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         deps.trackSigningInflight?.(advance);
         await advance;
@@ -1155,11 +1195,15 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             ...(deps.gatewayBackoffMaxMs !== undefined
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
+            moneyPathStatementTimeoutMs: statementTimeoutMs,
           }),
-          store: createSqlExternalSendLandingStore(deps.pool, deps.eventSigner?.() ?? null),
+          store: createSqlExternalSendLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
+            statementTimeoutMs,
+          }),
           nodeId: deps.config.nodeId,
           deviceKeyStore: deps.deviceKeyStore ?? new InMemoryDeviceKeyStore(),
           ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
       } catch (err) {
         deps.logger.error("money-workers: SEND completion lander tick failed", err);
@@ -1250,6 +1294,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           pool: deps.pool,
           ownerInstanceId: deps.config.ownerInstanceId,
           logger: deps.logger,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         if (handoff.spawned > 0 || handoff.failed > 0) {
           deps.logger.info(
@@ -1270,6 +1315,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           pool: deps.pool,
           logger: deps.logger,
           stopped: () => stopped,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         if (expiryResult.released > 0) {
           deps.logger.info(
@@ -1291,6 +1337,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           pool: deps.pool,
           ownerInstanceId: deps.config.ownerInstanceId,
           advanced: deps.moveInternalPorts,
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
         });
         await tickMoveInternalMoneyWorkers({
           pool: deps.pool,

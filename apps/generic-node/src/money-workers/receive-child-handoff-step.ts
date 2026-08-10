@@ -6,6 +6,9 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   createChildMoveWithContinuousSourceTransfer,
   MOVE_ADMISSION_EVENTS_DDL,
@@ -24,6 +27,7 @@ export interface ReceiveChildHandoffDeps {
   readonly ownerInstanceId: string;
   readonly logger: ReceiveChildHandoffLogger;
   readonly batchSize?: number;
+  readonly moneyPathStatementTimeoutMs?: number;
 }
 
 /** RECEIVE_LANDED + INTERNAL_MOVE + no child MOVE yet (or child exists without MOVE_SOURCE). */
@@ -57,10 +61,15 @@ export interface ReceiveChildHandoffResult {
   readonly failed: number;
 }
 
-async function withTransaction<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+async function withTransaction<T>(
+  pool: Pool,
+  fn: (client: PoolClient) => Promise<T>,
+  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const out = await fn(client);
     await client.query("COMMIT");
     return out;
@@ -93,25 +102,31 @@ export async function runReceiveChildHandoffStep(
 
   for (const row of candidates.rows) {
     try {
-      const result: ContinuousHandoffResult = await withTransaction(deps.pool, async (client) => {
-        const sql = {
-          query: async <R>(text: string, params?: readonly unknown[]) => {
-            const r = await client.query(text, params as never);
-            return { rows: r.rows as R[], rowCount: r.rowCount };
-          },
-        };
-        const withTx: MoveSqlTxFn = async (body) => body(sql as MoveSqlExecutor);
-        return createChildMoveWithContinuousSourceTransfer(
-          withTx,
-          { sql: sql as MoveSqlExecutor },
-          {
-            parentOperationId: row.parent_operation_id,
-            ownerInstanceId: deps.ownerInstanceId,
-            landingProofDigest: row.landing_proof_digest,
-            generateId: () => randomUUID(),
-          },
-        );
-      });
+      const statementTimeoutMs =
+        deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
+      const result: ContinuousHandoffResult = await withTransaction(
+        deps.pool,
+        async (client) => {
+          const sql = {
+            query: async <R>(text: string, params?: readonly unknown[]) => {
+              const r = await client.query(text, params as never);
+              return { rows: r.rows as R[], rowCount: r.rowCount };
+            },
+          };
+          const withTx: MoveSqlTxFn = async (body) => body(sql as MoveSqlExecutor);
+          return createChildMoveWithContinuousSourceTransfer(
+            withTx,
+            { sql: sql as MoveSqlExecutor },
+            {
+              parentOperationId: row.parent_operation_id,
+              ownerInstanceId: deps.ownerInstanceId,
+              landingProofDigest: row.landing_proof_digest,
+              generateId: () => randomUUID(),
+            },
+          );
+        },
+        statementTimeoutMs,
+      );
 
       if (result.ok) {
         spawned += 1;

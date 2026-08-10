@@ -111,7 +111,9 @@ describe("deployment scenario 1 — fresh install (valid config, empty state)", 
 
   it("main.ts threads the SAME validated config.DATABASE_URL into both the runtime pool and runMigrations", () => {
     const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
-    expect(mainSource).toMatch(/createPool\(config\.DATABASE_URL\)/);
+    // Pool options bag (timeouts/keepAlive) sits after DATABASE_URL (ZTR-1156).
+    expect(mainSource).toMatch(/createPool\(\s*config\.DATABASE_URL\s*,/);
+    expect(mainSource).toMatch(/keepAlive:\s*true/);
     expect(mainSource).toMatch(/runMigrations\(config\.DATABASE_URL\)/);
     // The pre-rework regression: runMigrations() called with no argument, re-reading env itself.
     expect(mainSource).not.toMatch(/await runMigrations\(\s*\)/);

@@ -46,6 +46,13 @@ describe("first-boot vs mutable split", () => {
       // read once at boot into the dual-control policy port; nothing re-applies a
       // changed value to a running node, so mutable would be a lie (ZTR-1148).
       "DUAL_CONTROL_MODE",
+      // Runtime pg.Pool + leadership ownership knobs are composition-time only (ZTR-1156).
+      "DB_POOL_MAX",
+      "DB_POOL_CONNECTION_TIMEOUT_MS",
+      "DB_POOL_IDLE_TIMEOUT_MS",
+      "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS",
+      "MONEY_PATH_STATEMENT_TIMEOUT_MS",
+      "SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS",
     ]);
     expect(MUTABLE_CONFIG_FIELDS).toEqual([
       "POOL_CAP_TOTAL",

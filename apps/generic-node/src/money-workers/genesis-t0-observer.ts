@@ -3,6 +3,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   GENESIS_PROJECTION,
@@ -34,12 +37,19 @@ const GENESIS_SEMANTIC = createHash("sha256")
  * `INDETERMINATE` mapping stays outside the retried body.
  */
 async function captureGenesisObservation(
-  deps: { readonly pool: Pool; readonly nodeId: string },
+  deps: {
+    readonly pool: Pool;
+    readonly nodeId: string;
+    readonly moneyPathStatementTimeoutMs?: number;
+  },
   walletPublicKey: string,
 ): Promise<ReceiveT0Observation> {
+  const statementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   const client = await deps.pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
     const existingObserver = await client.query<{ id: string }>(
       `SELECT id::text AS id FROM observers
         WHERE domain = 'NODE' AND owner_id = $1::uuid LIMIT 1`,
@@ -123,6 +133,7 @@ async function captureGenesisObservation(
 export function createGenesisT0Observer(deps: {
   readonly pool: Pool;
   readonly nodeId: string;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): ReceiveT0Observer {
   return {
     async observe(walletPublicKey: string): Promise<ReceiveT0Observation> {

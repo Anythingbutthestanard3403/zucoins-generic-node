@@ -12,6 +12,8 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
 import { sha256HexUtf8, type AttentionRetractionStore } from "@zucoins/node-core";
 
 // Row is locked (FOR UPDATE) before any check so the not-found / not-flagged / conflict
@@ -45,12 +47,18 @@ const SQL_INSERT_AUDIT_LOG = `
   VALUES ($1::uuid, $2::uuid, 'OPERATOR_SESSION', $3, $4, $5::uuid, NULL, $6, $7, now())
 `;
 
-export function createSqlAttentionRetractionStore(pool: Pool): AttentionRetractionStore {
+export function createSqlAttentionRetractionStore(
+  pool: Pool,
+  options: { readonly moneyPathStatementTimeoutMs?: number } = {},
+): AttentionRetractionStore {
+  const statementTimeoutMs =
+    options.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async commit(input) {
       const client: PoolClient = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
 
         const lockResult = await client.query<{
           node_id: string;

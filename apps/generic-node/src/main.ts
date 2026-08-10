@@ -123,7 +123,11 @@ import {
   type RuntimeListenerLogger,
 } from "./runtime-listener.js";
 import { createProductionRouteSurface, applyLabTotpBinding, resolveLabTotp } from "./full-http-mount.js";
-import { createPool, withPostgresDeadline } from "./db/client.js";
+import {
+  applyMoneyPathStatementTimeout,
+  createPool,
+  withPostgresDeadline,
+} from "./db/client.js";
 import { createProductionStoragePressureWiring } from "./storage-pressure.js";
 import { createBackupScheduler, probePgClientBinaries } from "./dr/index.js";
 import { createProductionMetricsSnapshotSource } from "./metrics/snapshot-source.js";
@@ -290,7 +294,14 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  const pool = createPool(config.DATABASE_URL);
+  const pool = createPool(config.DATABASE_URL, {
+    max: config.DB_POOL_MAX,
+    connectionTimeoutMillis: config.DB_POOL_CONNECTION_TIMEOUT_MS,
+    idleTimeoutMillis: config.DB_POOL_IDLE_TIMEOUT_MS,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: config.DB_POOL_KEEPALIVE_INITIAL_DELAY_MS,
+  });
+  const moneyPathStatementTimeoutMs = config.MONEY_PATH_STATEMENT_TIMEOUT_MS;
   // Hoisted above its other call sites (destination/device stores, metrics snapshot):
   // a plain query adapter over `pool`, no state of its own.
   const poolSql = {
@@ -490,6 +501,9 @@ async function main(): Promise<void> {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // Transaction-local bound — dies with COMMIT/ROLLBACK; never a pool default
+      // (migrations use a longer session-level SET on their own client).
+      await applyMoneyPathStatementTimeout(client, moneyPathStatementTimeoutMs);
       const tx = {
         query: async <R>(text: string, params?: readonly unknown[]) => {
           const result = await client.query(text, params as never);
@@ -641,6 +655,7 @@ async function main(): Promise<void> {
     nodeId: config.NODE_ID,
     pool,
     databaseUrl: config.DATABASE_URL,
+    moneyPathStatementTimeoutMs,
     // Env vault key ⇒ configured (no re-generate); backup KEK for ≠ check only.
     vaultMasterKey: config.VAULT_MASTER_KEY,
     backupMasterKey: config.BACKUP_MASTER_KEY ?? null,
@@ -1066,6 +1081,7 @@ async function main(): Promise<void> {
           lockId: SIGNER_LEADERSHIP_LOCK_ID,
           signal: leadershipAbort.signal,
           prolongedWaitMs: config.SIGNER_LEADERSHIP_RETRY_MAX_MS,
+          ownershipAssertIntervalMs: config.SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS,
           logger,
         });
         if (held === null) {
@@ -1095,6 +1111,7 @@ async function main(): Promise<void> {
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
+          await applyMoneyPathStatementTimeout(client, moneyPathStatementTimeoutMs);
           const sql = {
             query: async <R>(text: string, params?: readonly unknown[]) => {
               const result = await client.query(text, params as never);
@@ -1232,6 +1249,7 @@ async function main(): Promise<void> {
       moneyWorkers = startMoneyWorkers({
         pool,
         vault: vaultKeyStore,
+        moneyPathStatementTimeoutMs: moneyPathStatementTimeoutMs,
         config: {
           nodeId: config.NODE_ID,
           ownerInstanceId: config.NODE_ID,
@@ -1318,6 +1336,7 @@ async function main(): Promise<void> {
                 gatewayMaxAttempts: config.GATEWAY_READ_RETRY_MAX_ATTEMPTS,
                 gatewayBackoffMaxMs: config.GATEWAY_READ_BACKOFF_MAX_MS,
                 gatewayUrls: config.SPLITCHAIN_GATEWAY_URLS,
+                moneyPathStatementTimeoutMs,
                 nodeIdentitySigner: () => {
                   const held = sendSignerHolder.current;
                   if (!identityEnsured || held.signingKeyId === DEFERRED_SIGNING_KEY_ID) {

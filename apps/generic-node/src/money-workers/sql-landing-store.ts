@@ -18,6 +18,9 @@
 
 import type { Pool } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 import {
   RECEIVE_SETTLED_BODY_PERSISTED_PHASE,
   SqlReceiveLandingStore,
@@ -71,12 +74,16 @@ export interface CommitLandingResult {
 export function createSqlReceiveLandingStore(
   pool: Pool,
   eventSigner: NodeEventSigner | null,
+  options: { readonly statementTimeoutMs?: number } = {},
 ): ReceiveLandingStore {
+  const statementTimeoutMs =
+    options.statementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async commitLanding(command: CommitReceiveLandingCommand): Promise<CommitLandingResult> {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
         const inner = new SqlReceiveLandingStore(
           {
             // Pass-through: node-core's statements run on the transaction opened above, so its

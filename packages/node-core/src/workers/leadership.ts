@@ -22,6 +22,30 @@ export const TRY_ACQUIRE_LEADERSHIP_SQL = "SELECT pg_try_advisory_lock($1) AS lo
 export const RELEASE_LEADERSHIP_SQL = "SELECT pg_advisory_unlock($1) AS released";
 
 /**
+ * Positive ownership probe on the dedicated leadership connection (ZTR-1156).
+ * Confirms THIS backend pid still holds the session advisory lock — independent
+ * of transport `error`/`end`. Uses the single-bigint form of the lock id
+ * (`objsubid = 1`) that `pg_try_advisory_lock(bigint)` takes.
+ *
+ * Parameter $1 is the lock id (bigint). Returns one row with `owned = true`
+ * when the current backend still holds it.
+ */
+export const ASSERT_LEADERSHIP_OWNED_SQL = `
+SELECT EXISTS (
+  SELECT 1
+    FROM pg_locks
+   WHERE locktype = 'advisory'
+     AND granted = true
+     AND pid = pg_backend_pid()
+     AND objsubid = 1
+     AND classid = (($1::bigint >> 32) & 4294967295)::int
+     AND objid = ($1::bigint & 4294967295)::int
+) AS owned`.replace(/\s+/g, " ").trim();
+
+/** Default interval for the positive ownership watch (ms). Overridable via options. */
+export const DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS = 2_000;
+
+/**
  * One dedicated database connection. Shaped after a pooled client so a real driver's client
  * satisfies it structurally; `release` returns it to its pool (or closes it outright).
  *
@@ -115,7 +139,27 @@ export class SignerLeadership {
 export interface HeldSignerLeadership {
   /** Fired at most once when the dedicated connection dies. The latch is already false. */
   onLost(listener: (reason: string) => void): void;
+  /**
+   * Stop the positive ownership watch (if any). Safe to call after loss/release;
+   * does not release the lock — use {@link release} for that.
+   */
+  stopOwnershipWatch(): void;
   release(): Promise<void>;
+}
+
+export interface TryAcquireSignerLeadershipOptions {
+  /**
+   * How often to re-assert ownership server-side on the dedicated connection.
+   * `0` disables the watch (tests that only drive loss via error/end).
+   * Default {@link DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS}.
+   */
+  readonly ownershipAssertIntervalMs?: number;
+  /**
+   * Timer seams so the ownership watch is unit-testable without real wall time.
+   * Production leaves these undefined and uses the global timers.
+   */
+  readonly setIntervalFn?: (handler: () => void, ms: number) => unknown;
+  readonly clearIntervalFn?: (handle: unknown) => void;
 }
 
 /**
@@ -123,12 +167,27 @@ export interface HeldSignerLeadership {
  * armed) or `null` when another instance holds it — never blocks waiting for the holder.
  * A query error releases the probe connection and rethrows so the caller's backoff retries;
  * an unreachable database therefore never silently reads as leadership.
+ *
+ * `lockIdOrOptions` accepts the legacy positional `lockId` number OR an options bag so
+ * existing callers (`tryAcquire(pool, latch)`, `tryAcquire(pool, latch, lockId)`) keep
+ * working while ownership-watch knobs travel in the options bag.
  */
 export async function tryAcquireSignerLeadership(
   pool: LeadershipLockPool,
   latch: SignerLeadership,
-  lockId: number = SIGNER_LEADERSHIP_LOCK_ID,
+  lockIdOrOptions: number | TryAcquireSignerLeadershipOptions = SIGNER_LEADERSHIP_LOCK_ID,
+  maybeOptions?: TryAcquireSignerLeadershipOptions,
 ): Promise<HeldSignerLeadership | null> {
+  const lockId =
+    typeof lockIdOrOptions === "number" ? lockIdOrOptions : SIGNER_LEADERSHIP_LOCK_ID;
+  const options: TryAcquireSignerLeadershipOptions =
+    typeof lockIdOrOptions === "number" ? (maybeOptions ?? {}) : lockIdOrOptions;
+  const ownershipAssertIntervalMs =
+    options.ownershipAssertIntervalMs ?? DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS;
+  const setIntervalFn = options.setIntervalFn ?? ((handler, ms) => setInterval(handler, ms));
+  const clearIntervalFn =
+    options.clearIntervalFn ?? ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
+
   const client = await pool.connect();
   let locked = false;
   try {
@@ -147,46 +206,177 @@ export async function tryAcquireSignerLeadership(
   // From here the connection is dedicated: it is never returned until release or loss, so
   // the session-scoped lock persists for as long as this process holds leadership.
   let lost = false;
+  /**
+   * True only when the dedicated connection's transport died (`error`/`end`).
+   * Transport death frees the session advisory lock server-side, so unlock is skipped.
+   * Ownership-assert loss is the opposite: the backend is often still alive and still
+   * holds the lock — never treat it as transport-dead (ZTR-1156 bare-pool SPOF).
+   */
+  let transportDead = false;
   // release disposition for this handle. Separates connection-loss (`lost`) from the
   // terminal outcome of release so unlock-fail never looks like a clean unlock on
   // re-entry (boot-lane retains the handle after unlock-fail — re-entrancy SPOF).
   // open — no terminal release yet
-  // pooled — confirmed unlock (or prior connection loss); connection returned to pool
-  // failed — unlock failed; session destroyed or deliberately NOT pooled; sticky error
+  // pooled — confirmed unlock / transport death / ownership destroy; session not locked-in-pool
+  // failed — unlock/destroy failed; session deliberately NOT pooled; sticky error
   let releaseOutcome: "open" | "pooled" | "failed" = "open";
   let stickyReleaseErr: Error | undefined;
   // Single-flight: installed synchronously on first entry, before any await. Concurrent
   // release during unlock-query / end must join this promise — never fall through to
   // client.release while outcome is still "open" and lost already true (d72fd92).
   let releaseFlight: Promise<void> | undefined;
+  let ownershipTimer: unknown;
   const listeners: Array<(reason: string) => void> = [];
-  const onLoss = (event: "error" | "end") => (err?: Error): void => {
+  const stopOwnershipWatch = (): void => {
+    if (ownershipTimer !== undefined) {
+      clearIntervalFn(ownershipTimer);
+      ownershipTimer = undefined;
+    }
+  };
+
+  const destroySessionMandatory = async (context: string, cause?: unknown): Promise<void> => {
+    const causeMsg =
+      cause === undefined ? undefined : cause instanceof Error ? cause.message : String(cause);
+    if (typeof client.end !== "function") {
+      stickyReleaseErr = new Error(
+        `${context} and session has no end() destroy path${
+          causeMsg === undefined ? "" : `: cause=${causeMsg}`
+        }`,
+        cause === undefined ? undefined : { cause },
+      );
+      releaseOutcome = "failed";
+      throw stickyReleaseErr;
+    }
+    let destroyErr: unknown;
+    try {
+      await Promise.resolve(client.end());
+    } catch (err) {
+      destroyErr = err;
+    }
+    if (destroyErr !== undefined) {
+      const destroyMsg =
+        destroyErr instanceof Error ? destroyErr.message : String(destroyErr);
+      stickyReleaseErr = new Error(
+        `${context} and session destroy also failed${
+          causeMsg === undefined ? "" : `: cause=${causeMsg}`
+        }; destroy=${destroyMsg}`,
+        { cause: cause ?? destroyErr },
+      );
+      releaseOutcome = "failed";
+      throw stickyReleaseErr;
+    }
+  };
+
+  /**
+   * Ownership loss while the session may still be alive: destroy the dedicated
+   * connection so the advisory lock cannot outlive local authority. Standbys must
+   * not wait for process shutdown. Prefer destroy over unlock+pool-return so a
+   * flaky unlock cannot bare-pool a still-locked client (ZTR-1156 SPOF).
+   */
+  const disposeAfterOwnershipLoss = async (): Promise<void> => {
+    stopOwnershipWatch();
+    client.removeListener("error", onError);
+    client.removeListener("end", onEnd);
+    // Already latched lost by onLoss. Destroy is the terminal disposition — do not
+    // client.release() afterward (end/release(true) already retired the session).
+    try {
+      await destroySessionMandatory(
+        "signer leadership ownership lost",
+      );
+    } catch (err) {
+      // stickyReleaseErr + failed already set inside destroySessionMandatory.
+      throw err;
+    }
+    // Destroy succeeded — lock free server-side with the session. Terminal OK for
+    // later release() joins; never pool-return after end.
+    releaseOutcome = "pooled";
+  };
+
+  const onLoss = (event: "error" | "end" | "ownership") => (err?: Error): void => {
     if (lost) return;
     lost = true;
-    const reason = `signer leadership lock connection ${event}${
-      err === undefined ? "" : `: ${err.message}`
-    }`;
-    // Latch first, synchronously, before any observer runs: the lock is already free
-    // server-side, so another instance may acquire at any moment from now.
+    if (event === "error" || event === "end") {
+      transportDead = true;
+    }
+    stopOwnershipWatch();
+    const reason =
+      event === "ownership"
+        ? err?.message ?? "signer leadership ownership assertion failed"
+        : `signer leadership lock connection ${event}${
+            err === undefined ? "" : `: ${err.message}`
+          }`;
+    // Latch first, synchronously, before any observer runs.
+    // Transport death: lock is already free server-side — another instance may acquire now.
+    // Ownership loss: lock may still be held — disposeAfterOwnershipLoss frees it next.
     latch.markLost(reason);
     for (const listener of listeners) listener(reason);
+
+    if (event === "ownership" && releaseFlight === undefined) {
+      // Arm single-flight immediately (sync) so concurrent release() joins destroy
+      // instead of observing open+lost and bare-pooling (d72fd92 class).
+      releaseFlight = disposeAfterOwnershipLoss();
+      void releaseFlight.catch(() => {
+        // Rejection retained on releaseFlight for release() / boot quarantine.
+      });
+    }
   };
   const onError = onLoss("error");
   const onEnd = onLoss("end");
+  const onOwnershipLoss = onLoss("ownership");
   client.on("error", onError);
   client.on("end", onEnd);
 
   latch.markAcquired();
 
+  // Positive ownership watch — converts silence into a definite answer. A failed
+  // assertion latches lost and destroys the live session (not the transport-death
+  // skip-unlock path). Transport error/end on the probe still uses onError/onEnd.
+  if (ownershipAssertIntervalMs > 0) {
+    let assertInFlight = false;
+    ownershipTimer = setIntervalFn(() => {
+      if (lost || assertInFlight) return;
+      assertInFlight = true;
+      void client
+        .query(ASSERT_LEADERSHIP_OWNED_SQL, [lockId])
+        .then((result) => {
+          if (lost) return;
+          const owned =
+            (result.rows[0] as { owned?: unknown } | undefined)?.owned === true;
+          if (!owned) {
+            onOwnershipLoss(
+              new Error(
+                "signer leadership ownership assertion failed: lock not held by this backend",
+              ),
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          if (lost) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          onOwnershipLoss(
+            new Error(`signer leadership ownership assertion failed: ${msg}`, {
+              cause: err,
+            }),
+          );
+        })
+        .finally(() => {
+          assertInFlight = false;
+        });
+    }, ownershipAssertIntervalMs);
+  }
+
   const runRelease = async (): Promise<void> => {
+    stopOwnershipWatch();
     client.removeListener("error", onError);
     client.removeListener("end", onEnd);
     latch.markLost("signer leadership released");
-    // A dead connection has already freed the lock server-side; unlocking would only
-    // reject. Live unlock must succeed OR the session must be destroyed — never return a
+    // Skip unlock ONLY on true transport death — the server already dropped the
+    // session lock. Ownership-assert loss must NOT take this branch (transportDead
+    // stays false); that path destroys via disposeAfterOwnershipLoss instead.
+    // Live unlock must succeed OR the session must be destroyed — never return a
     // still-locked connection to the pool (idle pooled holder = permanent SPOF).
     let unlockErr: unknown;
-    if (!lost) {
+    if (!transportDead) {
       try {
         const result = await client.query(RELEASE_LEADERSHIP_SQL, [lockId]);
         const unlocked =
@@ -208,9 +398,6 @@ export async function tryAcquireSignerLeadership(
       const unlockMsg =
         unlockErr instanceof Error ? unlockErr.message : String(unlockErr);
       if (typeof client.end !== "function") {
-        // Structural cast / JS adapter slipped past the type boundary — refuse the
-        // SPOF path rather than pool-return. Lock may still be held server-side;
-        // boot-lane quarantines on this throw (step 8 failed unlock).
         stickyReleaseErr = new Error(
           `signer leadership unlock failed and session has no end() destroy path: unlock=${unlockMsg}`,
           { cause: unlockErr },
@@ -242,6 +429,7 @@ export async function tryAcquireSignerLeadership(
       throw stickyReleaseErr;
     }
     releaseOutcome = "pooled";
+    // Transport-dead or confirmed unlock: return the (unlocked / dead) client to the pool.
     client.release();
   };
 
@@ -250,6 +438,7 @@ export async function tryAcquireSignerLeadership(
       if (lost) return; // already lost — never resurrect a dead lock
       listeners.push(listener);
     },
+    stopOwnershipWatch,
     async release(): Promise<void> {
       // Idempotent / fail-closed on re-entry. Boot-lane retains the handle after unlock
       // failure (quarantine); a second release must never bare-pool a still
@@ -265,6 +454,7 @@ export async function tryAcquireSignerLeadership(
       }
       // Single-flight BEFORE any await: concurrent callers during unlock/end join the
       // in-flight promise instead of observing open+lost and bare-pooling.
+      // Ownership-loss already arms releaseFlight with disposeAfterOwnershipLoss.
       if (releaseFlight === undefined) {
         releaseFlight = runRelease();
       }
@@ -279,6 +469,10 @@ export interface AcquireSignerLeadershipOptions {
   /** Cooperative abort — resolves `null` promptly once set (shutdown during the wait). */
   readonly signal?: { readonly aborted: boolean };
   readonly lockId?: number;
+  /** Forwarded to each {@link tryAcquireSignerLeadership} attempt (ownership watch). */
+  readonly ownershipAssertIntervalMs?: number;
+  readonly setIntervalFn?: TryAcquireSignerLeadershipOptions["setIntervalFn"];
+  readonly clearIntervalFn?: TryAcquireSignerLeadershipOptions["clearIntervalFn"];
   /** Observability hook before each backoff wait (lock still held elsewhere). */
   readonly onWaiting?: (info: { attempt: number; delayMs: number }) => void;
   /** A single attempt errored (transient database fault) — non-fatal, backs off and retries. */
@@ -307,10 +501,21 @@ export async function acquireSignerLeadership(
 
   const aborted = (): boolean => options.signal?.aborted === true;
 
+  const tryOptions: TryAcquireSignerLeadershipOptions = {
+    ownershipAssertIntervalMs: options.ownershipAssertIntervalMs,
+    setIntervalFn: options.setIntervalFn,
+    clearIntervalFn: options.clearIntervalFn,
+  };
+
   let attempt = 0;
   while (!aborted()) {
     try {
-      const held = await tryAcquire(options.pool, options.latch, options.lockId);
+      const held = await tryAcquire(
+        options.pool,
+        options.latch,
+        options.lockId ?? SIGNER_LEADERSHIP_LOCK_ID,
+        tryOptions,
+      );
       if (held !== null) return held;
     } catch (err) {
       options.onError?.(err, attempt);

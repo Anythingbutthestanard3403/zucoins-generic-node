@@ -45,6 +45,9 @@ import {
 } from "@zucoins/node-core";
 import type { Pool, PoolClient } from "pg";
 
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+
 /**
  * One pinned connection for the whole unit of work. Structurally satisfies both node-core
  * SQL surfaces this module drives (`AckSqlExecutor` and the leases `SqlExecutor`), so the
@@ -319,12 +322,16 @@ export function createSqlVerificationCompleteStore(
  */
 export function createPoolVerificationCompleteTxFactory(
   pool: Pool,
+  options: { readonly statementTimeoutMs?: number } = {},
 ): VerificationCompleteTxFactory {
+  const statementTimeoutMs =
+    options.statementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async withTransaction<T>(fn: (tx: VerificationCompleteTx) => Promise<T>): Promise<T> {
       const client: PoolClient = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
         const tx: VerificationCompleteTx = {
           async query<R>(text: string, params?: readonly unknown[]) {
             const result = await client.query(text, params as unknown[] | undefined);

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   acquireSignerLeadership,
+  ASSERT_LEADERSHIP_OWNED_SQL,
   RELEASE_LEADERSHIP_SQL,
   SIGNER_LEADERSHIP_LOCK_ID,
   SignerLeadership,
@@ -17,19 +18,33 @@ import {
 interface FakeClient extends LeadershipLockClient {
   readonly queries: Array<{ sql: string; values?: readonly unknown[] }>;
   readonly released: () => boolean;
+  readonly ended: () => boolean;
   emit(event: "error" | "end", err?: Error): void;
 }
 
-function fakeClient(outcome: boolean | Error): FakeClient {
+function fakeClient(
+  outcome: boolean | Error,
+  options: {
+    owned?: boolean | (() => boolean) | Error;
+  } = {},
+): FakeClient {
   const listeners = new Map<string, Array<(err?: Error) => void>>();
   const queries: Array<{ sql: string; values?: readonly unknown[] }> = [];
   let released = false;
+  let ended = false;
   return {
     queries,
     released: () => released,
+    ended: () => ended,
     async query(sql, values) {
       queries.push({ sql, values });
       if (outcome instanceof Error) throw outcome;
+      if (sql === ASSERT_LEADERSHIP_OWNED_SQL) {
+        if (options.owned instanceof Error) throw options.owned;
+        const owned =
+          typeof options.owned === "function" ? options.owned() : (options.owned ?? true);
+        return { rows: [{ owned }] };
+      }
       return { rows: [{ locked: outcome, released: true }] };
     },
     on(event, listener) {
@@ -44,14 +59,16 @@ function fakeClient(outcome: boolean | Error): FakeClient {
       released = true;
     },
     end() {
-      // Session destroy — for happy-path fakes this is a no-op; unlock-fail tests override.
-      released = true;
+      // Session destroy — marks ended; must NOT be confused with idle pool-return.
+      ended = true;
     },
     emit(event, err) {
       for (const listener of [...(listeners.get(event) ?? [])]) listener(err);
     },
   };
 }
+
+const NO_OWNERSHIP_WATCH = { ownershipAssertIntervalMs: 0 } as const;
 
 function poolOf(...clients: LeadershipLockClient[]): LeadershipLockPool {
   let index = 0;
@@ -84,7 +101,7 @@ describe("non-blocking acquisition (AC1)", () => {
   it("acquires with the session advisory lock and pins the connection", async () => {
     const client = fakeClient(true);
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
 
     expect(held).not.toBeNull();
     expect(client.queries).toEqual([
@@ -98,7 +115,7 @@ describe("non-blocking acquisition (AC1)", () => {
     const client = fakeClient(false);
     const latch = new SignerLeadership();
 
-    expect(await tryAcquireSignerLeadership(poolOf(client), latch)).toBeNull();
+    expect(await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH)).toBeNull();
     expect(client.released()).toBe(true);
     expect(latch.held).toBe(false);
   });
@@ -107,7 +124,7 @@ describe("non-blocking acquisition (AC1)", () => {
     const client = fakeClient(new Error("connection refused"));
     const latch = new SignerLeadership();
 
-    await expect(tryAcquireSignerLeadership(poolOf(client), latch)).rejects.toThrow(
+    await expect(tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH)).rejects.toThrow(
       "connection refused",
     );
     expect(client.released()).toBe(true);
@@ -117,7 +134,7 @@ describe("non-blocking acquisition (AC1)", () => {
   it("release unlocks, frees the connection, and drops leadership", async () => {
     const client = fakeClient(true);
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
 
     await held?.release();
     expect(client.queries.at(-1)).toEqual({
@@ -171,7 +188,7 @@ describe("non-blocking acquisition (AC1)", () => {
       },
     };
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
     await expect(held!.release()).rejects.toThrow("unlock network blip");
     expect(ended).toBe(true);
     expect(released).toBe(false); // must not pool-return a still-locked session
@@ -204,7 +221,7 @@ describe("non-blocking acquisition (AC1)", () => {
       },
     };
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
     await expect(held!.release()).rejects.toThrow(/did not confirm release/);
     expect(ended).toBe(true);
     expect(released).toBe(false);
@@ -271,7 +288,7 @@ describe("non-blocking acquisition (AC1)", () => {
     };
 
     const latchA = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(pool, latchA, SIGNER_LEADERSHIP_LOCK_ID);
+    const held = await tryAcquireSignerLeadership(pool, latchA, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     expect(held).not.toBeNull();
     expect(holder).toBe("c1");
 
@@ -301,7 +318,7 @@ describe("non-blocking acquisition (AC1)", () => {
     // Live session may still block peer acquire (operator quarantine) — that is not the
     // idle-pool SPOF. The forbidden triple is pooled && lockedWhenPooled.
     const latchB = new SignerLeadership();
-    const peer = await tryAcquireSignerLeadership(pool, latchB, SIGNER_LEADERSHIP_LOCK_ID);
+    const peer = await tryAcquireSignerLeadership(pool, latchB, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     // Peer blocked only if holder still live — never because c1 was idle-pooled locked.
     if (peer === null) {
       expect(c1.pooled).toBe(false);
@@ -354,7 +371,7 @@ describe("non-blocking acquisition (AC1)", () => {
     };
 
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID);
+    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     expect(held).not.toBeNull();
 
     await expect(held!.release()).rejects.toThrow(/no end\(\) destroy path/);
@@ -371,6 +388,7 @@ describe("non-blocking acquisition (AC1)", () => {
       pool,
       new SignerLeadership(),
       SIGNER_LEADERSHIP_LOCK_ID,
+      NO_OWNERSHIP_WATCH,
     );
     expect(peer).toBeNull();
   });
@@ -407,7 +425,7 @@ describe("non-blocking acquisition (AC1)", () => {
       },
     };
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID);
+    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     await expect(held!.release()).rejects.toThrow("unlock network blip");
     await expect(held!.release()).rejects.toThrow("unlock network blip");
     expect(ends).toBe(1); // destroy once
@@ -463,7 +481,7 @@ describe("non-blocking acquisition (AC1)", () => {
     };
 
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID);
+    const held = await tryAcquireSignerLeadership(pool, latch, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     expect(held).not.toBeNull();
 
     const p1 = held!.release();
@@ -527,13 +545,13 @@ describe("non-blocking acquisition (AC1)", () => {
     };
 
     const latchA = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(pool, latchA, SIGNER_LEADERSHIP_LOCK_ID);
+    const held = await tryAcquireSignerLeadership(pool, latchA, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     expect(held).not.toBeNull();
     await expect(held!.release()).rejects.toThrow("unlock network blip");
     expect(holder).toBeNull();
 
     const latchB = new SignerLeadership();
-    const peer = await tryAcquireSignerLeadership(pool, latchB, SIGNER_LEADERSHIP_LOCK_ID);
+    const peer = await tryAcquireSignerLeadership(pool, latchB, SIGNER_LEADERSHIP_LOCK_ID, NO_OWNERSHIP_WATCH);
     expect(peer).not.toBeNull();
     expect(latchB.held).toBe(true);
     // Clean unlock for the peer so the test tears down.
@@ -559,7 +577,7 @@ describe("non-blocking acquisition (AC1)", () => {
       },
     };
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
     await expect(held!.release()).rejects.toThrow(
       /unlock failed and session destroy also failed[\s\S]*unlock network blip[\s\S]*destroy refused/,
     );
@@ -573,7 +591,7 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
     const latch = new SignerLeadership();
     const seen: string[] = [];
 
-    return tryAcquireSignerLeadership(poolOf(client), latch).then((held) => {
+    return tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH).then((held) => {
       held?.onLost((reason) => seen.push(reason));
       expect(latch.held).toBe(true);
 
@@ -590,7 +608,7 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
   it("fires loss at most once and never resurrects a dead lock", async () => {
     const client = fakeClient(true);
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
     const seen: string[] = [];
     held?.onLost((reason) => seen.push(reason));
 
@@ -605,7 +623,7 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
   it("release after loss skips the unlock query the dead connection would reject", async () => {
     const client = fakeClient(true);
     const latch = new SignerLeadership();
-    const held = await tryAcquireSignerLeadership(poolOf(client), latch);
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
 
     client.emit("end");
     await held?.release();
@@ -617,7 +635,8 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
   it("a lapsed lease age alone never releases or grants leadership", async () => {
     const client = fakeClient(true);
     const latch = new SignerLeadership();
-    await tryAcquireSignerLeadership(poolOf(client), latch);
+    // Ownership watch disabled — this test pins that wall-clock alone is not a loss signal.
+    await tryAcquireSignerLeadership(poolOf(client), latch, NO_OWNERSHIP_WATCH);
 
     vi.useFakeTimers();
     try {
@@ -626,6 +645,106 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("failed positive ownership assertion latches lost (ZTR-1156)", async () => {
+    const handlers: Array<() => void> = [];
+    const client = fakeClient(true, { owned: false });
+    const latch = new SignerLeadership();
+    const seen: string[] = [];
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 1_000,
+      setIntervalFn: (handler) => {
+        handlers.push(handler);
+        return 1;
+      },
+      clearIntervalFn: () => {},
+    });
+    held?.onLost((reason) => seen.push(reason));
+    expect(latch.held).toBe(true);
+    expect(handlers).toHaveLength(1);
+
+    handlers[0]!();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(latch.held).toBe(false);
+    expect(latch.reason).toMatch(/ownership assertion failed/);
+    expect(seen).toHaveLength(1);
+    expect(client.queries.some((q) => q.sql === ASSERT_LEADERSHIP_OWNED_SQL)).toBe(true);
+  });
+
+  it("ownership assert query error destroys session — never bare-pools still-locked (ZTR-1156 SPOF)", async () => {
+    // Review A/B @ ddd055d: onLoss("ownership") set lost=true then release() skipped
+    // unlock and client.release()'d a live still-locked session → permanent bare-pool SPOF.
+    const handlers: Array<() => void> = [];
+    const client = fakeClient(true, {
+      owned: new Error("transient assert network blip"),
+    });
+    const latch = new SignerLeadership();
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 1_000,
+      setIntervalFn: (handler) => {
+        handlers.push(handler);
+        return 1;
+      },
+      clearIntervalFn: () => {},
+    });
+    expect(held).not.toBeNull();
+    expect(latch.held).toBe(true);
+
+    handlers[0]!();
+    // Ownership dispose is async (end()); drain microtasks then join releaseFlight.
+    await Promise.resolve();
+    await Promise.resolve();
+    await held!.release();
+
+    expect(latch.held).toBe(false);
+    expect(latch.reason).toMatch(/ownership assertion failed/);
+    // Must destroy — never idle-pool while the advisory lock may still be held.
+    expect(client.ended()).toBe(true);
+    expect(client.released()).toBe(false);
+    // No graceful unlock attempt required on ownership destroy path; assert ran.
+    expect(client.queries.some((q) => q.sql === ASSERT_LEADERSHIP_OWNED_SQL)).toBe(true);
+    expect(client.queries.some((q) => q.sql === RELEASE_LEADERSHIP_SQL)).toBe(false);
+  });
+
+  it("ownership owned=false destroys session before release joins (ZTR-1156 SPOF)", async () => {
+    const handlers: Array<() => void> = [];
+    const client = fakeClient(true, { owned: false });
+    const latch = new SignerLeadership();
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 1_000,
+      setIntervalFn: (handler) => {
+        handlers.push(handler);
+        return 1;
+      },
+      clearIntervalFn: () => {},
+    });
+    handlers[0]!();
+    await Promise.resolve();
+    await Promise.resolve();
+    await held!.release();
+
+    expect(latch.held).toBe(false);
+    expect(client.ended()).toBe(true);
+    expect(client.released()).toBe(false);
+    expect(client.queries.some((q) => q.sql === RELEASE_LEADERSHIP_SQL)).toBe(false);
+  });
+
+  it("keepAlive-style connection error still latches lost with ownership watch armed", async () => {
+    const client = fakeClient(true, { owned: true });
+    const latch = new SignerLeadership();
+    const held = await tryAcquireSignerLeadership(poolOf(client), latch, {
+      ownershipAssertIntervalMs: 60_000,
+      setIntervalFn: () => 1,
+      clearIntervalFn: () => {},
+    });
+    expect(latch.held).toBe(true);
+    client.emit("error", new Error("ECONNRESET keepAlive probe"));
+    expect(latch.held).toBe(false);
+    expect(latch.reason).toMatch(/error/);
+    held?.stopOwnershipWatch();
   });
 });
 
@@ -646,7 +765,9 @@ describe("jittered backoff retry (AC2)", () => {
         delays.push(ms);
       },
       tryAcquire: async () =>
-        attempts[call++] === true ? { onLost: () => {}, release: async () => {} } : null,
+        attempts[call++] === true
+          ? { onLost: () => {}, stopOwnershipWatch: () => {}, release: async () => {} }
+          : null,
     });
 
     expect(held).not.toBeNull();
@@ -674,7 +795,7 @@ describe("jittered backoff retry (AC2)", () => {
               first = false;
               return null;
             }
-            return { onLost: () => {}, release: async () => {} };
+            return { onLost: () => {}, stopOwnershipWatch: () => {}, release: async () => {} };
           };
         })(),
       });
@@ -696,7 +817,7 @@ describe("jittered backoff retry (AC2)", () => {
       tryAcquire: async () => {
         call += 1;
         if (call === 1) throw new Error("database unreachable");
-        return { onLost: () => {}, release: async () => {} };
+        return { onLost: () => {}, stopOwnershipWatch: () => {}, release: async () => {} };
       },
     });
 

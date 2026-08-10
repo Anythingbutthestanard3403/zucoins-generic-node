@@ -166,10 +166,20 @@ describe("NeedsAttentionQuerySchema", () => {
       NeedsAttentionQuerySchema.safeParse({ classification: "INVARIANT_BREACH", limit: "10" })
         .success,
     ).toBe(true);
+    // Inclusive ceiling — string coerce to number (query-string shape).
+    const ceiling = NeedsAttentionQuerySchema.safeParse({ limit: "200" });
+    expect(ceiling.success).toBe(true);
+    if (ceiling.success) expect(ceiling.data.limit).toBe(200);
   });
   it("rejects unknown fields and bad enums", () => {
     expect(NeedsAttentionQuerySchema.safeParse({ bog: 1 }).success).toBe(false);
     expect(NeedsAttentionQuerySchema.safeParse({ classification: "NOPE" }).success).toBe(false);
+    expect(NeedsAttentionQuerySchema.safeParse({ kind: "REFUND" }).success).toBe(false);
+  });
+  it("rejects non-integer and out-of-range limit (ZTR-1198)", () => {
+    for (const limit of ["abc", "0", "-1", "201", "1.5", NaN]) {
+      expect(NeedsAttentionQuerySchema.safeParse({ limit }).success, String(limit)).toBe(false);
+    }
   });
 });
 

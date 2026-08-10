@@ -139,7 +139,8 @@ const SQL_LIST_NEEDS_ATTENTION = `
          terminal_observation_id::text AS terminal_observation_id,
          expiry_unix_time_secs, formation_state::text AS formation_state
     FROM operations
-   WHERE attention_required = true OR status = 'NEEDS_ATTENTION'
+   WHERE (attention_required = true OR status = 'NEEDS_ATTENTION')
+     AND ($2::text IS NULL OR kind::text = $2)
    ORDER BY created_at ASC -- contract-allow:order:frozen structural vocabulary
    LIMIT $1
 `;
@@ -507,9 +508,10 @@ export function createSqlRecoveryInspectionStore(
   readFreshHead?: ReadFreshHead,
 ): RecoveryInspectionStore {
   return {
-    // query.classification / query.kind are accepted by the NeedsAttentionQuery shape but
-    // deliberately left unfiltered here (limit-only) — a pre-existing gap, out of this
-    // ticket's reviewed scope.
+    // kind is bound into SQL before LIMIT (ZTR-1198). classification is derived at read
+    // time by classifyRecovery (not a durable column), so it still filters in
+    // handleNeedsAttention after the page is truncated — a short page is possible when
+    // classification is set. Follow-up: denormalize classification or over-fetch+repage.
     //
     // `readFreshHead` is deliberately NOT threaded into the listing. Every parked SEND in it
     // is past T2 + the aging margin with a durable partial by construction (that is what
@@ -526,7 +528,7 @@ export function createSqlRecoveryInspectionStore(
         attention_required: boolean; attention_reason: string | null; row_version: number;
         t0_observation_id: string | null; terminal_observation_id: string | null;
         expiry_unix_time_secs: string | null; formation_state: string | null;
-      }>(SQL_LIST_NEEDS_ATTENTION, [limit]);
+      }>(SQL_LIST_NEEDS_ATTENTION, [limit, query.kind ?? null]);
       const facts: RecoveryFacts[] = [];
       for (const r of result.rows) {
         const f = await loadRecoveryFactsFromRow(pool, r.operation_id, r.kind, r.status,

@@ -173,6 +173,11 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // far earlier above (whose own file is already applied, so its sql_sha256 must not
   // change). Appended; never renumber prior slices.
   "wallet-settled-ledger-indexes",
+  // operations worker-poll partial indexes, a pure index extension on a table created
+  // far earlier above (whose own file is already applied, so its sql_sha256 must not
+  // change). Appended; never renumber prior slices. Depends on receive-expiry-release
+  // for the receive_release_status column used by one partial predicate.
+  "operations-indexes",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

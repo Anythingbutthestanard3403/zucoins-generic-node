@@ -180,6 +180,10 @@ const SCHEMA_FILES = [
   // CREATE TABLE), so it's also in NO_TABLE_SCHEMA_FILES below; appended after the sequence
   // closer above (mirrors MONEY_SCHEMA_PACK_ORDER's own append-only placement).
   "wallet-settled-ledger-indexes.sql",
+  // Five worker-poll partial indexes on the already-created operations table. CREATE INDEX
+  // only (no CREATE TABLE), so it's also in NO_TABLE_SCHEMA_FILES below; appended after the
+  // sequence closer above (mirrors MONEY_SCHEMA_PACK_ORDER's own append-only placement).
+  "operations-indexes.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -195,6 +199,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "node-events-seq-composite-pk.sql",
   "mutation-correlation.sql",
   "wallet-settled-ledger-indexes.sql",
+  "operations-indexes.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -434,6 +439,13 @@ const GREENFIELD: Record<
   "wallet-settled-ledger-indexes.sql": {
     applies: false,
     missingRelation: "wallet_settled_ledger",
+  },
+  // Its statements index operations (and one partial predicate reads receive_release_status
+  // from receive-expiry-release.sql). Applied alone it fails immediately on the missing
+  // operations relation — prerequisite-bound by construction.
+  "operations-indexes.sql": {
+    applies: false,
+    missingRelation: "operations",
   },
 };
 

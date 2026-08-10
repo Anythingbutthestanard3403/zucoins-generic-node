@@ -30,6 +30,7 @@
     "observation-ledger.sql",
     "observation-stores.sql",
     "operational-stores.sql",
+    "operations-indexes.sql",
     "operations-response-columns.sql",
     "operations.sql",
     "privileges.sql",
@@ -64,7 +65,7 @@
     "nounsOk": 39,
     "nounsFailed": 0,
     "foreignKeysChecked": 187,
-    "accessPatternsChecked": 13,
+    "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
       "missing_store": 0,
@@ -2059,7 +2060,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_114",
+      "satisfiedBy": "index:operations_unique_119",
       "ok": true
     },
     {
@@ -2106,7 +2107,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_60",
+      "satisfiedBy": "index:audit_log_unique_65",
       "ok": true
     },
     {
@@ -2162,6 +2163,56 @@
         "wallet_id"
       ],
       "satisfiedBy": "index:wallet_settled_ledger_wallet_id_idx",
+      "ok": true
+    },
+    {
+      "id": "ops.receive-queue",
+      "table": "operations",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "satisfiedBy": "index:operations_receive_queue_created_idx",
+      "ok": true
+    },
+    {
+      "id": "ops.receive-expiry",
+      "table": "operations",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "satisfiedBy": "index:operations_receive_queue_created_idx",
+      "ok": true
+    },
+    {
+      "id": "ops.receive-ready",
+      "table": "operations",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "satisfiedBy": "index:operations_receive_queue_created_idx",
+      "ok": true
+    },
+    {
+      "id": "ops.receive-landed-handoff",
+      "table": "operations",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "satisfiedBy": "index:operations_receive_queue_created_idx",
+      "ok": true
+    },
+    {
+      "id": "ops.move-pending",
+      "table": "operations",
+      "columns": [
+        "created_at",
+        "id"
+      ],
+      "satisfiedBy": "index:operations_receive_queue_created_idx",
       "ok": true
     }
   ]

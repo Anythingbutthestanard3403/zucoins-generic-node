@@ -1625,6 +1625,10 @@ describe("main.ts graceful-stop composition", () => {
     // Handle retained outside the enable block so stopWorkers can reach it.
     expect(mainSource).toMatch(/let backupScheduler/);
     expect(mainSource).toMatch(/backupScheduler\s*=\s*createBackupScheduler/);
+    expect(mainSource).toMatch(/afterSuccess:\s*async/);
+    expect(mainSource).toMatch(/BACKUP_CONTINUITY_MARKERS_PATH/);
+    expect(mainSource).toMatch(/deriveContinuitySnapshot/);
+    expect(mainSource).toMatch(/writeContinuityMarkers/);
     // ENGINE_QUIESCE: stop new schedules synchronously.
     expect(mainSource).toMatch(/backupScheduler\?\.stop\(\)/);
     // INFLIGHT complete: await active export within bounded termination.

@@ -21,9 +21,16 @@ import {
   exportEncryptedBackup,
   restoreEncryptedBackup,
 } from "../../src/dr/encrypted-backup.js";
-import { buildForceAuthHoldSetStatements } from "../../src/dr/auth-hold.js";
-import { buildRestoreHoldReleaseUpdate, evaluateRestoreHoldRelease } from "../../src/dr/restore-hold.js";
-import { buildMarkersFromLocal } from "../../src/dr/markers.js";
+import {
+  buildForceAuthHoldSetStatements,
+  releaseDualGatesWithTrustedMarkers,
+} from "../../src/dr/auth-hold.js";
+import {
+  buildForceRestoreHoldUpsert,
+  buildRestoreHoldReleaseUpdate,
+  evaluateRestoreHoldRelease,
+} from "../../src/dr/restore-hold.js";
+import { buildScheduledBackupMarkers } from "../../src/dr/markers.js";
 
 const PG_AVAILABLE = (() => {
   try {
@@ -505,7 +512,10 @@ describe.skipIf(!PG_AVAILABLE)(
             )
           ).rows[0].event_hash as string,
         };
-        const markers = buildMarkersFromLocal(local, "file:/external-markers.json");
+        const markers = buildScheduledBackupMarkers(local, {
+          backupArtifactSha256: "22".repeat(32),
+          backupOutputPath: "/offsite/backup.zbkp",
+        });
         const decision = evaluateRestoreHoldRelease({ trusted: markers, local });
         expect(decision.release).toBe(true);
         if (!decision.release) return;
@@ -535,6 +545,50 @@ describe.skipIf(!PG_AVAILABLE)(
             [nodeId, implementerId, 2, keyId],
           ),
         ).rejects.toThrow(/lifecycle admission is closed|auth/i);
+
+        // Restore the D1 gate, then prove the shipped operator path releases D1+D2
+        // atomically against the pre-restore successful-backup continuity point.
+        const forceRestore = buildForceRestoreHoldUpsert({ nodeId, now: new Date() });
+        await target.query(forceRestore.sql, forceRestore.params as unknown[]);
+        const trusted = buildScheduledBackupMarkers(
+          {
+            lifecycleEpoch: 1n,
+            nonceBurnHighWater: 1n,
+            terminalEventHash: EVENT_HASH_1,
+          },
+          {
+            backupArtifactSha256: "33".repeat(32),
+            backupOutputPath: backupPath,
+          },
+        );
+        const released = await releaseDualGatesWithTrustedMarkers(dbUrl(targetDb), {
+          nodeId,
+          trusted,
+        });
+        expect(released.released).toBe(true);
+        if (!released.released) return;
+        expect(released.authHeadsReleased).toBe(1);
+
+        const opened = await target.query(
+          `SELECT r.restore_hold, h.auth_hold, h.epoch::text, e.event_type
+             FROM reporting_restore_state r
+             JOIN reporting_key_lifecycle_heads h ON h.node_id = r.node_id
+             JOIN reporting_key_lifecycle_events e ON e.id = h.lifecycle_event_id
+            WHERE r.node_id = $1 AND h.implementer_id = $2`,
+          [nodeId, implementerId],
+        );
+        expect(opened.rows[0]).toMatchObject({
+          restore_hold: false,
+          auth_hold: false,
+          epoch: "3",
+          event_type: "AUTH_HOLD_RELEASED",
+        });
+        await expect(
+          target.query(
+            `SELECT reporting_lock_and_assert_admission($1::uuid, $2::uuid, $3::bigint, $4::uuid, now())`,
+            [nodeId, implementerId, 3, keyId],
+          ),
+        ).resolves.toBeDefined();
       } finally {
         await target.end();
       }

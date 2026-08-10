@@ -505,6 +505,14 @@ export const NODE_ENV_CONFIG_SCHEMA = z.object(CONFIG_FIELD_SCHEMAS).superRefine
           "BACKUP_OUTPUT_DIR is required when BACKUP_SCHEDULE_ENABLED is true (local artifact directory; backup bytes never traverse HTTP)",
       });
     }
+    if (config.BACKUP_CONTINUITY_MARKERS_PATH === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["BACKUP_CONTINUITY_MARKERS_PATH"],
+        message:
+          "BACKUP_CONTINUITY_MARKERS_PATH is required when BACKUP_SCHEDULE_ENABLED is true (external continuity evidence must be emitted after every successful backup)",
+      });
+    }
   }
 
 

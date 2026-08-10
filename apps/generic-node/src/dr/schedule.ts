@@ -31,6 +31,8 @@ export interface BackupScheduleConfig {
    */
   readonly trackInflight?: <T>(work: Promise<T>) => Promise<T>;
   readonly afterSuccess?: (result: ScheduledBackupSuccess) => Promise<void> | void;
+  /** Test seam; production always uses exportEncryptedBackup. */
+  readonly exportBackup?: typeof exportEncryptedBackup;
   /**
    * Leadership / ownership gate (ZTR-1183). When provided, start() and each
    * loop iteration consult it; followers must not beginTrackedRun backups.
@@ -175,7 +177,11 @@ export function createBackupScheduler(config: BackupScheduleConfig): BackupSched
     const tmpPath = `${finalPath}.partial`;
 
     try {
-      const result = await exportEncryptedBackup(config.databaseUrl, tmpPath, config.masterKey);
+      const result = await (config.exportBackup ?? exportEncryptedBackup)(
+        config.databaseUrl,
+        tmpPath,
+        config.masterKey,
+      );
       await rename(tmpPath, finalPath);
       const published: BackupResult = { ...result, outputPath: finalPath };
       const retention = await pruneRetainedBackups({

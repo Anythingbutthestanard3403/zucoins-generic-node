@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
 import { applyDualGateForceAfterRestore } from "../../src/dr/auth-hold.js";
-import { buildMarkersFromLocal } from "../../src/dr/markers.js";
+import { buildScheduledBackupMarkers } from "../../src/dr/markers.js";
 import {
   buildRestoreHoldReleaseUpdate,
   evaluateRestoreHoldRelease,
@@ -425,7 +425,10 @@ describe.skipIf(!PG_AVAILABLE)(
         nonceBurnHighWater: BigInt(burnHw),
         terminalEventHash: eventHash2,
       };
-      const markers = buildMarkersFromLocal(local, "file:/external-markers.json");
+      const markers = buildScheduledBackupMarkers(local, {
+        backupArtifactSha256: "22".repeat(32),
+        backupOutputPath: "/offsite/backup.zbkp",
+      });
       const decision = evaluateRestoreHoldRelease({ trusted: markers, local });
       expect(decision.release).toBe(true);
       if (!decision.release) return;

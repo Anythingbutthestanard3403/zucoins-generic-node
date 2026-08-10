@@ -64,7 +64,9 @@ export {
   writeContinuityMarkers,
   compareContinuityMarkers,
   hashHoldReleaseEvidence,
-  buildMarkersFromLocal,
+  buildScheduledBackupMarkers,
+  deriveContinuitySnapshot,
+  deriveContinuitySnapshotOnClient,
   type ContinuityMarkers,
   type LocalContinuitySnapshot,
   type MarkerLoadResult,
@@ -86,11 +88,14 @@ export {
 export {
   applyForceAuthHoldAfterRestore,
   applyDualGateForceAfterRestore,
+  releaseDualGatesWithTrustedMarkers,
   buildForceAuthHoldSetStatements,
+  buildReleaseAuthHoldStatements,
   healLifecycleDeferredValidator,
   HEAL_LIFECYCLE_DEFERRED_VALIDATOR_SQL,
   type ForceAuthHoldResult,
   type DualGateForceResult,
+  type DualGateReleaseResult,
 } from "./auth-hold.js";
 
 export {

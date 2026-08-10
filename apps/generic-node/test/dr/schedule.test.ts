@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -5,6 +9,10 @@ import {
   interruptibleSleep,
   type BackupSchedulerHandle,
 } from "../../src/dr/schedule.js";
+import {
+  buildScheduledBackupMarkers,
+  writeContinuityMarkers,
+} from "../../src/dr/markers.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -32,9 +40,11 @@ describe("interruptibleSleep", () => {
 
 describe("createBackupScheduler — graceful stop", () => {
   const handles: BackupSchedulerHandle[] = [];
+  const dirs: string[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const h of handles.splice(0)) h.stop();
+    await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
   function baseConfig(
@@ -76,6 +86,51 @@ describe("createBackupScheduler — graceful stop", () => {
     await scheduler.drain();
     expect(Date.now() - t0).toBeLessThan(5_000);
     expect(runs).toBeGreaterThanOrEqual(1);
+  });
+
+  it("writes externally held continuity evidence after a successful backup run", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gn-scheduled-marker-"));
+    dirs.push(dir);
+    const markerPath = join(dir, "continuity.json");
+    const sha256 = "22".repeat(32);
+    const scheduler = createBackupScheduler(
+      baseConfig({
+        outputDir: dir,
+        nowMs: () => 1_000,
+        exportBackup: async (_databaseUrl, outputPath) => {
+          await writeFile(outputPath, "encrypted-backup", "utf8");
+          return { outputPath, bytesWritten: 16, sha256 };
+        },
+        afterSuccess: async (success) => {
+          await writeContinuityMarkers(
+            markerPath,
+            buildScheduledBackupMarkers(
+              {
+                lifecycleEpoch: 7n,
+                nonceBurnHighWater: 42n,
+                terminalEventHash: "ab".repeat(32),
+              },
+              {
+                backupArtifactSha256: success.result.sha256,
+                backupOutputPath: success.result.outputPath,
+                observedAt: new Date(success.finishedAtMs),
+              },
+            ),
+          );
+        },
+      }),
+    );
+    handles.push(scheduler);
+
+    const success = await scheduler.runOnce();
+    const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<string, unknown>;
+    expect(marker).toMatchObject({
+      provenance: "successful_scheduled_backup",
+      backupArtifactSha256: success.result.sha256,
+      backupOutputPath: success.result.outputPath,
+      lifecycleEpoch: "7",
+      nonceBurnHighWater: "42",
+    });
   });
 
   it("drain() awaits an in-flight export started before stop()", async () => {

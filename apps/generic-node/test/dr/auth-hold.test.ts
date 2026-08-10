@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildForceAuthHoldSetStatements,
+  buildReleaseAuthHoldStatements,
   HEAL_LIFECYCLE_DEFERRED_VALIDATOR_SQL,
 } from "../../src/dr/auth-hold.js";
 
@@ -57,6 +58,30 @@ describe("buildForceAuthHoldSetStatements — auth_hold force shape", () => {
     expect(built.params.evidenceText).toContain("zp-gn-restore-auth-hold-v1");
     expect(built.params.evidenceText).toContain(NODE);
     expect(built.params.evidenceText).toContain(IMPL);
+  });
+});
+
+describe("buildReleaseAuthHoldStatements — canonical release shape", () => {
+  it("appends AUTH_HOLD_RELEASED with nonce evidence and advances the head", () => {
+    const built = buildReleaseAuthHoldStatements({
+      nodeId: NODE,
+      implementerId: IMPL,
+      priorEpoch: 2n,
+      previousEventId: PREV_EVENT,
+      previousEventHash: PREV_HASH,
+      currentKeyId: KEY,
+      priorKeyId: null,
+      overlapExpiresAt: null,
+      now: new Date("2026-07-26T12:00:00.000Z"),
+      evidenceSha256: "ef".repeat(32),
+      nonceBurnSequence: 10n,
+    });
+    expect(built.eventSql).toMatch(/AUTH_HOLD_RELEASED/);
+    expect(built.eventSql).toMatch(/false/);
+    expect(built.nonceSql).toMatch(/restore_auth_hold_release/);
+    expect(built.advanceSql).toMatch(/reporting_advance_lifecycle_head/);
+    expect(built.eventSql + built.advanceSql).not.toMatch(/UPDATE\s+reporting_key_lifecycle_heads/i);
+    expect(built.params.epoch).toBe("3");
   });
 });
 

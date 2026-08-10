@@ -34,7 +34,21 @@ import { buildScheduledBackupMarkers } from "../../src/dr/markers.js";
 
 const PG_AVAILABLE = (() => {
   try {
-    execFileSync("pg_isready", ["-t", "1"], { stdio: "ignore", timeout: 2000 });
+    execFileSync(
+      "psql",
+      [
+        "-h",
+        process.env.PGHOST ?? "localhost",
+        "-p",
+        process.env.PGPORT ?? "5432",
+        "-d",
+        "postgres",
+        "-qAt",
+        "-c",
+        "SELECT 1",
+      ],
+      { stdio: "ignore", timeout: 2000 },
+    );
     return true;
   } catch {
     return false;
@@ -332,8 +346,8 @@ describe.skipIf(!PG_AVAILABLE)(
     beforeAll(async () => {
       workDir = await mkdtemp(join(tmpdir(), "auth-hold-force-auth-hold-"));
       const maint = maintenanceUrl();
-      execFileSync("createdb", ["--maintenance-db", maint, sourceDb], { stdio: "ignore" });
-      execFileSync("createdb", ["--maintenance-db", maint, targetDb], { stdio: "ignore" });
+      execFileSync("psql", ["--dbname", maint, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", `CREATE DATABASE "${sourceDb}"`], { stdio: "ignore" });
+      execFileSync("psql", ["--dbname", maint, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", `CREATE DATABASE "${targetDb}"`], { stdio: "ignore" });
 
       sourcePool = new Pool({ connectionString: dbUrl(sourceDb) });
       await sourcePool.query(MINIMAL_DUAL_GATE_SCHEMA_SQL);
@@ -453,7 +467,7 @@ describe.skipIf(!PG_AVAILABLE)(
       const maint = maintenanceUrl();
       for (const db of [sourceDb, targetDb]) {
         try {
-          execFileSync("dropdb", ["--if-exists", "--maintenance-db", maint, db], {
+          execFileSync("psql", ["--dbname", maint, "-qAt", "-c", `DROP DATABASE IF EXISTS "${db}" WITH (FORCE)`], {
             stdio: "ignore",
           });
         } catch {

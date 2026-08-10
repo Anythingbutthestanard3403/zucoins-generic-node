@@ -20,7 +20,7 @@ export interface DestinationSqlExecutor {
 
 const SELECT_DESTINATION = `
 SELECT d.id, d.node_id, d.wallet_id, w.public_key AS wallet_public_key, d.state,
-       d.blessed_at, d.blessed_by_device_key_id, d.blessing_artifact_id,
+       d.label, d.blessed_at, d.blessed_by_device_key_id, d.blessing_artifact_id,
        d.retired_at, d.created_at
   FROM destinations d
   JOIN wallets w ON w.id = d.wallet_id
@@ -33,8 +33,7 @@ function mapRow(row: Record<string, unknown>): DestinationRecord {
     walletId: String(row.wallet_id) as Uuid,
     walletPublicKey: String(row.wallet_public_key) as WalletPublicKey,
     state: row.state as DestinationRecord["state"],
-    // The destinations table has no label column; surface an empty string.
-    label: "",
+    label: row.label === null || row.label === undefined ? "" : String(row.label),
     blessedAt:
       row.blessed_at === null || row.blessed_at === undefined ? null : String(row.blessed_at),
     blessedByDeviceKeyId:
@@ -54,7 +53,7 @@ function mapRow(row: Record<string, unknown>): DestinationRecord {
 /**
  * Live PG DestinationStore. Idempotency of register is service-layer:
  * destinations DDL has no idempotency_key column, so findByIdempotencyKey is
- * a no-op (null). Label is not persisted (schema has no label column).
+ * a no-op (null). Label is persisted on destinations.label (ZTR-1169).
  */
 export function createSqlDestinationStore(sql: DestinationSqlExecutor): DestinationStore {
   return {
@@ -70,9 +69,15 @@ export function createSqlDestinationStore(sql: DestinationSqlExecutor): Destinat
 
     async insert(record: NewDestination) {
       await sql.query(
-        `INSERT INTO destinations (id, node_id, wallet_id, state, created_at)
-         VALUES ($1, $2, $3, 'PENDING', $4::timestamptz)`,
-        [record.destinationId, record.nodeId, record.walletId, record.createdAt],
+        `INSERT INTO destinations (id, node_id, wallet_id, label, state, created_at)
+         VALUES ($1, $2, $3, $4, 'PENDING', $5::timestamptz)`,
+        [
+          record.destinationId,
+          record.nodeId,
+          record.walletId,
+          record.label,
+          record.createdAt,
+        ],
       );
       return {
         ...record,
@@ -171,7 +176,7 @@ export function createSqlDestinationStore(sql: DestinationSqlExecutor): Destinat
       const limitIdx = params.length;
       const result = await sql.query(
         `SELECT d.id, d.node_id, d.wallet_id, w.public_key AS wallet_public_key, d.state,
-                d.blessed_at, d.blessed_by_device_key_id, d.blessing_artifact_id,
+                d.label, d.blessed_at, d.blessed_by_device_key_id, d.blessing_artifact_id,
                 d.retired_at, d.created_at
            FROM destinations d
            JOIN wallets w ON w.id = d.wallet_id

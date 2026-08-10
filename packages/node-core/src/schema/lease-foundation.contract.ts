@@ -5,7 +5,8 @@
  * Frozen inventory of the persisted lease foundation. The census binds every
  * entry here to the literal SQL text so the inventory and the schema contract cannot drift.
  * Live-database execution is discharged by test/lease-foundation.pg.test.ts and by the
- * fail-closed migrator in src/leases/migrate.ts.
+ * fail-closed migrator in src/leases/migrate.ts. Eligibility trigger ownership is
+ * custody-eligibility.sql (ZTR-1169 removed the shadowed lease-foundation copy).
  */
 
 export const LEASE_FOUNDATION_SCHEMA_FILE = "lease-foundation.sql" as const;
@@ -79,29 +80,19 @@ export const LEASE_FOUNDATION_INVARIANTS: readonly LeaseFoundationInvariant[] = 
     rule: "Schema-version fence fails closed when the required version is absent.",
   },
   {
-    id: "ELIGIBILITY_BEFORE_INSERT",
-    sqlAnchor: "CREATE TRIGGER wallet_active_leases_eligibility_guard",
-    rule: "BEFORE INSERT eligibility guard is present on the exclusive table.",
-  },
-  {
-    id: "RECONCILIATION_EXEMPT_BRANCH",
-    sqlAnchor: "IF NEW.lease_role = 'RECONCILIATION' THEN",
-    rule: "RECONCILIATION is observation-exempt at the structural guard (never a recovery gate).",
-  },
-  {
-    id: "UNKNOWN_ROLE_FAIL_CLOSED",
-    sqlAnchor: "RAISE EXCEPTION 'CUSTODY_LEASE_ROLE_UNKNOWN'",
-    rule: "Unknown lease_role fails closed rather than being silently admitted.",
-  },
-  {
-    id: "ELIGIBILITY_WALLET_FOR_UPDATE",
-    sqlAnchor: "SELECT * INTO wallet_row FROM wallets WHERE id = NEW.wallet_id FOR UPDATE",
-    rule: "The eligibility trigger locks the wallet row FOR UPDATE so concurrent quarantine cannot race past the standing read.",
+    id: "NO_SHADOWED_ELIGIBILITY_TRIGGER",
+    sqlAnchor: "no shadowed second copy here (ZTR-1169)",
+    rule: "Eligibility trigger is owned solely by custody-eligibility.sql; this slice must not re-declare wallet_active_leases_eligibility_guard or a second reject function.",
   },
   {
     id: "ACTIVE_OPERATION_INDEX",
     sqlAnchor: "CREATE INDEX wallet_active_leases_operation_idx",
     rule: "Active leases are indexed by operation_id for operation-scoped lookup.",
+  },
+  {
+    id: "LEASE_ROLE_IS_ENUM",
+    sqlAnchor: "lease_role wallet_lease_role NOT NULL",
+    rule: "Membership and active-lease roles use the real wallet_lease_role enum, not text+CHECK.",
   },
 ] as const;
 

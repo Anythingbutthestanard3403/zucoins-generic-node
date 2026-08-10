@@ -268,10 +268,8 @@ describe("schema-object census — live gate", () => {
     expect([...dispositioned].sort()).toEqual([...docTables].sort());
 
     const deferred = SPEC_TABLE_DISPOSITIONS.filter((d) => d.disposition === "deferred");
-    // Remaining open stores after main landed approval + verification + lineage DDL.
-    // lineage_path_proofs/bodies promoted to required; deferred floor is the
-    // remaining observation_relationship_adjudications (+ any later deferred rows).
-    expect(deferred.length).toBeGreaterThanOrEqual(1);
+    // observation_relationship_adjudications promoted to required (ZTR-1169).
+    // Floor may be zero when every governing CREATE TABLE is landed.
     for (const d of deferred) {
       expect(d.authority && d.authority.length >= 8, `${d.table} deferred needs authority`).toBe(
         true,
@@ -305,6 +303,7 @@ describe("schema-object census — live gate", () => {
       "operation_landing_proofs",
       "lineage_path_proofs",
       "lineage_path_bodies",
+      "observation_relationship_adjudications",
       "operation_verifications",
       "verification_acknowledgements",
       "verification_ack_wallet_evidence",

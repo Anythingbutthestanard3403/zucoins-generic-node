@@ -10,6 +10,7 @@
     "audit-log.sql",
     "base-enums-domains.sql",
     "custody-eligibility.sql",
+    "destinations-label.sql",
     "device-enrollment-challenges.sql",
     "device-keys.sql",
     "event-ledger.sql",
@@ -19,6 +20,7 @@
     "implementer-event-stream.sql",
     "landing-proof-verifications.sql",
     "lease-foundation.sql",
+    "lease-role-enum.sql",
     "lineage-path-proofs.sql",
     "move-baseline-binding.sql",
     "move-observation-evidence.sql",
@@ -28,6 +30,7 @@
     "node-signing-key-sealed-store.sql",
     "observation-anomaly-indexes.sql",
     "observation-ledger.sql",
+    "observation-relationship-adjudications.sql",
     "observation-stores.sql",
     "operational-stores.sql",
     "operations-indexes.sql",
@@ -64,7 +67,7 @@
     "nounsChecked": 39,
     "nounsOk": 39,
     "nounsFailed": 0,
-    "foreignKeysChecked": 187,
+    "foreignKeysChecked": 189,
     "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
@@ -1118,6 +1121,20 @@
       "ok": true
     },
     {
+      "source": "observation_relationship_adjudications(observation_id)",
+      "target": "gateway_observations(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "observation_relationship_adjudications(lineage_path_proof_id)",
+      "target": "lineage_path_proofs(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
       "source": "wallet_observation_cursors(observer_id)",
       "target": "observers(id)",
       "onDelete": "UNSPECIFIED",
@@ -2060,7 +2077,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_119",
+      "satisfiedBy": "index:operations_unique_121",
       "ok": true
     },
     {

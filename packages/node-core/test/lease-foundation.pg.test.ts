@@ -1217,7 +1217,7 @@ describe("lease-foundation real-PG behaviours", () => {
         `SELECT count(*) FROM pg_proc p
            JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public'
-            AND p.proname = 'lease_foundation_reject_ineligible_lease'`,
+            AND p.proname = 'custody_reject_ineligible_lease'`,
       ).trim();
       expect(fnAfterFail).toBe("0");
 
@@ -1238,6 +1238,9 @@ describe("lease-foundation real-PG behaviours", () => {
       psqlMust(
         bareUrl,
         `
+CREATE TYPE wallet_lease_role AS ENUM (
+  'RECEIVE_WINDOW', 'MOVE_SOURCE', 'MOVE_DESTINATION', 'SEND_SOURCE', 'RECONCILIATION'
+);
 CREATE TABLE lease_groups (
   id uuid PRIMARY KEY, root_operation_id uuid NOT NULL UNIQUE,
   created_at timestamptz NOT NULL, released_at timestamptz, release_proof_id uuid
@@ -1274,17 +1277,32 @@ VALUES (true, 1, now());
       });
       expect(await eligibilityGuardPresent(bare)).toBe(false);
 
-      // 4) Install wallets + destinations (minimal columns the function compiles against),
-      //    then migrate succeeds, installs guard, and only then is ready.
+      // 4) Install wallet_lease_role + wallets + destinations (minimal columns the
+      //    function compiles against and the foundation CREATE TABLE needs), then
+      //    migrate succeeds, installs guard, and only then is ready.
       psqlMust(
         bareUrl,
         `
+-- wallet_lease_role may already exist from the residue step above.
+DO $enum$ BEGIN
+  CREATE TYPE wallet_lease_role AS ENUM (
+    'RECEIVE_WINDOW',
+    'MOVE_SOURCE',
+    'MOVE_DESTINATION',
+    'SEND_SOURCE',
+    'RECONCILIATION'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $enum$;
+CREATE TYPE wallet_key_origin AS ENUM ('node_generated', 'imported');
+CREATE TYPE wallet_state AS ENUM ('AVAILABLE', 'PINNED', 'QUARANTINED', 'RETIRED');
+CREATE TYPE destination_state AS ENUM ('PENDING', 'BLESSED', 'RETIRED');
 CREATE TABLE wallets (
   id uuid PRIMARY KEY,
   node_id uuid NOT NULL,
   public_key text NOT NULL,
-  key_origin text NOT NULL,
-  state text NOT NULL,
+  key_origin wallet_key_origin NOT NULL,
+  state wallet_state NOT NULL,
   recovery_verified_at timestamptz,
   recovery_verification_id uuid
 );
@@ -1292,7 +1310,7 @@ CREATE TABLE destinations (
   id uuid PRIMARY KEY,
   wallet_id uuid NOT NULL UNIQUE REFERENCES wallets (id),
   node_id uuid NOT NULL,
-  state text NOT NULL
+  state destination_state NOT NULL
 );
 `,
       );
@@ -1313,7 +1331,7 @@ CREATE TABLE destinations (
           WHERE n.nspname = 'public'
             AND c.relname = 'wallet_active_leases'
             AND t.tgname = 'wallet_active_leases_eligibility_guard'
-            AND p.proname = 'lease_foundation_reject_ineligible_lease'
+            AND p.proname = 'custody_reject_ineligible_lease'
             AND NOT t.tgisinternal`,
       ).trim();
       expect(trg).toBe("1");

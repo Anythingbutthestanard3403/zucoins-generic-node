@@ -6,8 +6,8 @@
  *   - The one-in-flight-per-wallet rule backstop: wallet_active_leases.wallet_id PRIMARY KEY rejects a second
  *     active lease for the same wallet with unique_violation (SQLSTATE 23505).
  *   - lease_role vocabulary: an out-of-vocabulary lease_role is rejected fail-closed by the
- *     BEFORE INSERT unknown-role raise (CUSTODY_LEASE_ROLE_UNKNOWN / P0001; the inline CHECK is
- *     23512, which is not an assigned SQLSTATE).
+ *     wallet_lease_role ENUM cast (22P02). CUSTODY_LEASE_ROLE_UNKNOWN (P0001) remains the
+ *     fail-closed path when ALTER TYPE ADD VALUE admits a member without a trigger branch.
  *
  * Home rationale : the frozen contract declares this package carries NO database
  * harness (custody-eligibility.contract.ts, SCHEMA_EXECUTION_OBLIGATIONS preamble), and no
@@ -44,7 +44,7 @@
  *       exports to us, so it is the only one this suite gates on.
  *
  * Seed vocabulary: the PK-drill lease roles are drawn from the canonical LEASE_ROLES enum — the
- * same source of truth the DDL's lease_role CHECK is bound to by lease-role-parity.test.ts — so a
+ * same source of truth the DDL's wallet_lease_role enum is bound to by lease-role-parity.test.ts — so a
  * future vocabulary rename cannot silently re-break setup the way the literal 'RECEIVE' did after
  * reconciled the enum to RECEIVE_WINDOW/MOVE_DESTINATION/RECONCILIATION.
  */
@@ -59,7 +59,7 @@ import { tokenizeCustodySql } from "./custody-eligibility-sql-statements.js";
 const MAINTENANCE_DB = "postgres";
 const SQLSTATE_UNIQUE_VIOLATION = "23505";
 const PK_CONSTRAINT = "wallet_active_leases_pkey";
-const EXPECTED_DRILL_COUNT = 2;
+const EXPECTED_DRILL_COUNT = 3;
 
 /* ─── psql helpers ────────────────────────────────────────────────── */
 
@@ -254,17 +254,31 @@ describeIfPg("custody-eligibility lease PK & CHECK (real frozen DDL, hermetic sc
     assertionsRun += 1;
   });
 
-  it("rejects an out-of-vocabulary lease_role fail-closed (BEFORE INSERT unknown-role raise)", () => {
+  it("rejects an out-of-vocabulary lease_role fail-closed (enum cast)", () => {
     psqlMust(scratchDb, seedNode(NODE_B, pubkey("NODEB")));
     psqlMust(scratchDb, seedWallet(WALLET_B, NODE_B, pubkey("WALLETB")));
 
     const invalid = runPsql(scratchDb, insertLease(WALLET_B, "INVALID_ROLE"), true);
 
     expect(invalid.ok, "out-of-vocabulary lease_role must be rejected").toBe(false);
-    // BEFORE INSERT fires before CHECK, so CUSTODY_LEASE_ROLE_UNKNOWN (P0001) is the
-    // observed rejector. The inline CHECK remains as a second line of defence.
-    expect(extractSqlstate(invalid.stderr)).toBe("P0001");
-    expect(invalid.stderr).toContain("CUSTODY_LEASE_ROLE_UNKNOWN");
+    // wallet_lease_role ENUM rejects unknown labels at cast time (22P02) before the
+    // trigger runs. CUSTODY_LEASE_ROLE_UNKNOWN covers ALTER TYPE ADD VALUE without a branch.
+    expect(extractSqlstate(invalid.stderr)).toBe("22P02");
+    assertionsRun += 1;
+  });
+
+  it("CUSTODY_LEASE_ROLE_UNKNOWN fires when enum gains a member without a trigger branch", () => {
+    const walletC = "a0000000-0000-4000-8000-000000000005";
+    const nodeC = "b0000000-0000-4000-8000-000000000006";
+    psqlMust(scratchDb, seedNode(nodeC, pubkey("NODEC")));
+    psqlMust(scratchDb, seedWallet(walletC, nodeC, pubkey("WALLETC")));
+    // ADD VALUE cannot run inside a transaction block in older PG; psql -c is autocommit.
+    psqlMust(scratchDb, `ALTER TYPE wallet_lease_role ADD VALUE IF NOT EXISTS 'FUTURE_ROLE'`);
+
+    const unknown = runPsql(scratchDb, insertLease(walletC, "FUTURE_ROLE"), true);
+    expect(unknown.ok, "unbranched enum member must be rejected by trigger").toBe(false);
+    expect(extractSqlstate(unknown.stderr)).toBe("P0001");
+    expect(unknown.stderr).toContain("CUSTODY_LEASE_ROLE_UNKNOWN");
     assertionsRun += 1;
   });
 });

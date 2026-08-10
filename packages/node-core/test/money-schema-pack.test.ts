@@ -223,10 +223,47 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(sql).toMatch(/REFERENCES wallet_lease_memberships/);
     expect(sql).toMatch(/wallet_active_leases_lease_group_id_fkey/);
     expect(sql).toMatch(/REFERENCES lease_groups/);
+    // ZTR-1169: no shadowed eligibility function/trigger in lease-foundation at all.
     expect(sql).not.toMatch(
       /CREATE FUNCTION lease_foundation_reject_ineligible_lease\b/,
     );
+    expect(sql).not.toMatch(/CREATE FUNCTION custody_reject_ineligible_lease\b/);
     expect(sql).not.toMatch(/CREATE TRIGGER wallet_active_leases_eligibility_guard\b/);
+    const rawLease = readFileSync(
+      join(MONEY_SCHEMA_DIR, "lease-foundation.sql"),
+      "utf8",
+    );
+    expect(rawLease).not.toMatch(
+      /CREATE FUNCTION lease_foundation_reject_ineligible_lease\b/,
+    );
+    expect(rawLease).not.toMatch(
+      /CREATE TRIGGER wallet_active_leases_eligibility_guard\b/,
+    );
+  });
+
+  it("pack lands adjudications, destinations.label, and lease_role enum after lineage", () => {
+    const adjIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(
+      "observation-relationship-adjudications",
+    );
+    const labelIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-label");
+    const roleIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-role-enum");
+    const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
+    expect(adjIdx).toBeGreaterThan(lineageIdx);
+    expect(labelIdx).toBeGreaterThan(adjIdx);
+    expect(roleIdx).toBeGreaterThan(labelIdx);
+    const files = loadMoneySchemaMigrations();
+    expect(files[adjIdx]!.sql).toMatch(
+      /CREATE TABLE observation_relationship_adjudications\b/,
+    );
+    expect(files[adjIdx]!.sql).toMatch(
+      /observation_relationship_adjudications_no_update/,
+    );
+    expect(files[labelIdx]!.sql).toMatch(
+      /ADD COLUMN IF NOT EXISTS label text NOT NULL DEFAULT ''/,
+    );
+    expect(files[roleIdx]!.sql).toMatch(
+      /ALTER COLUMN lease_role TYPE wallet_lease_role/,
+    );
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

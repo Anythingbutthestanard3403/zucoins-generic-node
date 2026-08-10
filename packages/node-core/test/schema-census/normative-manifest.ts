@@ -550,9 +550,9 @@ export const SPEC_TABLE_DISPOSITIONS: readonly SpecTableDisposition[] = [
   },
   {
     table: "observation_relationship_adjudications",
-    disposition: "deferred",
+    disposition: "required",
     section: "observation ledger",
-    authority: "relationship adjudication persistence",
+    authority: "relationship adjudication persistence; landed in observation-relationship-adjudications.sql (ZTR-1169)",
   },
   { table: "proof_channel_candidate_bodies", disposition: "required", section: "proof-channel candidate bodies" },
   { table: "proof_body_slot_sighting_counters", disposition: "required", section: "proof-channel candidate bodies" },

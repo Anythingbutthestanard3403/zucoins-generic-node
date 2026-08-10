@@ -184,6 +184,13 @@ const SCHEMA_FILES = [
   // only (no CREATE TABLE), so it's also in NO_TABLE_SCHEMA_FILES below; appended after the
   // sequence closer above (mirrors MONEY_SCHEMA_PACK_ORDER's own append-only placement).
   "operations-indexes.sql",
+  // observation_relationship_adjudications. References gateway_observations +
+  // lineage_path_proofs. Appended after lineage-path-proofs.
+  "observation-relationship-adjudications.sql",
+  // destinations.label column. ALTER-only (no CREATE TABLE).
+  "destinations-label.sql",
+  // lease_role → wallet_lease_role enum. ALTER-only (no CREATE TABLE).
+  "lease-role-enum.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -200,6 +207,8 @@ const NO_TABLE_SCHEMA_FILES = [
   "mutation-correlation.sql",
   "wallet-settled-ledger-indexes.sql",
   "operations-indexes.sql",
+  "destinations-label.sql",
+  "lease-role-enum.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -446,6 +455,19 @@ const GREENFIELD: Record<
   "operations-indexes.sql": {
     applies: false,
     missingRelation: "operations",
+  },
+  "observation-relationship-adjudications.sql": {
+    applies: false,
+    missingRelation: "gateway_observations",
+  },
+  "destinations-label.sql": {
+    applies: false,
+    missingRelation: "destinations",
+  },
+  "lease-role-enum.sql": {
+    // DO block is a no-op when tables/columns are absent (IF EXISTS guards).
+    // Not greenfield-alone materialising; no CREATE TABLE.
+    applies: true,
   },
 };
 

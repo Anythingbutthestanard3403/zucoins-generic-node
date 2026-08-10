@@ -39,8 +39,10 @@ describe("createSqlDestinationStore", () => {
       DEST,
       NODE,
       WALLET,
+      "sink",
       "2026-07-29T00:00:00.000Z",
     ]);
+    expect(calls[0]!.text).toMatch(/label/);
   });
 
   it("findById maps a row and returns null when missing", async () => {
@@ -53,6 +55,7 @@ describe("createSqlDestinationStore", () => {
             wallet_id: WALLET,
             wallet_public_key: PUB,
             state: "PENDING",
+            label: "Primary sink",
             blessed_at: null,
             blessed_by_device_key_id: null,
             blessing_artifact_id: null,
@@ -65,7 +68,7 @@ describe("createSqlDestinationStore", () => {
     const store = createSqlDestinationStore(sql);
     const row = await store.findById(DEST);
     expect(row?.destinationId).toBe(DEST);
-    expect(row?.label).toBe("");
+    expect(row?.label).toBe("Primary sink");
     sql.query.mockResolvedValueOnce({ rows: [] });
     expect(await store.findById(DEST)).toBeNull();
   });

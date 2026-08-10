@@ -90,13 +90,17 @@ describe("lease-foundation schema census", () => {
     expect(missing).toEqual(["PROOF_TRUSTED_ISSUER_ONLY"]);
   });
 
-  it("splitSqlStatements yields a non-empty statement list ending with the trigger", () => {
+  it("splitSqlStatements yields a non-empty statement list with active leases (no shadowed trigger)", () => {
     const stmts = splitSqlStatements(sql);
     expect(stmts.length).toBeGreaterThanOrEqual(10);
     expect(stmts.some((s) => /CREATE TABLE wallet_active_leases/i.test(s))).toBe(true);
+    // ZTR-1169: eligibility trigger is custody-owned; foundation SQL must not re-declare it.
     expect(stmts.some((s) => /CREATE TRIGGER wallet_active_leases_eligibility_guard/i.test(s))).toBe(
-      true,
+      false,
     );
+    expect(
+      stmts.some((s) => /CREATE FUNCTION lease_foundation_reject_ineligible_lease/i.test(s)),
+    ).toBe(false);
   });
 
   it("sortWalletIdsAscending is ascending and non-mutating", () => {

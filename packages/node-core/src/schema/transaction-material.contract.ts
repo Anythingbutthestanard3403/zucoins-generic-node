@@ -199,12 +199,11 @@ export const TRANSACTION_MATERIAL_INVARIANTS: readonly TransactionMaterialInvari
 ] as const;
 
 /**
- * The three mutability regimes. No trigger DDL is frozen for them, so the
- * regimes live here as inventory plus schema-apply execution obligations — the guard design belongs
- * to the schema-apply phase (exact-content tables are append-only or carry
- * byte-immutability triggers). `updatableColumns` names every column a legal UPDATE may
- * touch; for operation_transactions each addition is one-way — an existing value can never
- * be overwritten (04:766).
+ * The three mutability regimes. Trigger DDL lives in the append-only pack slice
+ * `transaction-material-byte-immutability.sql` (ZTR-1138) so this file's CREATE TABLE
+ * surface stays byte-stable. Regimes stay inventoried here; `updatableColumns` names every
+ * column a legal UPDATE may touch; for operation_transactions each addition is one-way — an
+ * existing value can never be overwritten (04:766).
  */
 export const TRANSACTION_MATERIAL_MUTABILITY_REGIMES = [
   {
@@ -267,7 +266,7 @@ export const TRANSACTION_MATERIAL_PHASE_VOCABULARY = {
  */
 export const SCHEMA_TRANSACTION_MATERIAL_OBLIGATIONS = [
   "execution sequence: create the FK target relations (operations, operation_approvals, wallets) before this file's tables; the wallets(id) referenced here matches custody-eligibility.sql, so only the execution sequence below remains to be honoured.",
-  "guards: install BEFORE UPDATE/DELETE enforcement for the three mutability regimes (insert-only sign intents; one-way completion on operation_transactions; partials byte-immutable except delivery counters) — the conventions sanction byte-immutability triggers; no trigger DDL is frozen in this file.",
+  "guards: BEFORE UPDATE/DELETE/TRUNCATE enforcement for the three mutability regimes is shipped in transaction-material-byte-immutability.sql (pack append after this slice) — insert-only sign intents; one-way completion on operation_transactions; partials byte-immutable except delivery counters.",
   "negative: a second external_send_partials insert for the same operation_id violates the primary key — a persisted partial cannot be replaced, even after expiry or crash.",
   "negative: a second operation_transactions row for the same (operation_id, attempt_no) violates the composite primary key, and attempt_no = 2 violates the column CHECK — a second transaction attempt for one operation fails both ways.",
   "negative: no node code path creates a submit attempt for SEND_EXTERNAL; the completed transaction persisted through operation_transactions is durable, and only delivery of the persisted partial ever occurs.",

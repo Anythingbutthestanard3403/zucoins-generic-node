@@ -34,10 +34,11 @@
  * column, so "same lease_epoch throughout" is asserted where the epoch actually
  * lives — external_send_sign_intents.lease_epoch / lease_group_id — across the contention drill.
  *
- * Byte-immutability of external_send_partials is an APPLICATION-level regime
- * (TRANSACTION_MATERIAL_MUTABILITY_REGIMES: "byte_immutable_except_delivery_counters"), not a
- * DDL trigger. Drill (i) asserts that explicitly so this suite cannot be read as proving a
- * constraint that does not exist.
+ * Byte-immutability of external_send_partials is enforced by the append-only pack slice
+ * transaction-material-byte-immutability.sql (ZTR-1138). This suite still applies only
+ * transaction-material.sql (constraint half). Live trigger reject is proven in
+ * transaction-material-byte-immutability.pg.test.ts. Drill (i) still applies the guards
+ * slice and asserts signed-byte UPDATE is rejected.
  *
  * PG_REQUIRED race guard mirrors custody-eligibility-lease-pk.test.ts: PG_REQUIRED=1 is exported
  * by verify-local.sh only after its own pg_isready probe found Postgres reachable, so within this
@@ -429,23 +430,18 @@ describeIfPg(
       assertionsRun += 1;
     });
 
-    it("(i) byte-immutability is an APPLICATION regime, not a DDL constraint — this suite does not claim it proven", () => {
+    it("(i) byte-immutability trigger rejects signed-byte UPDATE on external_send_partials", () => {
       psqlMust(scratchDb, insertPartial(OP_MUT, APPROVAL_MUT, 40));
+      // Tables already applied in beforeAll; attach the append-only guards slice once here.
+      applyFile(scratchDb, "transaction-material-byte-immutability.sql");
 
-      // Deliberate: the frozen DDL carries no immutability trigger on external_send_partials.
-      // TRANSACTION_MATERIAL_MUTABILITY_REGIMES records "byte_immutable_except_delivery_counters"
-      // as the rule, and 04:766-767 places enforcement in the application. Asserting the UPDATE
-      // SUCCEEDS keeps that gap visible: if a future slice adds the trigger, this test goes red
-      // and the claim in this file's header gets revisited rather than silently over-reading.
       const mutate = runPsql(
         scratchDb,
         `UPDATE external_send_partials SET inner_sha256 = '${sha256(41)}' ` +
           `WHERE operation_id = '${OP_MUT}';`,
       );
-      expect(
-        mutate.ok,
-        "if this now fails, the DDL gained an immutability guard — update this file's header",
-      ).toBe(true);
+      expect(mutate.ok).toBe(false);
+      expect(mutate.stderr).toContain("EXTERNAL_SEND_PARTIALS_BYTE_IMMUTABLE");
       assertionsRun += 1;
     });
   },

@@ -4,11 +4,9 @@
 // this material is per attempt. The byte-exact signing rule (byte-exact JSON.stringify signing, never
 // reformat) and 4 (never blind-retry) bind here.
 //
-// The frozen DDL carries no trigger definitions, and transaction-material.contract.ts assigns
-// BEFORE UPDATE/DELETE guard installation to a later schema phase. Until those triggers
-// exist, the three mutability
-// regimes are enforced HERE, and this module is written so that each regime is a property of the
-// statement set rather than of caller discipline:
+// Engine-level BEFORE UPDATE/DELETE/TRUNCATE guards ship in
+// transaction-material-byte-immutability.sql (pack append). This module still shapes every
+// statement so each regime is a property of the statement set rather than of caller discipline:
 //
 // * external_send_sign_intents — insert-only. This module emits exactly one statement against
 // it, an INSERT. There is no UPDATE or DELETE to call.

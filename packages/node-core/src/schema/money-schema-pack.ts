@@ -188,6 +188,11 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // lease_role text→wallet_lease_role enum on active leases + memberships. Value-preserving
   // USING cast for already-applied DBs; cold CREATE already uses the enum. Appended.
   "lease-role-enum",
+  // BEFORE UPDATE/DELETE/TRUNCATE byte-immutability guards on external_send_sign_intents,
+  // operation_transactions, and external_send_partials (doc 04 §9 / 04:760-767). Tables are
+  // created by transaction-material earlier in the pack; this slice only attaches triggers.
+  // Appended so earlier money-pack version numbers stay stable. Never renumber prior slices.
+  "transaction-material-byte-immutability",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

@@ -43,9 +43,9 @@
  *   additional, not a substitute.
  *
  * WHAT IS NOT CLAIMED
- *   Byte-immutability of external_send_partials is an application regime, not a DDL
- * trigger (the data model / TRANSACTION_MATERIAL_MUTABILITY_REGIMES). This file proves the
- *   shipped code paths never mutate the bytes; the sibling file records the DDL gap.
+ *   Engine-level byte-immutability triggers live in transaction-material-byte-immutability.sql
+ *   and are proven in transaction-material-byte-immutability.pg.test.ts. This file proves the
+ *   shipped code paths never mutate the bytes under concurrency.
  */
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

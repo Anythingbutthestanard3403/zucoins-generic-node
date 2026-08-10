@@ -162,3 +162,20 @@ export {
   type ApprovalChallengeIssuerStore,
 } from "./challenge-issuer-store.js";
 
+// Additive device-signature policy (doc 07 §17.10 / ZTR-1143).
+export {
+  DEVICE_SIGNATURE_POLICY_MODES,
+  DEVICE_SIGNATURE_POLICY_SETTING_KEY,
+  DEVICE_SIGNATURE_POLICY_COPY,
+  parseDeviceSignaturePolicyMode,
+  resolveDeviceSignatureRequired,
+  effectiveDeviceSignaturePolicyMode,
+  combineDeviceSignatureRequirement,
+  fixedDeviceSignaturePolicy,
+  InMemoryDeviceSignaturePolicy,
+  createSqlDeviceSignaturePolicy,
+  type DeviceSignaturePolicyMode,
+  type DeviceSignaturePolicyPort,
+  type DeviceSignaturePolicySetMeta,
+} from "./device-signature-policy.js";
+

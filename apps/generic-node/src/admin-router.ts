@@ -75,6 +75,8 @@ import {
   // Second-device enrol, dual-control policy, operator push
   APPROVAL_POLICY_DENIAL_CODE,
   DUAL_CONTROL_COPY,
+  DEVICE_SIGNATURE_POLICY_COPY,
+  combineDeviceSignatureRequirement,
   issueSecondDeviceCeremony,
   bindSecondDevicePublicKey,
   authorizeSecondDeviceEnrol,
@@ -87,6 +89,8 @@ import {
   noopOperatorPushSender,
   type DualControlMode,
   type DualControlPolicyPort,
+  type DeviceSignaturePolicyMode,
+  type DeviceSignaturePolicyPort,
   type ApprovalChallengeIssuerStore,
   type SecondDeviceCeremonyStore,
   type OperatorPushSubscriptionStore,
@@ -457,6 +461,29 @@ function parseHaltBody(
     }
   }
   return { ok: true, body: { engaged: raw.engaged, reason } };
+}
+
+function parseDeviceSignaturePolicyBody(
+  raw: unknown,
+): ParseOk<{ mode: DeviceSignaturePolicyMode }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (raw.mode !== "required" && raw.mode !== "optional") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "mode must be required or optional",
+    };
+  }
+  const known = new Set(["mode"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { mode: raw.mode } };
 }
 
 const KNOWN_SCOPES = new Set<string>(IMPLEMENTER_SCOPES);
@@ -951,6 +978,11 @@ export interface AdminRouteDeps {
   readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   /** Dual-control policy. When omitted, single_operator. */
   readonly dualControlPolicy?: DualControlPolicyPort;
+  /**
+   * Additive device-signature policy for external-send approval (doc 07 §17.10).
+   * When omitted, approvals fail closed and require a device signature.
+   */
+  readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   /** Records which admin_operator issued the approval challenge (two_human). */
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   /** Second-device QR enrolment. When omitted, enrol routes 503. */
@@ -1899,6 +1931,33 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // --- Additive device-signature policy (doc 07 §17.10 / ZTR-1143) ---
+    if (verb === "GET" && pathname === "/admin/v1/device-signature-policy") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      // Fail closed when the port is absent or unreadable: surface required.
+      let mode: DeviceSignaturePolicyMode = "required";
+      if (deps.deviceSignaturePolicy !== undefined) {
+        try {
+          mode = await deps.deviceSignaturePolicy.getMode();
+        } catch {
+          mode = "required";
+        }
+      }
+      const copy = DEVICE_SIGNATURE_POLICY_COPY[mode];
+      return ok(200, {
+        mode,
+        requires_device_signature: mode === "required",
+        short: copy.short,
+        long: copy.long,
+        approve_hint: copy.approve_hint,
+      });
+    }
+
     // --- Second-device QR enrolment peek ---
     if (verb === "GET" && pathname.startsWith("/admin/v1/device-enrol/")) {
       const gate = await gateMoneyMutation(sessions, authReq, { userStore: deps.userStore, csrf, labTotp: labTotpOrNull(totp) });
@@ -2453,6 +2512,75 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       parsedBody = decodeBody(rawBody);
     } catch {
       return fail(400, "validation_error", "invalid JSON body", requestId);
+    }
+
+    // POST /admin/v1/device-signature-policy — guarded mutation (fresh TOTP + audit).
+    // Placed after body decode (POST-only gate); never request-body policy for approve.
+    if (verb === "POST" && pathname === "/admin/v1/device-signature-policy") {
+      if (deps.deviceSignaturePolicy === undefined || deps.deviceSignaturePolicy.setMode === undefined) {
+        return fail(503, "service_unavailable", "device-signature policy not writable", requestId);
+      }
+      const policyPort = deps.deviceSignaturePolicy;
+      const routeId = "admin_device_signature_policy";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async () => {
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseDeviceSignaturePolicyBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              await policyPort.setMode!(body.mode, {
+                actorId: user.id,
+                nodeId,
+              });
+              const mode = body.mode;
+              const copy = DEVICE_SIGNATURE_POLICY_COPY[mode];
+              return {
+                mode,
+                requires_device_signature: mode === "required",
+                short: copy.short,
+                long: copy.long,
+                approve_hint: copy.approve_hint,
+              };
+            },
+          });
+          if (!guarded.ok) {
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return {
+            outcome: "commit" as const,
+            status: 200,
+            responseBody: guarded.result,
+          };
+        },
+      });
     }
 
     // --- Mode A recovery ceremony start ---
@@ -3017,6 +3145,22 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             const dualMode: DualControlMode = deps.dualControlPolicy
               ? await deps.dualControlPolicy.getMode()
               : "single_operator";
+            // Server policy OR volunteered request — never the request body alone (ZTR-1143).
+            // Unreadable / missing policy fails closed (require).
+            let policyRequiresDevice = true;
+            if (deps.deviceSignaturePolicy !== undefined) {
+              try {
+                policyRequiresDevice = await deps.deviceSignaturePolicy.requiresDeviceSignature();
+              } catch {
+                policyRequiresDevice = true;
+              }
+            }
+            const requestSuppliedDevice =
+              body.device_key_id !== null && body.device_signature !== null;
+            const requireDeviceSignature = combineDeviceSignatureRequirement(
+              policyRequiresDevice,
+              requestSuppliedDevice,
+            );
             const outcome = await approveExternalSend({
               operationId: m[1]!, challengeNonce: body.challenge_nonce,
               expectedRowVersion: body.expected_row_version, preimageSha256: body.preimage_sha256,
@@ -3025,7 +3169,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             }, {
               challengeStore: ports.challengeStore, loadOperation: ports.loadOperation,
               deviceStore: deps.deviceStore as never, totpConfig, totpBurnStore: totpLog,
-              requireDeviceSignature: body.device_key_id !== null && body.device_signature !== null, nowMs,
+              requireDeviceSignature, nowMs,
               dualControlMode: dualMode,
               challengeIssuerStore: deps.challengeIssuerStore,
             });
@@ -4221,6 +4365,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly deviceRevocationSideEffects?: DeviceRevocationSideEffects | null;
   readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
+  readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];
   readonly operatorPush?: AdminRouteDeps["operatorPush"];
@@ -4274,6 +4419,9 @@ export function createFailClosedAdminRouteDeps(base: {
     deviceRevocationSideEffects: base.deviceRevocationSideEffects ?? null,
     breakGlassStore: base.breakGlassStore ?? null,
     ...(base.dualControlPolicy !== undefined ? { dualControlPolicy: base.dualControlPolicy } : {}),
+    ...(base.deviceSignaturePolicy !== undefined
+      ? { deviceSignaturePolicy: base.deviceSignaturePolicy }
+      : {}),
     ...(base.challengeIssuerStore !== undefined
       ? { challengeIssuerStore: base.challengeIssuerStore }
       : {}),
@@ -4340,6 +4488,7 @@ export function createLiveAdminRouteDeps(
     readonly deviceRevocationSideEffects?: DeviceRevocationSideEffects | null;
     readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
+  readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];
   readonly operatorPush?: AdminRouteDeps["operatorPush"];

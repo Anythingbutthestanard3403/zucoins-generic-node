@@ -41,6 +41,7 @@ describe("createPoolArmTxFactory / createPoolArmWalletGate", () => {
 
     expect(pool.connect).toHaveBeenCalledOnce();
     expect(queries[0]).toBe("BEGIN");
+    expect(queries[1]).toMatch(/set_config\('statement_timeout'/);
     expect(queries).toContain(ARM_SQL_STATEMENTS.LOCK_WALLET_STANDING);
     expect(queries.at(-1)).toBe("COMMIT");
     expect(client.release).toHaveBeenCalledOnce();
@@ -63,14 +64,16 @@ describe("createPoolArmTxFactory / createPoolArmWalletGate", () => {
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    expect(queries).toEqual(["BEGIN", "ROLLBACK"]);
+    expect(queries[0]).toBe("BEGIN");
+    expect(queries[1]).toMatch(/set_config\('statement_timeout'/);
+    expect(queries.at(-1)).toBe("ROLLBACK");
     expect(client.release).toHaveBeenCalledOnce();
   });
 
   it("createPoolArmWalletGate exposes withWalletLocked and live standing", async () => {
     const client = {
       query: vi.fn(async (text: string) => {
-        if (text === "BEGIN" || text === "COMMIT") return { rows: [] };
+        if (text === "BEGIN" || text === "COMMIT" || text.includes("set_config")) return { rows: [] };
         if (text === ARM_SQL_STATEMENTS.LOCK_WALLET_STANDING) {
           return {
             rows: [
@@ -113,7 +116,7 @@ describe("createPoolArmWalletGate requireCommitSession binds sql tx", () => {
     let captured: unknown;
     const client = {
       query: vi.fn(async (text: string) => {
-        if (text === "BEGIN" || text === "COMMIT") return { rows: [] };
+        if (text === "BEGIN" || text === "COMMIT" || text.includes("set_config")) return { rows: [] };
         if (text === ARM_SQL_STATEMENTS.LOCK_WALLET_STANDING) {
           return {
             rows: [

@@ -22,6 +22,30 @@ export const TRY_ACQUIRE_LEADERSHIP_SQL = "SELECT pg_try_advisory_lock($1) AS lo
 export const RELEASE_LEADERSHIP_SQL = "SELECT pg_advisory_unlock($1) AS released";
 
 /**
+ * Positive ownership probe on the dedicated leadership connection (ZTR-1156).
+ * Confirms THIS backend pid still holds the session advisory lock — independent
+ * of transport `error`/`end`. Uses the single-bigint form of the lock id
+ * (`objsubid = 1`) that `pg_try_advisory_lock(bigint)` takes.
+ *
+ * Parameter $1 is the lock id (bigint). Returns one row with `owned = true`
+ * when the current backend still holds it.
+ */
+export const ASSERT_LEADERSHIP_OWNED_SQL = `
+SELECT EXISTS (
+  SELECT 1
+    FROM pg_locks
+   WHERE locktype = 'advisory'
+     AND granted = true
+     AND pid = pg_backend_pid()
+     AND objsubid = 1
+     AND classid = (($1::bigint >> 32) & 4294967295)::int
+     AND objid = ($1::bigint & 4294967295)::int
+) AS owned`.replace(/\s+/g, " ").trim();
+
+/** Default interval for the positive ownership watch (ms). Overridable via options. */
+export const DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS = 2_000;
+
+/**
  * One dedicated database connection. Shaped after a pooled client so a real driver's client
  * satisfies it structurally; `release` returns it to its pool (or closes it outright).
  *
@@ -115,7 +139,27 @@ export class SignerLeadership {
 export interface HeldSignerLeadership {
   /** Fired at most once when the dedicated connection dies. The latch is already false. */
   onLost(listener: (reason: string) => void): void;
+  /**
+   * Stop the positive ownership watch (if any). Safe to call after loss/release;
+   * does not release the lock — use {@link release} for that.
+   */
+  stopOwnershipWatch(): void;
   release(): Promise<void>;
+}
+
+export interface TryAcquireSignerLeadershipOptions {
+  /**
+   * How often to re-assert ownership server-side on the dedicated connection.
+   * `0` disables the watch (tests that only drive loss via error/end).
+   * Default {@link DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS}.
+   */
+  readonly ownershipAssertIntervalMs?: number;
+  /**
+   * Timer seams so the ownership watch is unit-testable without real wall time.
+   * Production leaves these undefined and uses the global timers.
+   */
+  readonly setIntervalFn?: (handler: () => void, ms: number) => unknown;
+  readonly clearIntervalFn?: (handle: unknown) => void;
 }
 
 /**
@@ -123,12 +167,27 @@ export interface HeldSignerLeadership {
  * armed) or `null` when another instance holds it — never blocks waiting for the holder.
  * A query error releases the probe connection and rethrows so the caller's backoff retries;
  * an unreachable database therefore never silently reads as leadership.
+ *
+ * `lockIdOrOptions` accepts the legacy positional `lockId` number OR an options bag so
+ * existing callers (`tryAcquire(pool, latch)`, `tryAcquire(pool, latch, lockId)`) keep
+ * working while ownership-watch knobs travel in the options bag.
  */
 export async function tryAcquireSignerLeadership(
   pool: LeadershipLockPool,
   latch: SignerLeadership,
-  lockId: number = SIGNER_LEADERSHIP_LOCK_ID,
+  lockIdOrOptions: number | TryAcquireSignerLeadershipOptions = SIGNER_LEADERSHIP_LOCK_ID,
+  maybeOptions?: TryAcquireSignerLeadershipOptions,
 ): Promise<HeldSignerLeadership | null> {
+  const lockId =
+    typeof lockIdOrOptions === "number" ? lockIdOrOptions : SIGNER_LEADERSHIP_LOCK_ID;
+  const options: TryAcquireSignerLeadershipOptions =
+    typeof lockIdOrOptions === "number" ? (maybeOptions ?? {}) : lockIdOrOptions;
+  const ownershipAssertIntervalMs =
+    options.ownershipAssertIntervalMs ?? DEFAULT_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS;
+  const setIntervalFn = options.setIntervalFn ?? ((handler, ms) => setInterval(handler, ms));
+  const clearIntervalFn =
+    options.clearIntervalFn ?? ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
+
   const client = await pool.connect();
   let locked = false;
   try {
@@ -159,13 +218,24 @@ export async function tryAcquireSignerLeadership(
   // release during unlock-query / end must join this promise — never fall through to
   // client.release while outcome is still "open" and lost already true (d72fd92).
   let releaseFlight: Promise<void> | undefined;
+  let ownershipTimer: unknown;
   const listeners: Array<(reason: string) => void> = [];
-  const onLoss = (event: "error" | "end") => (err?: Error): void => {
+  const stopOwnershipWatch = (): void => {
+    if (ownershipTimer !== undefined) {
+      clearIntervalFn(ownershipTimer);
+      ownershipTimer = undefined;
+    }
+  };
+  const onLoss = (event: "error" | "end" | "ownership") => (err?: Error): void => {
     if (lost) return;
     lost = true;
-    const reason = `signer leadership lock connection ${event}${
-      err === undefined ? "" : `: ${err.message}`
-    }`;
+    stopOwnershipWatch();
+    const reason =
+      event === "ownership"
+        ? err?.message ?? "signer leadership ownership assertion failed"
+        : `signer leadership lock connection ${event}${
+            err === undefined ? "" : `: ${err.message}`
+          }`;
     // Latch first, synchronously, before any observer runs: the lock is already free
     // server-side, so another instance may acquire at any moment from now.
     latch.markLost(reason);
@@ -173,12 +243,51 @@ export async function tryAcquireSignerLeadership(
   };
   const onError = onLoss("error");
   const onEnd = onLoss("end");
+  const onOwnershipLoss = onLoss("ownership");
   client.on("error", onError);
   client.on("end", onEnd);
 
   latch.markAcquired();
 
+  // Positive ownership watch — converts silence into a definite answer. A failed
+  // assertion or a transport error on the probe drives the same onLoss path as
+  // error/end; the single-flight release invariant is unchanged.
+  if (ownershipAssertIntervalMs > 0) {
+    let assertInFlight = false;
+    ownershipTimer = setIntervalFn(() => {
+      if (lost || assertInFlight) return;
+      assertInFlight = true;
+      void client
+        .query(ASSERT_LEADERSHIP_OWNED_SQL, [lockId])
+        .then((result) => {
+          if (lost) return;
+          const owned =
+            (result.rows[0] as { owned?: unknown } | undefined)?.owned === true;
+          if (!owned) {
+            onOwnershipLoss(
+              new Error(
+                "signer leadership ownership assertion failed: lock not held by this backend",
+              ),
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          if (lost) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          onOwnershipLoss(
+            new Error(`signer leadership ownership assertion failed: ${msg}`, {
+              cause: err,
+            }),
+          );
+        })
+        .finally(() => {
+          assertInFlight = false;
+        });
+    }, ownershipAssertIntervalMs);
+  }
+
   const runRelease = async (): Promise<void> => {
+    stopOwnershipWatch();
     client.removeListener("error", onError);
     client.removeListener("end", onEnd);
     latch.markLost("signer leadership released");
@@ -250,6 +359,7 @@ export async function tryAcquireSignerLeadership(
       if (lost) return; // already lost — never resurrect a dead lock
       listeners.push(listener);
     },
+    stopOwnershipWatch,
     async release(): Promise<void> {
       // Idempotent / fail-closed on re-entry. Boot-lane retains the handle after unlock
       // failure (quarantine); a second release must never bare-pool a still
@@ -279,6 +389,10 @@ export interface AcquireSignerLeadershipOptions {
   /** Cooperative abort — resolves `null` promptly once set (shutdown during the wait). */
   readonly signal?: { readonly aborted: boolean };
   readonly lockId?: number;
+  /** Forwarded to each {@link tryAcquireSignerLeadership} attempt (ownership watch). */
+  readonly ownershipAssertIntervalMs?: number;
+  readonly setIntervalFn?: TryAcquireSignerLeadershipOptions["setIntervalFn"];
+  readonly clearIntervalFn?: TryAcquireSignerLeadershipOptions["clearIntervalFn"];
   /** Observability hook before each backoff wait (lock still held elsewhere). */
   readonly onWaiting?: (info: { attempt: number; delayMs: number }) => void;
   /** A single attempt errored (transient database fault) — non-fatal, backs off and retries. */
@@ -307,10 +421,21 @@ export async function acquireSignerLeadership(
 
   const aborted = (): boolean => options.signal?.aborted === true;
 
+  const tryOptions: TryAcquireSignerLeadershipOptions = {
+    ownershipAssertIntervalMs: options.ownershipAssertIntervalMs,
+    setIntervalFn: options.setIntervalFn,
+    clearIntervalFn: options.clearIntervalFn,
+  };
+
   let attempt = 0;
   while (!aborted()) {
     try {
-      const held = await tryAcquire(options.pool, options.latch, options.lockId);
+      const held = await tryAcquire(
+        options.pool,
+        options.latch,
+        options.lockId ?? SIGNER_LEADERSHIP_LOCK_ID,
+        tryOptions,
+      );
       if (held !== null) return held;
     } catch (err) {
       options.onError?.(err, attempt);

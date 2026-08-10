@@ -144,6 +144,20 @@ describe("runMigrations preflight composition", () => {
     expect(typeof migrate.assertJournalOrdering).toBe("function");
     expect(migrate.MIGRATION_LOCK_TIMEOUT_MS).toBeGreaterThan(0);
     expect(migrate.MIGRATION_STATEMENT_TIMEOUT_MS).toBeGreaterThan(0);
+    // Migrations must not inherit the shorter money-path statement_timeout (ZTR-1156).
+    expect(migrate.MIGRATION_STATEMENT_TIMEOUT_MS).toBeGreaterThan(15_000);
+  });
+
+  it("migrate.ts createPool call has no money-path statement_timeout option", async () => {
+    // Source census: migrate constructs the pool with URL only (or pool opts for
+    // connect/idle/max/keepAlive) — never a money-path statement bound.
+    const src = readFileSync(
+      fileURLToPath(new URL("../../src/db/migrate.ts", import.meta.url)),
+      "utf8",
+    );
+    expect(src).toMatch(/createPool\(databaseUrl\)/);
+    expect(src).not.toMatch(/MONEY_PATH_STATEMENT_TIMEOUT/);
+    expect(src).toMatch(/applyMigrationTimeouts/);
   });
 
   it("session-endpoint + overlap + lock modules are independently refuse-closed", async () => {

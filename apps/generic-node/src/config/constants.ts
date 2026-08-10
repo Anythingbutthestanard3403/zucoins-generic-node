@@ -13,6 +13,27 @@ export const POOL_CAP_CEILING = 500;
 export const POOL_CAP_DEFAULT = 50;
 export const MINT_BATCH_LIMIT = 5;
 
+// Runtime PostgreSQL pool (pg.Pool) defaults — distinct from receive-wallet
+// POOL_* sizing above. keepAlive is the load-bearing one for leadership: a
+// silently half-open TCP socket otherwise never emits error/end, so the
+// session-scoped advisory lock can free server-side while the latch still
+// reports held (ZTR-1156).
+export const DB_POOL_MAX_DEFAULT = 20;
+export const DB_POOL_MAX_MIN = 2;
+export const DB_POOL_MAX_MAX = 100;
+export const DB_POOL_CONNECTION_TIMEOUT_MS_DEFAULT = 5_000;
+export const DB_POOL_IDLE_TIMEOUT_MS_DEFAULT = 30_000;
+export const DB_POOL_KEEPALIVE_INITIAL_DELAY_MS_DEFAULT = 10_000;
+// Transaction-local money-path statement bound. Migrations use their own
+// longer session-level timeout (db/migrate.ts) and must not inherit this.
+export const MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT = 15_000;
+export const MONEY_PATH_STATEMENT_TIMEOUT_MS_MIN = 1_000;
+export const MONEY_PATH_STATEMENT_TIMEOUT_MS_MAX = 120_000;
+// Positive ownership re-check on the dedicated leadership connection.
+export const SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_DEFAULT = 2_000;
+export const SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MIN = 500;
+export const SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS_MAX = 60_000;
+
 export const RECEIVE_QUEUE_MAX_WAIT_DEFAULT_SECONDS = 30;
 export const RECEIVE_QUEUE_MAX_WAIT_MIN_SECONDS = 5;
 export const RECEIVE_QUEUE_MAX_WAIT_MAX_SECONDS = 3600;

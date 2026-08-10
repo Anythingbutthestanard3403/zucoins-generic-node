@@ -43,6 +43,11 @@ export interface SignerLeadershipRetryDeps {
    * prolonged-wait. Does NOT abort acquisition. Default 30s.
    */
   readonly prolongedWaitMs?: number;
+  /**
+   * Positive ownership re-check interval on the dedicated leadership
+   * connection (ZTR-1156). Forwarded to acquireSignerLeadership.
+   */
+  readonly ownershipAssertIntervalMs?: number;
   readonly logger: BootLogger;
   /** Test seam — defaults to the real node-core retry primitive. */
   readonly acquire?: typeof acquireSignerLeadership;
@@ -62,6 +67,7 @@ export async function acquireSignerLeadershipWithBoundedRetry(
     latch: deps.latch,
     lockId: deps.lockId,
     signal: deps.signal,
+    ownershipAssertIntervalMs: deps.ownershipAssertIntervalMs,
     onWaiting: ({ attempt, delayMs }) => {
       const waitedMs = Date.now() - startedAt;
       if (!prolongedLogged && waitedMs >= prolongedWaitMs) {

@@ -69,6 +69,13 @@ describe("frozen configuration schema — happy path", () => {
     expect(config.BACKUP_SCHEDULE_ENABLED).toBe(false);
     expect(config.DUAL_CONTROL_MODE).toBe("single_operator");
     expect(config.ZUCOINS_PUSH_API_BASE).toBe(DEFAULT_PUSH_API_BASE);
+    // Runtime pool + money-path statement bound defaults (ZTR-1156).
+    expect(config.DB_POOL_MAX).toBe(20);
+    expect(config.DB_POOL_CONNECTION_TIMEOUT_MS).toBe(5_000);
+    expect(config.DB_POOL_IDLE_TIMEOUT_MS).toBe(30_000);
+    expect(config.DB_POOL_KEEPALIVE_INITIAL_DELAY_MS).toBe(10_000);
+    expect(config.MONEY_PATH_STATEMENT_TIMEOUT_MS).toBe(15_000);
+    expect(config.SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS).toBe(2_000);
   });
 
   // ZTR-1182 — push relay base is a schema field, not a raw process.env read.

@@ -24,17 +24,30 @@ import {
 } from "@zucoins/node-core";
 import type { Pool, PoolClient } from "pg";
 
+import { applyMoneyPathStatementTimeout } from "../db/client.js";
+import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+
 /**
  * Adapt a node-postgres Pool into the ArmSqlTxFactory surface.
  * BEGIN → body(client) → COMMIT; ROLLBACK on throw. One client is pinned for
  * the whole critical section so FOR UPDATE is meaningful.
+ *
+ * After BEGIN, applies a transaction-local statement_timeout so a stuck arm
+ * query cannot hold the wallet row lock forever (ZTR-1156). Not a pool default
+ * — migrations keep their own longer session-level bound.
  */
-export function createPoolArmTxFactory(pool: Pool): ArmSqlTxFactory {
+export function createPoolArmTxFactory(
+  pool: Pool,
+  options: { readonly statementTimeoutMs?: number } = {},
+): ArmSqlTxFactory {
+  const statementTimeoutMs =
+    options.statementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   return {
     async withTransaction<T>(fn: (tx: ArmSqlTxExecutor) => Promise<T>): Promise<T> {
       const client: PoolClient = await pool.connect();
       try {
         await client.query("BEGIN");
+        await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
         const tx: ArmSqlTxExecutor = {
           async query<R>(text: string, params?: readonly unknown[]) {
             const result = await client.query(text, params as unknown[] | undefined);

@@ -152,6 +152,19 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "withConnectedPgClient hands one dedicated (non-pool) client through BEGIN → COMMIT",
     },
     {
+      site: "releaseDualGatesWithTrustedMarkers",
+      pathClass: "money-path",
+      isolation: "READ COMMITTED",
+      mechanism: "ROW_LOCK",
+      covering:
+        "locks reporting_restore_state, every node lifecycle head, and the node nonce-burn " +
+        "counter before deriving the live continuity snapshot; then appends AUTH_HOLD_RELEASED " +
+        "events, advances each canonical head, and clears restore_hold in the same transaction.",
+      pinned:
+        "withConnectedPgClient supplies one dedicated client for evidence derivation, all " +
+        "lifecycle writes, restore-hold release, and COMMIT",
+    },
+    {
       site: "applyDualGateForceAfterRestore",
       pathClass: "money-path",
       isolation: "READ COMMITTED",

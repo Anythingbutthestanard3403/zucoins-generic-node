@@ -31,6 +31,12 @@ export interface BackupScheduleConfig {
    */
   readonly trackInflight?: <T>(work: Promise<T>) => Promise<T>;
   readonly afterSuccess?: (result: ScheduledBackupSuccess) => Promise<void> | void;
+  /**
+   * Leadership / ownership gate (ZTR-1183). When provided, start() and each
+   * loop iteration consult it; followers must not beginTrackedRun backups.
+   * Omitted = single-writer composition (Stage 1) that has no leadership latch.
+   */
+  readonly isLeader?: () => boolean;
   readonly logger?: {
     info(message: string): void;
     error(message: string, err?: unknown): void;
@@ -44,19 +50,36 @@ export interface ScheduledBackupSuccess {
   readonly retention: RetentionReport;
 }
 
+/**
+ * Ownership of the scheduled-backup duty on this process (ZTR-1183).
+ * - owner: this process holds leadership (or no leadership gate is wired) and may run dumps
+ * - standby: schedule is configured but this process is not the backup owner
+ * - disabled: BACKUP_SCHEDULE_ENABLED=false / config.enabled=false
+ */
+export type BackupScheduleOwnership = "owner" | "standby" | "disabled";
+
 export interface BackupScheduleStatus {
   readonly enabled: boolean;
+  /** Who owns scheduled dumps on this process — never confuse standby with RPO failure. */
+  readonly ownership: BackupScheduleOwnership;
   readonly running: boolean;
   readonly lastSuccessAtMs: number | null;
   readonly lastFailureAtMs: number | null;
   readonly lastError: string | null;
   readonly newestArtifactAtMs: number | null;
+  /**
+   * RPO breach is only meaningful for the owner. Standby/disabled always report
+   * false so a non-leader replica cannot raise backup_age from empty local state.
+   */
   readonly rpoBreached: boolean;
   readonly consecutiveFailures: number;
 }
 
 export interface BackupSchedulerHandle {
-  /** Begin the loop (no-op when config.enabled is false). */
+  /**
+   * Begin the loop (no-op when config.enabled is false, or when
+   * {@link BackupScheduleConfig.isLeader} is provided and returns false).
+   */
   start(): void;
   /**
    * Synchronous ENGINE_QUIESCE step: stop accepting new runs and
@@ -222,8 +245,32 @@ export function createBackupScheduler(config: BackupScheduleConfig): BackupSched
     wakeSleep = undefined;
   }
 
+  function leadershipAllowsRun(): boolean {
+    // No gate wired (Stage 1 / unit tests) → single-writer assumption.
+    if (config.isLeader === undefined) return true;
+    try {
+      return config.isLeader() === true;
+    } catch (err) {
+      log.error("dr: isLeader probe failed — treating as non-leader (fail-closed)", err);
+      return false;
+    }
+  }
+
+  function ownershipNow(): BackupScheduleOwnership {
+    if (!config.enabled) return "disabled";
+    return leadershipAllowsRun() ? "owner" : "standby";
+  }
+
   async function loop(): Promise<void> {
     while (!stopped) {
+      // Re-check ownership every iteration so a lost leadership latch stops
+      // further pg_dump runs without waiting for process exit (ZTR-1183).
+      if (!leadershipAllowsRun()) {
+        log.info("dr: scheduler skipping run — this process is not the backup owner (leadership not held)");
+        if (stopped) return;
+        await sleepBetweenRuns();
+        continue;
+      }
       await beginTrackedRun();
       if (stopped) return;
       await sleepBetweenRuns();
@@ -234,6 +281,12 @@ export function createBackupScheduler(config: BackupScheduleConfig): BackupSched
     start() {
       if (!config.enabled) {
         log.info("dr: scheduler disabled (BACKUP_SCHEDULE_ENABLED=false)");
+        return;
+      }
+      if (!leadershipAllowsRun()) {
+        log.info(
+          "dr: scheduler not started — this process is not the backup owner (leadership not held)",
+        );
         return;
       }
       if (!stopped) return;
@@ -256,14 +309,22 @@ export function createBackupScheduler(config: BackupScheduleConfig): BackupSched
     },
     runOnce,
     status() {
+      const ownership = ownershipNow();
+      const anchor = newestArtifactAtMs ?? lastSuccessAtMs;
+      // Standby/disabled must not surface RPO breach — that alarm is owner-only.
+      const rpoBreached =
+        ownership === "owner"
+          ? isRpoBreached(anchor, nowMs(), policy)
+          : false;
       return {
         enabled: config.enabled,
+        ownership,
         running,
         lastSuccessAtMs,
         lastFailureAtMs,
         lastError,
         newestArtifactAtMs,
-        rpoBreached: isRpoBreached(newestArtifactAtMs ?? lastSuccessAtMs, nowMs(), policy),
+        rpoBreached,
         consecutiveFailures,
       };
     },

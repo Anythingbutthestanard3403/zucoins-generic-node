@@ -106,6 +106,7 @@ export {
   createBackupScheduler,
   newestBackupArtifactMtimeMs,
   type BackupScheduleConfig,
+  type BackupScheduleOwnership,
   type BackupScheduleStatus,
   type BackupSchedulerHandle,
   type ScheduledBackupSuccess,

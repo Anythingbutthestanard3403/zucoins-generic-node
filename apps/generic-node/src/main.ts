@@ -649,6 +649,7 @@ async function main(): Promise<void> {
         if (st === null) return null;
         return {
           enabled: st.enabled,
+          ownership: st.ownership,
           rpoBreached: st.rpoBreached,
           lastSuccessAt:
             st.lastSuccessAtMs === null ? null : new Date(st.lastSuccessAtMs).toISOString(),
@@ -1321,6 +1322,9 @@ async function main(): Promise<void> {
       logger.error(
         `node: boot incomplete at step "${result.failedStep ?? "unknown"}" — quarantine (leadership retained); serving liveness only, readiness stays false`,
       );
+      // ZTR-1183: incomplete boot never starts the backup scheduler (even with
+      // leadership retained for quarantine). A half-migrated / unready node must
+      // not author restore artifacts into the shared sink.
       return;
     }
     if (disposition === "exit-for-reacquire") {
@@ -1329,11 +1333,23 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
+    // liveness-only (migrations/vault/leadership-acquire failure, etc.).
+    // Explicit return — do NOT fall through to the backup scheduler start.
+    // Followers that lost the leadership race land here; only the ready
+    // leadership holder runs scheduled pg_dump (ZTR-1183).
     logger.error(
       `node: boot incomplete at step "${result.failedStep ?? "unknown"}" — serving liveness only, readiness stays false`,
     );
+    if (config.BACKUP_SCHEDULE_ENABLED) {
+      logger.info(
+        "node: backup scheduler withheld — boot incomplete (liveness-only); only the ready leadership holder runs scheduled backups",
+      );
+    }
+    return;
   }
 
+  // Full boot only: leadership held, recovery ready, money workers started.
+  // Mirrors the money-worker leadership gate — multi-replica safe (ZTR-1183).
   if (config.BACKUP_SCHEDULE_ENABLED) {
     // Fail closed: a missing/wrong-major-version pg_dump or psql
     // must be caught here, once, at boot — never discovered for the first
@@ -1357,6 +1373,8 @@ async function main(): Promise<void> {
         retentionDays: config.BACKUP_RETENTION_DAYS,
         scheduleIntervalMs: config.BACKUP_SCHEDULE_INTERVAL_MS,
       },
+      // Same latch family money workers consult — lost leadership stops further dumps.
+      isLeader: () => shutdownRegistry.authority.held,
       trackInflight: (work) => shutdownRegistry.trackInflight(work),
       logger,
     });

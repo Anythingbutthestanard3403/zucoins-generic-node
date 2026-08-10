@@ -1596,6 +1596,31 @@ describe("main.ts graceful-stop composition", () => {
     expect(mainSource).toMatch(/trackSigningInflight/);
   });
 
+  it("backup scheduler starts only after ready boot + leadership (ZTR-1183)", () => {
+    // Composition: incomplete-boot dispositions must return before createBackupScheduler.
+    // liveness-only used to fall through — the explicit return is the load-bearing fix.
+    expect(mainSource).toMatch(
+      /backup scheduler withheld — boot incomplete \(liveness-only\)/,
+    );
+    const withheldIdx = mainSource.indexOf(
+      "backup scheduler withheld — boot incomplete (liveness-only)",
+    );
+    expect(withheldIdx).toBeGreaterThan(-1);
+    // createBackupScheduler must appear only after the incomplete-boot early returns.
+    const createIdx = mainSource.indexOf("createBackupScheduler({", withheldIdx);
+    expect(createIdx).toBeGreaterThan(withheldIdx);
+    const between = mainSource.slice(withheldIdx, createIdx);
+    expect(between).toMatch(/\breturn;/);
+    // Leadership gate wired into the scheduler config (same latch money workers use).
+    expect(mainSource).toMatch(
+      /isLeader:\s*\(\)\s*=>\s*shutdownRegistry\.authority\.held/,
+    );
+    // Full-boot comment gates the start block.
+    expect(mainSource).toMatch(/Full boot only:[\s\S]{0,200}BACKUP_SCHEDULE_ENABLED/);
+    // Scheduler start itself still calls .start() after create.
+    expect(mainSource).toMatch(/backupScheduler\.start\(\)/);
+  });
+
   it("backup scheduler stop+drain is wired into the shutdown-sequence hooks (not block-local)", () => {
     // Handle retained outside the enable block so stopWorkers can reach it.
     expect(mainSource).toMatch(/let backupScheduler/);

@@ -8,22 +8,23 @@
 //      migration can run (review indicator 2).
 //   1. Health server starts — liveness 200 immediately, readiness 503 until
 // the readiness gating checks pass (schema ∧ DB ∧ vault ∧ observation;
-// leadership is reported non-gating by the readiness rule).
+// leadership + EVENT_SIGNING are reported/money-only, non-gating — ZPAY-252).
 //   2. Graceful stop installed — a SIGTERM at ANY later phase is clean.
 //   3. runBootLane — migrations → privilege readiness → genesis bootstrap →
-//      vault unlock → signer leadership → boot recovery → validated gateway
-//      read → readiness → money workers.
+//      vault unlock → validated gateway read (deploy-ready) → signer
+//      leadership (wait-for-handover) → boot recovery → money workers.
 //
 // Stage-2 money-surface wiring (this ticket):
 //   - Live DB adapter + privilege readiness (assertPrivilegeReadiness).
 //   - Vault unlock via VaultSqlStore + EncryptedWalletKeyStore (master key
 //     only from process.env, not Stage-1 config schema — stage1-production census).
-//   - Signer leadership: acquireSignerLeadership bounded retry (fail-closed at
-//     SIGNER_LEADERSHIP_RETRY_MAX_MS, well inside the Railway healthcheck window) on
-//     shutdownRegistry.authority (sole acquire margin).
+//   - Signer leadership: acquire after deploy-ready (ZPAY-252 / D8.102 class),
+//     wait-for-handover on shutdownRegistry.authority until prior holder
+//     releases or SIGTERM aborts; prolonged-wait log at
+//     SIGNER_LEADERSHIP_RETRY_MAX_MS (warn only, not a hard fail).
 //  - runDeterministicBootRecovery with real SQL-backed inventory (greenfield
 //     ready when no nonterminal ops / leases; populated recovery classifies durable state).
-//   - Validated observation gateway read via readGatewayAction.
+//   - Validated observation gateway read via readGatewayAction (before leadership).
 //   - SqlCredentialStore + implementer_bearer (no permissive auth).
 //   - Live OperationRouteStore over SQL admission stores + three-ops engines
 //     under implementer_bearer only (composition gate).
@@ -1015,24 +1016,37 @@ async function main(): Promise<void> {
       logger.info("boot: vault sealed store initialised (root key derived)");
     },
     acquireSignerLeadership: async (): Promise<SignerLeadershipHandle> => {
-      // The outgoing container during a rolling deploy still holds
-      // the advisory lock for a brief overlap; wait it out with bounded
-      // backoff instead of failing on the first try. Still fails closed
-      // exactly as the prior one-shot try-lock did once the cap is hit (e.g.
-      // the old holder never releases).
-      const held = await acquireSignerLeadershipWithBoundedRetry({
-        pool: leadershipPool,
-        latch: shutdownRegistry.authority,
-        lockId: SIGNER_LEADERSHIP_LOCK_ID,
-        maxWaitMs: config.SIGNER_LEADERSHIP_RETRY_MAX_MS,
-        logger,
-      });
-      if (held === null) {
-        throw new Error("signer leadership lock held by another instance");
-      }
-      return {
-        release: () => held.release(),
+      // Deploy-ready already passed (gateway before this step). Wait for the
+      // prior holder to release — never a short hard timeout that would leave
+      // a ready non-signer stranded (ZPAY-252). SIGTERM aborts the wait so
+      // graceful stop can complete; prolonged-wait is log-only.
+      const leadershipAbort = new AbortController();
+      const onStopSignal = (): void => {
+        leadershipAbort.abort();
       };
+      process.once("SIGTERM", onStopSignal);
+      process.once("SIGINT", onStopSignal);
+      try {
+        const held = await acquireSignerLeadershipWithBoundedRetry({
+          pool: leadershipPool,
+          latch: shutdownRegistry.authority,
+          lockId: SIGNER_LEADERSHIP_LOCK_ID,
+          signal: leadershipAbort.signal,
+          prolongedWaitMs: config.SIGNER_LEADERSHIP_RETRY_MAX_MS,
+          logger,
+        });
+        if (held === null) {
+          throw new Error(
+            "signer leadership acquire aborted (shutdown during handover wait)",
+          );
+        }
+        return {
+          release: () => held.release(),
+        };
+      } finally {
+        process.removeListener("SIGTERM", onStopSignal);
+        process.removeListener("SIGINT", onStopSignal);
+      }
     },
     onLeadershipAcquired: (handle) => shutdownRegistry.stampLeadership(handle),
     onBootPhaseComplete: () => shutdownRegistry.completeBootPhase(),
@@ -1338,10 +1352,12 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    // liveness-only (migrations/vault/leadership-acquire failure, etc.).
-    // Explicit return — do NOT fall through to the backup scheduler start.
-    // Followers that lost the leadership race land here; only the ready
-    // leadership holder runs scheduled pg_dump (ZTR-1183).
+    // liveness-only (migrations/vault/gateway failure, aborted leadership
+    // wait, etc.). Explicit return — do NOT fall through to the backup
+    // scheduler start. Only the ready leadership holder runs scheduled
+    // pg_dump (ZTR-1183). A replica still waiting on handover never reaches
+    // this branch while healthy — it is blocked inside the boot lane after
+    // deploy-ready already answers 200.
     logger.error(
       `node: boot incomplete at step "${result.failedStep ?? "unknown"}" — serving liveness only, readiness stays false`,
     );

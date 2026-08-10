@@ -28,15 +28,15 @@ export interface ReadinessStateInputs {
   readonly observationReadCapable: boolean;
   readonly leadershipLockHeld: boolean;
   /**
-   * EVENT_SIGNING authority availability. Gating: forces not-ready when false,
-   * the same way `stopping` does, WITHOUT joining the frozen reported check set
-   * (readiness-checks.contract.ts census stays closed). Defaults open — a
-   * deployment with no event-signing authority never stamps it; a composition
-   * that installs one (apps/generic-node boot/event-signer-authority.ts) stamps
-   * false at construction and re-opens only via arm. Safe to gate: EVENT_SIGNING
-   * ensure always runs after leadership is already held, so this cannot
-   * reproduce the overlap-deploy deadlock class that keeps signer_leadership
-   * non-gating (ZTR-1179).
+   * EVENT_SIGNING authority availability. Consumed by money admission
+   * (`isGatingReadyForMoney` / `moneyAdmissionRefusal`) so a runtime loss
+   * refuses new money work (ZTR-1179). Deliberately NON-gating on
+   * `/health/ready` — ensure runs only after leadership is held, so a ready
+   * gate here re-couples deploy health to the leadership lock (ZPAY-252 /
+   * D8.102 class). Defaults open — a deployment with no event-signing
+   * authority never stamps it; a composition that installs one
+   * (apps/generic-node boot/event-signer-authority.ts) stamps false at
+   * construction and re-opens only via arm.
    */
   readonly eventSignerAvailable: boolean;
   /** Operator halt engaged. Reported only; non-gating. */

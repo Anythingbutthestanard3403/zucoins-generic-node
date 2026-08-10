@@ -48,11 +48,14 @@ export class MoneyAdmissionRefusedError extends Error {
 }
 
 /**
- * Pure gating conjunction matching {@link evaluateReadinessFromProbes}'s ready
- * verdict. Lives in core/ so money engines never import api/.
+ * Pure gating conjunction for money engines. Lives in core/ so money engines
+ * never import api/.
  *
- * Leadership, halt, and storage_pressure are intentionally excluded
- * (leadership non-gating for readiness) and the dedicated assert ports own those.
+ * Matches {@link evaluateReadinessFromProbes}'s deploy-ready verdict PLUS the
+ * EVENT_SIGNING conjunct (ZTR-1179). Leadership, halt, and storage_pressure
+ * stay excluded (leadership is non-gating for deploy readiness); EVENT_SIGNING
+ * is money-only so an overlap-deploy follower can answer `/health/ready` 200
+ * without holding leadership or arming the event signer (ZPAY-252).
  */
 export function isGatingReadyForMoney(
   state: ReadinessStateInputs,
@@ -63,8 +66,8 @@ export function isGatingReadyForMoney(
   if (!databaseReachable) return false;
   if (!(state.vaultKeyRingLoaded && state.vaultCensusVerified)) return false;
   if (!state.observationReadCapable) return false;
-  // Runtime EVENT_SIGNING authority loss quiesces the money surface; admission
-  // must refuse in lockstep with the readiness verdict (ZTR-1179).
+  // Runtime EVENT_SIGNING authority loss quiesces the money surface (ZTR-1179).
+  // Not part of the /health/ready verdict (ZPAY-252).
   if (!state.eventSignerAvailable) return false;
   return true;
 }

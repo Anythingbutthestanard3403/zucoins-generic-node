@@ -62,13 +62,13 @@ function happyDeps(events: string[], readiness: NodeReadiness) {
 }
 
 describe("boot lane — boot recovery ordering", () => {
-  it("runs migrations → vault → leadership → gateway read → money workers", async () => {
+  it("runs migrations → vault → gateway → leadership → recovery → money workers", async () => {
     const events: string[] = [];
     const readiness = new NodeReadiness(3);
     const result = await runBootLane(happyDeps(events, readiness));
 
     expect(result.ready).toBe(true);
-    expect(events).toEqual(["migrations", "vault", "leadership", "boot-recovery", "gateway-read", "money-workers"]);
+    expect(events).toEqual(["migrations", "vault", "gateway-read", "leadership", "boot-recovery", "money-workers"]);
     expect(readiness.snapshot().ready).toBe(true);
     expect(result.leadership).toBeDefined();
   });
@@ -219,7 +219,7 @@ describe("signer leadership wiring (readiness gate)", () => {
   });
 });
 
-describe("acquireSignerLeadershipWithBoundedRetry (rolling-deploy overlap)", () => {
+describe("acquireSignerLeadershipWithBoundedRetry (rolling-deploy handover; ZPAY-252)", () => {
   function lockPool(grantOnAttempt: number): LeadershipLockPool {
     let attempt = 0;
     return {
@@ -245,50 +245,86 @@ describe("acquireSignerLeadershipWithBoundedRetry (rolling-deploy overlap)", () 
     };
   }
 
-  // Real per-attempt sleep so the wrapper's own maxWaitMs timer (a real
-  // setTimeout) gets a turn on the event loop's timer phase to race against it.
   const realTinySleep = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 
-  it("AC1: succeeds once the lock is held then released within the wait window", async () => {
+  it("AC1: succeeds once the prior holder releases (waiting-for-handover logs)", async () => {
     const { logger, info } = spyLogger();
     const pool = lockPool(3);
 
     const held = await acquireSignerLeadershipWithBoundedRetry({
       pool,
       latch: new SignerLeadership(),
-      maxWaitMs: 2_000,
+      prolongedWaitMs: 60_000,
       logger,
       acquire: (options) => acquireSignerLeadership({ ...options, sleep: realTinySleep }),
     });
 
     expect(held).not.toBeNull();
-    // AC3: each retry attempt (2 of them, before the 3rd-attempt grant) is logged.
     expect(info).toHaveLength(2);
-    expect(info[0]).toMatch(/attempt 1, next wait \d+ms/);
-    expect(info[1]).toMatch(/attempt 2, next wait \d+ms/);
+    expect(info[0]).toMatch(/waiting-for-handover/);
+    expect(info[0]).toMatch(/attempt 1/);
+    expect(info[1]).toMatch(/waiting-for-handover/);
+    expect(info[1]).toMatch(/attempt 2/);
   });
 
-  it("AC2: still fails closed at the wait-window cap when the lock is never released", async () => {
-    const { logger, info } = spyLogger();
+  it("AC3: prolonged-wait log once the warn threshold elapses (acquisition continues until abort)", async () => {
+    const { logger, info, error } = spyLogger();
     const pool = lockPool(Number.POSITIVE_INFINITY);
+    const abort = new AbortController();
+    let waits = 0;
 
     const held = await acquireSignerLeadershipWithBoundedRetry({
       pool,
       latch: new SignerLeadership(),
-      maxWaitMs: 30,
+      signal: abort.signal,
+      // 0ms → first onWaiting is already past the threshold.
+      prolongedWaitMs: 0,
       logger,
-      acquire: (options) => acquireSignerLeadership({ ...options, sleep: realTinySleep }),
+      acquire: (options) =>
+        acquireSignerLeadership({
+          ...options,
+          sleep: async () => {
+            waits += 1;
+            if (waits >= 2) abort.abort();
+          },
+        }),
     });
 
     expect(held).toBeNull();
-    expect(info.length).toBeGreaterThan(0);
+    expect(error.some((line) => /prolonged wait/.test(line))).toBe(true);
+    // First wait may already be prolonged (threshold 0); handover log is optional.
+    expect(error.length + info.length).toBeGreaterThan(0);
+  });
+
+  it("abort (shutdown) ends the wait without dual leadership", async () => {
+    const { logger, info } = spyLogger();
+    const pool = lockPool(Number.POSITIVE_INFINITY);
+    const abort = new AbortController();
+
+    const held = await acquireSignerLeadershipWithBoundedRetry({
+      pool,
+      latch: new SignerLeadership(),
+      signal: abort.signal,
+      prolongedWaitMs: 60_000,
+      logger,
+      acquire: (options) =>
+        acquireSignerLeadership({
+          ...options,
+          sleep: async () => {
+            abort.abort();
+          },
+        }),
+    });
+
+    expect(held).toBeNull();
+    expect(info.some((line) => /waiting-for-handover/.test(line))).toBe(true);
   });
 });
 
 
-// Boot recovery sits between leadership and gateway/money workers.
+// Boot recovery sits after leadership; gateway is before leadership (ZPAY-252).
 describe("boot recovery wiring", () => {
-  it("runs recovery after leadership and before gateway read / money workers", async () => {
+  it("runs gateway before leadership, recovery after leadership, money workers last", async () => {
     const events: string[] = [];
     const readiness = new NodeReadiness(3);
     const deps = {
@@ -304,9 +340,9 @@ describe("boot recovery wiring", () => {
     expect(events).toEqual([
       "migrations",
       "vault",
+      "gateway-read",
       "leadership",
       "boot-recovery",
-      "gateway-read",
       "money-workers",
     ]);
   });
@@ -325,13 +361,13 @@ describe("boot recovery wiring", () => {
     expect(result.ready).toBe(false);
     expect(result.failedStep).toBe("boot-recovery");
     expect(result.bootRecovery?.invariantBreach).toBe(true);
-    expect(events).not.toContain("gateway-read");
+    expect(events).toContain("gateway-read"); // deploy-ready before leadership (ZPAY-252)
     expect(events).not.toContain("money-workers");
     // Leadership is retained so a second instance cannot sign into a broken inventory.
     expect(events).not.toContain("leadership:release");
     expect(result.leadership).toBeDefined();
     expect(readiness.snapshot().checks.leadership).toBe(true);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 
   // retryable/incomplete recovery must not pin leadership forever.
@@ -350,13 +386,13 @@ describe("boot recovery wiring", () => {
     expect(result.ready).toBe(false);
     expect(result.failedStep).toBe("boot-recovery");
     expect(result.bootRecovery?.invariantBreach).toBe(false);
-    expect(events).not.toContain("gateway-read");
+    expect(events).toContain("gateway-read"); // deploy-ready before leadership (ZPAY-252)
     expect(events).not.toContain("money-workers");
     // Must release so a standby / restart can acquire (no operator-only deadlock).
     expect(events).toContain("leadership:release");
     expect(result.leadership).toBeUndefined();
     expect(readiness.snapshot().checks.leadership).toBe(false);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 
   it("fails closed when runBootRecovery is omitted at runtime (D3)", async () => {
@@ -367,7 +403,7 @@ describe("boot recovery wiring", () => {
     const result = await runBootLane(deps as Parameters<typeof runBootLane>[0]);
     expect(result.ready).toBe(false);
     expect(result.failedStep).toBe("boot-recovery");
-    expect(events).not.toContain("gateway-read");
+    expect(events).toContain("gateway-read"); // deploy-ready before leadership (ZPAY-252)
     expect(events).not.toContain("money-workers");
   });
 
@@ -384,8 +420,8 @@ describe("boot recovery wiring", () => {
     const result = await runBootLane(deps);
     expect(result.ready).toBe(false);
     expect(result.failedStep).toBe("boot-recovery");
-    expect(readiness.snapshot().ready).toBe(false);
-    expect(events).not.toContain("gateway-read");
+    expect(readiness.snapshot().ready).toBe(true);
+    expect(events).toContain("gateway-read"); // deploy-ready before leadership (ZPAY-252)
     expect(events).not.toContain("money-workers");
   });
 
@@ -791,5 +827,23 @@ describe("startup validation — fail-fast before any migration (review indicato
       await runBootLane(happyDeps(events, readiness));
     }
     expect(events).not.toContain("migrations");
+  });
+});
+
+describe("ZPAY-252 — deploy-ready without leadership (overlap handover)", () => {
+  it("AC1: readiness is true after gateway, before leadership resolves", async () => {
+    const events: string[] = [];
+    const readiness = new NodeReadiness(3);
+    const deps = happyDeps(events, readiness);
+    let readyWhileWaiting: boolean | undefined;
+    deps.acquireSignerLeadership = async () => {
+      events.push("leadership");
+      readyWhileWaiting = readiness.snapshot().ready;
+      return makeLeadership(events);
+    };
+    const result = await runBootLane(deps);
+    expect(result.ready).toBe(true);
+    expect(readyWhileWaiting).toBe(true);
+    expect(events.indexOf("gateway-read")).toBeLessThan(events.indexOf("leadership"));
   });
 });

@@ -490,42 +490,26 @@ describe("RECEIVE TTL policy", () => {
   });
 });
 
-// signer-leadership retry cap must fit inside the healthcheck window.
-describe("signer-leadership retry cap vs healthcheck window", () => {
-  it("defaults RAILWAY_HEALTHCHECK_TIMEOUT_MS to 150000 (matching railway.json)", () => {
+// Prolonged-wait warn threshold (ZPAY-252) — no longer coupled to healthcheck.
+describe("signer-leadership prolonged-wait threshold + healthcheck mirror", () => {
+  it("defaults RAILWAY_HEALTHCHECK_TIMEOUT_MS to 150000 and prolonged-wait to 30000", () => {
     const config = loadNodeConfig(validEnv());
     expect(config.RAILWAY_HEALTHCHECK_TIMEOUT_MS).toBe(150_000);
-    expect(config.SIGNER_LEADERSHIP_RETRY_MAX_MS).toBe(15_000);
+    expect(config.SIGNER_LEADERSHIP_RETRY_MAX_MS).toBe(30_000);
   });
 
-  it("refuses boot when SIGNER_LEADERSHIP_RETRY_MAX_MS >= RAILWAY_HEALTHCHECK_TIMEOUT_MS", () => {
-    const issues = loadIssues(
-      validEnv({
-        SIGNER_LEADERSHIP_RETRY_MAX_MS: "60000",
-        RAILWAY_HEALTHCHECK_TIMEOUT_MS: "60000",
-      }),
-    );
-    expect(
-      issues.some((issue) => issue.startsWith("SIGNER_LEADERSHIP_RETRY_MAX_MS:")),
-      issues.join("\n"),
-    ).toBe(true);
-    expect(issues.some((issue) => issue.includes("must fit inside the deployment healthcheck window"))).toBe(true);
-  });
-
-  it("refuses boot when SIGNER_LEADERSHIP_RETRY_MAX_MS exceeds RAILWAY_HEALTHCHECK_TIMEOUT_MS", () => {
-    const issues = loadIssues(
+  it("accepts SIGNER_LEADERSHIP_RETRY_MAX_MS above RAILWAY_HEALTHCHECK_TIMEOUT_MS (warn-only)", () => {
+    const config = loadNodeConfig(
       validEnv({
         SIGNER_LEADERSHIP_RETRY_MAX_MS: "60000",
         RAILWAY_HEALTHCHECK_TIMEOUT_MS: "30000",
       }),
     );
-    expect(
-      issues.some((issue) => issue.startsWith("SIGNER_LEADERSHIP_RETRY_MAX_MS:")),
-      issues.join("\n"),
-    ).toBe(true);
+    expect(config.SIGNER_LEADERSHIP_RETRY_MAX_MS).toBe(60_000);
+    expect(config.RAILWAY_HEALTHCHECK_TIMEOUT_MS).toBe(30_000);
   });
 
-  it("accepts boot when SIGNER_LEADERSHIP_RETRY_MAX_MS < RAILWAY_HEALTHCHECK_TIMEOUT_MS", () => {
+  it("accepts independent prolonged-wait and healthcheck values", () => {
     const config = loadNodeConfig(
       validEnv({
         SIGNER_LEADERSHIP_RETRY_MAX_MS: "60000",
@@ -544,3 +528,4 @@ describe("signer-leadership retry cap vs healthcheck window", () => {
     ).toThrow(/RAILWAY_HEALTHCHECK_TIMEOUT_MS/);
   });
 });
+

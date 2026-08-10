@@ -276,27 +276,24 @@ export const CONFIG_FIELD_SCHEMAS = {
     .max(300000, "RECONCILIATION_POLL_INTERVAL_MS must be between 1000 and 300000")
     .default(15000),
 
-  // Bounded wait for the boot-lane signer-leadership step during
-  // rolling-deploy overlap, when the outgoing container still holds the
-  // advisory lock. Must stay well inside the Railway healthcheckTimeout
-  // (railway.json, 120000 ms) alongside every other sequential boot step;
-  // 60000 ms ceiling leaves headroom for migrations/vault-unlock before it
-  // and boot-recovery/gateway-read after it. Fail-closed is preserved: once
-  // this wait is exhausted, the lane still throws exactly as a one-shot
-  // try-lock would.
+  // Prolonged-wait WARN threshold for the boot-lane signer-leadership
+  // handover (ZPAY-252). Acquisition itself is NOT capped by this value —
+  // the new instance waits until the prior holder releases or SIGTERM aborts
+  // (deploy /health/ready is independent of the lock). Past this wall-clock
+  // the boot log switches from waiting-for-handover to prolonged-wait so
+  // operators can distinguish routine overlap from a wedged prior holder.
+  // Env name retained for back-compat with existing Railway service vars.
   SIGNER_LEADERSHIP_RETRY_MAX_MS: z.coerce
     .number()
     .int("SIGNER_LEADERSHIP_RETRY_MAX_MS must be an integer")
-    .min(1000, "SIGNER_LEADERSHIP_RETRY_MAX_MS must be between 1000 and 60000")
-    .max(60000, "SIGNER_LEADERSHIP_RETRY_MAX_MS must be between 1000 and 60000")
-    .default(15000),
+    .min(1000, "SIGNER_LEADERSHIP_RETRY_MAX_MS must be between 1000 and 600000")
+    .max(600000, "SIGNER_LEADERSHIP_RETRY_MAX_MS must be between 1000 and 600000")
+    .default(30000),
 
   // The deployment-platform healthcheck timeout, in milliseconds.
-  // Must exceed SIGNER_LEADERSHIP_RETRY_MAX_MS so the bounded signer-leadership
-  // retry cannot consume the entire healthcheck window (which would reproduce
-  // the earlier failed-deploy symptom). Defaults to 150 000 ms, matching
-  // railway.json healthcheckTimeout=150. An operator who changes the Railway
-  // timeout MUST set this env var to the same value.
+  // Railway healthcheckTimeout mirror (railway.json = 150s). Informational /
+  // operator-alignment only after ZPAY-252: leadership wait is no longer capped
+  // inside this window because deploy-ready no longer requires the lock.
   RAILWAY_HEALTHCHECK_TIMEOUT_MS: z.coerce
     .number()
     .int("RAILWAY_HEALTHCHECK_TIMEOUT_MS must be an integer")
@@ -442,20 +439,6 @@ export const NODE_ENV_CONFIG_SCHEMA = z.object(CONFIG_FIELD_SCHEMAS).superRefine
     }
   }
 
-  // The signer-leadership retry cap must stay strictly inside the
-  // deployment healthcheck window. If cap >= healthcheck, the bounded retry
-  // can consume the entire window, reproducing the earlier failed-deploy
-  // symptom (deploy FAILED, old container keeps serving). Not custody-unsafe
-  // (never two live signers), but a hard operational regression.
-  if (config.SIGNER_LEADERSHIP_RETRY_MAX_MS >= config.RAILWAY_HEALTHCHECK_TIMEOUT_MS) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["SIGNER_LEADERSHIP_RETRY_MAX_MS"],
-      message:
-        "SIGNER_LEADERSHIP_RETRY_MAX_MS must be strictly less than RAILWAY_HEALTHCHECK_TIMEOUT_MS " +
-        "(the signer-leadership retry cap must fit inside the deployment healthcheck window)",
-    });
-  }
 
 });
 

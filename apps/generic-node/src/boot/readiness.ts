@@ -2,9 +2,11 @@
 //
 // Delegates to `@zucoins/node-core`'s NodeCoreReadinessState, which
 // implements the readiness gating policy:
-//   GATING: schema, vault, observation (gateway read within failure budget),
-//           event signer (verdict-forcing like `stopping`; ZTR-1179)
+//   GATING (deploy /health/ready): schema, vault, observation
+//           (gateway read within failure budget)
 //   NON-GATING (reported): signer leadership, halt, storage pressure
+//   MONEY-ONLY (admission, not deploy ready): event signer (ZTR-1179 /
+//           ZPAY-252 — must not re-couple ready to post-leadership ensure)
 //
 // The shell keeps a thin compatibility facade so boot-lane / graceful-stop call
 // sites stay stable while the ready conjunction itself is owned by node-core.
@@ -23,11 +25,10 @@ export interface ReadinessChecks {
   readonly leadership: boolean;
   readonly gateway: boolean;
   /**
-   * EVENT_SIGNING signer availability. Node-core gating conjunct
-   * (ReadinessStateInputs.eventSignerAvailable) — verdict-forcing like
-   * `stopping`, still outside the frozen GATING_READINESS_CHECK_IDS census.
-   * Safe to gate because EVENT_SIGNING ensure always runs after leadership is
-   * already held, so this cannot reproduce the overlap-deploy deadlock class.
+   * EVENT_SIGNING signer availability. Stamped for reporting and consumed by
+   * money admission (ZTR-1179). NOT part of the shell `ready` conjunction —
+   * ensure runs after leadership, so gating deploy-ready on it re-creates the
+   * overlap-deploy deadlock (ZPAY-252).
    */
   readonly eventSigner: boolean;
   /** Live DB reachability is probed by the health handler, not stamped here. */
@@ -80,11 +81,11 @@ export class NodeReadiness {
   }
 
   /**
-   * EVENT_SIGNING signer availability. Fail-closed: gates readiness
-   * shut on boot failure or runtime signer loss; must be explicitly re-armed
-   * on successful (re-)ensure. Pure forwarder — node-core's readiness state is
-   * the single source of truth, so /health/ready and money admission see the
-   * same conjunct (ZTR-1179).
+   * EVENT_SIGNING signer availability. Fail-closed for money admission on
+   * boot failure or runtime signer loss; must be explicitly re-armed on
+   * successful (re-)ensure. Pure forwarder — node-core's readiness state is
+   * the single source of truth. Money admission refuses when false; deploy
+   * `/health/ready` does not (ZPAY-252).
    */
   setEventSignerAvailable(available: boolean): void {
     this.inner.setEventSignerAvailable(available);
@@ -129,14 +130,13 @@ export class NodeReadiness {
       eventSigner: inputs.eventSignerAvailable,
     };
     // Stamp-side ready (DB probe applied by the health handler). Leadership
-    // deliberately excluded. EVENT_SIGNING gates in node-core
-    // (see ReadinessChecks.eventSigner doc).
+    // and EVENT_SIGNING deliberately excluded from deploy-ready (ZPAY-252);
+    // money admission still requires eventSigner (ZTR-1179).
     const ready =
       !inputs.stopping &&
       checks.schema &&
       checks.vault &&
-      checks.gateway &&
-      checks.eventSigner;
+      checks.gateway;
     const degraded = inputs.observationDegraded && !inputs.stopping;
     return Object.freeze({
       checks: Object.freeze(checks),

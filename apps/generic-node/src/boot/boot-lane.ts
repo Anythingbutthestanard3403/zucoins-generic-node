@@ -12,25 +12,26 @@
 //   1. runMigrations — database migrations, then the post-migration
 //      assertions; only after both does the `schema` readiness gate open.
 //   2. unlockVault — vault availability; the `vault` gate opens.
-//   3. acquireSignerLeadership — the process-wide signer leadership lock;
-//      the `leadership` gate opens.
-//  4. runBootRecovery — the deterministic boot-recovery walk. Pure
-//      classification then authorized resume; readiness stays false on any
-//      global invariant breach. Money workers never start after a breach.
-//   5. performValidatedGatewayRead — one validated gateway read; the
-//      `gateway` gate opens.
-// 6. Readiness is the readiness gating conjunction (schema ∧ vault ∧
-//      observation; database is live-probed by /health/ready). Signer
-//      leadership is acquired in step 3 and stamped for reporting, but
-//  does NOT gate the ready verdict. Boot recovery must also
-//      report ready. On invariant breach the early return keeps readiness
-//      false and retains leadership (quarantine so a second instance cannot
-//      sign into a broken inventory). On retryable/incomplete recovery
-//      (ready===false AND invariantBreach===false, both explicit) leadership
-//  is released so a standby or restart can acquire it; a failed
-//      release retains the handle. Missing/undefined breach is fail-closed
-//      quarantine. Money workers still start only after leadership is held —
-//      the lane never starts them without the handle from step 3.
+//   3. performValidatedGatewayRead — one validated gateway read; the
+//      `gateway` gate opens. Together with schema+vault this is enough for
+//      `/health/ready` 200 (ZPAY-252 / D8.102 class) WITHOUT holding
+//      leadership — so a Railway overlap deploy can SIGTERM the old holder.
+//   4. acquireSignerLeadership — the process-wide signer leadership lock;
+//      the `leadership` check opens (reported, NON-gating). Waits until the
+//      prior holder releases or SIGTERM aborts — never a short timeout that
+//      would leave a ready-but-never-signing replica.
+//   5. runBootRecovery — the deterministic boot-recovery walk. Pure
+//      classification then authorized resume; money workers never start after
+//      a breach. EVENT_SIGNING ensure runs here (after leadership).
+//   6. Readiness for the deploy healthcheck is schema ∧ vault ∧ observation
+//      (database live-probed by /health/ready). Signer leadership and
+//      EVENT_SIGNING are stamped for reporting / money admission but do NOT
+//      gate the ready verdict. Boot recovery must also report ready for
+//      money-worker start. On invariant breach the early return retains
+//      leadership (quarantine). On retryable/incomplete recovery
+//      (ready===false AND invariantBreach===false) leadership is released so
+//      a standby can acquire it. Money workers start only on the leadership
+//      holder after recovery authorizes engine start.
 //
 // WIRING POINT: `assertPostMigrationReadiness` is where the composition root
 // plugs in `assertPrivilegeReadiness` from `@zucoins/node-core` (
@@ -186,6 +187,19 @@ export async function runBootLane(deps: BootLaneDeps): Promise<BootLaneResult> {
     readiness.setVaultAvailable(true);
     logger.info("boot: vault available");
 
+    // Gateway BEFORE leadership so the deploy healthcheck can go 200 while this
+    // process still waits on the prior holder's lock (ZPAY-252 / D8.102).
+    await bootStep("gateway-read", () => deps.performValidatedGatewayRead());
+    readiness.recordGatewayReadSuccess();
+    logger.info("boot: validated gateway read succeeded");
+
+    if (!readiness.snapshot().ready) {
+      throw new BootLaneError("readiness", new Error("readiness conjunction incomplete"));
+    }
+    logger.info(
+      "boot: deploy-ready (schema ∧ vault ∧ observation) — acquiring signer leadership (non-gating)",
+    );
+
     leadership = await bootStep("signer-leadership", () => deps.acquireSignerLeadership());
     readiness.setSignerLeadershipHeld(true);
     logger.info("boot: signer leadership acquired");
@@ -207,8 +221,7 @@ export async function runBootLane(deps: BootLaneDeps): Promise<BootLaneResult> {
 
     // Boot recovery. Required after leadership — never skip.
     // On invariant breach we keep leadership (so a second instance cannot
-    // sign into a broken inventory) but never open readiness or start money
-    // workers.
+    // sign into a broken inventory) but never start money workers.
     if (typeof deps.runBootRecovery !== "function") {
       throw new BootLaneError(
         "boot-recovery",
@@ -286,19 +299,10 @@ export async function runBootLane(deps: BootLaneDeps): Promise<BootLaneResult> {
     }
     logger.info("boot: deterministic recovery complete (no invariant breach)");
 
-    await bootStep("gateway-read", () => deps.performValidatedGatewayRead());
-    readiness.recordGatewayReadSuccess();
-    logger.info("boot: validated gateway read succeeded");
-
-    if (!readiness.snapshot().ready) {
-      throw new BootLaneError("readiness", new Error("readiness conjunction incomplete"));
-    }
-
     // Last step: money workers run only on the leadership holder and only when
     // boot recovery explicitly authorizes engine start
-    // (shouldStartMoneyWorkersAfterRecovery). Stamp-side
-    // readiness may already be true without leadership, but this lane only
-    // reaches here with a held handle from step 3.
+    // (shouldStartMoneyWorkersAfterRecovery). Deploy-ready was already true
+    // before leadership; this lane only reaches here with a held handle.
     if (!shouldStartMoneyWorkersAfterRecovery(bootRecovery)) {
       throw new BootLaneError(
         "money-workers",

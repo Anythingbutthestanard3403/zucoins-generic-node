@@ -1,10 +1,9 @@
 # ZTR-1196 implementer r2 (FAIL remediation)
 
-- **PR:** #34 (`ztr-1196-admin-error-envelope`)
+- **PR:** #34 (`ztr-1196-admin-error-envelope`) — tip: `gh pr view 34 --json headRefOid`
 - **Plan:** `tasks/plan-ZTR-1196.md` (PASS review)
 - **Clears:** `tasks/ztr-1196-review-ec972dc.md` D1/D2
-- **Base head: `ec972dcb6a6764b3c756248bf3ae86ce14fc2b7a`
-- **New head:** `a42cd381148d9f9bdff13f917566cbeffd64f7ee`
+- **Prior FAIL head:** `ec972dcb6a6764b3c756248bf3ae86ce14fc2b7a`
 
 ## Changes
 
@@ -15,7 +14,7 @@
 
 Scope: `apps/generic-node/src/admin-router.ts`, `apps/generic-node/test/admin-error-envelope.test.ts` only.
 
-## Gates (this commit)
+## Gates
 
 | Command | Result |
 |---|---|
@@ -38,5 +37,3 @@ Scope: `apps/generic-node/src/admin-router.ts`, `apps/generic-node/test/admin-er
 | AC6 | API_ERROR_CODES / public envelope untouched | satisfied |
 | AC7 | no contracts freeze churn | satisfied |
 | AC8 | prior envelope tests pass | satisfied (6/6) |
-
-- **Pushed head:** `a42cd381148d9f9bdff13f917566cbeffd64f7ee`

@@ -54,6 +54,7 @@
     "signer-support.sql",
     "signing-key-registry.sql",
     "submit-attempts.sql",
+    "transaction-material-byte-immutability.sql",
     "transaction-material.sql",
     "vault-root-kdf-salt.sql",
     "vault.sql",

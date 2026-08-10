@@ -266,6 +266,28 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     );
   });
 
+  it("pack lands transaction-material byte-immutability triggers after the tables", () => {
+    const tablesIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("transaction-material");
+    const guardsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(
+      "transaction-material-byte-immutability",
+    );
+    expect(tablesIdx).toBeGreaterThanOrEqual(0);
+    expect(guardsIdx).toBeGreaterThan(tablesIdx);
+    const files = loadMoneySchemaMigrations();
+    expect(files[guardsIdx]!.sql).toMatch(
+      /CREATE TRIGGER external_send_sign_intents_insert_only\b/,
+    );
+    expect(files[guardsIdx]!.sql).toMatch(
+      /CREATE TRIGGER operation_transactions_byte_immutability\b/,
+    );
+    expect(files[guardsIdx]!.sql).toMatch(
+      /CREATE TRIGGER external_send_partials_byte_immutability\b/,
+    );
+    expect(files[guardsIdx]!.sql).toContain("EXTERNAL_SEND_SIGN_INTENTS_INSERT_ONLY");
+    expect(files[guardsIdx]!.sql).toContain("OPERATION_TRANSACTIONS_BYTE_IMMUTABLE");
+    expect(files[guardsIdx]!.sql).toContain("EXTERNAL_SEND_PARTIALS_BYTE_IMMUTABLE");
+  });
+
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {
     const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
     const ackIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-acknowledgements");

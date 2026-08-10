@@ -8,8 +8,9 @@
  * divergences from a live database, recorded per the synthesis: (1) no column DEFAULTs
  * applied (model stricter than Postgres); (2) no FK semantics; (3) uuid `===` compare
  * (fixtures are canonical lowercase); (4) POSIX `~` regexes evaluated via JS RegExp;
- * (5) no triggers — byte-immutability is expressed as the column-restricted update port,
- * never claimed as a database rejection.
+ * (5) harness has no trigger emulation — live DB rejection is
+ * transaction-material-byte-immutability.pg.test.ts; here byte-immutability is the
+ * column-restricted update port only.
  */
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";

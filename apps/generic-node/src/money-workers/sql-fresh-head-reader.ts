@@ -12,25 +12,20 @@
 // proof's `freshHeadObservationId` and the operation's `terminal_observation_id`; a landing
 // whose confirm-read was never persisted is not a landing.
 //
-// The stream writer is the SINGLE durability owner for this path, exactly as
-// gateway-t0-observer.ts arranges it for T0: the read primitive's `ObservationRecorder` hook is
-// left inert so one read cannot produce two ledger rows.
+// persistSqlObservation is the SINGLE durability owner for this path. It is used both by the
+// read primitive's transport-error recorder and by the parsed-response path, so every attempted
+// read produces exactly one observation/anomaly pair when the frozen classifier requires it.
 //
 // Fail-closed by throwing: `ReadFreshHead` has no fault channel, and the landing-proof rule admits no partial
 // read. A malformed envelope, an unverifiable head, or a persist failure raises, the oracle
 // call unwinds, and the caller records INDETERMINATE — no landing, no non-landing, no retry.
 
-import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-
-import { applyMoneyPathStatementTimeout } from "../db/client.js";
-import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
 
 import {
   buildGenesisWalletHeadFingerprint,
   buildGetTransactionActionData,
-  createSerializedStreamWriter,
-  createSqlStreamWriterEffects,
+
   fingerprintEndpoint,
   parseGatewayEnvelope,
   projectGenesisState,
@@ -42,12 +37,22 @@ import {
   type ReadFreshHead,
 } from "@zucoins/node-core";
 
-import { ensureNodeObserver } from "./gateway-t0-observer.js";
+import { persistSqlObservation } from "./sql-observation-persistence.js";
 
 const DEFAULT_LIMITS = {
   readTimeoutMs: 10_000,
   maxRequestBytes: 1_048_576,
   maxResponseBytes: 4_194_304,
+} as const;
+
+const EMPTY_ROW_PROJECTION = {
+  walletRole: null,
+  bAmount: null,
+  innerPreimageText: null,
+  step1Signature: null,
+  step2Signature: null,
+  completedTransactionText: null,
+  completedTransactionSha256: null,
 } as const;
 
 /** Raised for every read that cannot become a durable, verified head observation. */
@@ -94,8 +99,28 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
       {
         endpoints: deps.gatewayUrls,
         limits: DEFAULT_LIMITS,
-        // Inert on purpose — the stream writer below is the single durability owner.
-        recorder: { recordObservation: async () => {} },
+        recorder: {
+          recordObservation: async (observation) => {
+            if (!observation.transportAmbiguous) return;
+            await persistSqlObservation({
+              pool: deps.pool,
+              nodeId: deps.nodeId,
+              walletPublicKey,
+              moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+              endpointFingerprint: observation.endpointFingerprint,
+              httpStatus: null,
+              capture: {
+                parseResult: "TRANSPORT_ERROR",
+                rawResponseBytes: new Uint8Array(),
+                isGenesis: false,
+                sSignature: "",
+                pSignature: "",
+                semanticFingerprint: "",
+              },
+              projection: EMPTY_ROW_PROJECTION,
+            });
+          },
+        },
         ...(deps.exchange !== undefined ? { exchange: deps.exchange } : {}),
         ...(deps.maxAttempts !== undefined ? { maxAttempts: deps.maxAttempts } : {}),
         ...(deps.backoffMaxMs !== undefined ? { backoffMaxMs: deps.backoffMaxMs } : {}),
@@ -109,6 +134,29 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
 
     const envelope = parseGatewayEnvelope(rawBytes);
     if (envelope.classification === "MALFORMED_ENVELOPE") {
+      try {
+        await persistSqlObservation({
+          pool: deps.pool,
+          nodeId: deps.nodeId,
+          walletPublicKey,
+          moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+          endpointFingerprint,
+          httpStatus,
+          capture: {
+            parseResult: "MALFORMED_ENVELOPE",
+            rawResponseBytes: rawBytes,
+            isGenesis: false,
+            sSignature: "",
+            pSignature: "",
+            semanticFingerprint: "",
+          },
+          projection: EMPTY_ROW_PROJECTION,
+        });
+      } catch (error) {
+        throw new FreshHeadReadError(
+          error instanceof Error ? error.message : "malformed head observation persist failed",
+        );
+      }
       throw new FreshHeadReadError(`head envelope malformed: ${envelope.reason}`);
     }
 
@@ -143,6 +191,29 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
     } else {
       const verified = verifySettledTransaction(envelope.parsed, walletPublicKey);
       if (verified.verdict !== "VERIFIED") {
+        try {
+          await persistSqlObservation({
+            pool: deps.pool,
+            nodeId: deps.nodeId,
+            walletPublicKey,
+            moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+            endpointFingerprint,
+            httpStatus,
+            capture: {
+              parseResult: verified.verdict,
+              rawResponseBytes: rawBytes,
+              isGenesis: false,
+              sSignature: "",
+              pSignature: "",
+              semanticFingerprint: "",
+            },
+            projection: EMPTY_ROW_PROJECTION,
+          });
+        } catch (error) {
+          throw new FreshHeadReadError(
+            error instanceof Error ? error.message : "unverified head observation persist failed",
+          );
+        }
         throw new FreshHeadReadError(`head not verified for this wallet: ${verified.verdict}`);
       }
       parseResult = "VERIFIED_HEAD";
@@ -160,44 +231,15 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
       };
     }
 
-    const client = await deps.pool.connect();
     try {
-      await client.query("BEGIN");
-      await applyMoneyPathStatementTimeout(
-        client,
-        deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
-      );
-      const observerId = await ensureNodeObserver(client, deps.nodeId, endpointFingerprint);
-      const wallet = await client.query<{ id: string }>(
-        `SELECT id::text AS id FROM wallets WHERE public_key = $1 LIMIT 1`,
-        [walletPublicKey],
-      );
-      const walletId = wallet.rows[0]?.id ?? null;
-
-      let allocatedObservationId: string | null = null;
-      const effects = createSqlStreamWriterEffects({
-        sql: {
-          query: async <R>(text: string, params: readonly unknown[]) => {
-            const queried = await client.query(text, params as never[]);
-            return { rows: queried.rows as R[] };
-          },
-        },
-        project: (): ObservationRowProjection => ({
-          endpointFingerprint,
-          walletId,
-          httpStatus: httpStatus ?? 200,
-          observedAt: new Date(),
-          ...rowProjectionBase,
-        }),
-        allocateObservationId: () => {
-          allocatedObservationId = randomUUID();
-          return allocatedObservationId;
-        },
-        takeAdvisoryLock: true,
-      });
-      const written = await createSerializedStreamWriter(effects).capture(
-        { observerId, walletPublicKey },
-        {
+      const persisted = await persistSqlObservation({
+        pool: deps.pool,
+        nodeId: deps.nodeId,
+        walletPublicKey,
+        moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+        endpointFingerprint,
+        httpStatus: httpStatus ?? 200,
+        capture: {
           parseResult,
           rawResponseBytes: rawBytes,
           isGenesis: parseResult === "VERIFIED_GENESIS",
@@ -205,45 +247,15 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
           pSignature,
           semanticFingerprint,
         },
-      );
-
-      let observationId: string;
-      if (written.plan.kind === "APPEND") {
-        if (allocatedObservationId === null) {
-          throw new Error("stream writer APPEND without allocated observation id");
-        }
-        observationId = allocatedObservationId;
-      } else {
-        // Exact-byte re-observation: the cursor tip IS this read's observation. The oracle
-        // reads the head twice; an unmoved head therefore anchors and confirms on one row.
-        const tip = await client.query<{ id: string }>(
-          `SELECT last_recorded_observation_id::text AS id
-             FROM wallet_observation_cursors
-            WHERE observer_id = $1::uuid AND wallet_public_key = $2`,
-          [observerId, walletPublicKey],
-        );
-        const tipId = tip.rows[0]?.id;
-        if (tipId === undefined) {
-          throw new Error("stream writer SUPPRESS without cursor tip");
-        }
-        observationId = tipId;
-      }
-
-      await client.query("COMMIT");
-      return { observationId, envelope };
+        projection: rowProjectionBase,
+      });
+      return { observationId: persisted.observationId, envelope };
     } catch (err) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        /* keep the original failure */
-      }
       throw err instanceof FreshHeadReadError
         ? err
         : new FreshHeadReadError(
             err instanceof Error ? err.message : "head observation persist failed",
           );
-    } finally {
-      client.release();
     }
   };
 }

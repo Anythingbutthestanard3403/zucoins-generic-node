@@ -30,6 +30,7 @@ import {
 } from "@zucoins/node-core";
 
 import { createGatewayT0Observer } from "../src/money-workers/gateway-t0-observer.js";
+import { createSqlFreshHeadReader } from "../src/money-workers/sql-fresh-head-reader.js";
 import {
   resolveMoneyPathT0Observer,
   startMoneyWorkers,
@@ -167,10 +168,21 @@ type CursorRow = {
  * In-memory Postgres stand-in that enforces stream-writer cursor + unique seq semantics
  * (D1/D3) without a live DATABASE_URL. Models the subset of STREAM_WRITER_SQL used here.
  */
-function fakePoolForStreamWriterT0() {
+function fakePoolForStreamWriterT0(walletPublicKey?: string) {
   const observers = new Map<string, string>(); // nodeId -> observerId
   const observations: ObsRow[] = [];
+  const anomalies: Array<{ observation_id: string; kind: string }> = [];
   const cursors = new Map<string, CursorRow>(); // `${observer}\0${wallet}`
+  const wallet = walletPublicKey === undefined
+    ? null
+    : {
+        id: "33333333-3333-4333-8333-333333333333",
+        publicKey: walletPublicKey,
+        state: "PINNED",
+        quarantineReason: null as string | null,
+        activeLeaseId: "44444444-4444-4444-8444-444444444444",
+      };
+  const audits: string[] = [];
 
   const streamKey = (observerId: string, wallet: string) => `${observerId}\0${wallet}`;
 
@@ -191,7 +203,36 @@ function fakePoolForStreamWriterT0() {
       return { rows: [], rowCount: 1 };
     }
     if (text.includes("FROM wallets WHERE public_key")) {
+      const found = wallet?.publicKey === String(params?.[0]);
+      return { rows: found ? [{ id: wallet.id }] : [], rowCount: found ? 1 : 0 };
+    }
+    if (text.includes("FROM wallets w LEFT JOIN wallet_active_leases")) {
+      const found = wallet?.id === String(params?.[0]);
+      return {
+        rows: found
+          ? [{
+              id: wallet.id,
+              state: wallet.state,
+              quarantine_reason: wallet.quarantineReason,
+              active_lease_id: wallet.activeLeaseId,
+            }]
+          : [],
+        rowCount: found ? 1 : 0,
+      };
+    }
+    if (text.includes("UPDATE wallets SET state = 'QUARANTINED'")) {
+      if (wallet?.id === String(params?.[0])) {
+        wallet.state = "QUARANTINED";
+        wallet.quarantineReason = String(params?.[1]);
+      }
+      return { rows: [], rowCount: wallet === null ? 0 : 1 };
+    }
+    if (text.includes("FROM wallet_active_leases") && text.includes("operation_id")) {
       return { rows: [], rowCount: 0 };
+    }
+    if (text.includes("INSERT INTO audit_log")) {
+      audits.push(String(params?.[2]));
+      return { rows: [], rowCount: 1 };
     }
     // Advisory lock — no-op in fake.
     if (text.includes("pg_advisory_xact_lock")) {
@@ -311,6 +352,10 @@ function fakePoolForStreamWriterT0() {
       observations.push(row);
       return { rows: [], rowCount: 1 };
     }
+    if (text.includes("INSERT INTO observation_anomalies")) {
+      anomalies.push({ observation_id: String(params?.[1]), kind: String(params?.[5]) });
+      return { rows: [], rowCount: 1 };
+    }
     // UPSERT_CURSOR
     if (text.includes("INSERT INTO wallet_observation_cursors")) {
       const observerId = String(params?.[0]);
@@ -369,8 +414,11 @@ function fakePoolForStreamWriterT0() {
       release: () => {},
     })),
     _observations: observations,
+    _anomalies: anomalies,
     _cursors: cursors,
     _observers: observers,
+    _wallet: wallet,
+    _audits: audits,
   };
 }
 
@@ -444,8 +492,15 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(start).toMatch(/kind === "gateway"/);
     // D1: production T0 path must invokefrozen stream writer, not DIY INSERT alone.
     const observer = readFileSync(join(here, "../src/money-workers/gateway-t0-observer.ts"), "utf8");
-    expect(observer).toMatch(/createSerializedStreamWriter/);
-    expect(observer).toMatch(/createSqlStreamWriterEffects/);
+    expect(observer).toMatch(/persistSqlObservation/);
+    const persistence = readFileSync(
+      join(here, "../src/money-workers/sql-observation-persistence.ts"),
+      "utf8",
+    );
+    expect(persistence).toMatch(/createSerializedStreamWriter/);
+    expect(persistence).toMatch(/createSqlStreamWriterEffects/);
+    expect(persistence).toMatch(/createSqlAnomalyRecorder/);
+    expect(persistence).toMatch(/applyAnomalyAction/);
     expect(observer).not.toMatch(/'FIRST'::observation_relationship/);
     // Census: STREAM_WRITER_SQL still the production plan source of truth.
     expect(STREAM_WRITER_SQL.INSERT_OBSERVATION).toMatch(/previous_recorded_observation_id/);
@@ -623,6 +678,43 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(pool._observations.map((o) => o.wallet_seq).sort()).toEqual([1, 2]);
   });
 
+  it("REGRESSION atomically records evidence, quarantines the wallet and preserves its lease", async () => {
+    const pool = fakePoolForStreamWriterT0(SEED_02);
+    let call = 0;
+    const observer = createGatewayT0Observer({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      gatewayUrls: [GATEWAY_A],
+      exchange: syntheticExchange({
+        responseForKey: () => {
+          call += 1;
+          return call === 1
+            ? headEnvelopeBytes("predecessor.settled.json")
+            : call === 2
+              ? headEnvelopeBytes("target.settled.json")
+              : headEnvelopeBytes("predecessor.settled.json");
+        },
+      }),
+    });
+
+    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
+    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
+    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
+
+    expect(pool._observations.map((row) => row.relationship)).toEqual([
+      "FIRST",
+      "SUCCESSOR",
+      "REGRESSION",
+    ]);
+    expect(pool._anomalies).toHaveLength(1);
+    expect(pool._anomalies[0]!.kind).toBe("REGRESSION");
+    expect(pool._wallet?.state).toBe("QUARANTINED");
+    expect(pool._wallet?.quarantineReason).toBe("REGRESSION");
+    expect(pool._wallet?.activeLeaseId).toBe("44444444-4444-4444-8444-444444444444");
+    expect(pool._audits).toEqual(["anomaly.quarantine_wallet_halt_signing"]);
+    expect(pool._cursors.values().next().value?.next_wallet_seq).toBe(4);
+  });
+
   it("D1: second stream-writer path after T0 does not collide on wallet_seq=1", async () => {
     const pool = fakePoolForStreamWriterT0();
     const walletPk = mintTestWalletPublicKey();
@@ -649,7 +741,7 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(cursor.consecutive_repeat_count).toBe(1);
   });
 
-  it("malformed synthetic gateway body → UNVERIFIED (fail-closed, no genesis stub)", async () => {
+  it("identical malformed bodies append byte-identical observation+anomaly pairs twice", async () => {
     const pool = fakePoolForStreamWriterT0();
     const bad: GatewayExchangeTransport = {
       async exchange(endpoint, request): Promise<GatewayExchangeCapture> {
@@ -671,10 +763,54 @@ describe("real T0 OBSERVE (offline)", () => {
       gatewayUrls: [GATEWAY_A],
       exchange: bad,
     });
-    const outcome = await observer.observe(mintTestWalletPublicKey());
-    expect(outcome.kind).toBe("UNVERIFIED");
-    expect(pool._observations.length).toBe(0);
-    expect(pool._cursors.size).toBe(0);
+    const wallet = mintTestWalletPublicKey();
+    const first = await observer.observe(wallet);
+    const second = await observer.observe(wallet);
+    expect(first.kind).toBe("UNVERIFIED");
+    expect(second.kind).toBe("UNVERIFIED");
+    expect(pool._observations).toHaveLength(2);
+    expect(pool._anomalies).toHaveLength(2);
+    expect(pool._observations.map((row) => row.parse_result)).toEqual([
+      "MALFORMED_ENVELOPE",
+      "MALFORMED_ENVELOPE",
+    ]);
+    expect(pool._anomalies.map((row) => row.kind)).toEqual([
+      "MALFORMED_ENVELOPE",
+      "MALFORMED_ENVELOPE",
+    ]);
+    expect(pool._observations[0]!.raw_response_bytes.equals(Buffer.from("not-json{"))).toBe(true);
+    expect(pool._observations[1]!.raw_response_bytes.equals(Buffer.from("not-json{"))).toBe(true);
+    expect(pool._cursors.values().next().value?.next_wallet_seq).toBe(3);
+  });
+
+  it("fresh-head malformed response is durable before the read fails closed", async () => {
+    const pool = fakePoolForStreamWriterT0();
+    const responseBytes = new TextEncoder().encode("not-json{");
+    const reader = createSqlFreshHeadReader({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      gatewayUrls: [GATEWAY_A],
+      exchange: {
+        async exchange(endpoint, request): Promise<GatewayExchangeCapture> {
+          return {
+            endpoint,
+            endpointFingerprint: fingerprintEndpoint(endpoint),
+            requestBytes: request.bodyBytes,
+            requestSha256: sha256Hex(request.bodyBytes),
+            statusCode: 200,
+            responseBytes,
+            responseSha256: sha256Hex(responseBytes),
+          };
+        },
+      },
+    });
+
+    await expect(reader(mintTestWalletPublicKey())).rejects.toThrow(/head envelope malformed/);
+    expect(pool._observations).toHaveLength(1);
+    expect(pool._observations[0]!.parse_result).toBe("MALFORMED_ENVELOPE");
+    expect(pool._observations[0]!.raw_response_bytes.equals(Buffer.from("not-json{"))).toBe(true);
+    expect(pool._anomalies).toHaveLength(1);
+    expect(pool._anomalies[0]!.kind).toBe("MALFORMED_ENVELOPE");
   });
 
   it("createGatewayT0Observer refuses empty URL list (no silent stub)", () => {

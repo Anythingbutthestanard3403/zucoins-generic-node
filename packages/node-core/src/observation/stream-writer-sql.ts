@@ -45,6 +45,8 @@ export interface SqlStreamWriterEffectsOptions {
   readonly onAnomalyRequired?: (args: {
     readonly key: ObservationStreamKey;
     readonly observationId: string;
+    readonly walletId: string | null;
+    readonly priorObservationId: string | null;
     readonly result: CaptureWriteResult;
     readonly capture: SequenceCapture;
   }) => Promise<void>;
@@ -376,7 +378,14 @@ export function createSqlStreamWriterEffects(
     ]);
 
     if (plan.anomalyRequired && onAnomalyRequired) {
-      await onAnomalyRequired({ key, observationId: obsId, result, capture });
+      await onAnomalyRequired({
+        key,
+        observationId: obsId,
+        walletId: proj.walletId ?? null,
+        priorObservationId: previousId,
+        result,
+        capture,
+      });
     }
 
     await sql.query(STATEMENTS.UPSERT_CURSOR, [

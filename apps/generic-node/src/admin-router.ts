@@ -28,6 +28,7 @@ import {
   handleGetRecovery,
   handleNeedsAttention,
   handleRecoveryAction,
+  NeedsAttentionQuerySchema,
   IMPLEMENTER_SCOPES,
   InMemoryDeviceRevocationAuditLog,
   InMemoryEnrollmentAuditLog,
@@ -1676,13 +1677,21 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     if (verb === "GET" && pathname === "/admin/v1/operations/needs-attention") {
       const gate = await gateMoneyMutation(sessions, authReq, { userStore: deps.userStore, csrf, labTotp: labTotpOrNull(totp) });
       if (!gate.ok) return authFail(gate, requestId);
+      // Wire the declared NeedsAttentionQuerySchema (route-schemas) before the store —
+      // hand Number()/as-never bypass let NaN LIMIT reach Postgres as a 503 (ZTR-1198).
+      const q = parseQuery(rawPath);
+      const parsed = NeedsAttentionQuerySchema.safeParse(Object.fromEntries(q.entries()));
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        const code = issue?.code === "unrecognized_keys" ? "unknown_field" : "invalid_scalar";
+        const message =
+          code === "unknown_field"
+            ? "The request contains an unrecognized field."
+            : "A field value does not satisfy its canonical scalar constraint.";
+        return fail(400, code, message, requestId);
+      }
       try {
-        const q = parseQuery(rawPath);
-        const result = await handleNeedsAttention(deps.recoveryStore, {
-          classification: (q.get("classification") ?? undefined) as never,
-          kind: (q.get("kind") ?? undefined) as never,
-          limit: q.has("limit") ? Number(q.get("limit")) : undefined,
-        });
+        const result = await handleNeedsAttention(deps.recoveryStore, parsed.data);
         return ok(200, result);
       } catch {
         return fail(503, "service_unavailable", "recovery inspection unavailable", requestId);

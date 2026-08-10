@@ -85,7 +85,13 @@ export default defineConfig({
           new URL("../generic-node-contracts/src/api-schema/index.ts", import.meta.url),
         ),
       },
-      {
+            {
+        find: "@zucoins/generic-node-contracts/admin-auth-errors",
+        replacement: fileURLToPath(
+          new URL("../generic-node-contracts/src/admin-auth-errors/index.ts", import.meta.url),
+        ),
+      },
+{
         find: "@zucoins/generic-node-contracts/auth-errors",
         replacement: fileURLToPath(
           new URL("../generic-node-contracts/src/auth-errors/index.ts", import.meta.url),

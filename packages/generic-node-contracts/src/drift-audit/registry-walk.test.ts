@@ -54,13 +54,14 @@ describe("drift-audit check 1: registry walk", () => {
   // against an isolated os.tmpdir() fixture tree (via the srcDir scan option) — not this
   // package's own src/, and not a mock or a reimplemented replica of the filter logic.
 
-  it("every concern that has migrated to the canonical shape self-registers a ConcernManifest (: the original six plus twelve migrated concerns)", () => {
+  it("every concern that has migrated to the canonical shape self-registers a ConcernManifest (: canonical ConcernManifest set including admin-auth-errors (ZTR-1196))", () => {
     const dirs = listRegisteredConcerns().map((concern) => concern.dir);
     // `no-callback` appears twice: it self-registers two independent ConcernManifests across two
     // files (the no-callback channel freeze in manifest.ts, the no-callback doc/attack census in attack-manifest.ts), merged under one directory
     // key in CONCERN_MODULES — a legitimate multi-manifest directory, not a duplicate-registration
     // defect.
     expect(dirs).toEqual([
+      "admin-auth-errors",
       "amounts",
       "api-schema",
       "approval",

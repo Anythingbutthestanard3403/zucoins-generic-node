@@ -428,6 +428,7 @@ describe("node-core dependency boundaries", () => {
         // the same declaration the SPA renders from, so neither side can invent a field
         // (ZTR-1202: destination_address was read off a summary row nothing populated).
         "@zucoins/generic-node-contracts/admin-inventory",
+        "@zucoins/generic-node-contracts/admin-auth-errors",
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/node-core",
         "@zucoins/node-core/data",

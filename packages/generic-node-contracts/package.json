@@ -8,6 +8,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./admin-inventory": "./dist/admin-inventory/index.js",
+    "./admin-auth-errors": "./dist/admin-auth-errors/index.js",
     "./amounts": "./dist/amounts/index.js",
     "./api-schema": "./dist/api-schema/index.js",
     "./auth-errors": "./dist/auth-errors/index.js",

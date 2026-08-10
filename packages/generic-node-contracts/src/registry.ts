@@ -21,6 +21,7 @@
 import type { ConcernManifest } from "./testkit/concernManifest.ts";
 
 import { AMOUNTS_CONCERN_MANIFEST } from "./amounts/manifest.ts";
+import { ADMIN_AUTH_ERRORS_CONCERN_MANIFEST } from "./admin-auth-errors/manifest.ts";
 import { API_SCHEMA_CONCERN_MANIFEST } from "./api-schema/manifest.ts";
 import { APPROVAL_CONCERN_MANIFEST } from "./approval/manifest.ts";
 import { ARTIFACTS_CONCERN_MANIFEST } from "./artifacts/manifest.ts";
@@ -69,6 +70,7 @@ export interface RegisteredConcern {
  * membership and this sequence.
  */
 export const CONCERN_REGISTRY: readonly RegisteredConcern[] = [
+  { concernDir: "admin-auth-errors", exportName: "ADMIN_AUTH_ERRORS_CONCERN_MANIFEST", manifest: ADMIN_AUTH_ERRORS_CONCERN_MANIFEST },
   { concernDir: "amounts", exportName: "AMOUNTS_CONCERN_MANIFEST", manifest: AMOUNTS_CONCERN_MANIFEST },
   { concernDir: "api-schema", exportName: "API_SCHEMA_CONCERN_MANIFEST", manifest: API_SCHEMA_CONCERN_MANIFEST },
   { concernDir: "approval", exportName: "APPROVAL_CONCERN_MANIFEST", manifest: APPROVAL_CONCERN_MANIFEST },

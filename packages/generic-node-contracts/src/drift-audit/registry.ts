@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import type { ConcernManifest } from "../testkit/concernManifest.ts";
 
+import * as adminAuthErrors from "../admin-auth-errors/manifest.ts";
 import * as amounts from "../amounts/manifest.ts";
 import * as apiSchema from "../api-schema/manifest.ts";
 import * as approval from "../approval/manifest.ts";
@@ -69,6 +70,7 @@ export const repoRoot = join(packageRoot, "..", "..");
  * census — that is the intended "unregistered concern" drift signal, not a harness defect.
  */
 export const CONCERN_MODULES: Readonly<Record<string, object>> = {
+  "admin-auth-errors": adminAuthErrors,
   amounts,
   "api-schema": apiSchema,
   approval,

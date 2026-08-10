@@ -90,6 +90,55 @@ async function doFetch(path: string, init: ApiOptions = {}): Promise<Response> {
   });
 }
 
+/**
+ * Ambiguous-401 recovery. The server deliberately collapses session-gone,
+ * CSRF-token-fail and wrong-TOTP into one `invalid_credentials` envelope
+ * (`node-core/src/http/admin-mutation-chain.ts` header — they "must not oracle"),
+ * so the client cannot, and must not try to, tell them apart from the response.
+ * It asks the authoritative endpoint instead: `me()` re-reads /admin/v1/me and
+ * returns null once the session is gone; only then does it force re-auth through
+ * the existing `logout()` (clears the user *and* the in-memory CSRF token, then
+ * lands on /login). A still-live session leaves the store untouched, so a
+ * mistyped code keeps its re-prompt.
+ *
+ * Awaitable + coalesced so callers (esp. `withTotpRetry`) only see the 401
+ * throw after the session decision has settled — fire-and-forget let the
+ * step-up loop re-prompt before logout finished (ZTR-1195).
+ */
+export type SessionRecheckResult = "skipped" | "alive" | "dead";
+
+let sessionRecheck: Promise<SessionRecheckResult> | null = null;
+
+export function recheckSessionOn401(): Promise<SessionRecheckResult> {
+  if (sessionRecheck) return sessionRecheck;
+  const { user, me, logout } = useAuth.getState();
+  // No session held — a failed login has nothing to expire and nowhere to send.
+  if (user === null) return Promise.resolve("skipped");
+  // One probe covers a whole page of parallel 401s failing together.
+  sessionRecheck = (async (): Promise<SessionRecheckResult> => {
+    try {
+      const live = await me();
+      if (live === null) {
+        await logout();
+        return "dead";
+      }
+      return "alive";
+    } catch {
+      // Probe itself failed — treat as dead so money UX cannot loop on a
+      // half-known session (fail-closed; logout is local-clear-first).
+      try {
+        await logout();
+      } catch {
+        /* offline */
+      }
+      return "dead";
+    } finally {
+      sessionRecheck = null;
+    }
+  })();
+  return sessionRecheck;
+}
+
 export async function api<T>(path: string, init?: ApiOptions): Promise<T> {
   const res = await doFetch(path, init);
   if (!res.ok) {
@@ -107,6 +156,7 @@ export async function api<T>(path: string, init?: ApiOptions): Promise<T> {
     } catch {
       /* keep default */
     }
+    if (res.status === 401) await recheckSessionOn401();
     throw new ApiError(res.status, body, extras);
   }
   if (res.status === 204) return undefined as T;

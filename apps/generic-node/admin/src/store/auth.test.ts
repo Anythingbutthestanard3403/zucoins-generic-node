@@ -77,9 +77,43 @@ describe("auth store paths (generic-node live surface)", () => {
     });
 
     await useAuth.getState().logout();
+    // Local clear + /login must not wait on the revoke POST (ZTR-1195).
+    expect(useAuth.getState().user).toBeNull();
+    expect(assign).toHaveBeenCalledWith("/login");
     expect(fetchMock.mock.calls[0]![0]).toBe("/admin/v1/logout");
     const headers = new Headers((fetchMock.mock.calls[0]![1] as RequestInit).headers);
     expect(headers.get("X-CSRF-Token")).toBe("tok");
+  });
+
+  it("logout clears local session before a hung revoke POST settles", async () => {
+    useAuth.setState({
+      user: {
+        userId: "u1",
+        role: "admin",
+        mustEnrolTotp: false,
+        mustChangePassword: false,
+        csrfToken: "tok",
+      },
+    });
+    let release!: () => void;
+    const hung = new Promise<Response>((resolve) => {
+      release = () => resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => hung));
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
+    Object.defineProperty(window.location, "href", {
+      configurable: true,
+      set: assign,
+      get: () => "",
+    });
+
+    const pending = useAuth.getState().logout();
+    // Before the network answers: operator is already logged out locally.
+    expect(useAuth.getState().user).toBeNull();
+    expect(assign).toHaveBeenCalledWith("/login");
+    release();
+    await pending;
   });
 
   it("changePassword posts /admin/v1/password with snake_case body", async () => {

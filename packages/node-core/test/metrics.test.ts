@@ -138,6 +138,7 @@ describe("createNodeMetrics — per-scrape gauges (DB-truth snapshot)", () => {
       signerLeadershipHeld: 1,
       storagePressure: 0,
       quarantinedUnexpectedHead: 1,
+      parkedExternalSends: 2,
       activeLeasesByRole: { RECEIVE_WINDOW: 1 },
     }));
     createMetricsHooks(metrics).onT0ReadFailure();
@@ -153,6 +154,7 @@ describe("createNodeMetrics — per-scrape gauges (DB-truth snapshot)", () => {
     expect(body).toContain("gn_signer_leadership_held 1");
     expect(body).toContain("gn_storage_pressure 0");
     expect(body).toContain("gn_wallets_quarantined_unexpected_head 1");
+    expect(body).toContain("gn_send_external_parked 2");
     expect(body).toContain('gn_active_leases{lease_role="RECEIVE_WINDOW"} 1');
     expect(body).toContain("gn_t0_read_failures_total 1");
     expect(body).toContain("gn_proof_budget_exhaustion_total 1");
@@ -232,6 +234,9 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
             ],
           };
         }
+        if (text === METRICS_SNAPSHOT_STATEMENTS.COUNT_PARKED_EXTERNAL_SENDS) {
+          return { rows: [{ parked: 3 }] };
+        }
         throw new Error(`unexpected SQL: ${text}`);
       },
     };
@@ -247,6 +252,7 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
     });
 
     expect(snap.availableWallets).toBe(4);
+    expect(snap.parkedExternalSends).toBe(3);
     expect(snap.totalWallets).toBe(7);
     expect(snap.pinnedWallets).toBe(2);
     expect(snap.queueDepth).toBe(5);
@@ -261,7 +267,7 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
     expect(snap.signerLeadershipHeld).toBe(0);
     expect(snap.workerHealth.reconciler).toBe(1);
     expect(snap.workerHealth.observation).toBe(0);
-    expect(calls).toHaveLength(6);
+    expect(calls).toHaveLength(7);
   });
 
   it("rejects a non-positive pool cap (fail closed on bad config)", async () => {

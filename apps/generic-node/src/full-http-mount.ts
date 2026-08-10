@@ -831,9 +831,11 @@ export function createProductionRouteSurface(
       sendDecisionStore: new SqlSendDecisionStore(config.pool),
       loadOperation: createSqlApprovalOperationLoader(config.pool),
       // Live recovery action + inspection stores.
-      // readFreshHead threads the Route A confirm-read into RELEASE_EXPIRED_RECEIVE.
+      // readFreshHead threads the Route A confirm-read into RELEASE_EXPIRED_RECEIVE and into
+      // the SEND non-landing exclusion oracle. Both stores take it, and both spend it only on
+      // their single-operation fact loads — the attention listing runs no gateway reads.
       recoveryActionStore: createSqlRecoveryActionStore(config.pool, readFreshHead),
-      recoveryInspectionStore: createSqlRecoveryInspectionStore(config.pool),
+      recoveryInspectionStore: createSqlRecoveryInspectionStore(config.pool, readFreshHead),
       // Live audited attention-retraction store.
       attentionRetractionStore: createSqlAttentionRetractionStore(config.pool),
     },

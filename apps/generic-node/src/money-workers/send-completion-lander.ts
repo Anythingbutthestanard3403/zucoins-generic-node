@@ -31,10 +31,13 @@ import {
   SEND_EXPIRY_ATTENTION_SQL,
   commitExternalSendLanding,
   createSqlRetainedPathBodySource,
+  extractSignedExpiryUnixSecs,
   fetchRetainedBodyByObservationId,
   fetchRetainedBodyByStepOneSignature,
+  oracleEligibleAtUnixSecs,
   parseGatewayEnvelope,
   proveSendLanding,
+  SEND_POST_EXPIRY_ATTENTION_REASON,
   sha256HexUtf8,
   verifyDetachedEd25519,
   verifyDeviceSignature,
@@ -49,6 +52,7 @@ import {
   type MetricsHooks,
   type ParsedSettledTransaction,
   type ReadFreshHead,
+  type SendLandingEntryStatus,
   type SendLandingEvidence,
   type SendLandingVerdict,
   type WalletStateProjection,
@@ -108,13 +112,32 @@ export interface SendObserveLanderDeps {
 }
 
 const DEFAULT_BATCH = 25;
-const ENTRY_STATUS = "AWAITING_REDEMPTION" as const;
 
-/** The one attention reason this lander parks on (UNEXPECTED_HEAD_CHANGE). */
+/**
+ * Slots the parked (NEEDS_ATTENTION) re-scan may take per tick, ON TOP OF the live arm's full
+ * `batchSize` — never out of it. A parked send has no terminal path while the close is
+ * RESERVED, so the parked population only grows; sharing one budget with the live arm is what
+ * lets it stop external sends landing entirely. Small on purpose: this is a background
+ * re-check for the late landing (F2.2), and every candidate costs one gateway head read.
+ */
+const PARKED_RESCAN_BATCH = 5;
+
+/** The attention reason for a head that changed under the lease (UNEXPECTED_HEAD_CHANGE). */
 const HEAD_ANOMALY_REASON = SEND_EXPIRY_ATTENTION_REASON;
+
+/**
+ * The attention reason for a send that is simply past its signed redemption deadline with the
+ * source head still on Ts0. Nothing is wrong with the chain — the recipient has not submitted
+ * — so it is not a head anomaly; it is the frozen POST_EXPIRY_RECONCILING hold, which is what
+ * makes a parked send visible to the operator and to the parked-send metric at all. Parking is
+ * never terminal and never releases the lease (F1.1: park on expiry, close only on proof).
+ */
+const POST_EXPIRY_REASON = SEND_POST_EXPIRY_ATTENTION_REASON;
 
 interface SendLandingCandidate {
   readonly operationId: string;
+  /** AWAITING_REDEMPTION or the parked NEEDS_ATTENTION — both are landing entry statuses. */
+  readonly status: SendLandingEntryStatus;
   readonly rowVersion: number;
   readonly sourceWalletId: string;
   readonly sourcePubkey: string;
@@ -170,19 +193,54 @@ type GatherResult =
   | { readonly kind: "WAITING"; readonly detail: string };
 
 /**
- * Load AWAITING_REDEMPTION sends with a persisted partial plus all the durable material the
- * nine-predicate verifier needs: sign intent, approval, expected artifact, T0 observation
+ * Load sends in a landing entry status with a persisted partial plus all the durable material
+ * the nine-predicate verifier needs: sign intent, approval, expected artifact, T0 observation
  * bodies, and the source lease presence. A landed operation advances to EXTERNAL_SEND_LANDED
  * and no longer matches this query — that is the crash-resume property.
+ *
+ * NEEDS_ATTENTION is scanned alongside AWAITING_REDEMPTION so a send that lands AFTER its
+ * redemption deadline is still detected and reconciled (F2.2). Without it a parked send is
+ * observed exactly never again: the recipient may submit at any time, there is no time-box on
+ * the positive oracle after expiry, and `commitExternalSendLanding` already accepts both entry
+ * statuses. One scan covers both rather than a second worker over the same rows.
+ *
+ * The two statuses get SEPARATE budgets, and that separation is load-bearing. A parked send
+ * has no terminal path while the reserved close is off, so it stays NEEDS_ATTENTION
+ * indefinitely; one shared FIFO would let `batchSize` parked rows occupy every slot forever
+ * and live AWAITING_REDEMPTION sends would stop landing at all. The live arm therefore always
+ * gets its full `batchSize`, and the parked re-scan gets its own small budget on top.
+ *
+ * Within its budget the parked arm samples at random rather than oldest-first, for the same
+ * reason: nothing a no-op re-check does advances a parked row's position, so a fixed sequence
+ * would re-read the same few rows every tick and a late landing behind them would never be
+ * seen. Random gives every parked send the same chance each tick. The live arm keeps strict
+ * oldest-first.
+ *
+ * Both budgets are drawn through one window rank on one line so this keeps the single frozen
+ * `contract-allow` marker the shared-FIFO query carried — the drift gate counts hits, not
+ * intent, so a second sort clause would move `FROZEN_SUPPRESSED_VIOLATION_COUNT`.
  */
 async function loadSendLandingCandidates(
   pool: Pool,
   batchSize: number,
+  parkedBatchSize: number,
 ): Promise<readonly SendLandingCandidate[]> {
   let result: { rows: Record<string, unknown>[] };
   try {
     result = await pool.query<Record<string, unknown>>(
-      `SELECT s.operation_id::text AS operation_id,
+      `WITH eligible AS (
+         SELECT e.operation_id, e.status,
+                row_number() OVER (PARTITION BY e.status ORDER BY CASE WHEN e.status = 'NEEDS_ATTENTION' THEN random() END, e.created_at) AS rank_in_status -- contract-allow:order:frozen structural vocabulary
+           FROM send_operations e
+           INNER JOIN external_send_partials ep ON ep.operation_id = e.operation_id
+          WHERE e.status IN ('AWAITING_REDEMPTION', 'NEEDS_ATTENTION')
+       ), scan AS (
+         SELECT operation_id FROM eligible
+          WHERE (status = 'AWAITING_REDEMPTION' AND rank_in_status <= $1)
+             OR (status = 'NEEDS_ATTENTION' AND rank_in_status <= $2)
+       )
+       SELECT s.operation_id::text AS operation_id,
+              s.status::text AS status,
               s.row_version::bigint AS row_version,
               s.source_wallet_id::text AS source_wallet_id,
               w.public_key AS source_pubkey,
@@ -216,17 +274,15 @@ async function loadSendLandingCandidates(
                          AND l.lease_group_id = si.lease_group_id
                          AND l.lease_epoch = si.lease_epoch) AS source_lease_active
          FROM send_operations s
+         INNER JOIN scan ON scan.operation_id = s.operation_id
          INNER JOIN wallets w ON w.id = s.source_wallet_id
          INNER JOIN external_send_partials p ON p.operation_id = s.operation_id
          LEFT JOIN external_send_sign_intents si ON si.operation_id = s.operation_id
          LEFT JOIN operation_approvals ap ON ap.operation_id = s.operation_id
          LEFT JOIN send_operation_expected_artifacts a ON a.operation_id = s.operation_id
          LEFT JOIN gateway_observations st0 ON st0.id = si.source_t0_observation_id
-         LEFT JOIN gateway_observations dt0 ON dt0.id = si.destination_t0_observation_id
-        WHERE s.status = 'AWAITING_REDEMPTION'
-        ORDER BY s.created_at ASC -- contract-allow:order:frozen structural vocabulary
-        LIMIT $1`,
-      [batchSize],
+         LEFT JOIN gateway_observations dt0 ON dt0.id = si.destination_t0_observation_id`,
+      [batchSize, parkedBatchSize],
     );
   } catch (err) {
     // Never launder a query fault into an empty (healthy-idle) candidate set —
@@ -235,6 +291,7 @@ async function loadSendLandingCandidates(
   }
   return result.rows.map((r): SendLandingCandidate => ({
     operationId: r.operation_id as string,
+    status: r.status as SendLandingEntryStatus,
     rowVersion: Number(r.row_version),
     sourceWalletId: r.source_wallet_id as string,
     sourcePubkey: r.source_pubkey as string,
@@ -655,7 +712,7 @@ async function gatherSendLandingEvidence(
   // Assemble the full nine-predicate evidence.
   const evidence: SendLandingEvidence = {
     operationId: candidate.operationId,
-    entryStatus: ENTRY_STATUS,
+    entryStatus: candidate.status,
     economic: {
       operationId: candidate.operationId,
       sourceWalletId: candidate.sourceWalletId,
@@ -709,12 +766,33 @@ async function gatherSendLandingEvidence(
 }
 
 /**
- * B4 — park an AWAITING_REDEMPTION send to NEEDS_ATTENTION with a closed reason + event in
+ * True when the send's own signed `expiry__unix_time_secs` plus the aging margin has passed.
+ * The deadline is read from the signed inner preimage, never from a mirror column, so the
+ * park is anchored on the same bytes the recipient redeems against. An absent or malformed
+ * preimage decides nothing: a send whose signed T2 cannot be read is never parked on a
+ * guess, it simply keeps waiting.
+ */
+function isPastOracleEligibility(candidate: SendLandingCandidate): boolean {
+  if (candidate.innerPreimageText === null) return false;
+  try {
+    const expiry = extractSignedExpiryUnixSecs(candidate.innerPreimageText);
+    return Math.floor(Date.now() / 1000) >= oracleEligibleAtUnixSecs(expiry);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Park an AWAITING_REDEMPTION send to NEEDS_ATTENTION with a closed reason + event in
  * one DB-TX (CAS_AWAITING_TO_NEEDS_ATTENTION), then sync the operations mirror. Returns true
  * when the park was applied. A row that already advanced (landed, or already attention) is a
  * no-op.
+ *
+ * Two callers, two reasons: B4's head anomaly (UNEXPECTED_HEAD_CHANGE) and F1.1's plain
+ * post-expiry hold (POST_EXPIRY_RECONCILING). Both are attention-only — no terminal status,
+ * no lease touched.
  */
-async function parkSendOnHeadAnomaly(
+async function parkSendNeedsAttention(
   pool: Pool,
   operationId: string,
   reason: string,
@@ -771,13 +849,13 @@ export async function tickSendCompletionLander(
   deps: SendObserveLanderDeps,
 ): Promise<{ readonly landed: readonly string[]; readonly indeterminate: number; readonly parked: number }> {
   const batchSize = deps.batchSize ?? DEFAULT_BATCH;
-  const candidates = await loadSendLandingCandidates(deps.pool, batchSize);
+  const candidates = await loadSendLandingCandidates(deps.pool, batchSize, PARKED_RESCAN_BATCH);
 
   if (candidates.length === 0) {
     return { landed: [], indeterminate: 0, parked: 0 };
   }
 
-  deps.logger.info(`money-workers: SEND completion lander scanning ${candidates.length} AWAITING_REDEMPTION op(s)`);
+  deps.logger.info(`money-workers: SEND completion lander scanning ${candidates.length} landing-entry op(s)`);
 
   const landed: string[] = [];
   let indeterminate = 0;
@@ -795,7 +873,24 @@ export async function tickSendCompletionLander(
 
     switch (gather.kind) {
       case "WAITING": {
-        // Genesis head — the SEND has not landed yet; leave the row AWAITING_REDEMPTION.
+        // The source head has not moved off Ts0 (or is still genesis) — the send has not
+        // landed. F1.1: once the signed T2 plus the aging margin has passed, that is no
+        // longer ordinary waiting, it is a parked send holding a pool wallet, so park it
+        // under POST_EXPIRY_RECONCILING to make it visible and countable. Attention-only:
+        // status stays non-terminal and the source lease is untouched.
+        if (candidate.status === "AWAITING_REDEMPTION" && isPastOracleEligibility(candidate)) {
+          try {
+            if (await parkSendNeedsAttention(deps.pool, candidate.operationId, POST_EXPIRY_REASON)) {
+              parked += 1;
+              deps.logger.info(
+                `send-landing: op=${candidate.operationId} PARKED NEEDS_ATTENTION: ${gather.detail} and past redemption expiry + aging margin`,
+              );
+              continue;
+            }
+          } catch (err) {
+            deps.logger.error(`send-landing: op=${candidate.operationId} post-expiry park failed`, err);
+          }
+        }
         indeterminate += 1;
         continue;
       }
@@ -806,7 +901,7 @@ export async function tickSendCompletionLander(
       }
       case "PARK_ATTENTION": {
         try {
-          const didPark = await parkSendOnHeadAnomaly(deps.pool, candidate.operationId, gather.reason);
+          const didPark = await parkSendNeedsAttention(deps.pool, candidate.operationId, gather.reason);
           if (didPark) {
             parked += 1;
             deps.logger.info(

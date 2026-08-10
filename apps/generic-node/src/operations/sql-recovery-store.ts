@@ -13,6 +13,9 @@ import {
   withSerializationRetry,
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   redeliverExactPartialViaSql,
+  createSqlRetainedPathBodySource,
+  fetchRetainedBodyByObservationId,
+  proveSendNonLanding,
   mintReleaseProof,
   releaseLease,
   completeGroupOperation,
@@ -27,7 +30,9 @@ import {
   type IssuedRecoveryNonce,
   type NeedsAttentionQuery,
   type EvidenceManifestEntry,
+  type PathBaseline,
   type ReadFreshHead,
+  type SendNonLandingOutcome,
   type LeaseSqlExecutor,
 } from "@zucoins/node-core";
 
@@ -95,6 +100,26 @@ export const LAUNCH_RESERVED_RECOVERY_ACTIONS = [
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
   "REBUILD_INTERNAL_MOVE",
 ] as const;
+
+/**
+ * The single switch that would make CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED reachable at
+ * runtime — and it is deliberately off.
+ *
+ * The non-landing exclusion oracle below is live: it reads the source head through the
+ * observation service, walks the retained T0→head path, and records what it found on every
+ * operation's evidence manifest. What it may NOT do yet is set the two close predicates,
+ * because the action it feeds is RESERVED in the frozen contract
+ * (`generic-node-contracts/operator-halt/halt.contract.ts` RESERVED_RECOVERY_ACTIONS: "they
+ * cannot be granted at runtime"), and the decision register does not grant it: D9.6 ("There
+ * is no generic PROVEN_NOT_LANDED oracle"), D10.21(1) (the closed determination space has no
+ * PROVEN_NOT_LANDED member), and D9.15 (folding a non-landing into a release "reopens
+ * landed-into-released-wallet loss"). 09-operations-recovery.md §"Allowed action values" and
+ * Appendix B §5.3.1's RESERVED note both defer to D9.6.
+ *
+ * Flipping this to true is the whole of runtime activation, and it belongs to the reviewed
+ * freeze decision that authorizes it — not to a reading of the oracle's own correctness.
+ */
+const SEND_NON_LANDING_CLOSE_ACTIVATED = false;
 
 const SQL_LOOKUP_IDEMPOTENCY = `
   SELECT body FROM recovery_action_idempotency
@@ -398,15 +423,102 @@ const SQL_HAS_OPERATION_TRANSACTION = `
   SELECT 1 FROM operation_transactions WHERE operation_id = $1::uuid
 `;
 
+// F1.2's two live inputs come from the chain, not from storage: the source wallet's public
+// key to read the head under, the send's recorded Ts0 observation to compare it against, and
+// the step-1 signature the exclusion walk hunts for. Read-only, one row.
+const SQL_SEND_NON_LANDING_MATERIAL = `
+  SELECT w.public_key AS source_pubkey,
+         si.source_t0_observation_id::text AS source_t0_observation_id,
+         t0.completed_transaction_text AS source_t0_body_text,
+         p.step_1_signature AS step_1_signature
+    FROM send_operations s
+    JOIN wallets w ON w.id = s.source_wallet_id
+    JOIN external_send_partials p ON p.operation_id = s.operation_id
+    LEFT JOIN external_send_sign_intents si ON si.operation_id = s.operation_id
+    LEFT JOIN gateway_observations t0 ON t0.id = si.source_t0_observation_id
+   WHERE s.operation_id = $1::uuid
+`;
+
+/**
+ * Run the non-landing exclusion oracle for one parked SEND_EXTERNAL.
+ *
+ * Returns the outcome plus an evidence-manifest summary of what was read. A null outcome
+ * means the oracle was never asked (no Ts0 binding, no retained Ts0 body) — indistinguishable
+ * from INDETERMINATE at the fact level, both leave the two predicates false.
+ */
+async function proveSendNonLandingForOperation(
+  pool: Pool,
+  operationId: string,
+  readFreshHead: ReadFreshHead,
+): Promise<{ readonly outcome: SendNonLandingOutcome | null; readonly summary: string }> {
+  const row = (await pool.query<{
+    source_pubkey: string;
+    source_t0_observation_id: string | null;
+    source_t0_body_text: string | null;
+    step_1_signature: string;
+  }>(SQL_SEND_NON_LANDING_MATERIAL, [operationId])).rows[0];
+
+  if (row === undefined || row.source_t0_observation_id === null) {
+    return { outcome: null, summary: "non-landing exclusion not attempted: no source Ts0 binding" };
+  }
+
+  let baseline: PathBaseline;
+  if (row.source_t0_body_text === null) {
+    baseline = { kind: "GENESIS", observation_id: row.source_t0_observation_id };
+  } else {
+    const t0Body = await fetchRetainedBodyByObservationId({ sql: pool }, row.source_t0_observation_id);
+    if (t0Body === null) {
+      return {
+        outcome: null,
+        summary: "non-landing exclusion not attempted: source Ts0 retained body absent",
+      };
+    }
+    baseline = { kind: "HEAD", body: t0Body };
+  }
+
+  const outcome = await proveSendNonLanding(
+    {
+      walletPublicKey: row.source_pubkey,
+      baseline,
+      step1Signature: row.step_1_signature,
+    },
+    createSqlRetainedPathBodySource({ sql: pool }),
+    readFreshHead,
+  );
+  const summary =
+    outcome.kind === "INDETERMINATE"
+      ? `non-landing exclusion INDETERMINATE (${outcome.fault})`
+      : outcome.kind === "OWN_SEND_ON_PATH"
+        ? "non-landing exclusion refused: this send is ON the source path (late landing)"
+        : `non-landing exclusion ${outcome.kind}`;
+  return { outcome, summary };
+}
+
 const SQL_HAS_SUBMIT_ATTEMPT = `
   SELECT 1 FROM gateway_submit_attempts WHERE operation_id = $1::uuid
 `;
 
-export function createSqlRecoveryInspectionStore(pool: Pool): RecoveryInspectionStore {
+// `readFreshHead` is the same Route A confirm-read the action store takes. Without it the
+// SEND non-landing exclusion oracle is never asked and both its predicates stay false, so a
+// composition that cannot reach a gateway degrades to the pre-oracle behaviour rather than
+// guessing.
+export function createSqlRecoveryInspectionStore(
+  pool: Pool,
+  readFreshHead?: ReadFreshHead,
+): RecoveryInspectionStore {
   return {
     // query.classification / query.kind are accepted by the NeedsAttentionQuery shape but
     // deliberately left unfiltered here (limit-only) — a pre-existing gap, out of this
     // ticket's reviewed scope.
+    //
+    // `readFreshHead` is deliberately NOT threaded into the listing. Every parked SEND in it
+    // is past T2 + the aging margin with a durable partial by construction (that is what
+    // parked MEANS), so passing it would run the non-landing exclusion oracle once per row —
+    // two live gateway head reads plus up to `DEFAULT_MAX_PATH_DEPTH` successor lookups per
+    // send, up to `limit` (200) times, inside one synchronous operator HTTP request. The
+    // oracle belongs on the single-operation paths below, which is where an operator actually
+    // decides an action; a listing that omits it is fail-closed (both predicates false), never
+    // wrong in the permissive direction.
     async listNeedsAttention(query: NeedsAttentionQuery): Promise<readonly RecoveryFacts[]> {
       const limit = query.limit ?? 50;
       const result = await pool.query<{
@@ -430,7 +542,7 @@ export function createSqlRecoveryInspectionStore(pool: Pool): RecoveryInspection
     },
 
     async loadRecoveryFacts(operationId: string): Promise<RecoveryFacts | null> {
-      return loadRecoveryFactsById(pool, operationId);
+      return loadRecoveryFactsById(pool, operationId, readFreshHead);
     },
 
     async issueRecoveryNonce(operationId: string): Promise<IssuedRecoveryNonce> {
@@ -481,7 +593,7 @@ export function createSqlRecoveryActionStore(pool: Pool, readFreshHead?: ReadFre
     },
 
     async loadRecoveryFactsLocked(operationId: string): Promise<RecoveryFacts | null> {
-      return loadRecoveryFactsById(pool, operationId);
+      return loadRecoveryFactsById(pool, operationId, readFreshHead);
     },
 
     async commitRecoveryAction(input: RecoveryActionCommitInput): Promise<RecoveryActionCommitResult> {
@@ -861,7 +973,11 @@ export function createSqlRecoveryActionStore(pool: Pool, readFreshHead?: ReadFre
   };
 }
 
-async function loadRecoveryFactsById(pool: Pool, operationId: string): Promise<RecoveryFacts | null> {
+async function loadRecoveryFactsById(
+  pool: Pool,
+  operationId: string,
+  readFreshHead?: ReadFreshHead,
+): Promise<RecoveryFacts | null> {
   const result = await pool.query<{
     operation_id: string; kind: string; status: string;
     attention_required: boolean; attention_reason: string | null; row_version: number;
@@ -877,7 +993,7 @@ async function loadRecoveryFactsById(pool: Pool, operationId: string): Promise<R
       terminalObservationId: r.terminal_observation_id,
       expiryUnixTimeSecs: r.expiry_unix_time_secs,
       formationState: r.formation_state,
-    });
+    }, readFreshHead);
 }
 
 interface RecoveryFactsRowExtra {
@@ -891,6 +1007,7 @@ async function loadRecoveryFactsFromRow(
   pool: Pool, operationId: string, kind: string, status: string,
   attentionRequired: boolean, attentionReason: string | null, rowVersion: number,
   extra: RecoveryFactsRowExtra,
+  readFreshHead?: ReadFreshHead,
 ): Promise<RecoveryFacts | null> {
   // Load active leases for this operation.
   const leaseRows = await pool.query<{
@@ -1138,6 +1255,42 @@ async function loadRecoveryFactsFromRow(
       });
     }
 
+    // F1.2's two live inputs. The exclusion oracle runs for real — the outcome of every read
+    // is recorded on the evidence manifest — but its positives are admitted to the close
+    // predicates only through SEND_NON_LANDING_CLOSE_ACTIVATED, which is false while the
+    // action is RESERVED. A fault, a thrown read, an absent Ts0 binding, or a send found ON
+    // the source path all leave both predicates false regardless (fail-closed).
+    //
+    // Two gates decide whether it is asked at all, and BOTH are needed. Past T2 + the aging
+    // margin with a durable partial is the sole window in which a terminal close may even be
+    // considered — but every parked send satisfies it, so that gate alone does not bound the
+    // read volume. `readFreshHead` is the other: only the single-operation callers thread it,
+    // so one operation costs at most one oracle run and the attention listing costs none.
+    // Changing that (threading it into listNeedsAttention) puts `limit` live gateway walks
+    // inside one operator HTTP request — see the comment on listNeedsAttention.
+    let freshHeadEqualsSourceT0 = false;
+    let completePathExclusionProved = false;
+    if (protocolExpiredPlusMargin && hasDurablePartial && readFreshHead !== undefined) {
+      try {
+        const probe = await proveSendNonLandingForOperation(pool, operationId, readFreshHead);
+        freshHeadEqualsSourceT0 =
+          SEND_NON_LANDING_CLOSE_ACTIVATED && probe.outcome?.kind === "FRESH_HEAD_EQUALS_T0";
+        completePathExclusionProved =
+          SEND_NON_LANDING_CLOSE_ACTIVATED && probe.outcome?.kind === "COMPLETE_PATH_EXCLUSION";
+        manifest.push({
+          kind: "gateway_observations", id: null, role: "SOURCE_HEAD", digest_sha256: null,
+          summary: SEND_NON_LANDING_CLOSE_ACTIVATED
+            ? probe.summary
+            : `${probe.summary} (RESERVED: not admitted to the close predicates)`,
+        });
+      } catch (err) {
+        manifest.push({
+          kind: "gateway_observations", id: null, role: "SOURCE_HEAD", digest_sha256: null,
+          summary: `non-landing exclusion read failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
     send = {
       hasSignIntent,
       hasSignerCall: hasSignerAudit,
@@ -1145,10 +1298,8 @@ async function loadRecoveryFactsFromRow(
       hasDurablePartial,
       hasDelivery,
       protocolExpiredPlusMargin,
-      // Fresh-head / complete-path exclusion require live chain oracle reads — left false
-      // so PROVEN_NOT_LANDED cannot fire without evidence (fail-closed).
-      freshHeadEqualsSourceT0: false,
-      completePathExclusionProved: false,
+      freshHeadEqualsSourceT0,
+      completePathExclusionProved,
       hasSignerAudit,
       hasMatchingExactByteRecord: true,
     };

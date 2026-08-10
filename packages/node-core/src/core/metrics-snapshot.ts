@@ -98,6 +98,22 @@ SELECT count(*)::int AS wallets
     .replace(/\s+/g, " ")
     .trim(),
 
+  // Only the post-delivery park counts. A NEEDS_ATTENTION send that never reached a
+  // delivered partial (a formation failure) holds no source-wallet lease, so counting it
+  // would overstate what is held against the wallet cap — the one thing this gauge is read
+  // for. The two reasons are the two the completion lander parks under (F1.1's post-expiry
+  // hold and B4's head anomaly); both are non-terminal and both keep the lease.
+  COUNT_PARKED_EXTERNAL_SENDS: `
+SELECT count(*)::int AS parked
+  FROM send_operations s
+ WHERE s.status = 'NEEDS_ATTENTION'
+   AND s.attention_reason IN ('POST_EXPIRY_RECONCILING', 'UNEXPECTED_HEAD_CHANGE')
+   AND EXISTS (SELECT 1 FROM external_send_partials p
+                WHERE p.operation_id = s.operation_id
+                  AND p.first_delivered_at IS NOT NULL)`
+    .replace(/\s+/g, " ")
+    .trim(),
+
   COUNT_OPERATIONS_BY_STATUS: `
 SELECT status::text AS status,
        count(*)::int AS ops,
@@ -146,7 +162,15 @@ export async function collectOperationalMetricsSnapshot(
     );
   }
 
-  const [byStateRows, availableRows, leaseRows, queueRows, quarantineRows, opRows] =
+  const [
+    byStateRows,
+    availableRows,
+    leaseRows,
+    queueRows,
+    quarantineRows,
+    opRows,
+    parkedSendRows,
+  ] =
     await Promise.all([
       db.query<{ state: string; wallets: number }>(
         METRICS_SNAPSHOT_STATEMENTS.COUNT_WALLETS_BY_STATE,
@@ -164,6 +188,7 @@ export async function collectOperationalMetricsSnapshot(
       db.query<{ status: string; ops: number; oldest_age_secs: number }>(
         METRICS_SNAPSHOT_STATEMENTS.COUNT_OPERATIONS_BY_STATUS,
       ),
+      db.query<{ parked: number }>(METRICS_SNAPSHOT_STATEMENTS.COUNT_PARKED_EXTERNAL_SENDS),
     ]);
 
   const walletsByState: Partial<Record<MetricWalletState, number>> = {};
@@ -211,6 +236,7 @@ export async function collectOperationalMetricsSnapshot(
     poolCapTotal,
     oldestLeaseAgeSecs,
     quarantinedUnexpectedHead: Number(quarantineRows.rows[0]?.wallets ?? 0),
+    parkedExternalSends: Number(parkedSendRows.rows[0]?.parked ?? 0),
     operationsByStatus,
     operationsOldestAgeSecsByStatus,
     storagePressure: stamps.storagePressure ? 1 : 0,
@@ -244,6 +270,7 @@ export function snapshotFromPoolPressure(
     readonly activeLeasesByRole?: Readonly<Partial<Record<MetricLeaseRole, number>>>;
     readonly oldestLeaseAgeSecs?: number;
     readonly quarantinedUnexpectedHead?: number;
+    readonly parkedExternalSends?: number;
     readonly operationsByStatus?: Readonly<Partial<Record<MetricOperationStatus, number>>>;
     readonly operationsOldestAgeSecsByStatus?: Readonly<
       Partial<Record<MetricOperationStatus, number>>
@@ -271,6 +298,7 @@ export function snapshotFromPoolPressure(
     poolCapTotal: pressure.poolCapTotal,
     oldestLeaseAgeSecs: extras?.oldestLeaseAgeSecs ?? pressure.oldestReceiveLeaseAgeSecs,
     quarantinedUnexpectedHead: extras?.quarantinedUnexpectedHead ?? 0,
+    parkedExternalSends: extras?.parkedExternalSends ?? 0,
     operationsByStatus: extras?.operationsByStatus ?? {},
     operationsOldestAgeSecsByStatus: extras?.operationsOldestAgeSecsByStatus ?? {},
     storagePressure: stamps.storagePressure ? 1 : 0,

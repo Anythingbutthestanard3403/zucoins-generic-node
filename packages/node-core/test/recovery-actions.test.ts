@@ -571,6 +571,65 @@ describe("fresh evaluation under locks", () => {
     if (out.status === "ok") expect(out.body.status).toBe("REJECTED");
   });
 
+  it("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED also admits the complete-path exclusion arm", async () => {
+    const excluded = baseSend({
+      send: {
+        hasSignIntent: true,
+        hasSignerCall: true,
+        hasSignature: true,
+        hasDurablePartial: true,
+        hasDelivery: true,
+        protocolExpiredPlusMargin: true,
+        freshHeadEqualsSourceT0: false,
+        completePathExclusionProved: true,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(derivePermittedActions(excluded).permittedActions).toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
+    const out = await executeRecoveryAction(
+      new MemoryRecoveryStore(excluded),
+      OP,
+      req("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED"),
+    );
+    expect(out.status).toBe("ok");
+    if (out.status === "ok") expect(out.body.status).toBe("REJECTED");
+  });
+
+  it("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED stays unreachable while both oracle facts are withheld", async () => {
+    // The RESERVED posture the SQL store holds today (ZTR-1129 freeze boundary): the
+    // non-landing exclusion oracle runs and records what it read, but neither positive is
+    // admitted to these two predicates while the action is RESERVED (halt.contract
+    // RESERVED_RECOVERY_ACTIONS; D9.6 — no generic PROVEN_NOT_LANDED oracle; D10.21(1) — no
+    // PROVEN_NOT_LANDED member in the determination space). With both false the action is
+    // neither offered nor admitted, however expired the send is.
+    const withheld = baseSend({
+      send: {
+        hasSignIntent: true,
+        hasSignerCall: true,
+        hasSignature: true,
+        hasDurablePartial: true,
+        hasDelivery: true,
+        protocolExpiredPlusMargin: true,
+        freshHeadEqualsSourceT0: false,
+        completePathExclusionProved: false,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    const permitted = derivePermittedActions(withheld);
+    expect(permitted.classification).not.toBe("PROVEN_NOT_LANDED");
+    expect(permitted.permittedActions).not.toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
+    const refused = await executeRecoveryAction(
+      new MemoryRecoveryStore(withheld),
+      OP,
+      req("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED"),
+    );
+    expect(refused.status).toBe("rejected");
+  });
+
   it("REDELIVER_EXACT_PARTIAL returns identical stored bytes", async () => {
     const store = new MemoryRecoveryStore(baseSend());
     const out = await executeRecoveryAction(store, OP, req("REDELIVER_EXACT_PARTIAL"));

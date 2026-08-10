@@ -10,6 +10,10 @@
 - Focused node tests: 59/59 pass (live move 6/6, route 26/26, OpenAPI 27/27).
 - Contract schema tests: 25/25 pass.
 - Real PG route suite: 6/6 pass with `PG_REQUIRED=1` and native PostgreSQL 16 `psql`.
-- Touched-path ESLint: pass.
-- Canonical package test/lint/build: pending final exact-head transaction.
+- Touched-path ESLint: pass; package-local contracts lint/build and node-core build pass.
+- Canonical root build and schema census: pass.
+- Canonical contracts suite: 2731/2732 pass; the sole forbidden-term scan failure reproduces identically on exact base `12603b1d2663c47fbeaffb114f398fb5271b8ebd` (`drain`/`sweep` in untouched files).
+- Canonical node-core lint: one `no-useless-catch` error in untouched `src/workers/leadership.ts`, reproduced identically on exact base.
+- Canonical node-core suite with the host `~/.local/bin/psql` shim is non-authoritative (29 files / 105 assertions fail on PostgreSQL CLI-output semantics); the ticket-owned strict route drill passes 6/6 with native PostgreSQL 16.14 `psql` against port 55433.
+- Root boundaries: ticket-owned MOVE→core read-only edge registered and focused boundary suite 71/71 passes; the remaining forbidden-term failure is the exact-base identity above.
 - No merge performed; handoff target is QA Review.

@@ -92,8 +92,10 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   send: ["protocol", "device", "verifier", "reporting", "observation", "workers", "data", "proof", "core", "totp", "event-log"],
   // MOVE_INTERNAL admission: amount/UUID parsers live in protocol.
   // dual-lease acquisition drives the one canonical lease repository rather than
-  // re-sorting or re-inserting wallet_active_leases itself.
-  move: ["protocol", "leases"],
+  // re-sorting or re-inserting wallet_active_leases itself. The live point-read reuses
+  // core's canonical execution-phase derivation and transaction-material fact reader;
+  // move remains read-only across that edge.
+  move: ["protocol", "leases", "core"],
   // persisted lease foundation: reads frozen schema version/file constants only.
   leases: ["schema"],
   workers: ["protocol", "core", "gateway"],

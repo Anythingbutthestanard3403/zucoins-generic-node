@@ -1,8 +1,8 @@
 # ZTR-1183 implementer report
 
-**Head SHA:** `57653fb0333a18c3caa5c8f96fcb0d0f774784d0`
+**Head SHA:** `b704d6e` (impl `57653fb0333a18c3caa5c8f96fcb0d0f774784d0`; tip includes this report)
 **Branch:** `ztr-1183-backup-leadership`
-**PR:** (filled after create)
+**PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/32
 
 ## Governing
 

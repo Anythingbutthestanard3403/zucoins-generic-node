@@ -135,7 +135,11 @@ import {
   publicKeyFromEd25519Seed,
   runGenesisBootstrap,
 } from "./bootstrap/genesis.js";
-import { composePush, type PushComposition } from "./push/compose.js";
+import {
+  composePush,
+  requireActivePushSubscriptionOrRefuse,
+  type PushComposition,
+} from "./push/compose.js";
 import {
   assertRootKeyOpensSealedEnvelope,
   reconcileRootKdfSalt,
@@ -526,8 +530,10 @@ async function main(): Promise<void> {
     sendPartials: createSqlSendPartialLoader(pool),
     // late-bound push gate — push is composed below, so the closure captures
     // the mutable `push` ref. EXTERNAL send path calls this before committing.
+    // Fail closed when push was not composed (PUBLIC_BASE_URL unset) — matches
+    // the boot log claim that EXTERNAL paths refuse (ZTR-1181).
     requireActiveSubscription: async (walletId: string) => {
-      if (push) { await push.service.requireActiveSubscription(walletId); }
+      await requireActivePushSubscriptionOrRefuse(push, walletId);
     },
   });
   const operationAuth = createImplementerBearerAuthFromService(
@@ -1199,8 +1205,10 @@ async function main(): Promise<void> {
         // Subscribe every freshly minted wallet, post-commit.
         onWalletsMinted: (walletIds) => push?.onWalletsMinted(walletIds),
         // Hard gate for EXTERNAL receive — wallet must hold ACTIVE push subscription.
+        // Fail closed when push was not composed (PUBLIC_BASE_URL unset) — matches
+        // the boot log claim that EXTERNAL paths refuse (ZTR-1181).
         requireActivePushSubscription: async (walletId: string) => {
-          if (push) { await push.service.requireActiveSubscription(walletId); }
+          await requireActivePushSubscriptionOrRefuse(push, walletId);
         },
         moneyPathGates: moneyPathPorts,
         // The settle step co-signs under this latch and submits to

@@ -1,0 +1,15 @@
+# ZTR-1137 CI-gates handoff
+- Tested implementation SHA: `667184131fc3db05d5395f3f102f5648b7097cf1`; base: `12603b1d2663c47fbeaffb114f398fb5271b8ebd`.
+- Prerequisites: ZTR-1163 `57e4964b6` and ZTR-1164 `6c29b0a` are ancestors of fetched `origin/main`.
+- Added required PR/main CI: frozen install, build, lint, contracts, PG-required root tests, boundaries, schema census, admin unit, Chromium Playwright.
+- PostgreSQL is real v16, isolated at `127.0.0.1:55437`; workflow installs real client tools and sets `PG_REQUIRED=1`.
+- Workflow census: 5/5 PASS; disposable `PG_REQUIRED` removal RED then restored GREEN.
+- Build PASS; schema census PASS (39/39 nouns, 189 FKs); admin unit PASS (40 files, 313 tests).
+- Admin Playwright: 22/23 PASS; identical accessible-label failure reproduced on exact base.
+- Full PG run: 836 files/12,428 tests PASS; 8 files/14 tests FAIL plus 8 EPIPE errors.
+- Exact same 8 files/14 tests and 8 errors reproduced on exact base; branch-owned product failures: none.
+- Contracts: 224/225 files, 2,731/2,732 tests; boundaries: 4/5 files, 161/162 tests; both fail only on base-owned `leadership.test.ts` forbidden term.
+- Lint: branch surfaces 1 error/6 warnings; exact base reproduces `leadership.ts:282 no-useless-catch`.
+- Other exact-base failures: schema inventory/type order, destination label fixture, sign-intent UPDATE, vaultRootKey fixture, receive harness timeout.
+- Scope is four implementation files plus this report; no production guard was relaxed and no base-owned drift was absorbed.
+- Backup refs: `refs/backup/ztr-1137-pre-finalize-20260810T042643Z`, `refs/backup/ztr-1137-checkpoint`.

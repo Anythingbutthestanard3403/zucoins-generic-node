@@ -5,10 +5,12 @@
 //
 //   1. OBSERVE(receiver_pubkey, RECEIVE_TERMINAL_CHECK) — the durable confirm-read
 //      (sql-fresh-head-reader.ts). Its observation-ledger row is the terminal observation.
-// 2/3. The landing-proof rule landing oracle (node-core `proveReceiveLanding`, driven through
-//      `verifyAndCommitReceiveLanding`) reverifies every body from exact signed text, applies
-//      the current-exact-head rule by reading the head twice, and re-runs the receive
-//      economic predicate against a re-derived T0 — never a cached balance column.
+// 2/3. Any-depth successor bodies are assembled from retained storage via
+//      `walkAncestryPath` + `createSqlRetainedPathBodySource` (same path SEND uses). The
+//      landing-proof oracle (`proveReceiveLanding` via `verifyAndCommitReceiveLanding`)
+//      then reverifies every body from exact signed text, applies the current-exact-head
+//      rule by reading the head twice, and re-runs the receive economic predicate against
+//      a re-derived T0 — never a cached balance column.
 //   4. The landing DB-TX (sql-landing-store.ts).
 //
 // Closing rule: nothing here mints a landing from a bare head match, and no
@@ -23,19 +25,30 @@
 // `readFreshHead` and `store` are injected ports so the whole flow runs offline against a real
 // PostgreSQL with a scripted gateway exchange (test/receive-landing-step.pg.test.ts).
 
+import { createHash, randomUUID } from "node:crypto";
+
 import type { Pool } from "pg";
 
 import {
   ATTEMPT_PHASE_LADDER,
+  createSqlRetainedPathBodySource,
+  DEFAULT_MAX_PATH_DEPTH,
+  fetchRetainedBodyByObservationId,
+  InMemoryLineagePathProofStore,
+  parseGatewayEnvelope,
   RECEIVE_READY_STATUS,
   RECEIVE_SETTLED_BODY_PERSISTED_PHASE,
   verifyAndCommitReceiveLanding,
-  parseGatewayEnvelope,
+  verifySettledTransaction,
+  walkAncestryPath,
   type CommitReceiveLandingOutcome,
   type MetricsHooks,
   type ParsedSettledTransaction,
+  type PathBaseline,
   type ReadFreshHead,
   type ReceiveLandingStore,
+  type RetainedPathBody,
+  type RetainedPathBodySource,
 } from "@zucoins/node-core";
 
 /**
@@ -210,12 +223,168 @@ export async function loadReceiveLandingCandidates(
 }
 
 /**
+ * Build an EXPECTED_OPERATION retained body from the attempt's exact settled bytes.
+ * Columns are re-derived via verifySettledTransaction so verifyHop's column binding holds.
+ * observation_id is a synthetic locator — the walk never probes it as a ledger key.
+ */
+export function retainedExpectedBodyFromSettledText(
+  expectedBodyText: string,
+  walletPublicKey: string,
+): RetainedPathBody | null {
+  const parsed = parseStoredSettledBody(expectedBodyText);
+  if (parsed === null) return null;
+  const verdict = verifySettledTransaction(parsed, walletPublicKey);
+  if (verdict.verdict !== "VERIFIED") return null;
+  const { role, S, P, B } = verdict.projection;
+  if (role !== "sender" && role !== "receiver") return null;
+  return {
+    source_kind: "EXPECTED_OPERATION",
+    observation_id: randomUUID(),
+    wallet_public_key: walletPublicKey,
+    completed_transaction_text: expectedBodyText,
+    completed_transaction_sha256: verdict.completedTransactionSha256,
+    completed_transaction_octets: Buffer.byteLength(expectedBodyText, "utf8"),
+    wallet_role: role,
+    s_signature: S,
+    p_signature: P,
+    b_amount: B,
+    inner_preimage_text: verdict.innerPreimageText,
+    inner_sha256: createHash("sha256").update(verdict.innerPreimageText, "utf8").digest("hex"),
+    step_1_signature: parsed.step_1_signature,
+    step_2_signature: parsed.step_2_signature,
+    semantic_fingerprint: verdict.semanticFingerprint,
+  };
+}
+
+export interface ResolveReceiveSuccessorsDeps {
+  readonly readFreshHead: ReadFreshHead;
+  /** Production: createSqlRetainedPathBodySource({ sql: pool }). Tests inject InMemory. */
+  readonly retainedSource: RetainedPathBodySource;
+  /**
+   * SQL port for T0 observation lookup when baseline is not injected. Production always
+   * passes the pool; unit tests may omit it and inject `baseline` instead.
+   */
+  readonly sql?: {
+    query<R extends Record<string, unknown>>(
+      text: string,
+      params: readonly unknown[],
+    ): Promise<{ rows: readonly R[] }>;
+  };
+  /** Optional override when T0 is not on the observation ledger (unit tests). */
+  readonly baseline?: PathBaseline;
+}
+
+/**
+ * Resolve the ordered successor body list T_expected+1 … T_head via the retained-path
+ * walk (same engine SEND uses). Finite depth budget is explicit (DEFAULT_MAX_PATH_DEPTH).
+ *
+ * - Depth 0 (expected is the fresh head): returns [].
+ * - Depth ≥ 1: returns the verified successor ParsedSettledTransaction bodies.
+ * - Unprovable path (missing body, gap, anomaly, moved head, budget): null → INDETERMINATE.
+ */
+export async function resolveReceiveSuccessorBodies(
+  candidate: ReceiveLandingCandidate,
+  deps: ResolveReceiveSuccessorsDeps,
+  maxPathDepth: number = DEFAULT_MAX_PATH_DEPTH,
+): Promise<readonly ParsedSettledTransaction[] | null> {
+  const retainedExpected = retainedExpectedBodyFromSettledText(
+    candidate.expectedBodyText,
+    candidate.receiverPublicKey,
+  );
+  if (retainedExpected === null) return null;
+
+  let baseline: PathBaseline;
+  if (deps.baseline !== undefined) {
+    baseline = deps.baseline;
+  } else if (candidate.t0BodyText === null) {
+    baseline = { kind: "GENESIS", observation_id: candidate.t0ObservationId };
+  } else if (deps.sql !== undefined) {
+    const t0Retained = await fetchRetainedBodyByObservationId(
+      { sql: deps.sql },
+      candidate.t0ObservationId,
+    );
+    if (t0Retained === null) {
+      // Retention miss on T0: rebuild from the candidate's retained text (same bytes).
+      const t0Body = retainedExpectedBodyFromSettledText(
+        candidate.t0BodyText,
+        candidate.receiverPublicKey,
+      );
+      if (t0Body === null) return null;
+      baseline = {
+        kind: "HEAD",
+        body: {
+          ...t0Body,
+          source_kind: "CANONICAL_LEDGER",
+          observation_id: candidate.t0ObservationId,
+        },
+      };
+    } else {
+      baseline = { kind: "HEAD", body: t0Retained };
+    }
+  } else {
+    const t0Body = retainedExpectedBodyFromSettledText(
+      candidate.t0BodyText,
+      candidate.receiverPublicKey,
+    );
+    if (t0Body === null) return null;
+    baseline = {
+      kind: "HEAD",
+      body: {
+        ...t0Body,
+        source_kind: "CANONICAL_LEDGER",
+        observation_id: candidate.t0ObservationId,
+      },
+    };
+  }
+
+  try {
+    const walkOutcome = await walkAncestryPath(
+      {
+        pathProofId: randomUUID(),
+        landingProofId: randomUUID(),
+        walletId: null,
+        walletPublicKey: candidate.receiverPublicKey,
+        operation: {
+          kind: "RECEIVE_EXTERNAL",
+          amountZkz: candidate.amountZkz,
+          receiverPubkey: candidate.receiverPublicKey,
+        },
+        expectedBody: retainedExpected,
+        baseline,
+        maxPathDepth,
+      },
+      deps.retainedSource,
+      deps.readFreshHead,
+      new InMemoryLineagePathProofStore(),
+    );
+    if (walkOutcome.kind !== "PATH_PROVEN") {
+      return null;
+    }
+    const successors: ParsedSettledTransaction[] = [];
+    for (const row of walkOutcome.bodies.slice(1)) {
+      const parsed = parseStoredSettledBody(row.completed_transaction_text);
+      if (parsed === null) return null;
+      successors.push(parsed);
+    }
+    return successors;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The landing walk for one candidate. Returns the node-core outcome verbatim; every non-APPLIED
  * result leaves the durable row exactly as it was found.
  */
 export async function landOneReceive(
   candidate: ReceiveLandingCandidate,
-  deps: Pick<ReceiveLandingStepDeps, "readFreshHead" | "store">,
+  deps: Pick<ReceiveLandingStepDeps, "pool" | "readFreshHead" | "store">,
+  options?: {
+    readonly maxPathDepth?: number;
+    /** Test seam — production always uses createSqlRetainedPathBodySource({ sql: pool }). */
+    readonly retainedSource?: RetainedPathBodySource;
+    readonly baseline?: PathBaseline;
+  },
 ): Promise<CommitReceiveLandingOutcome> {
   const expectedBody = parseStoredSettledBody(candidate.expectedBodyText);
   if (expectedBody === null) {
@@ -235,6 +404,30 @@ export async function landOneReceive(
     };
   }
 
+  const maxPathDepth = options?.maxPathDepth ?? DEFAULT_MAX_PATH_DEPTH;
+  const retainedSource =
+    options?.retainedSource ?? createSqlRetainedPathBodySource({ sql: deps.pool });
+
+  // Any-depth successors from retained storage (Q6). Depth 0 → []. Fail-closed null →
+  // INDETERMINATE (no rebuild, no resubmit, lease untouched).
+  const successors = await resolveReceiveSuccessorBodies(
+    candidate,
+    {
+      readFreshHead: deps.readFreshHead,
+      retainedSource,
+      sql: deps.pool,
+      baseline: options?.baseline,
+    },
+    maxPathDepth,
+  );
+  if (successors === null) {
+    return {
+      outcome: "REJECTED",
+      reason: "PROOF_NOT_POSITIVE",
+      detail: "receive landing path unprovable from retained bodies (INDETERMINATE)",
+    };
+  }
+
   // Steps 2–4. The landing-proof rule oracle (proveReceiveLanding, driven through
   // verifyAndCommitReceiveLanding) does its OWN durable confirm-read via readFreshHead and
   // binds the terminal observation to that read's observation ID. A preliminary read is NOT
@@ -246,11 +439,12 @@ export async function landOneReceive(
       walletPubkeyBase64Urlsafe: candidate.receiverPublicKey,
       t0Body,
       expectedBody,
-      successorBodies: [],
+      successorBodies: successors,
       operation: {
         amountZkz: candidate.amountZkz,
         receiverPubkey: candidate.receiverPublicKey,
       },
+      maxDepth: maxPathDepth,
     },
     {
       operationId: candidate.operationId,

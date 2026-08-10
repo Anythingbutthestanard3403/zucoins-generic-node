@@ -520,7 +520,7 @@ const SEND_NAMING_REACHERS: Readonly<Record<string, string>> = {
     "the package barrel re-exports SEND_EXTERNAL_CREATE_GN3_OBLIGATIONS / _INVARIANTS / _SCHEMA_FILE (index.ts:119-121), so the substring predicate matches an identifier PREFIX, not a kind literal. Its reach of the write path is core/index.ts:26 — MOVE_INTERNAL's submit machinery re-exported — not SEND reaching it",
 };
 
-// Half 2's declared set. Thirteen members; the two the over-inclusive SEND predicate flags are
+// Half 2's declared set. Fourteen members; the two the over-inclusive SEND predicate flags are
 // named in SEND_NAMING_LEDGER_MODULES below, on the same exact-set terms as half 1's.
 const SUBMIT_LEDGER_NAMING_MODULES: Readonly<Record<string, string>> = {
   "core/backup/format.ts": "backup manifest names both ledgers as backed-up tables (06-backup)",
@@ -539,6 +539,8 @@ const SUBMIT_LEDGER_NAMING_MODULES: Readonly<Record<string, string>> = {
     "The frozen invariant inventory. Names both ledgers inside the REVOKE anchors the census binds to privileges.sql; it is contract text, not a query",
   "gateway/records.ts": "gateway row mappers; names gateway_submit_attempts",
   "gateway/submit.ts": "the gateway submit seam; names both ledgers describing the at-most-once row",
+  "move/sql-store.ts":
+    "MOVE_INTERNAL live GET projection reads gateway_submit_attempts to derive execution phase; it does not write the submit ledger",
   "protocol/reconcile/move-ambiguity.ts":
     "MOVE reconcile; names both ledgers stating what it must never invent a second row of",
   "schema/submit-attempts.contract.ts": "the frozen DDL contract for gateway_submit_attempts",
@@ -547,7 +549,7 @@ const SUBMIT_LEDGER_NAMING_MODULES: Readonly<Record<string, string>> = {
     "MOVE_INTERNAL pipeline compose — names both ledgers describing the at-most-once settle path it drives via core/move-submit-claim",
 };
 
-// Of the twelve above, which the over-inclusive SEND predicate flags. Exact set, same terms as
+// Of the fourteen above, which the over-inclusive SEND predicate flags. Exact set, same terms as
 // SEND_NAMING_REACHERS: a THIRD SEND-naming ledger module reddens rather than being absorbed.
 // Both entries name SEND_EXTERNAL in prose because they describe the defence AGAINST it — the
 // grant that denies node_core_send the ledgers, and the frozen inventory of that grant. Neither

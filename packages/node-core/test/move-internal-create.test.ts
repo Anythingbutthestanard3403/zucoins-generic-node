@@ -569,7 +569,10 @@ describe("createInternalMove — admission", () => {
       destination_id: DESTINATION_ID,
       spawned_from_operation_id: null,
       lease_status: "WAITING",
+      execution_phase: "NOT_STARTED",
       expected_artifact: null,
+      source_terminal_observation_id: null,
+      destination_terminal_observation_id: null,
     });
   });
 

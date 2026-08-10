@@ -1013,39 +1013,24 @@ describe.skipIf(!PG_AVAILABLE)("boot census keeps landed-operation leases (dispo
   );
 
   it(
-    "a genuinely orphaned lease — operation row absent entirely — still breaches and quarantines",
+    "the production schema refuses a genuinely orphaned lease before boot recovery",
     async () => {
       await clearOperationalState();
-      const walletId = await seedVerifiedWallet();
       const missingOperationId = randomUUID(); // no `operations` row is ever written for it
       const leaseGroupId = randomUUID();
-      await pool.query(
-        `INSERT INTO lease_groups (id, root_operation_id, created_at) VALUES ($1::uuid, $2::uuid, now())`,
-        [leaseGroupId, missingOperationId],
-      );
-      await seedHeldLease(leaseGroupId, missingOperationId, walletId);
-      await pool.query(
-        `INSERT INTO lease_group_operations (lease_group_id, operation_id, joined_at)
-         VALUES ($1::uuid, $2::uuid, now())`,
-        [leaseGroupId, missingOperationId],
-      );
 
-      const report = await runRecovery();
-
-      expect(report.invariantBreach).toBe(true);
-      expect(report.ready).toBe(false);
-      expect(
-        report.leaseFindings.some(
-          (f) => f.walletId === walletId && f.reason === "lease_operation_missing",
+      await expect(
+        pool.query(
+          `INSERT INTO lease_groups (id, root_operation_id, created_at)
+           VALUES ($1::uuid, $2::uuid, now())`,
+          [leaseGroupId, missingOperationId],
         ),
-      ).toBe(true);
-      const wallet = await pool.query<{ state: string }>(
-        `SELECT state::text FROM wallets WHERE id = $1::uuid`,
-        [walletId],
-      );
-      expect(wallet.rows[0]!.state).toBe("QUARANTINED");
-      // One-in-flight: quarantine never deletes the lease row.
-      expect((await pool.query(`SELECT 1 FROM wallet_active_leases`)).rowCount).toBe(1);
+      ).rejects.toMatchObject({ code: "23503" });
+
+      // ZTR-1139 closes this legacy incident shape at storage admission. Existing deployed
+      // dangling rows are stopped by the fix-forward preflight before any FK is installed.
+      expect((await pool.query(`SELECT 1 FROM lease_groups WHERE id = $1::uuid`, [leaseGroupId])).rowCount).toBe(0);
+      expect((await pool.query(`SELECT 1 FROM wallet_active_leases`)).rowCount).toBe(0);
     },
     PG_TEST_TIMEOUT_MS,
   );

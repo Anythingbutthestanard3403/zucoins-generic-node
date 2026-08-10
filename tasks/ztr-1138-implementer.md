@@ -1,6 +1,6 @@
 # ZTR-1138 implementer
 
-**Head SHA:** `a8fe23d5ef4deaaea1763ba9939ccc3792cb8b86`
+**Head SHA:** `ce444a63ba7a045c77a1af64bd0058ef8ba8fd1e`
 **Branch:** `ztr-1138-tx-byte-immutability`
 **Governing:** doc 04 §9 / 04:760-767 (transaction material mutability); `packages/node-core/src/schema/transaction-material.contract.ts` regimes; `CONVENTIONS.md` exact-content byte-immutability; pack append after v153 (`lease-role-enum`) → **v154**.
 

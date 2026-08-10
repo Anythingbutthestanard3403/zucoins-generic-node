@@ -66,7 +66,9 @@ export async function handleCreateDestination(
     return success(result.status === "created" ? 201 : 200, result.destination);
   } catch (err) {
     if (err instanceof z.ZodError) {
-      return fail(apiErrorResponse("invalid_scalar", ctx.requestId, err.message));
+      // Canonical invalid_scalar only — never pass Zod's serialized issue array
+      // (field paths / expected / received) into the implementer-facing body.
+      return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
     }
     return fail(apiErrorResponse("service_unavailable", ctx.requestId));
   }
@@ -85,7 +87,7 @@ type ListDestinationsFilter = z.infer<typeof ListDestinationsQuery>;
 
 export type ListDestinationsQueryParse =
   | { readonly ok: true; readonly query: ListDestinationsFilter }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false };
 
 /**
  * query off the opaque exact raw signed target. Delegates to the same strict
@@ -100,7 +102,7 @@ export function parseListDestinationsQueryFromTarget(
   const parsed = ListDestinationsQuery.safeParse(
     Object.fromEntries(new URLSearchParams(search)),
   );
-  if (!parsed.success) return { ok: false, message: parsed.error.message };
+  if (!parsed.success) return { ok: false };
   return { ok: true, query: parsed.data };
 }
 
@@ -158,7 +160,8 @@ export function createDestinationsListRouteHandler(
     if (!parsed.ok) {
       // Same envelope the bearer pipeline emits for a bad query (api error vocabulary);
       // the frozen reporting-rejection codes stay reserved for the pre-handler auth stages.
-      const error = apiErrorResponse("invalid_scalar", deps.newRequestId(), parsed.message);
+      // No message override: Zod issue dumps stay off the wire (non-oracular surface).
+      const error = apiErrorResponse("invalid_scalar", deps.newRequestId());
       return {
         response: reportingJsonResponse(error.status, error.body),
         persistChild: null,

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDestinationsListRouteHandler,
+  handleCreateDestination,
   handleListDestinations,
   listDestinationsBody,
   parseListDestinationsQueryFromTarget,
@@ -179,11 +180,26 @@ describe("reporting-credential destinations list", () => {
     const response = await handler(verified(NODE_A, "/v1/destinations?limit=0"));
     expect(response.response.status).toBe(400);
     expect(response.persistChild).toBeNull();
-    const body = JSON.parse(decode(response.response.bodyBytes)) as {
-      error: { code: string; request_id: string };
+    const raw = decode(response.response.bodyBytes);
+    const body = JSON.parse(raw) as {
+      error: { code: string; message: string; request_id: string };
     };
     expect(body.error.code).toBe("invalid_scalar");
     expect(body.error.request_id).toBe("req-bad");
+    // ZTR-1200: canonical message only — Zod issue dumps (expected/received/path) stay off the wire.
+    expect(body.error.message).toBe(
+      "A field value does not satisfy its canonical scalar constraint.",
+    );
+    expect(raw).not.toMatch(/"expected"\s*:/);
+    expect(raw).not.toMatch(/"received"\s*:/);
+    expect(raw).not.toContain("Too small");
+    expect(raw).not.toContain("Too big");
+  });
+
+  it("parseListDestinationsQueryFromTarget failure carries no Zod message field", () => {
+    const bad = parseListDestinationsQueryFromTarget("/v1/destinations?limit=0");
+    expect(bad).toEqual({ ok: false });
+    expect(bad).not.toHaveProperty("message");
   });
 
   it("a throwing service fails closed as internal_error and never leaks the reason", async () => {
@@ -210,5 +226,35 @@ describe("reporting-credential destinations list", () => {
     expect(listDestinationsBody(page)).toBe(
       JSON.stringify({ items: NODE_A_ROWS, next_after: NODE_A_ROWS[1]!.destinationId }),
     );
+  });
+});
+
+describe("handleCreateDestination Zod body failures (ZTR-1200)", () => {
+  it("returns canonical invalid_scalar without Zod expected/received dumps", async () => {
+    const result = await handleCreateDestination(
+      {
+        requestId: "req-create-bad",
+        principal: { implementerId: "55555555-5555-4555-8555-555555555555" },
+        request: { headers: { "idempotency-key": "idem-create-1" }, query: {} },
+        parsedBody: { label: 12 },
+        idempotencyTenantId: "55555555-5555-4555-8555-555555555555",
+      } as never,
+      {
+        service: stubService(),
+        nodeId: NODE_A,
+      },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const raw = result.error.body;
+    const body = JSON.parse(raw) as { error: { code: string; message: string } };
+    expect(result.error.status).toBe(400);
+    expect(body.error.code).toBe("invalid_scalar");
+    expect(body.error.message).toBe(
+      "A field value does not satisfy its canonical scalar constraint.",
+    );
+    expect(raw).not.toMatch(/"expected"\s*:/);
+    expect(raw).not.toMatch(/"received"\s*:/);
+    expect(raw).not.toContain("invalid_type");
   });
 });

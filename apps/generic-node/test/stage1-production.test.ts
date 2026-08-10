@@ -1,4 +1,5 @@
-import type { AddressInfo } from "node:net";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
+import { EventEmitter } from "node:events";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -15,6 +16,15 @@ import {
 import type { BackupSchedulerHandle } from "../src/dr/index.js";
 
 const VALID_BACKUP_KEY = "a".repeat(32);
+
+/**
+ * Signal wiring for startStage1Service. Every boot here gets a fake emitter so the
+ * graceful stop installed before migrations never registers a real SIGTERM/SIGINT
+ * handler (with the default `process.exit`) on the vitest process.
+ */
+function fakeShutdown(emitter: EventEmitter = new EventEmitter()) {
+  return { emitter, exit: () => {}, logger: { info: () => {}, error: () => {} } };
+}
 
 function productionBackupEnv(
   overrides: Record<string, string | undefined> = {},
@@ -225,6 +235,7 @@ describe("Stage-1 production composition", () => {
         // Composition test — the real pg_dump/psql probe is host-dependent
         // and covered by test/dr/client-probe.test.ts.
         probeBackupClient: async () => ({ ok: true }),
+        shutdown: fakeShutdown(),
       },
     );
 
@@ -260,6 +271,7 @@ describe("Stage-1 production composition", () => {
         closeDatabase: async () => {},
         createScheduler: () => undefined,
         probeBackupClient: async () => ({ ok: true }),
+        shutdown: fakeShutdown(),
       },
     );
 
@@ -279,6 +291,7 @@ describe("Stage-1 production composition", () => {
           closeDatabase: async () => {},
           createScheduler: () => undefined,
           probeBackupClient: async () => ({ ok: false, reason: "pg_dump not found" }),
+          shutdown: fakeShutdown(),
         },
       ),
     ).rejects.toThrow(/postgresql-client probe failed.*pg_dump not found/);
@@ -371,5 +384,141 @@ describe("Stage-1 production composition", () => {
     expect(live).toMatch(/strategy:\s*\n\s*type:\s*Recreate/);
     expect(live).not.toMatch(/type:\s*RollingUpdate/);
     expect(live).not.toMatch(/rollingUpdate:/);
+  });
+});
+
+// Stage-1 boot ordering (ZTR-1184). The custody path's rule — migrations run with
+// the health surface already answering and the stop path already installed
+// (src/boot/boot-lane.ts:12-13) — now holds for the zero-custody entry point too.
+// runMigrations is injected as a deferred promise, so every assertion below is made
+// while the migration is genuinely still in flight. No real database, no real
+// signal: inside test/setup-network-guard.ts.
+describe("Stage-1 boot ordering", () => {
+  let service: Stage1Service | undefined;
+
+  afterEach(async () => {
+    await service?.stop();
+    service = undefined;
+  });
+
+  function devConfig() {
+    return loadStage1Config({
+      BIND_HOST: "127.0.0.1",
+      DATABASE_URL: "postgresql://stage1.invalid/zunode",
+    });
+  }
+
+  // The port must be known before the boot starts: the service handle (and with it
+  // server.address()) does not exist until after migrations resolve.
+  async function reservePort(): Promise<number> {
+    const probe = createNetServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const { port } = probe.address() as AddressInfo;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    return port;
+  }
+
+  it("answers health with a bound port and a registered SIGTERM handler while runMigrations is still pending", async () => {
+    const port = await reservePort();
+    const emitter = new EventEmitter();
+    const onSpy = vi.spyOn(emitter, "on");
+    let releaseMigration: (() => void) | undefined;
+
+    const booting = startStage1Service(
+      { ...devConfig(), port },
+      {
+        runMigrations: () =>
+          new Promise<void>((resolve) => {
+            releaseMigration = resolve;
+          }),
+        pingDatabase: async () => {},
+        closeDatabase: async () => {},
+        shutdown: fakeShutdown(emitter),
+      },
+    );
+
+    // runMigrations is only reached after listen resolves, so the deferred
+    // existing IS "the port is bound and the migration has begun".
+    await vi.waitFor(() => expect(releaseMigration).toBeDefined());
+
+    // AC: the signal handler exists before the migration, not after it.
+    expect(onSpy.mock.calls.map((c) => c[0])).toContain("SIGTERM");
+
+    // AC: liveness answers unconditionally; readiness is a 503, not ECONNREFUSED.
+    const live = await call(port, "/health");
+    expect(live.status).toBe(200);
+    expect(live.body).toEqual({ status: "live" });
+
+    const readyDuring = await call(port, "/health/ready");
+    expect(readyDuring.status).toBe(503);
+    expect(readyDuring.body).toEqual({
+      status: "not_ready",
+      stage: "zero-custody",
+      checks: { migrations: false, database: false },
+    });
+
+    releaseMigration?.();
+    service = await booting;
+
+    // AC: readiness flips once migrations complete, exactly as before.
+    expect((await call(port, "/health/ready")).status).toBe(200);
+  });
+
+  it("handles a SIGTERM that lands mid-migration instead of leaving it to the default disposition", async () => {
+    const emitter = new EventEmitter();
+    const exit = vi.fn();
+    let releaseMigration: (() => void) | undefined;
+    let databaseClosed = false;
+
+    const booting = startStage1Service(
+      { ...devConfig(), port: 0 },
+      {
+        runMigrations: () =>
+          new Promise<void>((resolve) => {
+            releaseMigration = resolve;
+          }),
+        pingDatabase: async () => {},
+        closeDatabase: async () => {
+          databaseClosed = true;
+        },
+        shutdown: { ...fakeShutdown(emitter), exit },
+      },
+    );
+
+    await vi.waitFor(() => expect(releaseMigration).toBeDefined());
+    emitter.emit("SIGTERM");
+
+    // Caught: the HTTP surface and the service pool close and the process is asked
+    // to exit 0, rather than Node terminating on the spot with nothing logged.
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+    expect(databaseClosed).toBe(true);
+
+    releaseMigration?.();
+    service = await booting;
+  });
+
+  it("keeps a failed migration fatal and closes the surface it had already bound", async () => {
+    const port = await reservePort();
+    let databaseClosed = false;
+
+    await expect(
+      startStage1Service(
+        { ...devConfig(), port },
+        {
+          runMigrations: async () => {
+            throw new Error("migration boom");
+          },
+          pingDatabase: async () => {},
+          closeDatabase: async () => {
+            databaseClosed = true;
+          },
+          shutdown: fakeShutdown(),
+        },
+      ),
+    ).rejects.toThrow("migration boom");
+
+    expect(databaseClosed).toBe(true);
+    // Nothing is left listening: the child-process probe cannot connect.
+    await expect(call(port, "/health")).rejects.toThrow();
   });
 });

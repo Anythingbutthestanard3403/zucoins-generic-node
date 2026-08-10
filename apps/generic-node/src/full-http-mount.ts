@@ -280,6 +280,12 @@ export interface ProductionSurfaceConfig {
   readonly databaseUrl?: string;
   readonly vaultMasterKey?: string | null;
   readonly backupMasterKey?: string | null;
+  /**
+   * 32-byte vault root (or supplier) for sealing TOTP factors at rest (ZTR-1134).
+   * Required whenever the production SqlAdminUserStore is used (not test overrides).
+   * Pass the same buffer boot unlock mutates on salt rederive.
+   */
+  readonly vaultRootKey?: Uint8Array | (() => Uint8Array);
   readonly newRequestId?: () => string;
   readonly nowMs?: () => number;
   /**
@@ -560,7 +566,13 @@ export function createProductionRouteSurface(
   const sessionStore = config.adminSessionStore ?? sqlSessionStore!;
   const sqlUserStore =
     config.adminUserStore === undefined
-      ? new SqlAdminUserStore(createPoolAdminUserExecutor(config.pool))
+      ? new SqlAdminUserStore(
+          createPoolAdminUserExecutor(config.pool),
+          // main.ts always injects the process vault root. Mount/unit tests that omit it
+          // get an ephemeral zero key so composition still builds; those suites must not
+          // share durable operator rows with a differently-rooted production process.
+          config.vaultRootKey ?? Buffer.alloc(32, 0),
+        )
       : null;
   const userStore = config.adminUserStore ?? sqlUserStore!;
   // Shared durable (node_id,timestep) burns — confirm + money approve/reject.

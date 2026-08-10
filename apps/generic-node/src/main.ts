@@ -69,6 +69,7 @@ import {
   type LeadershipLockClient,
   type LeadershipLockPool,
   migrateLeaseFoundation,
+  migrateTotpSecretsAtRest,
   type NodeEventSigner,
   readGatewayAction,
   runDeterministicBootRecovery,
@@ -640,6 +641,8 @@ async function main(): Promise<void> {
     // Env vault key ⇒ configured (no re-generate); backup KEK for ≠ check only.
     vaultMasterKey: config.VAULT_MASTER_KEY,
     backupMasterKey: config.BACKUP_MASTER_KEY ?? null,
+    // Same root buffer EncryptedWalletKeyStore holds; unlock may rederive in place.
+    vaultRootKey: rootKey,
     newRequestId: (): string => randomUUID(),
     metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
     destinationService,
@@ -1011,6 +1014,25 @@ async function main(): Promise<void> {
         `boot: vault root salt source=${rootSalt.source} persisted=${rootSalt.persisted} ` +
           `rederived=${rootSalt.rederive} ` +
           `self-check=${proof.checked ? `opened:${proof.provenAgainst}` : "nothing-sealed"}`,
+      );
+      // ZTR-1134: seal residual plaintext TOTP secrets and drop totp_secret_base32.
+      // Needs the unlocked root; drizzle 0007/0008 only add/conditionally drop the column.
+      const totpMigrate = await migrateTotpSecretsAtRest({
+        db: {
+          query: async <T extends Record<string, unknown>>(
+            sql: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await pool.query(sql, params === undefined ? undefined : [...params]);
+            return { rows: result.rows as T[] };
+          },
+        },
+        rootKey,
+      });
+      logger.info(
+        `boot: TOTP seal migration migrated=${totpMigrate.migrated} ` +
+          `already_sealed=${totpMigrate.alreadySealed} ` +
+          `plaintext_dropped=${totpMigrate.plaintextColumnDropped}`,
       );
       logger.info("boot: vault sealed store initialised (root key derived)");
     },

@@ -342,26 +342,26 @@ describeIfApi("fault-inject rotation and rollback", () => {
       expect(byId.WALLET_VAULT).toBe("IMPLEMENTED");
       expect(byId.NODE_SIGNING_KEYS).toBe("IMPLEMENTED");
       expect(byId.PUSH_RECEIVER_SECRETS).toBe("IMPLEMENTED");
-      expect(byId.TOTP_SECRET).toBe("DEFERRED_NO_SEAL_RUNTIME");
+      expect(byId.TOTP_SECRET).toBe("IMPLEMENTED");
       expect(byId.SESSION_SECRETS).toBe("DEFERRED_NO_SEAL_RUNTIME");
     });
 
     it("omitting a DEFERRED store from the input registry is visible in the report set", async () => {
-      // Drop TOTP_SECRET — rotation may still commit (orchestrator iterates input list),
-      // but the report must NOT claim TOTP was covered. Callers that pass a truncated
+      // Drop SESSION_SECRETS — rotation may still commit (orchestrator iterates input list),
+      // but the report must NOT claim it was covered. Callers that pass a truncated
       // registry are the hazard; the structural census (above) is what catches a missing
       // production seal site. This test documents the orchestrator's input-driven scope.
       const fixtures = [makeRow(0xd4, 1)];
-      const truncated = registrySnapshot().filter((s) => s.id !== "TOTP_SECRET");
+      const truncated = registrySnapshot().filter((s) => s.id !== "SESSION_SECRETS");
       const { input } = baseInput(fixtures, { sealedStores: truncated });
 
       const result = await rot.rotateMasterKey(input);
       expect(result.committed).toBe(true);
-      expect(result.stores.map((s) => s.storeId)).not.toContain("TOTP_SECRET");
+      expect(result.stores.map((s) => s.storeId)).not.toContain("SESSION_SECRETS");
       // Re-add: full registry reports the deferred entry.
       const { input: fullInput } = baseInput([makeRow(0xd5, 2)]);
       const full = await rot.rotateMasterKey(fullInput);
-      expect(full.stores.map((s) => s.storeId)).toContain("TOTP_SECRET");
+      expect(full.stores.map((s) => s.storeId)).toContain("SESSION_SECRETS");
     });
   });
 
@@ -508,12 +508,13 @@ describeIfApi("fault-inject rotation and rollback", () => {
       expect(vaultReport?.status).toBe("REWRAPPED");
       expect(vaultReport?.result).toEqual({ rowsBefore: 3, rowsAfter: 3, rewrapped: 3 });
 
-      // DEFERRED stores report null; signing and push stores are IMPLEMENTED (empty censuses).
+      // DEFERRED stores report null; signing/push/totp stores are IMPLEMENTED (empty censuses).
       for (const id of REGISTERED_STORE_IDS) {
         if (
           id === "WALLET_VAULT" ||
           id === "NODE_SIGNING_KEYS" ||
-          id === "PUSH_RECEIVER_SECRETS"
+          id === "PUSH_RECEIVER_SECRETS" ||
+          id === "TOTP_SECRET"
         ) continue;
         const rep = result.stores.find((s) => s.storeId === id);
         expect(rep?.status).toBe("DEFERRED_NO_SEAL_RUNTIME");
@@ -525,6 +526,9 @@ describeIfApi("fault-inject rotation and rollback", () => {
       const pushRep = result.stores.find((s) => s.storeId === "PUSH_RECEIVER_SECRETS");
       expect(pushRep?.status).toBe("REWRAPPED");
       expect(pushRep?.result).toEqual({ rowsBefore: 0, rowsAfter: 0, rewrapped: 0 });
+      const totpRep = result.stores.find((s) => s.storeId === "TOTP_SECRET");
+      expect(totpRep?.status).toBe("REWRAPPED");
+      expect(totpRep?.result).toEqual({ rowsBefore: 0, rowsAfter: 0, rewrapped: 0 });
 
       expect(commit).not.toHaveBeenCalled();
       expect(uow.commits).toBe(0);

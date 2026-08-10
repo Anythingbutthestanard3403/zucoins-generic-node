@@ -71,7 +71,26 @@ export {
   SqlAdminUserStore,
   createPoolAdminUserExecutor,
 } from "./admin-user-sql-store.js";
-export type { AdminUserSqlExecutor } from "./admin-user-sql-store.js";
+export type { AdminUserSqlExecutor, TotpVaultRootKey } from "./admin-user-sql-store.js";
+
+export {
+  TOTP_SECRET_ENVELOPE_PREFIX,
+  TOTP_SECRET_HKDF_LABEL,
+  TotpOpenError,
+  TotpSealError,
+  buildTotpSecretAad,
+  buildTotpSecretDekInfo,
+  openTotpSecret,
+  sealTotpSecret,
+  rewrapTotpSecretStore,
+  migrateTotpSecretsAtRest,
+} from "../totp/index.js";
+export type {
+  TotpSecretRewrapInput,
+  TotpSecretRewrapRow,
+  TotpPlaintextMigrationExecutor,
+  TotpPlaintextMigrationResult,
+} from "../totp/index.js";
 
 export {
   ADMIN_SESSION_SQL,

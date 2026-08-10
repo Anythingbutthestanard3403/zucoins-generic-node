@@ -224,6 +224,8 @@ export function censusPorts(rows: readonly WalletVaultRewrapRow[]): {
   countNodeSigningKeyRows: () => Promise<number>;
   pushReceiverSecrets: { rows: readonly [] };
   countPushSecretRows: () => Promise<number>;
+  totpSecrets: { rows: readonly [] };
+  countTotpSecretRows: () => Promise<number>;
 } {
   return {
     walletVault: { rows },
@@ -232,6 +234,8 @@ export function censusPorts(rows: readonly WalletVaultRewrapRow[]): {
     countNodeSigningKeyRows: async () => 0,
     pushReceiverSecrets: { rows: [] },
     countPushSecretRows: async () => 0,
+    totpSecrets: { rows: [] },
+    countTotpSecretRows: async () => 0,
   };
 }
 

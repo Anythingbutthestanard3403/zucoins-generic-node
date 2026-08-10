@@ -1,20 +1,32 @@
-// Durable admin operator + TOTP factor store (Review B defect 4).
+// Durable admin operator + sealed TOTP factor store (ZTR-1134).
 //
-// In-memory factors are wiped on reboot while money SQL stays live; this store
-// persists operator posture and the factor secret so enrol → reboot → money
-// still resolves the same active secret. Seal-at-rest (operator surface) remains
-// DEFERRED_NO_SEAL_RUNTIME — durability first; sealing lands with.
+// TOTP shared secrets are AES-256-GCM sealed under the vault root
+// (packages/node-core/src/totp/seal.ts — registry TOTP_SECRET). The
+// admin_operators.totp_secret_sealed column holds only the opaque envelope;
+// plaintext base32 never persists. Opening reconstructs AAD from the operator id.
 //
 // Table is operational (apps composition root ensures DDL). Not part of the
 // frozen money-schema pack census — same class as harness ops tables.
 
 import type { AdminTotpFactorState, AdminUser, AdminUserStore } from "./admin-session.js";
+import { encodeBase32, totpSecretBytes } from "../totp/secret.js";
+import { openTotpSecret, sealTotpSecret } from "../totp/seal.js";
 
 export interface AdminUserSqlExecutor {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
     params?: readonly unknown[],
   ): Promise<{ rows: T[] }>;
+}
+
+/**
+ * Root-key supplier for TOTP seal/open. Production wires the process vault root
+ * buffer (same reference boot unlock mutates in place on salt rederive).
+ */
+export type TotpVaultRootKey = Uint8Array | (() => Uint8Array);
+
+function resolveRootKey(root: TotpVaultRootKey): Uint8Array {
+  return typeof root === "function" ? root() : root;
 }
 
 function rowToUser(row: Record<string, unknown>): AdminUser {
@@ -39,24 +51,54 @@ function rowToUser(row: Record<string, unknown>): AdminUser {
   };
 }
 
-function rowToFactor(row: Record<string, unknown>): AdminTotpFactorState {
-  const status = String(row["totp_status"] ?? "none");
-  const secret = row["totp_secret_base32"];
-  if (status === "pending" && typeof secret === "string" && secret.length > 0) {
-    return { status: "pending", secretBase32: secret };
+function openFactor(
+  rootKey: Uint8Array,
+  adminId: string,
+  status: string,
+  sealed: unknown,
+): AdminTotpFactorState {
+  if (typeof sealed !== "string" || sealed.length === 0) {
+    return { status: "none" };
   }
-  if (status === "active" && typeof secret === "string" && secret.length > 0) {
-    return { status: "active", secretBase32: secret };
+  if (status !== "pending" && status !== "active") {
+    return { status: "none" };
   }
-  return { status: "none" };
+  const raw = openTotpSecret(rootKey, adminId, sealed);
+  try {
+    const secretBase32 = encodeBase32(raw);
+    if (status === "pending") return { status: "pending", secretBase32 };
+    return { status: "active", secretBase32 };
+  } finally {
+    raw.fill(0);
+  }
+}
+
+function sealSecretBase32(rootKey: Uint8Array, adminId: string, secretBase32: string): string {
+  const bytes = totpSecretBytes(secretBase32);
+  if (bytes === null) {
+    throw new Error("invalid TOTP secret base32");
+  }
+  try {
+    return sealTotpSecret(rootKey, adminId, bytes);
+  } finally {
+    // totpSecretBytes returns a fresh Uint8Array; wipe when it's a Buffer-like.
+    if (bytes instanceof Uint8Array) {
+      bytes.fill(0);
+    }
+  }
 }
 
 /**
  * Postgres-backed AdminUserStore. Call {@link ensureSchema} once at boot before
  * bootstrapInitialAdmin so a cold node does not re-seed after every reboot.
+ *
+ * Requires a vault root key so TOTP factors seal at rest (registry TOTP_SECRET).
  */
 export class SqlAdminUserStore implements AdminUserStore {
-  constructor(private readonly db: AdminUserSqlExecutor) {}
+  constructor(
+    private readonly db: AdminUserSqlExecutor,
+    private readonly vaultRootKey: TotpVaultRootKey,
+  ) {}
 
   async ensureSchema(): Promise<void> {
     // DDL owned by apps/generic-node/src/db/migrate.ts. No runtime DDL here.
@@ -88,7 +130,7 @@ export class SqlAdminUserStore implements AdminUserStore {
       `INSERT INTO admin_operators (
          id, username, password_hash, role,
          must_change_password, must_enrol_totp, disabled_at, created_at,
-         totp_status, totp_secret_base32
+         totp_status, totp_secret_sealed
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,to_timestamp($8::double precision / 1000.0),'none',NULL)`,
       [
         user.id,
@@ -139,12 +181,17 @@ export class SqlAdminUserStore implements AdminUserStore {
 
   async getTotpFactor(id: string): Promise<AdminTotpFactorState> {
     const { rows } = await this.db.query(
-      `SELECT totp_status, totp_secret_base32 FROM admin_operators WHERE id = $1`,
+      `SELECT totp_status, totp_secret_sealed FROM admin_operators WHERE id = $1`,
       [id],
     );
     const row = rows[0];
     if (row === undefined) return { status: "none" };
-    return rowToFactor(row);
+    return openFactor(
+      resolveRootKey(this.vaultRootKey),
+      id,
+      String(row["totp_status"] ?? "none"),
+      row["totp_secret_sealed"],
+    );
   }
 
   async setPendingTotpSecret(
@@ -158,11 +205,12 @@ export class SqlAdminUserStore implements AdminUserStore {
     const row = rows[0];
     if (row === undefined) return "missing";
     if (String(row["totp_status"]) === "active") return "already_active";
+    const sealed = sealSecretBase32(resolveRootKey(this.vaultRootKey), id, secretBase32);
     await this.db.query(
       `UPDATE admin_operators
-          SET totp_status = 'pending', totp_secret_base32 = $2
+          SET totp_status = 'pending', totp_secret_sealed = $2
         WHERE id = $1 AND totp_status <> 'active'`,
-      [id, secretBase32],
+      [id, sealed],
     );
     return "ok";
   }
@@ -171,7 +219,7 @@ export class SqlAdminUserStore implements AdminUserStore {
     const { rows } = await this.db.query(
       `UPDATE admin_operators
           SET totp_status = 'active', must_enrol_totp = false
-        WHERE id = $1 AND totp_status = 'pending' AND totp_secret_base32 IS NOT NULL
+        WHERE id = $1 AND totp_status = 'pending' AND totp_secret_sealed IS NOT NULL
         RETURNING id`,
       [id],
     );
@@ -182,12 +230,13 @@ export class SqlAdminUserStore implements AdminUserStore {
   }
 
   async setActiveTotpSecret(id: string, secretBase32: string): Promise<"ok" | "missing"> {
+    const sealed = sealSecretBase32(resolveRootKey(this.vaultRootKey), id, secretBase32);
     const { rows } = await this.db.query(
       `UPDATE admin_operators
-          SET totp_status = 'active', totp_secret_base32 = $2, must_enrol_totp = false
+          SET totp_status = 'active', totp_secret_sealed = $2, must_enrol_totp = false
         WHERE id = $1
         RETURNING id`,
-      [id, secretBase32],
+      [id, sealed],
     );
     return rows[0] === undefined ? "missing" : "ok";
   }

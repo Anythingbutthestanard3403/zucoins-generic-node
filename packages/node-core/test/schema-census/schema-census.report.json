@@ -56,6 +56,7 @@
     "verification-access-windows.sql",
     "verification-acknowledgements.sql",
     "verification-proofs.sql",
+    "wallet-settled-ledger-indexes.sql",
     "wallet-settled-ledger.sql"
   ],
   "summary": {
@@ -63,7 +64,7 @@
     "nounsOk": 39,
     "nounsFailed": 0,
     "foreignKeysChecked": 187,
-    "accessPatternsChecked": 12,
+    "accessPatternsChecked": 13,
     "failureCount": 0,
     "byClass": {
       "missing_store": 0,
@@ -2058,7 +2059,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_113",
+      "satisfiedBy": "index:operations_unique_114",
       "ok": true
     },
     {
@@ -2105,7 +2106,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_59",
+      "satisfiedBy": "index:audit_log_unique_60",
       "ok": true
     },
     {
@@ -2152,6 +2153,15 @@
         "wallet_id"
       ],
       "satisfiedBy": "index:wallet_observation_cursors_wallet_id_idx",
+      "ok": true
+    },
+    {
+      "id": "settled-ledger.by-wallet",
+      "table": "wallet_settled_ledger",
+      "columns": [
+        "wallet_id"
+      ],
+      "satisfiedBy": "index:wallet_settled_ledger_wallet_id_idx",
       "ok": true
     }
   ]

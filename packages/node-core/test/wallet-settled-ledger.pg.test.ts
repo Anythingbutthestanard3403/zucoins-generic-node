@@ -12,6 +12,7 @@
  *   8. UPDATE, DELETE and TRUNCATE all raise WALLET_SETTLED_LEDGER_INSERT_ONLY
  *   9. A swapped operation_role on a real MOVE participant is rejected
  *  10. A wallet_public_key that is not wallets.public_key for wallet_id is rejected
+ *  11. wallet_settled_ledger_wallet_id_idx exists and serves a wallet_id equality lookup
  *
  * Composition: base-enums-domains.sql supplies the domains and enums, the frozen
  * operation_wallets / operation_transactions CREATE TABLE blocks are lifted verbatim out of
@@ -32,7 +33,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_DIR = join(HERE, "../src/schema");
 const MAINTENANCE_DB = "postgres";
 const DB_PREFIX = "wallet_settled_ledger_settled_ledger_";
-const EXPECTED_DRILL_COUNT = 10;
+const EXPECTED_DRILL_COUNT = 11;
 
 const WALLET_A = "b0000000-0000-4000-8000-000000000001";
 const WALLET_B = "b0000000-0000-4000-8000-000000000002";
@@ -270,6 +271,11 @@ describe("canonical per-wallet settled ledger PG drills", () => {
       "prerequisites",
     );
     applyDdl(db, ledgerDdl(), "wallet-settled-ledger.sql");
+    applyDdl(
+      db,
+      readFileSync(join(SCHEMA_DIR, "wallet-settled-ledger-indexes.sql"), "utf8"),
+      "wallet-settled-ledger-indexes.sql",
+    );
 
     psqlMust(
       db,
@@ -676,5 +682,62 @@ describe("canonical per-wallet settled ledger PG drills", () => {
         `SELECT count(*) FROM wallet_settled_ledger WHERE operation_id='${opPk}'`,
       ).stdout.trim(),
     ).toBe("1");
+  });
+
+  // wallet-settled-ledger-indexes.sql. The ledger's wallet_id foreign key makes PostgreSQL
+  // re-check every referencing row whenever a wallets row is deleted, and PostgreSQL does not
+  // index a foreign key's referencing column. This drill pins the index that keeps that check
+  // (and the per-wallet derivation the table's header reserves) off a sequential scan.
+  it("11. wallet_settled_ledger_wallet_id_idx exists and serves a wallet_id equality lookup", () => {
+    if (skip()) return;
+    drillsRun += 1;
+
+    expect(
+      runPsql(
+        db!,
+        `SELECT indexdef FROM pg_indexes WHERE tablename='wallet_settled_ledger'` +
+          ` AND indexname='wallet_settled_ledger_wallet_id_idx'`,
+      ).stdout.trim(),
+    ).toBe(
+      "CREATE INDEX wallet_settled_ledger_wallet_id_idx ON public.wallet_settled_ledger" +
+        " USING btree (wallet_id)",
+    );
+
+    // The literal statement PostgreSQL's referential-integrity trigger issues to prove no
+    // referencing row survives a `DELETE FROM wallets`. seqscan is disabled so the assertion
+    // is "the planner CAN use this index for this predicate" rather than a bet on which plan
+    // wins at the handful of rows this suite seeds.
+    const riCheck =
+      `SELECT 1 FROM ONLY wallet_settled_ledger x WHERE x.wallet_id = '${WALLET_A}'::uuid` +
+      ` FOR KEY SHARE OF x`;
+    expect(
+      runPsql(db!, `SET enable_seqscan = off; EXPLAIN (COSTS OFF) ${riCheck}`).stdout,
+    ).toContain("Index Scan using wallet_settled_ledger_wallet_id_idx");
+
+    // Causation, not correlation: without the index that same predicate has no plan but a
+    // scan of the whole append-only table, which is the defect this slice closes.
+    psqlMust(db!, "DROP INDEX wallet_settled_ledger_wallet_id_idx");
+    expect(
+      runPsql(db!, `SET enable_seqscan = off; EXPLAIN (COSTS OFF) ${riCheck}`).stdout,
+    ).toContain("Seq Scan on wallet_settled_ledger");
+    psqlMust(
+      db!,
+      "CREATE INDEX wallet_settled_ledger_wallet_id_idx ON wallet_settled_ledger(wallet_id)",
+    );
+
+    // The index has a real job because the foreign key that drives that predicate is real.
+    // Every `DELETE FROM wallets` runs this check against the ledger; the two production
+    // sites that delete a wallet compensate a failed vault seal on a freshly minted one, so
+    // nothing references it, no constraint rejects, and the check runs to completion over the
+    // whole table to return no rows -- exactly the scan this index removes.
+    expect(
+      runPsql(
+        db!,
+        `SELECT conname FROM pg_constraint WHERE contype='f'` +
+          ` AND conrelid='wallet_settled_ledger'::regclass` +
+          ` AND confrelid='wallets'::regclass`,
+      ).stdout.trim(),
+    ).toBe("wallet_settled_ledger_wallet_id_fkey");
+    expect(runPsql(db!, `DELETE FROM wallets WHERE id = '${WALLET_D}'::uuid`).ok).toBe(true);
   });
 });

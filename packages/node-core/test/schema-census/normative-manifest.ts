@@ -882,6 +882,13 @@ export const WORKER_ACCESS_PATTERNS: readonly AccessPattern[] = [
     columns: ["wallet_id"],
     source: "wallet_observation_cursors_wallet_id_idx",
   },
+  {
+    id: "settled-ledger.by-wallet",
+    table: "wallet_settled_ledger",
+    columns: ["wallet_id"],
+    source:
+      "wallet_id REFERENCES wallets(id) RI check on DELETE FROM wallets (main.ts, start-money-workers.ts) + per-wallet settled derivation / wallet_settled_ledger_wallet_id_idx",
+  },
 ] as const;
 
 /**

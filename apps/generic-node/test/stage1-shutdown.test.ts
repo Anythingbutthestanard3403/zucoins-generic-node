@@ -167,6 +167,9 @@ describe("startStage1Service.stop rejection surfaces", () => {
         runMigrations: async () => {},
         pingDatabase: async () => {},
         closeDatabase: async () => {},
+        // Fake emitter: the graceful stop is installed inside startStage1Service
+        // (before migrations) and must not touch the vitest process.
+        shutdown: { emitter: new EventEmitter(), exit: () => {}, logger: silentLogger },
       },
     );
   }
@@ -198,6 +201,7 @@ describe("startStage1Service.stop rejection surfaces", () => {
         closeDatabase: async () => {
           throw new Error("pool end failed");
         },
+        shutdown: { emitter: new EventEmitter(), exit: () => {}, logger: silentLogger },
       },
     );
 

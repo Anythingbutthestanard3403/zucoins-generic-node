@@ -163,3 +163,9 @@ payload, no schema, no migration, no contract.
   cadence is no longer load-bearing for correctness (any value `< ttlMs − δ` works); it is
   left as-is to keep the diff minimal.
 </content>
+
+---
+
+## r3 addendum — mid-flight sticky-open (plan-ZTR-1178)
+
+See `tasks/ztr-1178-implementer-r3.md`. D1 sticky-open on `inFlight && cachedOk===true`; D2 prod-ratio mid-flight converse; main.ts false “always” comment corrected; mutations (remove sticky / restore refresh short-circuit) demonstrated red on intended tests.

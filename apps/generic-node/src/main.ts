@@ -162,15 +162,19 @@ import {
 const DEFAULT_PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
 
 /**
- * Shared DB-probe refresh cadence. Half the probe's own TTL, leaving a full half-TTL of
- * slack for the ping itself, so the re-dated verdict always lands before the previous one
- * ages out and CachedDbProbe.cachedReachable() never reads stale-closed on a healthy node.
- * Derived from the TTL rather than pinned, so tightening one moves the other. This only
- * holds because the timer calls refresh(), which re-dates unconditionally — a probe()
- * timer is swallowed by its own TTL and cannot keep the verdict warm at any cadence
- * (ZTR-1178).
+ * Shared DB-probe refresh cadence. Half the probe's own TTL so idle age stays well inside
+ * one TTL under normal ping cost (refresh() re-dates unconditionally — a probe() timer is
+ * swallowed by its own TTL and cannot keep the verdict warm at any cadence).
+ *
+ * Production ping budget (DB_PING_DEADLINE_MS ≤ probe timeoutMs) can exceed this half-TTL
+ * slack under pool pressure. That is not a composition bug: CachedDbProbe.cachedReachable()
+ * sticky-opens while a refresh is in flight on a last-true verdict, so mid-flight age past
+ * TTL does not refuse money on a healthy node. Fail-closed still applies on completed
+ * failure, idle stale, and unknown (ZTR-1178).
  */
 const DB_PROBE_KEEP_WARM_MS = DEFAULT_DB_PING_TTL_MS / 2;
+/** Server-side cancel budget for pingDb; must stay ≤ CachedDbProbe's client-side timeoutMs. */
+const DB_PING_DEADLINE_MS = 4_500;
 import {
   createCandidateIntakeInbox,
   createSqlSendPartialLoader,
@@ -294,7 +298,7 @@ async function main(): Promise<void> {
   };
   const pingDb = async (): Promise<void> => {
     // Finish server-side cancellation before CachedDbProbe's 5s client-side fail-safe wins.
-    await withPostgresDeadline(pool, 4_500, async (db) => {
+    await withPostgresDeadline(pool, DB_PING_DEADLINE_MS, async (db) => {
       await db.query("SELECT 1");
     });
   };

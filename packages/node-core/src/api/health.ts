@@ -207,17 +207,29 @@ export class CachedDbProbe {
    * Last completed verdict, read without probing — for synchronous consumers that must
    * not issue a query of their own (money admission; see money-path-admission.ts).
    *
-   * Fail-closed on both unknown and stale: `false` before the first probe completes and
-   * again once the cached verdict has aged past `ttlMs`. A consumer therefore acts on a
-   * verdict at most one TTL old, and the answer re-closes on DB loss the moment the next
-   * probe records a failure — it can never latch open the way a boot-time flag does.
+   * Fail-closed on unknown, last-false, and idle-stale: `false` before the first probe
+   * completes, after a completed failure, and once a last-true verdict has aged past
+   * `ttlMs` with no refresh in flight. The answer re-closes on DB loss the moment the
+   * next probe records a failure — it can never latch open the way a boot-time flag does.
    *
-   * Staying open on a healthy node is the composition's job, not this method's: something
-   * must call `refresh()` on a cadence strictly inside `ttlMs`. A `probe()` timer does NOT
-   * satisfy that — see `refresh()`.
+   * Sticky-open while a refresh is already underway on a previously-true verdict: the
+   * age clock keeps running against the last *completed* stamp for the whole ping
+   * (refresh deliberately does not blank or re-date until settle), so under production
+   * constants a healthy ping whose wall time exceeds half-TTL slack would otherwise flip
+   * this method false mid-flight. While `inFlight` is set and `cachedOk === true`, return
+   * true. The window is bounded by the existing `timeoutMs` race (inFlight clears on
+   * settle ≤ timeoutMs) — not an unbounded latch.
+   *
+   * Idle freshness is still one TTL: something must call `refresh()` on a cadence inside
+   * `ttlMs` so the stamp never goes idle-stale. A `probe()` timer does NOT satisfy that —
+   * see `refresh()`. Mid-flight sticky does not widen the idle bound.
    */
   cachedReachable(): boolean {
     if (this.cachedOk !== true) return false;
+    // Sticky-open: a refresh already underway on a previously-true verdict must not
+    // refuse money solely because the old stamp aged out mid-flight. Bounded by the
+    // existing ping timeout race (inFlight clears on settle ≤ timeoutMs).
+    if (this.inFlight !== undefined) return true;
     return this.clock() - this.cachedAtMs < this.ttlMs;
   }
 

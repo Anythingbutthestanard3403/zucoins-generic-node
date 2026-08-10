@@ -44,26 +44,40 @@ const KEEP_WARM_MS = TTL_MS / 2;
  * caller-controlled ping, read synchronously by the admission port. Every stamped
  * conjunct is open, so a refusal can only come from the database one.
  *
- * `pingCostMs` charges the virtual clock for the round trip. It defaults to 0 for the
- * cases that only care about the verdict, but a real ping is never free, and δ = 0 is the
- * single degenerate case where the staleness window this suite has to police vanishes —
- * the keep-warm drill below therefore passes a non-zero cost.
+ * `pingCostMs` charges the virtual clock for the round trip (used by the multi-cycle
+ * converse that awaits each refresh to completion). For mid-flight sampling, pass a
+ * deferred hold via `holdPing` so the test can observe admission while refresh is pending
+ * — awaiting a charged ping never sees the D1 gap by construction.
  */
-function harness(opts: { pingCostMs?: number } = {}) {
+function harness(
+  opts: {
+    pingCostMs?: number;
+    /** When set, each ping parks until the test releases the queued resolver. */
+    holdPing?: boolean;
+  } = {},
+) {
   const pingCostMs = opts.pingCostMs ?? 0;
+  const holdPing = opts.holdPing === true;
   let dbUp = true;
   let nowMs = 0;
   const pings: number[] = [];
+  const pendingReleases: Array<() => void> = [];
   const readiness = new NodeCoreReadinessState({ observationFailureBudget: 3 });
   readiness.markSchemaMigrated();
   readiness.setVaultAvailable(true);
   readiness.recordObservationReadSuccess();
   const probe = new CachedDbProbe(
-    async () => {
-      pings.push(nowMs);
-      nowMs += pingCostMs;
-      if (!dbUp) throw new Error("connection terminated unexpectedly");
-    },
+    () =>
+      new Promise<void>((resolve, reject) => {
+        pings.push(nowMs);
+        const settle = () => {
+          nowMs += pingCostMs;
+          if (!dbUp) reject(new Error("connection terminated unexpectedly"));
+          else resolve();
+        };
+        if (holdPing) pendingReleases.push(settle);
+        else settle();
+      }),
     TTL_MS,
     () => nowMs,
   );
@@ -83,6 +97,12 @@ function harness(opts: { pingCostMs?: number } = {}) {
     setDbUp: (up: boolean) => {
       dbUp = up;
     },
+    releaseOnePing: () => {
+      const release = pendingReleases.shift();
+      if (release === undefined) throw new Error("no held ping to release");
+      release();
+    },
+    pendingHeld: () => pendingReleases.length,
   };
 }
 
@@ -199,6 +219,50 @@ describe("money-admission database conjunct (ZTR-1178)", () => {
     expect(refusedAt).toEqual([]);
     // …and the cadence really did re-ping, rather than passing by never being consulted.
     expect(h.pings.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("stays admitted while a keep-warm refresh is in flight past TTL (prod-ratio)", async () => {
+    // ZTR-1178 D2. The δ=120 converse above awaits each refresh to completion, so it never
+    // observes mid-flight states. Production: KEEP_WARM=2500, deadline=4500, TTL=5000 —
+    // a healthy ping held in (2500, 4500] crosses TTL while still pending. Sample admission
+    // during that window; sticky-open must keep refusedAt empty. Mutation: remove sticky
+    // from cachedReachable → this case goes red while the δ=120 converse may still pass.
+    const HOLD_MS = 3_000; // ∈ (KEEP_WARM_MS, 4500]
+    const SAMPLE_MS = 50;
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const h = harness({ holdPing: true });
+
+    // Boot arm — release immediately so we start from a dated last-true.
+    const arm = h.probe.refresh();
+    await tick();
+    expect(h.pendingHeld()).toBe(1);
+    h.releaseOnePing();
+    expect(await arm).toBe(true);
+    expect(refusalCode(() => h.ports.assertMoneyAdmitted())).toBeNull();
+    const armStamp = h.now();
+    const pingsAfterArm = h.pings.length;
+
+    // Advance to the first keep-warm tick, start refresh, hold the ping open.
+    h.advance(KEEP_WARM_MS - (h.now() - armStamp));
+    const keepWarm = h.probe.refresh();
+    await tick();
+    expect(h.pendingHeld()).toBe(1);
+
+    const refusedAt: number[] = [];
+    // Sample across the old stamp's TTL boundary and out through the held δ.
+    const sampleUntil = armStamp + TTL_MS + (HOLD_MS - KEEP_WARM_MS) + SAMPLE_MS;
+    while (h.now() < sampleUntil) {
+      if (refusalCode(() => h.ports.assertMoneyAdmitted()) !== null) refusedAt.push(h.now());
+      h.advance(SAMPLE_MS);
+    }
+
+    expect(refusedAt).toEqual([]);
+    expect(h.now()).toBeGreaterThanOrEqual(armStamp + TTL_MS); // really crossed idle TTL
+
+    h.releaseOnePing();
+    expect(await keepWarm).toBe(true);
+    expect(refusalCode(() => h.ports.assertMoneyAdmitted())).toBeNull();
+    expect(h.pings.length).toBe(pingsAfterArm + 1);
   });
 
   it("admission issues no database round-trip of its own", async () => {

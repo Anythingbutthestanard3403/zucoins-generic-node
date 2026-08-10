@@ -2,19 +2,47 @@
 // useTotpGatedMutation — the step-up retry loop must terminate. The 401
 // challenge is deliberately ambiguous (session gone / CSRF stale / wrong code),
 // so an unbounded `for(;;)` over it re-prompts an operator forever (ZTR-1195).
+// Money-mutation expiry path: attempt → api() 401 → awaited /me dead → no
+// second prompt + /login (D1 integration).
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { ApiError } from "../lib/api.js";
+import { ApiError, api } from "../lib/api.js";
+import { useAuth } from "../store/auth.js";
 import { TotpPromptProvider } from "./index.js";
 import { useTotpGatedMutation } from "./useTotpGatedMutation.js";
 
 const AUTH_FACTOR_FAILURE = {
   error: { code: "invalid_credentials", message: "authentication required" },
 };
+
+const AUTH_401_BODY = JSON.stringify(AUTH_FACTOR_FAILURE);
+
+const LIVE_USER = {
+  userId: "u1",
+  role: "admin" as const,
+  mustEnrolTotp: false,
+  mustChangePassword: false,
+  csrfToken: "csrf-x",
+};
+
+function seedSession() {
+  useAuth.setState({ user: { ...LIVE_USER }, demoMode: false });
+}
+
+function captureRedirect(): { readonly to: () => string | undefined } {
+  const assign = vi.fn();
+  Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
+  Object.defineProperty(window.location, "href", {
+    configurable: true,
+    set: assign,
+    get: () => "",
+  });
+  return { to: () => assign.mock.calls[0]?.[0] as string | undefined };
+}
 
 function Harness({ mutationFn }: { mutationFn: (v: void, totp: string) => Promise<string> }) {
   const m = useTotpGatedMutation<string>(mutationFn);
@@ -41,18 +69,20 @@ function renderHarness(mutationFn: (v: void, totp: string) => Promise<string>) {
   fireEvent.click(screen.getByRole("button", { name: "Run" }));
 }
 
-/** Waits for a fresh (empty, enabled) prompt, then fills it — slots auto-submit on 6. */
+/** Per-slot findByLabelText — avoids remount race on first empty slot wait. */
 async function enterCode(code: string) {
-  await vi.waitFor(() => {
-    const first = screen.getByLabelText("Verification code") as HTMLInputElement;
-    expect(first.value).toBe("");
-    expect(first.disabled).toBe(false);
-  });
-  fireEvent.change(screen.getByLabelText("Verification code"), { target: { value: code[0]! } });
-  for (let i = 1; i < 6; i += 1) {
-    fireEvent.change(screen.getByLabelText(`Digit ${i + 1}`), { target: { value: code[i]! } });
+  for (let i = 0; i < 6; i += 1) {
+    const input = await screen.findByLabelText(
+      i === 0 ? "Verification code" : `Digit ${i + 1}`,
+    );
+    fireEvent.change(input, { target: { value: code[i]! } });
   }
 }
+
+beforeEach(() => {
+  seedSession();
+  vi.restoreAllMocks();
+});
 
 afterEach(cleanup);
 
@@ -61,6 +91,25 @@ describe("withTotpRetry ceiling", () => {
     const attempt = vi.fn(async () => {
       throw new ApiError(401, AUTH_FACTOR_FAILURE);
     });
+    // Alive-session recheck so wrong-code path keeps retrying under the ceiling.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-x",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(AUTH_401_BODY, { status: 401 });
+      }),
+    );
     renderHarness(attempt);
 
     // One initial attempt + MAX_TOTP_RETRIES re-prompts. An unbounded loop would
@@ -79,11 +128,126 @@ describe("withTotpRetry ceiling", () => {
       if (totp !== "999999") throw new ApiError(401, AUTH_FACTOR_FAILURE);
       return "engaged";
     });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-x",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(AUTH_401_BODY, { status: 401 });
+      }),
+    );
     renderHarness(attempt);
 
     for (const code of ["111111", "222222", "333333", "999999"]) await enterCode(code);
 
     expect(await screen.findByText("done: engaged")).toBeInTheDocument();
     expect(attempt).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("expired session on TOTP-gated money mutation (ZTR-1195 D1)", () => {
+  test("dead session after money 401 does not re-prompt and lands on /login", async () => {
+    const redirect = captureRedirect();
+    let moneyPosts = 0;
+    let meCalls = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/admin/v1/external-sends/op/approve" && (init?.method ?? "GET") === "POST") {
+          moneyPosts += 1;
+          return new Response(AUTH_401_BODY, { status: 401 });
+        }
+        if (url === "/admin/v1/me") {
+          meCalls += 1;
+          return new Response(AUTH_401_BODY, { status: 401 });
+        }
+        if (url === "/admin/v1/logout") return new Response(null, { status: 204 });
+        return new Response(AUTH_401_BODY, { status: 401 });
+      }),
+    );
+
+    const mutationFn = vi.fn(async (_v: void, totp: string) =>
+      api<string>("/external-sends/op/approve", {
+        method: "POST",
+        body: "{}",
+        totp,
+      }),
+    );
+    renderHarness(mutationFn);
+
+    await enterCode("123456");
+
+    expect(await screen.findByText(/^terminated:/)).toHaveTextContent(
+      "terminated: authentication required",
+    );
+    // No second prompt cycle after the failed attempt.
+    expect(screen.queryByLabelText("Verification code")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Code invalid/)).not.toBeInTheDocument();
+    expect(useAuth.getState().user).toBeNull();
+    expect(redirect.to()).toBe("/login");
+    expect(moneyPosts).toBe(1);
+    expect(mutationFn).toHaveBeenCalledTimes(1);
+    expect(meCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  test("alive session wrong code still re-prompts within the ceiling", async () => {
+    captureRedirect();
+    let moneyPosts = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/admin/v1/external-sends/op/approve" && (init?.method ?? "GET") === "POST") {
+          moneyPosts += 1;
+          // First attempt wrong; second succeeds.
+          if (moneyPosts === 1) {
+            return new Response(AUTH_401_BODY, { status: 401 });
+          }
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-fresh",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(AUTH_401_BODY, { status: 401 });
+      }),
+    );
+
+    const mutationFn = vi.fn(async (_v: void, totp: string) =>
+      api<{ ok: boolean }>("/external-sends/op/approve", {
+        method: "POST",
+        body: "{}",
+        totp,
+      }).then(() => "engaged"),
+    );
+    renderHarness(mutationFn);
+
+    await enterCode("111111");
+    // Wrong-code path surfaces try-again copy on the next prompt.
+    expect(await screen.findByText(/Code invalid/)).toBeInTheDocument();
+    await enterCode("999999");
+
+    expect(await screen.findByText("done: engaged")).toBeInTheDocument();
+    expect(moneyPosts).toBe(2);
+    expect(useAuth.getState().user).not.toBeNull();
   });
 });

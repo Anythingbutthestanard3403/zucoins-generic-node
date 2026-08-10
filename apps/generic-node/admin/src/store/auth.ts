@@ -89,7 +89,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     return user;
   },
   logout: async () => {
+    // Local clear + navigate first so a hung revoke POST cannot keep
+    // RequireAuth open or let a TOTP step-up re-prompt after session death
+    // (ZTR-1195). Server revoke is best-effort with the snapped CSRF.
     const csrf = get().user?.csrfToken ?? "";
+    set({ user: null, demoMode: false });
+    window.location.href = "/login";
     try {
       await fetch("/admin/v1/logout", {
         method: "POST",
@@ -99,8 +104,6 @@ export const useAuth = create<AuthState>((set, get) => ({
     } catch {
       /* offline */
     }
-    set({ user: null, demoMode: false });
-    window.location.href = "/login";
   },
   changePassword: async (currentPassword, newPassword) => {
     const csrf = get().user?.csrfToken ?? "";

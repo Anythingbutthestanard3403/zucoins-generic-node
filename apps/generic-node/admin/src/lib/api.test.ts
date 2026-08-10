@@ -143,11 +143,30 @@ describe("api client", () => {
       vi.stubGlobal("fetch", fetchMock);
 
       await expect(api("/operations/needs-attention")).rejects.toBeInstanceOf(ApiError);
-      await vi.waitFor(() => expect(redirect.to()).toBe("/login"));
-
+      // Recheck is awaited before the throw — decision is settled on reject.
+      expect(redirect.to()).toBe("/login");
       expect(fetchMock.mock.calls.map((c) => c[0])).toContain("/admin/v1/me");
       // logout() nulls the user, which is where the in-memory CSRF token lives.
       expect(useAuth.getState().user).toBeNull();
+    });
+
+    it("parallel 401s coalesce onto one /me probe", async () => {
+      const redirect = captureRedirect();
+      let meCalls = 0;
+      const fetchMock = routeFetch(() => {
+        meCalls += 1;
+        return new Response(AUTH_401, { status: 401 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const results = await Promise.allSettled([
+        api("/operations/needs-attention"),
+        api("/overview"),
+      ]);
+      expect(results.every((r) => r.status === "rejected")).toBe(true);
+      expect(meCalls).toBe(1);
+      expect(useAuth.getState().user).toBeNull();
+      expect(redirect.to()).toBe("/login");
     });
 
     it("a live session survives the 401 — a mistyped code must keep its re-prompt", async () => {

@@ -1045,6 +1045,7 @@ export interface AdminRouteDeps {
     readonly breakGlassActive?: () => Promise<boolean | null> | boolean | null;
     readonly backupStatus?: () => {
       readonly enabled: boolean;
+      readonly ownership?: "owner" | "standby" | "disabled";
       readonly rpoBreached: boolean;
       readonly lastSuccessAt: string | null;
       readonly consecutiveFailures: number;

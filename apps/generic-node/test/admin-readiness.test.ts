@@ -147,6 +147,19 @@ describe("buildReadinessChecklist truth table", () => {
     expect(never.detail).toMatch(/no successful backup/i);
     expect(never.detail).toMatch(/recovery/i);
     expect(never.href).toBe("/backup");
+
+    // Standby (non-leader) is optional — not amber RPO failure (ZTR-1183).
+    const standby = buildReadinessChecklist({
+      backup: {
+        enabled: true,
+        ownership: "standby",
+        rpoBreached: false,
+        lastSuccessAt: null,
+        consecutiveFailures: 0,
+      },
+    }).rows.find((r) => r.id === "backup_health")!;
+    expect(standby.status).toBe("optional");
+    expect(standby.detail).toMatch(/not the backup owner/i);
   });
 
   it("all-green signal set yields no blocked rows", () => {

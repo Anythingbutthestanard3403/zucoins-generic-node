@@ -77,6 +77,8 @@ export interface ReadinessSignals {
    */
   readonly backup?: {
     readonly enabled: boolean;
+    /** owner | standby | disabled — standby is not an RPO failure (ZTR-1183). */
+    readonly ownership?: "owner" | "standby" | "disabled";
     readonly rpoBreached: boolean;
     readonly lastSuccessAt: string | null;
     readonly consecutiveFailures: number;
@@ -421,8 +423,19 @@ function buildBackup(s: ReadinessSignals): ReadinessRow {
       href,
     );
   }
-  const { enabled, rpoBreached, lastSuccessAt, consecutiveFailures } = s.backup;
-  if (!enabled) {
+  const { enabled, ownership, rpoBreached, lastSuccessAt, consecutiveFailures } = s.backup;
+  // Standby replica: schedule is on cluster-wide but this process is not the owner.
+  // Distinct from "backups failing" / RPO breach (ZTR-1183).
+  if (ownership === "standby") {
+    return row(
+      "backup_health",
+      "optional",
+      "Backup health",
+      "This replica is not the backup owner (signer leadership not held). Scheduled dumps run only on the leadership holder — local RPO status is not authoritative here.",
+      href,
+    );
+  }
+  if (!enabled || ownership === "disabled") {
     return row(
       "backup_health",
       "optional",

@@ -90,6 +90,7 @@ export interface ProductionMetricsSnapshotDeps {
     readonly running: boolean;
     readonly lastSuccessAtMs: number | null;
     readonly rpoBreached: boolean;
+    readonly ownership?: "owner" | "standby" | "disabled";
   } | null;
   readonly nowMs?: () => number;
   /** Monotonic clock for elapsed scrape budgets; never use wall time for deadlines. */

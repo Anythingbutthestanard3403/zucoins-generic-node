@@ -859,6 +859,12 @@ export function createProductionRouteSurface(
         store: createNodeSettingsHaltStore(client),
         evidence: createNodeSettingsHaltEvidenceRecorder(client),
       };
+      // Device-signature policy writes must share the mutation PoolClient so a
+      // ROLLBACK undoes node_settings + audit_log with the idempotency row (ZTR-1143).
+      // Prefer the TX SQL port over any injected process-level fixed/in-memory port:
+      // production always uses SQL; tests that inject InMemory rebind via createTestAdminAtomicDeps.
+      const txDeviceSignaturePolicy: DeviceSignaturePolicyPort =
+        createSqlDeviceSignaturePolicy(client);
       return {
         challengeStore: createSqlApprovalChallengeStore(client),
         sendDecisionStore: new SqlSendDecisionStore(client),
@@ -866,6 +872,7 @@ export function createProductionRouteSurface(
         destinationService: config.destinationServiceForSql?.(client) ?? createFailClosedDestinationService(),
         halt: shadowHalt,
         credentialService: new CredentialService(new SqlCredentialStore(client, config.nodeId)),
+        deviceSignaturePolicy: txDeviceSignaturePolicy,
       };
     },
   });

@@ -1145,6 +1145,12 @@ export interface AdminMutationTxPorts {
   readonly destinationService: DestinationService;
   readonly halt?: AdminRouteDeps["halt"];
   readonly credentialService: CredentialService;
+  /**
+   * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
+   * port so node_settings + audit_log commit/roll back with the admin mutation TX.
+   * Approve-path reads may still use deps.deviceSignaturePolicy (fail-closed).
+   */
+  readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
 }
 
 export interface AdminRouterResponse {
@@ -2517,10 +2523,11 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     // POST /admin/v1/device-signature-policy — guarded mutation (fresh TOTP + audit).
     // Placed after body decode (POST-only gate); never request-body policy for approve.
     if (verb === "POST" && pathname === "/admin/v1/device-signature-policy") {
+      // Writable surface must exist on deps (process-level); the actual write uses the
+      // TX-bound port from portsFor so ROLLBACK undoes settings+audit with the mutation.
       if (deps.deviceSignaturePolicy === undefined || deps.deviceSignaturePolicy.setMode === undefined) {
         return fail(503, "service_unavailable", "device-signature policy not writable", requestId);
       }
-      const policyPort = deps.deviceSignaturePolicy;
       const routeId = "admin_device_signature_policy";
       const idem = await idempotencyGate({
         store: deps.adminIdempotencyStore,
@@ -2540,7 +2547,14 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         idemKey: idem.idemKey,
         fingerprint: idem.fingerprint,
         requestId,
-        action: async () => {
+        action: async (ports) => {
+          const policyPort = ports.deviceSignaturePolicy;
+          if (policyPort === undefined || policyPort.setMode === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "transactional device-signature policy not wired", requestId),
+            };
+          }
           const guarded = await runGuardedAdminMutation({
             sessions,
             request: authReq,

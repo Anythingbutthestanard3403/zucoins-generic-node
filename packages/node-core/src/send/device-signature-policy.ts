@@ -180,20 +180,12 @@ export function createSqlDeviceSignaturePolicy(
       if (mode !== "required" && mode !== "optional") {
         throw new Error("unrecognised device-signature policy mode");
       }
+      // Previous mode is resolved fail-closed before the write so the audit row
+      // records the effective gate an operator was changing, not a raw NULL.
       const previous = await readRaw();
       const previousMode = previous.ok
         ? effectiveDeviceSignaturePolicyMode(previous.value)
         : "required";
-
-      await sql.query(
-        `INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
-         VALUES ($1, $2, 1, now())
-         ON CONFLICT (setting_key) DO UPDATE
-         SET setting_value = EXCLUDED.setting_value,
-             row_version = node_settings.row_version + 1,
-             updated_at = now()`,
-        [DEVICE_SIGNATURE_POLICY_SETTING_KEY, mode],
-      );
 
       const details =
         "setting_key=" +
@@ -203,16 +195,39 @@ export function createSqlDeviceSignaturePolicy(
         ";next=" +
         mode;
       const detailsSha = detailsSha256(details);
+
+      // Single statement: settings upsert + audit insert. Either both land or
+      // neither does — even when the caller has not opened an outer TX. When
+      // bound to the admin mutation PoolClient, this also rides that TX so a
+      // later ROLLBACK undoes the policy flip with the idempotency row.
       await sql.query(
-        `INSERT INTO audit_log (
+        `WITH upserted AS (
+           INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
+           VALUES ($1, $2, 1, now())
+           ON CONFLICT (setting_key) DO UPDATE
+           SET setting_value = EXCLUDED.setting_value,
+               row_version = node_settings.row_version + 1,
+               updated_at = now()
+           RETURNING setting_key
+         )
+         INSERT INTO audit_log (
            id, node_id, actor_kind, actor_id, action, operation_id, wallet_id,
            details_text, details_sha256, created_at
-         ) VALUES (
-           $1::uuid, $2::uuid, 'OPERATOR_SESSION', $3,
+         )
+         SELECT
+           $3::uuid, $4::uuid, 'OPERATOR_SESSION', $5,
            'approval.device_signature_policy_changed', NULL, NULL,
-           $4, $5, now()
-         )`,
-        [newId(), meta.nodeId, meta.actorId, details, detailsSha],
+           $6, $7, now()
+         FROM upserted`,
+        [
+          DEVICE_SIGNATURE_POLICY_SETTING_KEY,
+          mode,
+          newId(),
+          meta.nodeId,
+          meta.actorId,
+          details,
+          detailsSha,
+        ],
       );
     },
   };

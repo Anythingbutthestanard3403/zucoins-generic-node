@@ -115,6 +115,13 @@ describe("createSqlDeviceSignaturePolicy", () => {
             rows: (v === undefined ? [] : [{ setting_value: v }]) as R[],
           };
         }
+        // Single-statement setMode (CTE upsert + audit) — both effects in one query.
+        if (text.includes("WITH upserted AS") && text.includes("audit_log")) {
+          settings.set(String(params[0]), String(params[1]));
+          // params: key, mode, auditId, nodeId, actorId, details, detailsSha
+          audits.push(params);
+          return { rows: [] };
+        }
         if (text.includes("INSERT INTO node_settings")) {
           settings.set(String(params[0]), String(params[1]));
           return { rows: [] };
@@ -175,8 +182,37 @@ describe("createSqlDeviceSignaturePolicy", () => {
     });
     expect(settings.get(DEVICE_SIGNATURE_POLICY_SETTING_KEY)).toBe("optional");
     expect(audits).toHaveLength(1);
-    expect(audits[0]![2]).toBe("op-9");
-    expect(String(audits[0]![3])).toMatch(/previous=required;next=optional/);
+    // CTE params: [key, mode, auditId, nodeId, actorId, details, detailsSha]
+    expect(audits[0]![1]).toBe("optional");
+    expect(audits[0]![4]).toBe("op-9");
+    expect(String(audits[0]![5])).toMatch(/previous=required;next=optional/);
     expect(await p.requiresDeviceSignature()).toBe(false);
+  });
+
+  it("setMode issues one statement covering settings and audit (no split autocommit)", async () => {
+    let writeCount = 0;
+    const settings = new Map<string, string>();
+    const sql: SqlExecutor = {
+      async query<R>(text: string, params: readonly unknown[]): Promise<{ rows: R[] }> {
+        if (text.includes("SELECT setting_value")) {
+          return { rows: [] as R[] };
+        }
+        writeCount += 1;
+        if (text.includes("WITH upserted AS") && text.includes("audit_log")) {
+          settings.set(String(params[0]), String(params[1]));
+          return { rows: [] as R[] };
+        }
+        throw new Error(`unexpected split write: ${text.slice(0, 80)}`);
+      },
+    };
+    const p = createSqlDeviceSignaturePolicy(sql, {
+      newId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    await p.setMode!("required", {
+      actorId: "op-1",
+      nodeId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(writeCount).toBe(1);
+    expect(settings.get(DEVICE_SIGNATURE_POLICY_SETTING_KEY)).toBe("required");
   });
 });

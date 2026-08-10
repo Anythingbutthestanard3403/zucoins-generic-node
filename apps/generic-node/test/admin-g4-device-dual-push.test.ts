@@ -99,7 +99,12 @@ function makeRouter(opts?: {
     loadOperation,
     // The approve route runs inside the required atomic idempotency transaction;
     // without it every approve is 503 before any policy is consulted.
-    ...createTestAdminAtomicDeps({ challengeStore, loadOperation }),
+    // TX ports must carry deviceSignaturePolicy so POST policy setMode is not 503.
+    ...createTestAdminAtomicDeps({
+      challengeStore,
+      loadOperation,
+      deviceSignaturePolicy,
+    }),
     sendDecisionStore: {
       rejectCreated: async () => {
         throw new Error("unused");
@@ -168,10 +173,14 @@ function generateTestKeyPair() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const spkiDer = publicKey.export({ format: "der", type: "spki" });
   const rawPub = new Uint8Array(spkiDer.slice(ED25519_SPKI_DER_PREFIX.length));
-  const paddedBase64Url = Buffer.from(rawPub)
+  let paddedBase64Url = Buffer.from(rawPub)
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_");
+  // Device verify path requires padded base64url (PADDED_SIG_RE / decodePaddedBase64Url).
+  if (!paddedBase64Url.endsWith("=")) {
+    paddedBase64Url += "=".repeat((4 - (paddedBase64Url.length % 4)) % 4);
+  }
   return { publicKey, privateKey, paddedBase64Url };
 }
 
@@ -180,7 +189,11 @@ function signPreimageB64(
   preimageText: string,
 ): string {
   const sig = sign(null, Buffer.from(preimageText, "utf8"), privateKey);
-  return Buffer.from(sig).toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+  let b64 = Buffer.from(sig).toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
+  if (!b64.endsWith("=")) {
+    b64 += "=".repeat((4 - (b64.length % 4)) % 4);
+  }
+  return b64;
 }
 
 const TOTP_SECRET = new TextEncoder().encode("test-secret-key-32-bytes-long!!");
@@ -759,6 +772,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
   describe("approve respects server policy, not the request body alone", () => {
     const OP_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const WALLET_ID = "55555555-5555-4555-8555-555555555555";
+    const DEVICE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     const op: ApprovalOperationSnapshot = {
       operationId: OP_ID,
       nodeId: NODE_ID,
@@ -771,13 +785,41 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
       referencesOperationId: null,
     };
 
-    async function approveOmittingDevice(mode: "required" | "optional") {
-      const { router, userStore } = makeRouter({
+    /**
+     * Full challenge→approve harness. Seeds the in-memory challenge store's op
+     * decision state so commitApprovalMutation can CAS CREATED→APPROVED (D3).
+     */
+    async function challengeThenApprove(input: {
+      readonly mode: "required" | "optional";
+      readonly device?: {
+        readonly keyId: string | null;
+        readonly signature: string | null;
+        readonly enrol?: ReturnType<typeof generateTestKeyPair>;
+      };
+    }) {
+      const challengeStore = new InMemoryApprovalChallengeStore();
+      challengeStore.seedOperation(OP_ID, op.status, op.rowVersion);
+      const { router, userStore, deviceStore } = makeRouter({
         dualMode: "single_operator",
-        deviceSignatureMode: mode,
-        loadOperation: async (id) => (id === OP_ID ? op : null),
-        challengeStoreOverride: new InMemoryApprovalChallengeStore(),
+        deviceSignatureMode: input.mode,
+        loadOperation: async (id) => {
+          if (id !== OP_ID) return null;
+          const st = challengeStore.getOperationState(OP_ID);
+          if (st === null) return null;
+          return { ...op, status: st.status, rowVersion: st.rowVersion };
+        },
+        challengeStoreOverride: challengeStore,
       });
+      if (input.device?.enrol !== undefined) {
+        deviceStore.insert({
+          id: DEVICE_ID,
+          nodeId: NODE_ID,
+          publicKey: input.device.enrol.paddedBase64Url,
+          label: "policy-test-device",
+          enrolledAt: new Date().toISOString(),
+          revokedAt: null,
+        });
+      }
       const auth = await login(router, userStore);
       const issued = await router(
         "GET",
@@ -788,9 +830,12 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
       expect(issued.status).toBe(200);
       const challenge = JSON.parse(issued.body) as {
         nonce: string;
+        preimage_text: string;
         preimage_sha256: string;
         row_version: number;
       };
+      const deviceKeyId = input.device?.keyId ?? null;
+      const deviceSignature = input.device?.signature ?? null;
       const res = await router(
         "POST",
         `/admin/v1/external-sends/${OP_ID}/approve`,
@@ -799,8 +844,8 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
             challenge_nonce: challenge.nonce,
             expected_row_version: challenge.row_version,
             preimage_sha256: challenge.preimage_sha256,
-            device_key_id: null,
-            device_signature: null,
+            device_key_id: deviceKeyId,
+            device_signature: deviceSignature,
           }),
         ),
         {
@@ -812,22 +857,169 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
           "x-zp-totp": totpNow(),
         },
       );
-      return { status: res.status, body: JSON.parse(res.body) as { error?: { code: string } } };
+      return {
+        status: res.status,
+        body: JSON.parse(res.body) as {
+          error?: { code: string };
+          status?: string;
+          method?: string;
+          operation_id?: string;
+        },
+        challenge,
+      };
     }
 
     it("rejects TOTP-only approve when policy requires the device factor", async () => {
-      const res = await approveOmittingDevice("required");
+      const res = await challengeThenApprove({
+        mode: "required",
+        device: { keyId: null, signature: null },
+      });
       expect(res.status).toBe(403);
       expect(res.body.error?.code).toBe("approval_rejected");
       expect(JSON.stringify(res.body)).not.toMatch(/device_required|totp/i);
     });
 
-    it("does not collapse missing-device as device_required when policy is optional", async () => {
-      const res = await approveOmittingDevice("optional");
-      expect(res.status).not.toBe(401);
-      if (res.status === 403) {
-        expect(res.body.error?.code).toBe("approval_rejected");
-      }
+    it("optional policy + omitted device → 200 TOTP_ONLY", async () => {
+      const res = await challengeThenApprove({
+        mode: "optional",
+        device: { keyId: null, signature: null },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("APPROVED");
+      expect(res.body.method).toBe("TOTP_ONLY");
+      expect(res.body.operation_id).toBe(OP_ID);
+    });
+
+    it("optional policy + volunteered valid device → 200 TOTP_AND_DEVICE", async () => {
+      const pair = generateTestKeyPair();
+      const challengeStore = new InMemoryApprovalChallengeStore();
+      challengeStore.seedOperation(OP_ID, op.status, op.rowVersion);
+      const { router, userStore, deviceStore } = makeRouter({
+        dualMode: "single_operator",
+        deviceSignatureMode: "optional",
+        loadOperation: async (id) => {
+          if (id !== OP_ID) return null;
+          const st = challengeStore.getOperationState(OP_ID);
+          if (st === null) return null;
+          return { ...op, status: st.status, rowVersion: st.rowVersion };
+        },
+        challengeStoreOverride: challengeStore,
+      });
+      deviceStore.insert({
+        id: DEVICE_ID,
+        nodeId: NODE_ID,
+        publicKey: pair.paddedBase64Url,
+        label: "volunteered-device",
+        enrolledAt: new Date().toISOString(),
+        revokedAt: null,
+      });
+      const auth = await login(router, userStore);
+      const issued = await router(
+        "GET",
+        `/admin/v1/external-sends/${OP_ID}/approval-challenge`,
+        new Uint8Array(),
+        { cookie: auth.cookie, origin: ORIGIN, "x-csrf-token": auth.csrf },
+      );
+      expect(issued.status).toBe(200);
+      const challenge = JSON.parse(issued.body) as {
+        nonce: string;
+        preimage_text: string;
+        preimage_sha256: string;
+        row_version: number;
+      };
+      const deviceSignature = signPreimageB64(pair.privateKey, challenge.preimage_text);
+      const res = await router(
+        "POST",
+        `/admin/v1/external-sends/${OP_ID}/approve`,
+        Buffer.from(
+          JSON.stringify({
+            challenge_nonce: challenge.nonce,
+            expected_row_version: challenge.row_version,
+            preimage_sha256: challenge.preimage_sha256,
+            device_key_id: DEVICE_ID,
+            device_signature: deviceSignature,
+          }),
+        ),
+        {
+          cookie: auth.cookie,
+          origin: ORIGIN,
+          "x-csrf-token": auth.csrf,
+          "content-type": "application/json",
+          "idempotency-key": randomUUID(),
+          "x-zp-totp": totpNow(),
+        },
+      );
+      expect(res.status).toBe(200);
+      const body = JSON.parse(res.body) as { status: string; method: string };
+      expect(body.status).toBe("APPROVED");
+      expect(body.method).toBe("TOTP_AND_DEVICE");
+    });
+
+    it("optional policy + volunteered bad device sig → 403 approval_rejected (opaque)", async () => {
+      const pair = generateTestKeyPair();
+      const other = generateTestKeyPair();
+      const challengeStore = new InMemoryApprovalChallengeStore();
+      challengeStore.seedOperation(OP_ID, op.status, op.rowVersion);
+      const { router, userStore, deviceStore } = makeRouter({
+        dualMode: "single_operator",
+        deviceSignatureMode: "optional",
+        loadOperation: async (id) => {
+          if (id !== OP_ID) return null;
+          const st = challengeStore.getOperationState(OP_ID);
+          if (st === null) return null;
+          return { ...op, status: st.status, rowVersion: st.rowVersion };
+        },
+        challengeStoreOverride: challengeStore,
+      });
+      deviceStore.insert({
+        id: DEVICE_ID,
+        nodeId: NODE_ID,
+        publicKey: pair.paddedBase64Url,
+        label: "volunteered-device",
+        enrolledAt: new Date().toISOString(),
+        revokedAt: null,
+      });
+      const auth = await login(router, userStore);
+      const issued = await router(
+        "GET",
+        `/admin/v1/external-sends/${OP_ID}/approval-challenge`,
+        new Uint8Array(),
+        { cookie: auth.cookie, origin: ORIGIN, "x-csrf-token": auth.csrf },
+      );
+      expect(issued.status).toBe(200);
+      const challenge = JSON.parse(issued.body) as {
+        nonce: string;
+        preimage_text: string;
+        preimage_sha256: string;
+        row_version: number;
+      };
+      // Sign with a different key than the enrolled device — verify must fail.
+      const badSig = signPreimageB64(other.privateKey, challenge.preimage_text);
+      const res = await router(
+        "POST",
+        `/admin/v1/external-sends/${OP_ID}/approve`,
+        Buffer.from(
+          JSON.stringify({
+            challenge_nonce: challenge.nonce,
+            expected_row_version: challenge.row_version,
+            preimage_sha256: challenge.preimage_sha256,
+            device_key_id: DEVICE_ID,
+            device_signature: badSig,
+          }),
+        ),
+        {
+          cookie: auth.cookie,
+          origin: ORIGIN,
+          "x-csrf-token": auth.csrf,
+          "content-type": "application/json",
+          "idempotency-key": randomUUID(),
+          "x-zp-totp": totpNow(),
+        },
+      );
+      expect(res.status).toBe(403);
+      const body = JSON.parse(res.body) as { error?: { code: string } };
+      expect(body.error?.code).toBe("approval_rejected");
+      expect(res.body).not.toMatch(/device_signature_invalid|device_required|totp/i);
     });
   });
 

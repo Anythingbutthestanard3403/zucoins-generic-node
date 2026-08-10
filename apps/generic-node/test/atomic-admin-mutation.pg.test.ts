@@ -4,6 +4,11 @@ import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client, Pool, type PoolClient } from "pg";
 
+import {
+  createSqlDeviceSignaturePolicy,
+  DEVICE_SIGNATURE_POLICY_SETTING_KEY,
+} from "@zucoins/node-core";
+
 import { SqlAdminIdempotencyStore } from "../src/ops/admin-idempotency.js";
 import { createAtomicAdminMutationExecutor } from "../src/ops/atomic-admin-mutation.js";
 
@@ -156,6 +161,27 @@ describe.skipIf(!PG_AVAILABLE)("atomic REQUIRED admin mutation (disposable PG)",
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE (node_id, route_id, idempotency_key)
     )`);
+    // Minimal node_settings + audit_log for ZTR-1143 TX-bound policy rollback proof.
+    await pool.query(`CREATE TABLE node_settings (
+      setting_key text PRIMARY KEY,
+      setting_value text NOT NULL,
+      row_version bigint NOT NULL DEFAULT 1 CHECK (row_version > 0),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await pool.query(`CREATE TABLE audit_log (
+      seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      id uuid NOT NULL UNIQUE,
+      node_id uuid NOT NULL REFERENCES nodes(id),
+      actor_kind text NOT NULL,
+      actor_id text,
+      action text NOT NULL,
+      operation_id uuid,
+      wallet_id uuid,
+      details_text text NOT NULL,
+      details_sha256 sha256_hex NOT NULL,
+      created_at timestamptz NOT NULL,
+      UNIQUE (id, node_id)
+    )`);
     await new SqlAdminIdempotencyStore(pool).ensureSchema();
   }, PG_TEST_TIMEOUT_MS);
 
@@ -272,5 +298,54 @@ describe.skipIf(!PG_AVAILABLE)("atomic REQUIRED admin mutation (disposable PG)",
     }
     const effects = await pool.query("SELECT value FROM atomic_admin_mutation_child_effects WHERE value = 'must-roll-back'");
     expect(effects.rows).toHaveLength(0);
+  });
+
+  it("rolls back device-signature policy setMode when post-write mutation aborts (ZTR-1143 D1)", async () => {
+    // Seed required so a leaked optional write is observable.
+    await pool.query(
+      `INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
+       VALUES ($1, 'required', 1, now())
+       ON CONFLICT (setting_key) DO UPDATE
+       SET setting_value = 'required', row_version = node_settings.row_version + 1, updated_at = now()`,
+      [DEVICE_SIGNATURE_POLICY_SETTING_KEY],
+    );
+    const execute = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor: (client: PoolClient) => ({
+        deviceSignaturePolicy: createSqlDeviceSignaturePolicy(client),
+      }),
+    });
+    await pool.query("ALTER TABLE admin_mutation_idempotency RENAME TO admin_mutation_idempotency_offline");
+    try {
+      await expect(
+        execute(
+          {
+            nodeId,
+            routeId: "admin_device_signature_policy",
+            idempotencyKey: `device-policy-rollback-${randomUUID()}`,
+            fingerprint: fingerprint("f".repeat(64)),
+          },
+          async (ports) => {
+            await ports.deviceSignaturePolicy.setMode!("optional", {
+              actorId: "op-rollback",
+              nodeId,
+            });
+            return { outcome: "commit" as const, status: 200, responseBody: { mode: "optional" } };
+          },
+        ),
+      ).rejects.toMatchObject({ code: "42P01" });
+    } finally {
+      await pool.query("ALTER TABLE admin_mutation_idempotency_offline RENAME TO admin_mutation_idempotency");
+    }
+    const setting = await pool.query<{ setting_value: string }>(
+      "SELECT setting_value FROM node_settings WHERE setting_key = $1",
+      [DEVICE_SIGNATURE_POLICY_SETTING_KEY],
+    );
+    expect(setting.rows[0]?.setting_value).toBe("required");
+    const audits = await pool.query(
+      "SELECT 1 FROM audit_log WHERE action = 'approval.device_signature_policy_changed'",
+    );
+    expect(audits.rows).toHaveLength(0);
   });
 });

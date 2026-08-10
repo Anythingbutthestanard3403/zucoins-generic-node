@@ -12,11 +12,14 @@
 // Additional reported-only detail outside the closed check
 // set: halt, storage_pressure. Neither gates the ready verdict.
 //
-// Two verdict-forcing inputs gate WITHOUT joining the closed check set
+// One verdict-forcing input gates WITHOUT joining the closed check set
 // (readiness-checks.contract.ts census stays frozen): `stopping` (graceful
-// stop) and `eventSignerAvailable` (runtime EVENT_SIGNING authority loss —
-// armed only after leadership is held, so gating it cannot reproduce the
-// overlap-deploy deadlock; ZTR-1179).
+// stop). `eventSignerAvailable` is stamped and consumed by money admission
+// (ZTR-1179) but deliberately NON-gating on `/health/ready` — EVENT_SIGNING
+// ensure runs only after leadership is held, so gating ready on it re-coupled
+// readiness to the leadership lock and re-created the Railway overlap-deploy
+// deadlock (ZPAY-252). Report it via money admission / metrics, not the ready
+// verdict.
 //
 // Liveness is zero-dependency: never touches the database or the gateway and
 // must never flap on a transient dependency blip.
@@ -143,9 +146,10 @@ export function evaluateReadinessFromProbes(
   );
 
   const failing = GATING_READINESS_CHECK_IDS.filter((id) => !checkValues[id]);
-  // eventSignerAvailable gates like `stopping`: verdict-forcing, outside the
-  // frozen reported check set (see module header; ZTR-1179).
-  const gatesPass = failing.length === 0 && !state.stopping && state.eventSignerAvailable;
+  // eventSignerAvailable is intentionally NOT consulted here (ZPAY-252). Money
+  // admission still refuses on it (isGatingReadyForMoney); only the deploy
+  // healthcheck must stay independent of post-leadership boot steps.
+  const gatesPass = failing.length === 0 && !state.stopping;
   const ready = gatesPass;
 
   let status: ReadinessStatus;

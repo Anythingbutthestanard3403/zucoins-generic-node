@@ -26,7 +26,7 @@ function fullyReadyStamps(): NodeReadiness {
   readiness.setVaultAvailable(true);
   readiness.setSignerLeadershipHeld(true);
   readiness.recordGatewayReadSuccess();
-  // /health/ready now gates on EVENT_SIGNING availability (ZTR-1179).
+  // EVENT_SIGNING is money-only; stamp open for fixtures that also exercise admission.
   readiness.setEventSignerAvailable(true);
   return readiness;
 }
@@ -145,8 +145,8 @@ describe("health routes — readiness gating", () => {
   });
 });
 
-describe("health routes — EVENT_SIGNING availability gates /health/ready (ZTR-1179)", () => {
-  it("a runtime EVENT_SIGNING withdrawal flips /health/ready to 503", async () => {
+describe("health routes — EVENT_SIGNING is money-only, not deploy-ready (ZTR-1179 / ZPAY-252)", () => {
+  it("a runtime EVENT_SIGNING withdrawal keeps /health/ready 200", async () => {
     const readiness = fullyReadyStamps();
     const authority = createEventSignerAuthority({
       readiness,
@@ -163,23 +163,24 @@ describe("health routes — EVENT_SIGNING availability gates /health/ready (ZTR-
     const router = createHealthRouter({ readiness, pingDb: pingDbOk });
     expect((await router("GET", "/health/ready")).status).toBe(200);
 
-    // The first runtime sign failure withdraws authority and must close /health/ready.
     expect(() => armed.sign(new Uint8Array())).toThrow(/sealed row unreadable/);
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
 
     const res = await router("GET", "/health/ready");
-    expect(res.status).toBe(503);
-    expect(res.body).toMatchObject({ status: "not_ready" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "ready" });
   });
 
-  it("a boot-unarmed signer keeps /health/ready 503 even with every other gate open", async () => {
+  it("a boot-unarmed signer still answers /health/ready 200 once schema/vault/gateway/DB pass", async () => {
     const readiness = new NodeReadiness(3);
     readiness.markSchemaChecksPassed();
     readiness.setVaultAvailable(true);
     readiness.recordGatewayReadSuccess();
     const router = createHealthRouter({ readiness, pingDb: pingDbOk });
     const res = await router("GET", "/health/ready");
-    expect(res.status).toBe(503);
-    expect(res.body).toMatchObject({ status: "not_ready" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: "ready" });
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
   });
 });
 

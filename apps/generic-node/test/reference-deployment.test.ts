@@ -230,9 +230,9 @@ describe("manifest boots the real config + boot lane (AC#2)", () => {
     expect(events).toEqual([
       "migrations",
       "vault",
+      "gateway-read",
       "leadership",
       "boot-recovery",
-      "gateway-read",
       "money-workers",
     ]);
     expect(gatewaySeen).toEqual([["https://gateway.internal.example/"]]);

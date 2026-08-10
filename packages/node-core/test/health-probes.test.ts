@@ -45,13 +45,11 @@ function baseState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessStat
   };
 }
 
-describe("readiness — EVENT_SIGNING availability (verdict-forcing, outside the frozen check census; ZTR-1179)", () => {
-  it("eventSignerAvailable:false forces not-ready without joining the reported check set", () => {
+describe("readiness — EVENT_SIGNING availability (money-only, outside the frozen check census; ZTR-1179 / ZPAY-252)", () => {
+  it("eventSignerAvailable:false does NOT force not-ready (deploy-ready independent of post-leadership ensure)", () => {
     const verdict = evaluateReadinessFromProbes(baseState({ eventSignerAvailable: false }), true);
-    expect(verdict.ready).toBe(false);
-    expect(verdict.status).toBe("not_ready");
-    // Like `stopping`: no failing gating check id — the frozen census stays closed.
-    expect(verdict.failing).toEqual([]);
+    expect(verdict.ready).toBe(true);
+    expect(verdict.status).toBe("ready");
     expect(verdict.checks.map((c) => c.name)).not.toContain("event_signer_available");
   });
 

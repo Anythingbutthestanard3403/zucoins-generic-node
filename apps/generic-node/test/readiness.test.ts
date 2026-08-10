@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NodeReadiness } from "../src/boot/readiness.js";
 
 describe("NodeReadiness — readiness gating (schema ∧ vault ∧ observation)", () => {
-  it("starts fully not-ready and opens when gating stamps pass (leadership optional)", () => {
+  it("starts fully not-ready and opens when gating stamps pass (leadership + EVENT_SIGNING optional)", () => {
     const readiness = new NodeReadiness(3);
     expect(readiness.snapshot().ready).toBe(false);
 
@@ -17,9 +17,11 @@ describe("NodeReadiness — readiness gating (schema ∧ vault ∧ observation)"
     readiness.setSignerLeadershipHeld(true);
     expect(readiness.snapshot().ready).toBe(false);
 
-    // EVENT_SIGNING is gating — still not ready without it.
+    // Deploy-ready = schema ∧ vault ∧ observation (ZPAY-252).
     readiness.recordGatewayReadSuccess();
-    expect(readiness.snapshot().ready).toBe(false);
+    const beforeArm = readiness.snapshot();
+    expect(beforeArm.ready).toBe(true);
+    expect(beforeArm.checks.eventSigner).toBe(false);
 
     readiness.setEventSignerAvailable(true);
     const snapshot = readiness.snapshot();
@@ -120,8 +122,8 @@ describe("NodeReadiness — gateway failure budget", () => {
   });
 });
 
-describe("NodeReadiness — EVENT_SIGNING gating (fail-closed)", () => {
-  it("starts with eventSigner unavailable and blocks ready even when all else passes", () => {
+describe("NodeReadiness — EVENT_SIGNING money-only (ZTR-1179 / ZPAY-252)", () => {
+  it("starts with eventSigner unavailable but deploy-ready once schema/vault/gateway pass", () => {
     const readiness = new NodeReadiness(3);
     readiness.markSchemaChecksPassed();
     readiness.setVaultAvailable(true);
@@ -129,19 +131,21 @@ describe("NodeReadiness — EVENT_SIGNING gating (fail-closed)", () => {
     readiness.recordGatewayReadSuccess();
     const snapshot = readiness.snapshot();
     expect(snapshot.checks.eventSigner).toBe(false);
-    expect(snapshot.ready).toBe(false);
+    expect(snapshot.ready).toBe(true);
   });
 
-  it("opens ready once the signer becomes available", () => {
+  it("deploy-ready does not require arming the event signer", () => {
     const readiness = new NodeReadiness(3);
     readiness.markSchemaChecksPassed();
     readiness.setVaultAvailable(true);
     readiness.recordGatewayReadSuccess();
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
     readiness.setEventSignerAvailable(true);
     expect(readiness.snapshot().ready).toBe(true);
   });
 
-  it("runtime signer loss closes readiness again (fail-closed)", () => {
+  it("runtime signer loss stamps eventSigner false but keeps deploy-ready", () => {
     const readiness = new NodeReadiness(3);
     readiness.markSchemaChecksPassed();
     readiness.setVaultAvailable(true);
@@ -152,7 +156,7 @@ describe("NodeReadiness — EVENT_SIGNING gating (fail-closed)", () => {
     readiness.setEventSignerAvailable(false);
     const snapshot = readiness.snapshot();
     expect(snapshot.checks.eventSigner).toBe(false);
-    expect(snapshot.ready).toBe(false);
+    expect(snapshot.ready).toBe(true);
   });
 });
 

@@ -454,7 +454,7 @@ describe("deployment scenario 5 — overlap deploy (rolling update, one leader)"
     });
     expect(lock.stats().maxConcurrentHolders).toBe(1);
     expect(readinessB.snapshot().checks.leadership).toBe(false);
-    expect(readinessB.snapshot().ready).toBe(false);
+    expect(readinessB.snapshot().ready).toBe(true) // deploy-ready while waiting (ZPAY-252);
 
     // Graceful handoff: A releases leadership (as graceful stop would), so the
     // successor B acquires it and completes its own boot.
@@ -632,7 +632,7 @@ describe("deployment scenario 8 — restart (re-run from step 1, no stale state)
     const second = await runBootLane(secondDeps);
     expect(second.ready).toBe(true);
     // Re-ran from step 1 — migrations executed again, full sequence preserved.
-    expect(secondEvents).toEqual(["migrations", "vault", "leadership", "boot-recovery", "gateway-read", "money-workers"]);
+    expect(secondEvents).toEqual(["migrations", "vault", "gateway-read", "leadership", "boot-recovery", "money-workers"]);
     // No stale state leaked: every gate opened on the fresh readiness.
     expect(secondReadiness.snapshot().ready).toBe(true);
     expect(secondReadiness.snapshot().checks).toEqual({
@@ -707,9 +707,9 @@ describe("deployment scenario 8 — restart (re-run from step 1, no stale state)
     expect(secondEvents).toEqual([
       "migrations",
       "vault",
+      "gateway-read",
       "leadership",
       "boot-recovery",
-      "gateway-read",
       "money-workers",
     ]);
 
@@ -827,9 +827,9 @@ describe("deployment scenario 9 — offline e2e", () => {
       "migrations",
       "privilege-check",
       "vault",
+      "gateway-read",
       "leadership",
       "boot-recovery",
-      "gateway-read",
       "money-workers",
     ]);
     // Leadership is held after a successful boot — the boot lane keeps the

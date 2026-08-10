@@ -46,10 +46,11 @@ function armEverythingElse(readiness: NodeReadiness): void {
 const okSigner = { signingKeyId: "key-1", sign: () => "c2ln" };
 
 describe("EVENT_SIGNING authority", () => {
-  it("arming is the only thing that opens the readiness conjunct", () => {
+  it("arming is the only thing that opens the eventSigner conjunct (deploy-ready already open)", () => {
     const { authority, readiness } = harness();
     armEverythingElse(readiness);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
 
     authority.arm(okSigner);
     expect(readiness.snapshot().ready).toBe(true);
@@ -70,7 +71,7 @@ describe("EVENT_SIGNING authority", () => {
     // Rethrow is the Byte-exact half: the caller's READY transaction must roll back, never
     // commit with the event logged away as a residual.
     expect(readiness.snapshot().checks.eventSigner).toBe(false);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
     // Withdraw-before-quiesce — drop the signing latch before stopping the engines.
     expect(calls).toEqual(["SIGNER_AUTHORITY_WITHDRAW", "ENGINE_QUIESCE"]);
   });
@@ -104,7 +105,8 @@ describe("EVENT_SIGNING authority", () => {
     authority.withdraw(new Error("loss"));
 
     expect(() => authority.arm(okSigner)).toThrow(/already withdrawn/);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 
   it("keeps quiescing even if the readiness stamp throws (each step is independent)", () => {
@@ -146,7 +148,7 @@ describe("EVENT_SIGNING withdrawal reaches every readiness consumer (ZTR-1179)",
     expect((thrown as MoneyAdmissionRefusedError).code).toBe("event_signer_unavailable");
   });
 
-  it("the node-core readiness verdict (/health/ready's evaluator) goes not-ready on the same snapshot", () => {
+  it("the node-core readiness verdict (/health/ready's evaluator) stays ready on the same snapshot (money-only)", () => {
     const { authority, readiness } = harness();
     armEverythingElse(readiness);
     authority.arm(okSigner);
@@ -154,8 +156,9 @@ describe("EVENT_SIGNING withdrawal reaches every readiness consumer (ZTR-1179)",
 
     authority.withdraw(new Error("loss"));
     const verdict = evaluateReadinessFromProbes(readiness.core.snapshot(), true);
-    expect(verdict.ready).toBe(false);
-    expect(verdict.status).toBe("not_ready");
+    expect(verdict.ready).toBe(true);
+    expect(verdict.status).toBe("ready");
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
   });
 });
 
@@ -177,7 +180,7 @@ describe("EVENT_SIGNING boot install (open → probe → arm)", () => {
       }),
     ).rejects.toThrow(/EVENT_SIGNING sealed row missing/);
     expect(readiness.snapshot().checks.eventSigner).toBe(false);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 
   it("propagates a correspondence-probe failure and never arms", async () => {
@@ -199,7 +202,7 @@ describe("EVENT_SIGNING boot install (open → probe → arm)", () => {
       }),
     ).rejects.toThrow(/sealed seed will not reopen/);
     expect(readiness.snapshot().checks.eventSigner).toBe(false);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 
   it("probes before arming, then arms the withdraw-wrapped signer", async () => {
@@ -256,6 +259,7 @@ describe("EVENT_SIGNING boot install (open → probe → arm)", () => {
 
     expect(() => signer.sign(new Uint8Array())).toThrow(/sealed EVENT_SIGNING row unreadable/);
     expect(calls).toEqual(["SIGNER_AUTHORITY_WITHDRAW", "ENGINE_QUIESCE"]);
-    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().checks.eventSigner).toBe(false);
+    expect(readiness.snapshot().ready).toBe(true);
   });
 });

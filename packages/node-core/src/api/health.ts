@@ -203,6 +203,36 @@ export class CachedDbProbe {
     }
   }
 
+  /**
+   * Last completed verdict, read without probing — for synchronous consumers that must
+   * not issue a query of their own (money admission; see money-path-admission.ts).
+   *
+   * Fail-closed on unknown, last-false, and idle-stale: `false` before the first probe
+   * completes, after a completed failure, and once a last-true verdict has aged past
+   * `ttlMs` with no refresh in flight. The answer re-closes on DB loss the moment the
+   * next probe records a failure — it can never latch open the way a boot-time flag does.
+   *
+   * Sticky-open while a refresh is already underway on a previously-true verdict: the
+   * age clock keeps running against the last *completed* stamp for the whole ping
+   * (refresh deliberately does not blank or re-date until settle), so under production
+   * constants a healthy ping whose wall time exceeds half-TTL slack would otherwise flip
+   * this method false mid-flight. While `inFlight` is set and `cachedOk === true`, return
+   * true. The window is bounded by the existing `timeoutMs` race (inFlight clears on
+   * settle ≤ timeoutMs) — not an unbounded latch.
+   *
+   * Idle freshness is still one TTL: something must call `refresh()` on a cadence inside
+   * `ttlMs` so the stamp never goes idle-stale. A `probe()` timer does NOT satisfy that —
+   * see `refresh()`. Mid-flight sticky does not widen the idle bound.
+   */
+  cachedReachable(): boolean {
+    if (this.cachedOk !== true) return false;
+    // Sticky-open: a refresh already underway on a previously-true verdict must not
+    // refuse money solely because the old stamp aged out mid-flight. Bounded by the
+    // existing ping timeout race (inFlight clears on settle ≤ timeoutMs).
+    if (this.inFlight !== undefined) return true;
+    return this.clock() - this.cachedAtMs < this.ttlMs;
+  }
+
   /** Force the next call to re-probe (tests / post-recovery). */
   invalidate(): void {
     this.generation += 1;
@@ -216,6 +246,22 @@ export class CachedDbProbe {
     if (this.cachedOk !== undefined && now - this.cachedAtMs < this.ttlMs) {
       return this.cachedOk;
     }
+    return this.refresh();
+  }
+
+  /**
+   * Ping unconditionally and re-date the cached verdict. This is the keep-warm path
+   * (ZTR-1178): `probe()` returns early on a cache hit *without* advancing `cachedAtMs`,
+   * so a timer driven through `probe()` can never hold a verdict inside its own TTL —
+   * every tick that lands before expiry is swallowed, and the first tick that actually
+   * re-pings is by construction one that arrives after `cachedReachable()` has already
+   * read closed. No cadence closes that gap; only re-dating does.
+   *
+   * Unlike `invalidate()` + `probe()`, the last-known verdict stays readable for the
+   * duration of the ping, so the money-admission gate does not read closed on every
+   * refresh cycle. Concurrent calls coalesce onto the one in-flight ping.
+   */
+  async refresh(): Promise<boolean> {
     if (this.inFlight !== undefined) {
       return this.inFlight;
     }

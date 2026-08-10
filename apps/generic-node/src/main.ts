@@ -43,6 +43,7 @@ import {
   assertPrivilegeReadiness,
   assertSchemaCompleteness,
   CachedDbProbe,
+  DEFAULT_DB_PING_TTL_MS,
   createDestinationService,
   createDeviceBlessingAuthorizer,
   createHostEvidenceRuntimeMetricsCollector,
@@ -159,6 +160,21 @@ import {
 
 /** Push API base. Overridable via ZUCOINS_PUSH_API_BASE for staging. */
 const DEFAULT_PUSH_API_BASE = "https://wallet.zucoins.com/api__v1/";
+
+/**
+ * Shared DB-probe refresh cadence. Half the probe's own TTL so idle age stays well inside
+ * one TTL under normal ping cost (refresh() re-dates unconditionally — a probe() timer is
+ * swallowed by its own TTL and cannot keep the verdict warm at any cadence).
+ *
+ * Production ping budget (DB_PING_DEADLINE_MS ≤ probe timeoutMs) can exceed this half-TTL
+ * slack under pool pressure. That is not a composition bug: CachedDbProbe.cachedReachable()
+ * sticky-opens while a refresh is in flight on a last-true verdict, so mid-flight age past
+ * TTL does not refuse money on a healthy node. Fail-closed still applies on completed
+ * failure, idle stale, and unknown (ZTR-1178).
+ */
+const DB_PROBE_KEEP_WARM_MS = DEFAULT_DB_PING_TTL_MS / 2;
+/** Server-side cancel budget for pingDb; must stay ≤ CachedDbProbe's client-side timeoutMs. */
+const DB_PING_DEADLINE_MS = 4_500;
 import {
   createCandidateIntakeInbox,
   createSqlSendPartialLoader,
@@ -280,18 +296,34 @@ async function main(): Promise<void> {
       return { rows: result.rows as R[] };
     },
   };
-  let databaseReachableForMoney = false;
   const pingDb = async (): Promise<void> => {
     // Finish server-side cancellation before CachedDbProbe's 5s client-side fail-safe wins.
-    await withPostgresDeadline(pool, 4_500, async (db) => {
+    await withPostgresDeadline(pool, DB_PING_DEADLINE_MS, async (db) => {
       await db.query("SELECT 1");
     });
-    databaseReachableForMoney = true;
   };
-  // Shared with the health route so /health/ready and /metrics agree on DB
-  // reachability within one TTL window instead of probing (and potentially disagreeing)
-  // independently.
+  // Shared with the health route so /health/ready, /metrics and money admission agree on
+  // DB reachability within one TTL window instead of probing (and potentially disagreeing)
+  // independently. It is the ONLY DB-reachability state in this process — a second copy
+  // held in the shell latched open at the first successful ping and never re-closed
+  // (ZTR-1178).
   const dbProbe = new CachedDbProbe(pingDb);
+  // /health/ready and /metrics refresh the probe when something calls them; the money
+  // workers call neither, and a cached verdict nobody refreshes reads stale-closed. This
+  // keeps the shared verdict inside its own TTL without any external caller. refresh(),
+  // not probe(): probe() would short-circuit on its own cache and leave cachedAtMs where
+  // it was, so the verdict would still age out between ticks. One `SELECT 1` per cadence.
+  const dbProbeKeepWarm = setInterval(() => {
+    // refresh() resolves false on failure rather than rejecting; the catch is only so a
+    // future change there cannot become an unhandled rejection on this timer.
+    void dbProbe.refresh().catch(() => {});
+  }, DB_PROBE_KEEP_WARM_MS);
+  // unref only — deliberately NOT cleared from graceful stop's stopWorkers hook, which
+  // runs before flushInFlight: killing the refresh there would let the shared verdict age
+  // out while in-flight money work is still being flushed, and refuse the very work the
+  // flush exists to finish. unref already keeps it from holding the process open, so there
+  // is nothing left to reclaim.
+  dbProbeKeepWarm.unref();
 
   const readiness = new NodeReadiness(config.GATEWAY_READ_FAILURE_BUDGET);
 
@@ -327,7 +359,11 @@ async function main(): Promise<void> {
 
   const moneyPathPorts: MoneyPathAdmissionPorts = createMoneyPathAdmissionPortsFromRuntime({
     snapshotReadiness: () => readiness.core.snapshot(),
-    isDatabaseReachable: () => databaseReachableForMoney,
+    // The same probe that answers /health/ready, read synchronously: admission issues no
+    // query of its own and acts on a verdict up to one probe TTL old (deliberate — see
+    // CachedDbProbe.cachedReachable). Stale or never-probed reads false, so the database
+    // conjunct re-closes on loss instead of staying satisfied for the life of the process.
+    isDatabaseReachable: () => dbProbe.cachedReachable(),
     backpressure: storagePressure.storageBackpressure,
     haltGate,
   });
@@ -878,9 +914,22 @@ async function main(): Promise<void> {
       // migrate.ts don't exist yet — readiness must not flip before schema is complete.
       await assertSchemaCompleteness(pool);
       await assertPrivilegeReadiness(pool);
-      // Money workers read isDatabaseReachable before any external health probe
-      // may have called pingDb — arm the path once the pool is proven writable.
-      await pingDb();
+      // Money workers read isDatabaseReachable before any external health probe may have
+      // refreshed the shared verdict — arm it once the pool is proven writable. refresh(),
+      // not probe(): the keep-warm timer is already running by now, so a single failed tick
+      // during boot would otherwise be served back from cache here and fail the boot the
+      // pool has just proven healthy. The arm must be a real ping. refresh() collapses a
+      // ping failure to `false` rather than throwing, so the boot lane still has to fail
+      // closed on it explicitly.
+      if (!(await dbProbe.refresh())) {
+        // The driver's reason was collapsed to `false`; re-issue once, on the failure path
+        // only, so the crash carries it instead of a bare sentence.
+        const cause = await pingDb().then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+        throw new Error("boot: database probe failed after migrations", { cause });
+      }
       // Restore durable halt BEFORE money engines (fail-closed default).
       const restored = await restoreHaltState(haltStore, haltGate);
       applyHaltStamp(haltGate.isHalted());

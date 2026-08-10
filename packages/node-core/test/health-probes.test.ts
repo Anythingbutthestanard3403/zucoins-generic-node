@@ -263,6 +263,167 @@ describe("CachedDbProbe — flood protection + recovery", () => {
     expect(calls).toBe(2);
   });
 
+  it("refresh() re-pings and re-dates inside the TTL, where probe() short-circuits", async () => {
+    // ZTR-1178. probe()'s cache hit returns the old verdict AND leaves cachedAtMs where it
+    // was, so a keep-warm timer built on probe() cannot hold cachedReachable() open: the
+    // ticks that land before expiry do nothing, and the tick that finally re-pings arrives
+    // after the verdict has already aged out. refresh() is the path that re-dates.
+    let calls = 0;
+    let t = 0;
+    const probe = new CachedDbProbe(
+      async () => {
+        calls += 1;
+      },
+      1_000,
+      () => t,
+    );
+    expect(await probe.probe()).toBe(true);
+
+    t = 500;
+    expect(await probe.probe()).toBe(true);
+    expect(calls).toBe(1); // swallowed by the TTL, cachedAtMs still 0
+    expect(await probe.refresh()).toBe(true);
+    expect(calls).toBe(2); // re-pinged despite the live cache…
+
+    t = 1_400;
+    expect(probe.cachedReachable()).toBe(true); // …and re-dated to 500, so 900ms old
+    expect(calls).toBe(2); // cachedReachable never probes
+  });
+
+  it("refresh() leaves the last verdict readable while its ping is in flight", async () => {
+    // Why the keep-warm refresh is refresh() and not invalidate() + probe(): invalidate()
+    // clears cachedOk, so the money-admission gate would read closed for the duration of
+    // every refresh ping — a self-inflicted outage once per cadence (ZTR-1178).
+    // pingDb is invoked from a microtask, so the resolver only exists a tick later.
+    const pending: Array<() => void> = [];
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let t = 0;
+    const probe = new CachedDbProbe(
+      () => new Promise<void>((resolve) => pending.push(resolve)),
+      1_000,
+      () => t,
+    );
+
+    const armed = probe.refresh();
+    await tick();
+    pending.shift()?.();
+    expect(await armed).toBe(true);
+    expect(probe.cachedReachable()).toBe(true);
+
+    t = 500;
+    const inFlight = probe.refresh();
+    await tick();
+    expect(pending.length).toBe(1); // a real ping is out, inside the TTL…
+    expect(probe.cachedReachable()).toBe(true); // …and the gate stayed open through it
+    pending.shift()?.();
+    expect(await inFlight).toBe(true);
+  });
+
+  it("cachedReachable sticky-opens past TTL while a last-true refresh is in flight", async () => {
+    // ZTR-1178 D1. refresh() leaves the old stamp in place until settle. Under production
+    // constants half-TTL slack (2.5s) < ping deadline (4.5s), so age can cross ttlMs while
+    // a healthy keep-warm ping is still out. Sticky-open on inFlight + last-true closes
+    // that gap without widening the idle freshness bound.
+    const pending: Array<() => void> = [];
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let t = 0;
+    const probe = new CachedDbProbe(
+      () => new Promise<void>((resolve) => pending.push(resolve)),
+      1_000,
+      () => t,
+    );
+
+    const armed = probe.refresh();
+    await tick();
+    pending.shift()?.();
+    expect(await armed).toBe(true);
+    expect(probe.cachedReachable()).toBe(true);
+
+    const inFlight = probe.refresh();
+    await tick();
+    expect(pending.length).toBe(1);
+
+    t = 1_000;
+    expect(probe.cachedReachable()).toBe(true); // age == TTL, but sticky while pending
+    t = 1_001;
+    expect(probe.cachedReachable()).toBe(true); // past TTL mid-flight still open
+
+    pending.shift()?.();
+    expect(await inFlight).toBe(true);
+    expect(probe.cachedReachable()).toBe(true); // re-dated on settle
+    t = 2_000;
+    expect(probe.cachedReachable()).toBe(true); // idle age from settle stamp (1001)
+    t = 2_002;
+    expect(probe.cachedReachable()).toBe(false); // idle stale once inFlight cleared
+  });
+
+  it("cachedReachable does not sticky-open on last-false while a retry is in flight", async () => {
+    // Fail-closed on a known-bad verdict: a flapping DB must not look admitted during
+    // every retry just because a refresh is pending.
+    const pending: Array<() => void> = [];
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let t = 0;
+    let shouldFail = true;
+    const probe = new CachedDbProbe(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          pending.push(() => {
+            if (shouldFail) reject(new Error("down"));
+            else resolve();
+          });
+        }),
+      1_000,
+      () => t,
+    );
+
+    const failed = probe.refresh();
+    await tick();
+    pending.shift()?.();
+    expect(await failed).toBe(false);
+    expect(probe.cachedReachable()).toBe(false);
+
+    shouldFail = false;
+    const retry = probe.refresh();
+    await tick();
+    expect(pending.length).toBe(1);
+    t = 500;
+    expect(probe.cachedReachable()).toBe(false); // still closed on last-false mid-flight
+    t = 2_000;
+    expect(probe.cachedReachable()).toBe(false);
+
+    pending.shift()?.();
+    expect(await retry).toBe(true);
+    expect(probe.cachedReachable()).toBe(true); // opens only after successful settle
+  });
+
+  it("timeout settle clears sticky-open on a hung last-true refresh", async () => {
+    // timeoutMs is wall setTimeout, not the fake clock — use a short real timeout and
+    // await the in-flight promise (same pattern as readinessHttp timeout cases above).
+    // Do not "advance fake clock past timeoutMs" alone; that never fires the race.
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let t = 0;
+    let n = 0;
+    const probe = new CachedDbProbe(
+      () => {
+        n += 1;
+        if (n === 1) return Promise.resolve();
+        return new Promise<void>(() => {}); // hang thereafter
+      },
+      1_000,
+      () => t,
+      30,
+    );
+    expect(await probe.refresh()).toBe(true);
+    expect(probe.cachedReachable()).toBe(true);
+
+    const hung = probe.refresh();
+    await tick();
+    t = 5_000; // well past TTL; sticky holds only while inFlight is set
+    expect(probe.cachedReachable()).toBe(true);
+    expect(await hung).toBe(false); // wall timeout race settles false
+    expect(probe.cachedReachable()).toBe(false); // sticky cleared with completed false
+  });
+
   it("matches the default TTL", () => {
     expect(DEFAULT_DB_PING_TTL_MS).toBe(5_000);
     expect(DEFAULT_DB_PING_TIMEOUT_MS).toBe(5_000);

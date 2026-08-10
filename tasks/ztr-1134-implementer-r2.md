@@ -6,7 +6,7 @@
 
 ## Head SHA
 
-`83aee80364d7462eaeabfad3d098514ea792c8cf`
+`d31d1cdb92bc80f9a50c0fae9683a450f6a716c6` (implementation commit; PR tip may add docs-only commits)
 
 ## Fixes
 

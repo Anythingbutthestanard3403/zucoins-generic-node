@@ -25,18 +25,17 @@
  * CREATE that a prior unit (reporting seed and/or earlier pack slice) already
  * registered so a combined apply does not fail with SQLSTATE 42710.
  * CREATE TABLE name already registered by a prior owner is stripped (avoids
- * 42710). When the stripped later body declares inline REFERENCES the first
- * owner did not, the loader appends idempotent ALTER TABLE … ADD CONSTRAINT
- * wire-up so lease contract FKs (e.g. wallet_active_leases → memberships/groups)
- * still land on a cold combined pack apply. Trigger name conflicts keep the
+ * 42710). When a deliberately allow-listed later body declares inline REFERENCES
+ * the first owner did not, the loader appends idempotent ALTER TABLE … ADD CONSTRAINT
+ * wire-up. Trigger name conflicts keep the
  * first owner's attachment; a later CREATE FUNCTION that would only have been
  * attached by a stripped same-slice trigger is not emitted (no orphans).
  *
- * Multi-slice tables in this pack (audit fix round):
- * - wallet_active_leases: custody-eligibility (first: wallet_id→wallets) then
- * lease-foundation (membership_id/lease_group_id FKs via wire-up).
- * Eligibility trigger owner: custody_reject_ineligible_lease only — lease-foundation no
- * longer ships a shadowed second copy (ZTR-1169).
+ * Multi-slice tables in this pack (closed compatibility allow-list):
+ * - wallet_active_leases: custody-eligibility is the production owner; lease-foundation's
+ * duplicate body is retained only for the standalone fail-closed lease migrator. Missing
+ * membership/group refs are wired during assembly; operation refs are fix-forwarded by the
+ * appended lease-operation-foreign-keys slice after operations exists.
  * - operation_expected_artifacts: expected-artifacts first (stronger FKs);
  * move-baseline CREATE stripped (bodies diverge; first is strict FK superset).
  * - operator_device_keys: device-keys first; approval-stores CREATE stripped
@@ -193,6 +192,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // created by transaction-material earlier in the pack; this slice only attaches triggers.
   // Appended so earlier money-pack version numbers stay stable. Never renumber prior slices.
   "transaction-material-byte-immutability",
+  // ZTR-1139 fix-forward for databases that already journaled custody/lease-foundation
+  // before the operations FKs were present. Checks all four relations for dangling rows
+  // before adding any constraint, then installs explicit NO ACTION FKs. Appended only.
+  "lease-operation-foreign-keys",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

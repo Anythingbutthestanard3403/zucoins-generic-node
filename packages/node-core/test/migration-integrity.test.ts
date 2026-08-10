@@ -191,6 +191,9 @@ const SCHEMA_FILES = [
   "destinations-label.sql",
   // lease_role → wallet_lease_role enum. ALTER-only (no CREATE TABLE).
   "lease-role-enum.sql",
+  // ZTR-1139 fix-forward: preflight dangling lease ownership rows, then add the six
+  // deferred NO ACTION FKs after operations + lease foundation exist. ALTER/DO only.
+  "lease-operation-foreign-keys.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -209,6 +212,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "operations-indexes.sql",
   "destinations-label.sql",
   "lease-role-enum.sql",
+  "lease-operation-foreign-keys.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -468,6 +472,12 @@ const GREENFIELD: Record<
     // DO block is a no-op when tables/columns are absent (IF EXISTS guards).
     // Not greenfield-alone materialising; no CREATE TABLE.
     applies: true,
+  },
+  // Fix-forward DO block starts by auditing wallet_active_leases; every target is owned by
+  // earlier production-pack slices, so standalone application must fail on that first target.
+  "lease-operation-foreign-keys.sql": {
+    applies: false,
+    missingRelation: "wallet_active_leases",
   },
 };
 

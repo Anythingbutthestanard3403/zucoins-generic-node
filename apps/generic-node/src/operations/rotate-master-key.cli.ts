@@ -97,7 +97,9 @@ export interface RotateMasterKeyCliDeps {
    */
   readonly nodeId: string;
   /**
-   * Boot-canary census envelope (or null when absent). May be a snapshot loader.
+   * Boot-canary census envelope (or null when absent). May be a snapshot OR a live
+   * loader — the coordinator re-invokes this via loadBootCanaryEnvelope inside the
+   * fence and on D-B5 finalize so crash-resume never proves a stale pre-rotation blob.
    * Authoritative presence is still proven via countBootCanaryRows inside the fence.
    */
   readonly loadBootCanaryCensus:
@@ -325,6 +327,15 @@ export async function runRotateMasterKeyCli(
       commitTotpSecrets: deps.commitTotpSecrets,
       countBootCanaryRows: deps.countBootCanaryRows,
       commitBootCanary: deps.commitBootCanary,
+      // Live reload inside the fence / D-B5 finalize — never trust the pre-rotation snapshot alone.
+      loadBootCanaryEnvelope: async () => {
+        const census =
+          typeof deps.loadBootCanaryCensus === "function"
+            ? await deps.loadBootCanaryCensus()
+            : deps.loadBootCanaryCensus;
+        const envelope = census?.envelope ?? null;
+        return envelope !== null && envelope.length > 0 ? envelope : null;
+      },
       rewrapBootCanary: (input) => {
         const report = rewrapVaultBootCanary({
           oldRootKey: input.oldRootKey,

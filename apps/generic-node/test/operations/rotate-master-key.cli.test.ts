@@ -612,6 +612,57 @@ describe("runRotateMasterKeyCli boot canary rewrap (ZTR-1177 r2)", () => {
     expect(durableCanary).toBe(committedCanary);
   });
 
+  it("ROTATING resume completes when durable canary is already under new root (stale census)", async () => {
+    const { row: w1 } = makeRow(1, 1);
+    // Wallet still under OLD in this fixture; canary already under NEW (vault-durable partial).
+    const sealedNew = sealVaultBootCanary(NEW_ROOT, NODE_ID);
+    const sealedOldSnapshot = sealVaultBootCanary(OLD_ROOT, NODE_ID);
+    let durableCanary = sealedNew;
+    const journal = new InMemoryMasterKeyRotationJournal(1);
+    await journal.begin({ fromEpoch: 1, toEpoch: 2 });
+    expect((await journal.read()).phase).toBe("ROTATING");
+
+    const result = await runRotateMasterKeyCli({
+      loadCensus: { rows: [w1] },
+      countWalletVaultRows: async () => 1,
+      countNodeSigningKeyRows: async () => 0,
+      loadPushSecretsCensus: { rows: [] },
+      countPushSecretRows: async () => 0,
+      loadTotpSecretsCensus: { rows: [] },
+      countTotpSecretRows: async () => 0,
+      nodeId: NODE_ID,
+      // Stale pre-rotation snapshot value if read once; live loader re-reads durableCanary.
+      loadBootCanaryCensus: async () => ({ envelope: durableCanary }),
+      countBootCanaryRows: async () => 1,
+      commitBootCanary: async (envelope) => {
+        durableCanary = envelope;
+      },
+      journal,
+      interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
+      unitOfWork: new InMemoryRotationUnitOfWork(),
+      commitWalletVault: async () => {},
+      fromEpoch: 1,
+      env: env(),
+      argv: ["node", "rotate-master-key.cli.js"],
+      logger: { info() {}, error() {} },
+    });
+
+    expect(result.committed).toBe(true);
+    // Already-under-new: carry-through (same envelope) or equivalent open under NEW.
+    const opened = openVaultBootCanary(NEW_ROOT, NODE_ID, durableCanary);
+    try {
+      expect(Buffer.from(opened).toString("utf8")).toBe(VAULT_BOOT_CANARY_PLAINTEXT);
+    } finally {
+      opened.fill(0);
+    }
+    // Stale old snapshot must not have been re-committed over the live new row.
+    expect(durableCanary).not.toBe(sealedOldSnapshot);
+    expect(() => openVaultBootCanary(OLD_ROOT, NODE_ID, durableCanary)).toThrow(
+      /VAULT_BOOT_CANARY_DOES_NOT_OPEN/,
+    );
+  });
+
   it("refuses rotation when canary row exists but commitBootCanary is unwired", async () => {
     const { row: w1 } = makeRow(1, 1);
     await expect(

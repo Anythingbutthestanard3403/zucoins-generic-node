@@ -288,7 +288,8 @@ export interface MasterKeyRotationInput {
       }>;
   /**
    * Injected boot-canary rewrap (composition wires apps/.../boot-canary). Required when
-   * countBootCanaryRows > 0. Must open under oldRoot and reseal under newRoot.
+   * countBootCanaryRows > 0. Must open writer-first (new then old), skip reseal when
+   * already under newRoot, else reseal under newRoot + round-trip (push/TOTP key-ring parity).
    */
   readonly rewrapBootCanary?: (input: {
     readonly oldRootKey: Uint8Array;
@@ -303,6 +304,13 @@ export interface MasterKeyRotationInput {
         readonly result: SealedStoreRewrapResult;
         readonly rewrappedEnvelope: string;
       }>;
+  /**
+   * Live `node_settings` boot-canary envelope loader, re-read INSIDE the ceremony fence
+   * (and again on D-B5 finalize). Required when countBootCanaryRows is wired and the
+   * authoritative count is 1 — never prove/rewrap against a pre-rotation census snapshot
+   * alone (crash-resume may have already committed under the new root).
+   */
+  readonly loadBootCanaryEnvelope?: () => Promise<string | null>;
 
   /**
    * Authoritative live `vault` row count, re-read INSIDE the ceremony fence (D-A2).
@@ -1085,18 +1093,20 @@ export async function rotateMasterKey(
           `VAULT_BOOT_CANARY count must be 0 or 1 (got ${canaryCount})`,
         );
       }
-      const censusEnvelope = input.bootCanary?.envelope ?? null;
-      const censusPresent = censusEnvelope !== null && censusEnvelope.length > 0;
-      if (canaryCount === 1 && !censusPresent) {
+      // Prefer live load inside the fence (crash-resume / D-B5). Snapshot is fallback only
+      // for unit tests that do not wire a loader.
+      const liveEnvelope = await resolveBootCanaryEnvelope(input);
+      const envelopePresent = liveEnvelope !== null && liveEnvelope.length > 0;
+      if (canaryCount === 1 && !envelopePresent) {
         throw new MasterKeyRotationError(
           "ROTATION_ABORTED",
-          "VAULT_BOOT_CANARY row present but bootCanary census envelope is missing",
+          "VAULT_BOOT_CANARY row present but live envelope is missing",
         );
       }
-      if (canaryCount === 0 && censusPresent) {
+      if (canaryCount === 0 && envelopePresent) {
         throw new MasterKeyRotationError(
           "ROTATION_ABORTED",
-          "VAULT_BOOT_CANARY census has an envelope but authoritative count is 0",
+          "VAULT_BOOT_CANARY live envelope present but authoritative count is 0",
         );
       }
       let result: SealedStoreRewrapResult;
@@ -1115,10 +1125,12 @@ export async function rotateMasterKey(
           readonly rewrappedEnvelope: string;
         };
         try {
+          // Writer-first open is inside rewrapBootCanary (new then old). Live envelope
+          // may already be under newRoot after a vault-durable crash.
           report = await input.rewrapBootCanary({
             oldRootKey: input.oldRootKey,
             newRootKey: input.newRootKey,
-            envelope: censusEnvelope as string,
+            envelope: liveEnvelope as string,
           });
         } catch (err) {
           if (err instanceof MasterKeyRotationError) throw err;
@@ -1126,7 +1138,7 @@ export async function rotateMasterKey(
             "ROTATION_ABORTED",
             err instanceof Error
               ? err.message
-              : "VAULT_BOOT_CANARY rewrap failed under the old root",
+              : "VAULT_BOOT_CANARY rewrap failed (new-or-old open)",
             err,
           );
         }
@@ -1471,6 +1483,27 @@ async function finalizeCompletedRotation(
 }
 
 /** Authoritative count/parity/open proof for every registry store. */
+
+/**
+ * Resolve the boot-canary envelope for ceremony / D-B5 finalize.
+ * Always uses the live loader inside the fence when countBootCanaryRows is wired.
+ * Pre-rotation `bootCanary` census is never authoritative alone (crash-resume may
+ * already have committed under the new root).
+ */
+async function resolveBootCanaryEnvelope(
+  input: MasterKeyRotationInput,
+): Promise<string | null> {
+  if (input.loadBootCanaryEnvelope === undefined) {
+    throw new MasterKeyRotationError(
+      "ROTATION_REFUSED",
+      "VAULT_BOOT_CANARY requires loadBootCanaryEnvelope (live node_settings read) when countBootCanaryRows is wired",
+    );
+  }
+  const live = await input.loadBootCanaryEnvelope();
+  if (live !== null && live.length === 0) return null;
+  return live;
+}
+
 async function verifyCompletedStoreCensus(
   input: MasterKeyRotationInput,
 ): Promise<StoreRotationReport[]> {
@@ -1625,6 +1658,7 @@ async function verifyCompletedStoreCensus(
   }
 
   // Apps boot canary — same 0-or-1 proof under the new root when the port is wired.
+  // Always reload the live node_settings envelope (never a pre-rotation census snapshot).
   if (input.countBootCanaryRows !== undefined) {
     const count = await input.countBootCanaryRows();
     if (count !== 0 && count !== 1) {
@@ -1633,12 +1667,12 @@ async function verifyCompletedStoreCensus(
         `VAULT_BOOT_CANARY finalize count must be 0 or 1 (got ${count})`,
       );
     }
-    const envelope = input.bootCanary?.envelope ?? null;
+    const envelope = await resolveBootCanaryEnvelope(input);
     if (count === 1) {
       if (envelope === null || envelope.length === 0) {
         throw new MasterKeyRotationError(
           "ROTATION_STATE",
-          "VAULT_BOOT_CANARY finalize requires census envelope when row is present",
+          "VAULT_BOOT_CANARY finalize requires live envelope when row is present",
         );
       }
       if (input.rewrapBootCanary === undefined) {
@@ -1648,9 +1682,11 @@ async function verifyCompletedStoreCensus(
         );
       }
       try {
-        // Open-proof under new root: oldRootKey === newRootKey means "already under writer".
+        // Writer-first open inside rewrap: live row must open under new (already under
+        // writer after durable rewrap). Pass both roots so a mis-wired stale snapshot still
+        // fails closed only after live reload — not via oldRoot===newRoot alone.
         const proof = await input.rewrapBootCanary({
-          oldRootKey: input.newRootKey,
+          oldRootKey: input.oldRootKey,
           newRootKey: input.newRootKey,
           envelope,
         });

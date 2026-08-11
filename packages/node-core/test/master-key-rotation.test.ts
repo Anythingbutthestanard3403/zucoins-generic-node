@@ -1809,3 +1809,159 @@ describe("D-A2 — census/store parity", () => {
     expect(await journal.read()).toMatchObject({ phase: "STABLE", writerEpoch: TO_EPOCH });
   });
 });
+
+
+describe("ZTR-1177 r3 — boot canary crash-resume / D-B5 live envelope", () => {
+  const CANARY_OLD = "canary-envelope-under-old-root";
+  const CANARY_NEW = "canary-envelope-under-new-root";
+
+  function canaryPorts(live: { envelope: string | null }) {
+    return {
+      bootCanary: { envelope: CANARY_OLD }, // deliberately stale pre-rotation snapshot
+      countBootCanaryRows: async () => (live.envelope === null ? 0 : 1),
+      loadBootCanaryEnvelope: async () => live.envelope,
+      rewrapBootCanary: async (input: {
+        readonly oldRootKey: Uint8Array;
+        readonly newRootKey: Uint8Array;
+        readonly envelope: string;
+      }) => {
+        // Minimal key-ring parity stub: open "new" if envelope is CANARY_NEW;
+        // open "old" if CANARY_OLD; else refuse.
+        if (input.envelope === CANARY_NEW) {
+          // already under writer — carry through
+          if (input.newRootKey !== NEW_ROOT) {
+            throw new Error("new-root mismatch on already-new canary");
+          }
+          return {
+            result: { rowsBefore: 1, rowsAfter: 1, rewrapped: 1 },
+            rewrappedEnvelope: input.envelope,
+          };
+        }
+        if (input.envelope === CANARY_OLD) {
+          if (input.oldRootKey !== OLD_ROOT) {
+            throw new Error("old-root mismatch on still-old canary");
+          }
+          return {
+            result: { rowsBefore: 1, rowsAfter: 1, rewrapped: 1 },
+            rewrappedEnvelope: CANARY_NEW,
+          };
+        }
+        throw new Error("VAULT_BOOT_CANARY_DOES_NOT_OPEN: neither root");
+      },
+      commitBootCanary: async (envelope: string) => {
+        live.envelope = envelope;
+      },
+    };
+  }
+
+  it("ROTATING resume with durable canary already under new completes despite stale census", async () => {
+    // Guard-3: vault TX durable (canary under NEW), journal still ROTATING.
+    const fixtures = [makeRow(0xb1, 1, NEW_ROOT)];
+    const journal = new InMemoryMasterKeyRotationJournal(FROM_EPOCH);
+    await journal.begin({ fromEpoch: FROM_EPOCH, toEpoch: TO_EPOCH });
+    expect((await journal.read()).phase).toBe("ROTATING");
+
+    const live = { envelope: CANARY_NEW as string | null };
+    let committedCanary: string | null = null;
+    const ports = canaryPorts(live);
+    ports.commitBootCanary = async (envelope: string) => {
+      committedCanary = envelope;
+      live.envelope = envelope;
+    };
+
+    const result = await rotateMasterKey({
+      sealedStores: registry(),
+      ...census(fixtures.map((f) => f.row)),
+      ...ports,
+      keyRing: makeKeyRing(),
+      fromEpoch: FROM_EPOCH,
+      toEpoch: TO_EPOCH,
+      oldRootKey: OLD_ROOT,
+      newRootKey: NEW_ROOT,
+      journal,
+      interlock: makeInterlock(),
+      commitWalletVault: async () => {},
+      unitOfWork: makeUow(),
+    });
+
+    expect(result.committed).toBe(true);
+    expect((await journal.read()).phase).toBe("STABLE");
+    expect((await journal.read()).writerEpoch).toBe(TO_EPOCH);
+    // Carry-through commit of the already-new envelope (or skip-equivalent).
+    expect(committedCanary).toBe(CANARY_NEW);
+    expect(live.envelope).toBe(CANARY_NEW);
+    const canaryReport = result.stores.find((s) => s.storeId === "VAULT_BOOT_CANARY");
+    expect(canaryReport?.status).toBe("REWRAPPED");
+    expect(canaryReport?.result).toEqual({ rowsBefore: 1, rowsAfter: 1, rewrapped: 1 });
+  });
+
+  it("D-B5 finalize after vault-durable with stale census snapshot still verifies live row", async () => {
+    const fixtures = [makeRow(0xb2, 1, NEW_ROOT)];
+    const journal = new InMemoryMasterKeyRotationJournal(FROM_EPOCH);
+    await journal.begin({ fromEpoch: FROM_EPOCH, toEpoch: TO_EPOCH });
+    await journal.complete();
+    expect((await journal.read()).phase).toBe("ROTATION_COMPLETE");
+    expect((await journal.read()).writerEpoch).toBe(TO_EPOCH);
+
+    // Live row is under NEW; caller still holds pre-rotation OLD snapshot in bootCanary.
+    const live = { envelope: CANARY_NEW as string | null };
+    let rewrapSaw: string | null = null;
+    const ports = canaryPorts(live);
+    const baseRewrap = ports.rewrapBootCanary;
+    ports.rewrapBootCanary = async (input) => {
+      rewrapSaw = input.envelope;
+      return baseRewrap(input);
+    };
+
+    const result = await rotateMasterKey({
+      sealedStores: registry(),
+      ...census(fixtures.map((f) => f.row)),
+      ...ports,
+      // Stale snapshot — must NOT be used for finalize proof.
+      bootCanary: { envelope: CANARY_OLD },
+      keyRing: makeKeyRing(),
+      fromEpoch: FROM_EPOCH,
+      toEpoch: TO_EPOCH,
+      oldRootKey: OLD_ROOT,
+      newRootKey: NEW_ROOT,
+      journal,
+      interlock: makeInterlock(),
+      commitWalletVault: async () => {
+        throw new Error("finalize must not re-commit vault");
+      },
+      unitOfWork: makeUow(),
+    });
+
+    expect(result.committed).toBe(true);
+    expect((await journal.read()).phase).toBe("STABLE");
+    expect(rewrapSaw).toBe(CANARY_NEW);
+    expect(rewrapSaw).not.toBe(CANARY_OLD);
+  });
+
+  it("refuses when countBootCanaryRows is wired without loadBootCanaryEnvelope", async () => {
+    const fixtures = [makeRow(0xb3, 1)];
+    const journal = new InMemoryMasterKeyRotationJournal(FROM_EPOCH);
+    await expect(
+      rotateMasterKey({
+        sealedStores: registry(),
+        ...census(fixtures.map((f) => f.row)),
+        bootCanary: { envelope: CANARY_OLD },
+        countBootCanaryRows: async () => 1,
+        rewrapBootCanary: async () => ({
+          result: { rowsBefore: 1, rowsAfter: 1, rewrapped: 1 },
+          rewrappedEnvelope: CANARY_NEW,
+        }),
+        commitBootCanary: async () => {},
+        keyRing: makeKeyRing(),
+        fromEpoch: FROM_EPOCH,
+        toEpoch: TO_EPOCH,
+        oldRootKey: OLD_ROOT,
+        newRootKey: NEW_ROOT,
+        journal,
+        interlock: makeInterlock(),
+        commitWalletVault: async () => {},
+        unitOfWork: makeUow(),
+      }),
+    ).rejects.toMatchObject({ code: "ROTATION_REFUSED" });
+  });
+});

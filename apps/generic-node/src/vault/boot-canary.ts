@@ -377,7 +377,10 @@ export interface VaultBootCanaryRewrapInput {
   readonly oldRootKey: Uint8Array;
   readonly newRootKey: Uint8Array;
   readonly nodeId: string;
-  /** Existing durable envelope (must open under oldRootKey). */
+  /**
+   * Existing durable envelope. Crash-resume may already be under newRootKey
+   * (writer-first open, push/TOTP key-ring parity).
+   */
   readonly envelope: string;
 }
 
@@ -390,12 +393,28 @@ export interface VaultBootCanaryRewrapReport {
   readonly rewrappedEnvelope: string;
 }
 
+function assertCanaryPlaintext(opened: Buffer, where: string): void {
+  const expected = Buffer.from(VAULT_BOOT_CANARY_PLAINTEXT, "utf8");
+  if (!plaintextsEqual(opened, expected)) {
+    throw new VaultBootCanaryError(
+      "VAULT_BOOT_CANARY_PLAINTEXT_MISMATCH",
+      `master-key rotation: boot canary plaintext mismatch ${where}`,
+    );
+  }
+}
+
 /**
  * Value-preserving master-key rewrap for the boot canary (0-or-1 row).
  *
- * Open under old root (refuse rotation if AEAD fails), reseal under new root with a
- * fresh nonce, round-trip open + plaintext check. Pure over the envelope — caller
- * owns the DB commit boundary (same UoW as other sealed-store commits).
+ * Crash-resume / key-ring parity with push + TOTP:
+ * 1. Try open under **new** root first (writer). If it authenticates, the durable
+ *    row is already under the writer — skip reseal and carry the envelope through.
+ * 2. Else open under **old** root. On success, reseal under new + round-trip.
+ * 3. If neither root opens, refuse (would brick vault-unlock after advance).
+ *
+ * Pure over the envelope — caller owns the DB commit boundary (same UoW as other
+ * sealed-store commits). Caller must pass the **live** node_settings envelope on
+ * resume/finalize, not a pre-rotation census snapshot alone.
  */
 export function rewrapVaultBootCanary(
   input: VaultBootCanaryRewrapInput,
@@ -404,30 +423,55 @@ export function rewrapVaultBootCanary(
   assertRootKey(input.newRootKey);
   assertNodeId(input.nodeId);
 
-  let opened: Buffer;
-  try {
-    opened = openVaultBootCanary(input.oldRootKey, input.nodeId, input.envelope);
-  } catch (err) {
-    if (err instanceof VaultBootCanaryError) {
-      throw new VaultBootCanaryError(
-        err.code,
-        "master-key rotation: boot canary does not open under the old root — " +
-          "refusing to advance (canary would brick vault-unlock under the new key)",
-      );
-    }
-    throw err;
-  }
+  // Writer-first (new), then retained old — same order as orderEntriesForOpen.
+  let openedUnder: "new" | "old" | null = null;
+  let opened: Buffer | null = null;
 
   try {
-    const expected = Buffer.from(VAULT_BOOT_CANARY_PLAINTEXT, "utf8");
-    if (!plaintextsEqual(opened, expected)) {
-      throw new VaultBootCanaryError(
-        "VAULT_BOOT_CANARY_PLAINTEXT_MISMATCH",
-        "master-key rotation: boot canary plaintext mismatch under the old root",
-      );
-    }
+    opened = openVaultBootCanary(input.newRootKey, input.nodeId, input.envelope);
+    assertCanaryPlaintext(opened, "under the new root");
+    openedUnder = "new";
+  } catch (err) {
+    if (!(err instanceof VaultBootCanaryError)) throw err;
+    // fall through to old
   } finally {
+    if (openedUnder !== "new" && opened !== null) {
+      opened.fill(0);
+      opened = null;
+    }
+  }
+
+  if (openedUnder !== "new") {
+    try {
+      opened = openVaultBootCanary(input.oldRootKey, input.nodeId, input.envelope);
+      assertCanaryPlaintext(opened, "under the old root");
+      openedUnder = "old";
+    } catch (err) {
+      if (err instanceof VaultBootCanaryError) {
+        throw new VaultBootCanaryError(
+          err.code,
+          "master-key rotation: boot canary does not open under the new or old root — " +
+            "refusing to advance (canary would brick vault-unlock under the new key)",
+        );
+      }
+      throw err;
+    } finally {
+      if (opened !== null) {
+        opened.fill(0);
+        opened = null;
+      }
+    }
+  } else if (opened !== null) {
     opened.fill(0);
+    opened = null;
+  }
+
+  if (openedUnder === "new") {
+    // Already under writer — no reseal (push/TOTP carry-through).
+    return {
+      result: { rowsBefore: 1, rowsAfter: 1, rewrapped: 1 },
+      rewrappedEnvelope: input.envelope,
+    };
   }
 
   const resealed = sealVaultBootCanary(input.newRootKey, input.nodeId);
@@ -449,13 +493,7 @@ export function rewrapVaultBootCanary(
     );
   }
   try {
-    const expected = Buffer.from(VAULT_BOOT_CANARY_PLAINTEXT, "utf8");
-    if (!plaintextsEqual(roundTrip, expected)) {
-      throw new VaultBootCanaryError(
-        "VAULT_BOOT_CANARY_PLAINTEXT_MISMATCH",
-        "master-key rotation: rewrapped boot canary plaintext mismatch under the new root",
-      );
-    }
+    assertCanaryPlaintext(roundTrip, "under the new root after reseal");
   } finally {
     roundTrip.fill(0);
   }

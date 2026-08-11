@@ -218,16 +218,48 @@ describe("rewrapVaultBootCanary (ZTR-1177 r2 rotation)", () => {
     }
   });
 
-  it("refuses rewrap when the old root cannot open the durable canary", () => {
+  it("refuses rewrap when neither new nor old root opens the durable canary", () => {
     const sealedA = sealVaultBootCanary(rootA, nodeId);
+    const rootC = Buffer.alloc(32, 0xc3);
     expect(() =>
       rewrapVaultBootCanary({
         oldRootKey: rootB, // wrong "old"
-        newRootKey: rootB,
+        newRootKey: rootC, // wrong "new"
         nodeId,
         envelope: sealedA,
       }),
     ).toThrow(/VAULT_BOOT_CANARY_DOES_NOT_OPEN/);
+  });
+
+  it("skips reseal when the durable canary is already under the new root (crash-resume)", () => {
+    const sealedB = sealVaultBootCanary(rootB, nodeId);
+    const { result, rewrappedEnvelope } = rewrapVaultBootCanary({
+      oldRootKey: rootA,
+      newRootKey: rootB,
+      nodeId,
+      envelope: sealedB,
+    });
+    expect(result).toEqual({ rowsBefore: 1, rowsAfter: 1, rewrapped: 1 });
+    // Carry-through — no fresh seal (identical envelope).
+    expect(rewrappedEnvelope).toBe(sealedB);
+    const opened = openVaultBootCanary(rootB, nodeId, rewrappedEnvelope);
+    try {
+      expect(Buffer.from(opened).toString("utf8")).toBe(VAULT_BOOT_CANARY_PLAINTEXT);
+    } finally {
+      opened.fill(0);
+    }
+  });
+
+  it("opens under new first when both roots could theoretically apply (writer-first)", () => {
+    // Envelope under new; old is wrong for this envelope — still succeeds via new-first.
+    const sealedB = sealVaultBootCanary(rootB, nodeId);
+    const report = rewrapVaultBootCanary({
+      oldRootKey: rootA,
+      newRootKey: rootB,
+      nodeId,
+      envelope: sealedB,
+    });
+    expect(report.rewrappedEnvelope).toBe(sealedB);
   });
 
   it("commit updates the durable row; wrong-key prove still fails closed without overwrite", async () => {

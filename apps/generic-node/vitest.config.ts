@@ -134,6 +134,16 @@ export default defineConfig({
         ),
       },
       {
+        // Closed recovery-action catalog (halt.contract). Must precede the package-root alias.
+        find: "@zucoins/generic-node-contracts/operator-halt",
+        replacement: fileURLToPath(
+          new URL(
+            "../../packages/generic-node-contracts/src/operator-halt/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
         find: "@zucoins/generic-node-contracts",
         replacement: fileURLToPath(
           new URL("../../packages/generic-node-contracts/src/index.ts", import.meta.url),

@@ -6,7 +6,7 @@
  * Normative honesty:
  * - Approve ≠ redeemed ≠ paid; node never submits SEND_EXTERNAL on-chain.
  * - Post-approve: forming → waiting for recipient to finish → landed/attention.
- * - Only implemented recovery effect kinds are actionable.
+ * - Only live (non-reserved) recovery effect kinds are actionable.
  * - TOTP is required for every money mutation; device signature is additive only.
  */
 
@@ -21,16 +21,19 @@ import {
   formatMoneyError,
   getApprovalChallenge,
   isCancelled,
+  isLiveRecoveryAction,
   listDestinationsInventory,
   listDeviceKeys,
   listSendOperationsInventory,
   operationDetailPath,
+  partitionRecoveryActions,
   pollSendState,
   postApprove,
   postBless,
   postRecoveryAction,
   postReject,
   getRecovery,
+  recoveryActionLabel,
   type ApprovalChallenge,
   type DestinationItem,
   type OperationListItem,
@@ -42,14 +45,6 @@ import {
 } from "../../lib/ops.js";
 import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
-
-/** Effect kinds the SQL recovery store can actually commit (sql-recovery-store.ts). */
-export const IMPLEMENTED_RECOVERY_ACTIONS = new Set([
-  "RETRY_OBSERVATION",
-  "ACKNOWLEDGE_KEEP_PINNED",
-  "QUARANTINE_WALLETS",
-  "RELEASE_EXPIRED_RECEIVE",
-]);
 
 function shortDigest(hex: string | null | undefined): string {
   if (!hex || hex.length < 12) return hex ?? "—";
@@ -260,8 +255,8 @@ export function ApproveInboxPage() {
 
   const recoveryAction = useTotpGatedMutation(
     async (vars: { operationId: string; action: string }, totp: string) => {
-      if (!IMPLEMENTED_RECOVERY_ACTIONS.has(vars.action)) {
-        throw new Error(`Recovery action not implemented yet: ${vars.action}`);
+      if (!isLiveRecoveryAction(vars.action)) {
+        throw new Error(`Recovery action not implemented on this node: ${vars.action}`);
       }
       const fresh = await getRecovery(vars.operationId);
       return postRecoveryAction(
@@ -717,12 +712,7 @@ export function ApproveInboxPage() {
           </h2>
           <ul className="approve-cards">
             {recoveryCards.map((a) => {
-              const implemented = a.permitted_actions.filter((x) =>
-                IMPLEMENTED_RECOVERY_ACTIONS.has(x),
-              );
-              const unimplemented = a.permitted_actions.filter(
-                (x) => !IMPLEMENTED_RECOVERY_ACTIONS.has(x),
-              );
+              const { live, unavailable } = partitionRecoveryActions(a.permitted_actions);
               return (
                 <li key={a.operation_id} className="approve-card" data-testid="approve-recovery-card">
                   <div className="approve-card-head">
@@ -748,9 +738,9 @@ export function ApproveInboxPage() {
                       {a.classification_rationale}
                     </p>
                   </div>
-                  {implemented.length > 0 ? (
+                  {live.length > 0 ? (
                     <div className="approve-action-bar" style={{ marginTop: 10 }}>
-                      {implemented.map((action) => (
+                      {live.map((action) => (
                         <button
                           key={action}
                           type="button"
@@ -762,23 +752,35 @@ export function ApproveInboxPage() {
                             recoveryAction.mutate({ operationId: a.operation_id, action });
                           }}
                         >
-                          {action}
+                          {recoveryActionLabel(action)}
                         </button>
                       ))}
                     </div>
                   ) : (
                     <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                      No implemented recovery actions available on this row.
+                      No live recovery actions available on this row.
                     </p>
                   )}
-                  {unimplemented.length > 0 ? (
-                    <p
-                      className="muted"
-                      style={{ fontSize: 12, marginTop: 6 }}
+                  {unavailable.length > 0 ? (
+                    <div
+                      style={{ marginTop: 6 }}
                       data-testid="approve-recovery-unimplemented"
                     >
-                      Not yet implemented: {unimplemented.join(", ")}
-                    </p>
+                      {unavailable.map(({ action, reason }) => (
+                        <p
+                          key={action}
+                          className="muted"
+                          style={{ fontSize: 12, margin: "4px 0" }}
+                          data-testid="approve-recovery-unavailable-item"
+                        >
+                          <button type="button" className="mini-btn" disabled aria-disabled="true">
+                            {recoveryActionLabel(action)}
+                          </button>
+                          {" — "}
+                          {reason}
+                        </p>
+                      ))}
+                    </div>
                   ) : null}
                   <div className="approve-card-foot">
                     <Link

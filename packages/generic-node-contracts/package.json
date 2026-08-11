@@ -13,6 +13,7 @@
     "./api-schema": "./dist/api-schema/index.js",
     "./auth-errors": "./dist/auth-errors/index.js",
     "./observation": "./dist/observation/index.js",
+    "./operator-halt": "./dist/operator-halt/index.js",
     "./route-policy": "./dist/route-policy/index.js",
     "./wallet-state": "./dist/wallet-state/index.js",
     "./operations/events": "./dist/operations/events.contract.js",

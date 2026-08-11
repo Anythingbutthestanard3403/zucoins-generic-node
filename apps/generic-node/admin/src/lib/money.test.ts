@@ -659,4 +659,24 @@ describe("recovery action UI honesty", () => {
       "Continue waiting for redemption",
     );
   });
+
+  it("SPA live ∪ reserved catalog exactly equals the frozen OPERATOR_RECOVERY_ACTIONS", async () => {
+    const {
+      LIVE_RECOVERY_ACTIONS,
+      RESERVED_RECOVERY_ACTIONS,
+      OPERATOR_RECOVERY_ACTIONS,
+    } = await import("./money.js");
+    const { OPERATOR_RECOVERY_ACTIONS: CONTRACT } = await import(
+      "@zucoins/generic-node-contracts/operator-halt"
+    );
+    const spa = new Set<string>([...LIVE_RECOVERY_ACTIONS, ...RESERVED_RECOVERY_ACTIONS]);
+    const contract = new Set<string>(CONTRACT);
+    expect(spa).toEqual(contract);
+    expect(OPERATOR_RECOVERY_ACTIONS).toEqual(CONTRACT);
+    // Live and reserved are disjoint and cover the catalog.
+    for (const action of RESERVED_RECOVERY_ACTIONS) {
+      expect(LIVE_RECOVERY_ACTIONS as readonly string[]).not.toContain(action);
+    }
+    expect(spa.size).toBe(CONTRACT.length);
+  });
 });

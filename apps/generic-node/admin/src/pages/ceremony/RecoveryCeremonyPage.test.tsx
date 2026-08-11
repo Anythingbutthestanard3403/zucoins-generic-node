@@ -53,34 +53,25 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
   it("shows pack create/prove on the pack step", () => {
     renderPage();
     fireEvent.click(screen.getByText(/Continue to recovery pack/i));
-    expect(screen.getByTestId("pack-secret-create")).toBeInTheDocument();
+    expect(screen.getByTestId("pack-secret-create-hint")).toBeInTheDocument();
     expect(screen.getByTestId("pack-file")).toBeInTheDocument();
   });
 
-  it("generates the pack secret instead of accepting a passcode", () => {
+  it("is generate-only — no operator-chosen seal secret field", () => {
     renderPage();
     fireEvent.click(screen.getByText(/Continue to recovery pack/i));
 
-    // No digit-passcode field survives: a ≤10^6 keyspace is enumerable offline
-    // against a pack copy, so the operator never gets to pick the seal.
+    // No digit-passcode or hand-rolled secret field: create is server generate-only.
     expect(screen.queryByTestId("pack-passcode-create")).not.toBeInTheDocument();
-    const secret = screen.getByTestId("pack-secret-create") as HTMLInputElement;
-    expect(secret).toHaveAttribute("readonly");
-    expect(secret.value).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(secret.value).not.toMatch(/^\d+$/);
+    expect(screen.queryByTestId("pack-secret-create")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pack-secret-regenerate")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pack-secret-create-hint")).toHaveTextContent(/cannot choose/i);
 
-    // Create stays disabled until the operator confirms the secret is written down —
-    // it is shown once and the node never returns it.
+    // Create stays disabled until the operator confirms they will write the shown secret.
     const create = screen.getByRole("button", { name: /Create & download pack/i });
     expect(create).toBeDisabled();
     fireEvent.click(screen.getByTestId("pack-secret-saved"));
     expect(create).toBeEnabled();
-
-    // Regenerating draws a fresh secret and re-arms the confirmation.
-    const first = secret.value;
-    fireEvent.click(screen.getByTestId("pack-secret-regenerate"));
-    expect((screen.getByTestId("pack-secret-create") as HTMLInputElement).value).not.toBe(first);
-    expect(screen.getByRole("button", { name: /Create & download pack/i })).toBeDisabled();
   });
 
   it("offers the v1 legacy opt-in and the re-issue path for superseded packs", () => {

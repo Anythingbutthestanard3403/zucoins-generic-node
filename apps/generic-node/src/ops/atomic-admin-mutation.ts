@@ -13,7 +13,13 @@ export type AtomicAdminMutationAction<TPorts, TAbort> = (
   | {
       readonly outcome: "commit";
       readonly status: number;
+      /** Bytes returned to the caller on this request (may include show-once fields). */
       readonly responseBody: unknown;
+      /**
+       * When set, these bytes are what land in the durable idempotency row and on
+       * replay. Use to strip show-once secrets so a replay cannot re-exfil the seal key.
+       */
+      readonly durableResponseBody?: unknown;
       readonly afterCommit?: () => void;
     }
   | { readonly outcome: "abort"; readonly response: TAbort }
@@ -81,20 +87,24 @@ export function createAtomicAdminMutationExecutor<TPorts>(input: {
         await client.query("ROLLBACK");
         return { outcome: "aborted", response: result.response };
       }
-      const responseBytes = Buffer.from(JSON.stringify(result.responseBody), "utf8");
+      // First-response body (may carry show-once material) vs durable replay body.
+      const liveResponseBytes = Buffer.from(JSON.stringify(result.responseBody), "utf8");
+      const durableSource =
+        result.durableResponseBody !== undefined ? result.durableResponseBody : result.responseBody;
+      const durableResponseBytes = Buffer.from(JSON.stringify(durableSource), "utf8");
       await input.idempotencyStore.recordCompleted({
         nodeId: mutation.nodeId,
         routeId: mutation.routeId,
         idempotencyKey: mutation.idempotencyKey,
         fingerprint: mutation.fingerprint,
         responseStatus: result.status,
-        responseBytes,
+        responseBytes: durableResponseBytes,
         tx: client,
       });
       afterCommit = result.afterCommit;
       await client.query("COMMIT");
       afterCommit?.();
-      return { outcome: "committed", status: result.status, responseBytes };
+      return { outcome: "committed", status: result.status, responseBytes: liveResponseBytes };
     } catch (err) {
       try { await client.query("ROLLBACK"); } catch { /* retain original */ }
       if (!isAdminIdempotencyUniqueViolation(err)) throw err;

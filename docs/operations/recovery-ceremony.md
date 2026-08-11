@@ -104,9 +104,15 @@ wallet backup.
 ## Recovery pack
 
 `POST /admin/v1/recovery-pack/create` produces `zp-node-recovery-pack-v2`: Argon2id →
-AES-256-GCM seal of the vault master key, under a secret with a **128-bit entropy floor**
-enforced at creation. `POST /admin/v1/recovery-pack/prove` opens it and is subject to an
-online lockout.
+AES-256-GCM seal of the vault master key under a **generate-only** secret. The node draws
+the seal key with CSPRNG (`generateRecoverySecret()`: Crockford base32 × 26 symbols) and
+returns it **once** on the live create response; the durable idempotency row never stores
+it. Callers must not supply `recovery_secret` — any body field value is refused
+(`caller_supplied_recovery_secret`), weak or strong. Structure guards on the generator
+reject pathological CSPRNG draws; they are not a measured content-entropy floor and are
+not an accept path for operator-chosen strings (ZTR-1220).
+
+`POST /admin/v1/recovery-pack/prove` opens a pack and is subject to an online lockout.
 
 The pack is designed to leave the host, so it must survive hostile hands. Two things follow:
 
@@ -115,20 +121,8 @@ The pack is designed to leave the host, so it must survive hostile hands. Two th
 - **Every `zp-node-recovery-pack-v1` ever exported is compromised-if-leaked.** v1 sealed under
   a 4–6 digit passcode — a keyspace of at most a million, enumerable offline against the same
   Argon2id. v1 packs still open through an explicit legacy opt-in so you can migrate. Re-issue
-  as v2 and destroy the v1 copy (ZTR-1126).
-
-Use `generateRecoverySecret()` — the sanctioned path. The operator never chooses the seal
-key. Creation accepts only that shape: exactly 26 Crockford-base32 characters
-(0-9 A-Z except I/L/O/U), with structure guards against exact and near-period tiles,
-same-character / paired-double blocks, constant-step and strided / broken sequential
-runs (including Fibonacci digit prefixes), long letter-only runs, digit/letter
-alternation and pair sequences, keyboard row/column/diagonal walks, digit-broken
-or reversed dictionary / media / passphrase skeletons, and the non-list human-pattern
-class (math digit constants such as π, ceremony year+KEY/ABC mnemonic pads, high
-Latin-vowel letter skeletons, open English n-gram density, open-lexicon cover)
-(ZTR-1220). A free-form passphrase — including Crockford-mapped, digit-broken,
-reversed dictionary phrases, or off-list English/media/geo mnemonics — is refused
-at create; do not invent one.
+  as v2 and destroy the v1 copy (ZTR-1126). Re-issue is also generate-only for the new seal
+  secret.
 
 Store the pack the way you would store a wallet backup, and store the vault root KDF salt
 with it — see [`restore.md`](restore.md).

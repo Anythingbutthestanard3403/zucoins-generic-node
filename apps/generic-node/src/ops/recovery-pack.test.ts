@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   createRecoveryPack,
+  createRecoveryPackForTests,
   estimateRecoverySecretEntropyBits,
   generateRecoverySecret,
   openRecoveryPack,
@@ -41,7 +42,7 @@ const LEGACY_V1_MASTER = "legacy-v1-master-key-32chars!!!!!";
  * Argon2id at 64 MiB costs ~2 s per derivation, so this file seals once and
  * re-reads rather than re-sealing per test.
  */
-const V2_PACK = createRecoveryPack({ vaultMasterKey: MASTER, secret: SECRET });
+const V2_PACK = createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: SECRET });
 
 describe("recovery secret entropy floor", () => {
   it("refuses digits only regardless of length", () => {
@@ -133,11 +134,11 @@ describe("recovery secret entropy floor", () => {
       expect(secret).toHaveLength(26);
       expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
       expect(recoverySecretWeakness(secret)).toMatch(want);
-      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
         RecoveryPackError,
       );
       try {
-        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
         expect.unreachable(`residual must not seal: ${secret}`);
       } catch (e) {
         expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -176,11 +177,11 @@ describe("recovery secret entropy floor", () => {
       expect(secret).toHaveLength(26);
       expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
       expect(recoverySecretWeakness(secret)).toMatch(residualWant);
-      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
         RecoveryPackError,
       );
       try {
-        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
         expect.unreachable(`r2 residual must not seal: ${secret}`);
       } catch (e) {
         expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -235,11 +236,11 @@ describe("recovery secret entropy floor", () => {
       const weakness = recoverySecretWeakness(secret);
       expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
       expect(weakness).toMatch(residualWant);
-      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
         RecoveryPackError,
       );
       try {
-        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
         expect.unreachable(`r3 residual must not seal: ${secret}`);
       } catch (e) {
         expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -269,11 +270,11 @@ describe("recovery secret entropy floor", () => {
       const weakness = recoverySecretWeakness(secret);
       expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
       expect(weakness).toMatch(residualWant);
-      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
         RecoveryPackError,
       );
       try {
-        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
         expect.unreachable(`r4 residual must not seal: ${secret}`);
       } catch (e) {
         expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -302,11 +303,11 @@ describe("entropy floor is enforced at creation", () => {
   // Independent of RECOVERY_PACK_PROVE_FAIL_THRESHOLD: no lockout store, no HTTP,
   // no prove call. A weak secret can never produce an artifact in the first place.
   it("refuses to build a pack under a digit passcode", () => {
-    expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret: "482913" })).toThrow(
+    expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "482913" })).toThrow(
       RecoveryPackError,
     );
     try {
-      createRecoveryPack({ vaultMasterKey: MASTER, secret: "482913" });
+      createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "482913" });
       expect.unreachable("digit passcode must not seal a pack");
     } catch (e) {
       expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -317,7 +318,7 @@ describe("entropy floor is enforced at creation", () => {
 
   it("refuses to build a pack under a sub-floor / non-shape secret", () => {
     try {
-      createRecoveryPack({ vaultMasterKey: MASTER, secret: "Tr0ub4dor&3" });
+      createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "Tr0ub4dor&3" });
       expect.unreachable("sub-floor secret must not seal a pack");
     } catch (e) {
       expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -360,9 +361,50 @@ describe("entropy floor is enforced at creation", () => {
       "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
     ];
     for (const secret of falseAccepts) {
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+    }
+  });
+
+  it("refuses caller-supplied secrets on create (generate-only, ZTR-1220 r6)", () => {
+    const residuals = [
+      // Strong Crockford×26 that would clear structure heuristics.
+      "9F3KQ2XW7HB4TMZ0RCJ8PNVA5D",
+      // Review B r5 residual human mnemonics (1999 pad / 2024-no-KEY brands).
+      "HARRYP0TTERWAND1999MNPQRSX",
+      "GAME0FTHR0NES1999MNPQRSXAB",
+      "N4RVT0VZVM4K11999MNPQRSXAB",
+      "0NEP1ECE1VFFY1999MNPQRSXAB",
+      "ATT4CK0NT1T4N1999MNPQRSXAB",
+      "M1NCR4FTD1AM0ND1999MNPQRSX",
+      "F0RTN1TEV1CT0RY1999MNPQRSX",
+      "R0B10X0BG1N1999MNPQRSXAB2C",
+      "T1KT0KD4NCE1999MNPQRSXAB2C",
+      "1NST4GR4MF4ME1999MNPQRSXAB",
+      "Y00TVBEV1R411999MNPQRSXAB2",
+      "1NCEPT10NMATR1X2024MNPQRSX",
+      "MADMAXFVRYR0AD2024MNPQRSXX",
+      "GVARD1ANSGA1AXY2024MNPQRSX",
+      "C0CAC01AC1ASS1C2024MNPQRSX",
+      "AD1DASSVPERSTAR2024MNPQRSX",
+      "S4MSVNGGA1AXYS24V1TRAMNPQX",
+      "H4PPYB1RTHD4YT0Y0V2024MNPX",
+      "SH0ES0CKSH4TB00TC04TXABXXA",
+      "ETHPREVMC0NTRACT2024MNPQRX",
+      "GVTENT4G411EFRE2024MNPQRSX",
+      "H01AMVND0AM1G0S2024MNPQRSX",
+    ];
+    for (const secret of residuals) {
       expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
         RecoveryPackError,
       );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`caller-supplied must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("caller_supplied_secret");
+      }
     }
   });
 
@@ -467,7 +509,7 @@ describe("createRecoveryPack / openRecoveryPack", () => {
   });
 
   it("refuses short master", () => {
-    expect(() => createRecoveryPack({ vaultMasterKey: "short", secret: SECRET })).toThrow(
+    expect(() => createRecoveryPackForTests({ vaultMasterKey: "short", secret: SECRET })).toThrow(
       RecoveryPackError,
     );
   });
@@ -553,19 +595,18 @@ describe("reissueRecoveryPack", () => {
   });
 
   describe("from a v2 pack", () => {
-    const NEXT_SECRET = "8HZ4PQ2WKX7NRB0MJ5TVDC93FA";
     let reissued: ReturnType<typeof reissueRecoveryPack>;
     beforeAll(() => {
       reissued = reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: SECRET,
-        newSecret: NEXT_SECRET,
       });
     });
 
-    it("re-seals under the caller-supplied secret as a distinct artifact", () => {
+    it("re-seals under a generated secret as a distinct artifact", () => {
       expect(reissued.previousVersion).toBe(2);
-      expect(reissued.secret).toBe(NEXT_SECRET);
+      expect(recoverySecretWeakness(reissued.secret)).toBeNull();
+      expect(reissued.secret).not.toBe(SECRET);
       expect(reissued.envelope.pack_content_sha256).not.toBe(
         V2_PACK.envelope.pack_content_sha256,
       );
@@ -573,7 +614,7 @@ describe("reissueRecoveryPack", () => {
 
     it("opens under the new secret", () => {
       expect(
-        openRecoveryPack({ fileBytes: reissued.fileBytes, secret: NEXT_SECRET })
+        openRecoveryPack({ fileBytes: reissued.fileBytes, secret: reissued.secret })
           .vault_master_key,
       ).toBe(MASTER);
     });
@@ -585,14 +626,24 @@ describe("reissueRecoveryPack", () => {
     ).toThrow(/superseded v1 recovery pack/);
   });
 
-  it("refuses a weak new secret before it decrypts anything", () => {
+  it("refuses a caller-supplied replacement secret (generate-only)", () => {
     expect(() =>
       reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: SECRET,
         newSecret: "123456",
       }),
-    ).toThrow(/digits only/);
+    ).toThrow(/generate-only/);
+    try {
+      reissueRecoveryPack({
+        fileBytes: V2_PACK.fileBytes,
+        secret: SECRET,
+        newSecret: "8HZ4PQ2WKX7NRB0MJ5TVDC93FA",
+      });
+      expect.unreachable("caller-supplied newSecret must not seal");
+    } catch (e) {
+      expect((e as RecoveryPackError).code).toBe("caller_supplied_secret");
+    }
   });
 
   it("refuses when the existing secret is wrong", () => {
@@ -600,7 +651,6 @@ describe("reissueRecoveryPack", () => {
       reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: WRONG_SECRET,
-        newSecret: "5T7YQ2ZXK4B0NRJ8MHVDC93FA",
       }),
     ).toThrow(RecoveryPackError);
   });

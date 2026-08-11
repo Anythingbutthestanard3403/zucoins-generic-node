@@ -915,6 +915,11 @@ export interface RecoveryPackCreateResponse {
   readonly filename: string;
   readonly pack_file_b64: string;
   readonly content_type: string;
+  /**
+   * Server-generated seal secret — present on the first create response only.
+   * Idempotent replay omits it (durable row is secret-free). Write it down then.
+   */
+  readonly recovery_secret?: string;
 }
 
 export interface RecoveryPackProveResponse {
@@ -1719,7 +1724,6 @@ export function generateRecoveryPackSecret(): string {
 
 export async function postRecoveryPackCreate(
   body: {
-    readonly recovery_secret: string;
     readonly vault_master_key?: string;
     /** Re-issue source: the existing pack file, opened server-side. */
     readonly from_pack?: string;
@@ -1728,6 +1732,7 @@ export async function postRecoveryPackCreate(
   },
   totp: string,
 ): Promise<RecoveryPackCreateResponse> {
+  // Generate-only: never send recovery_secret — node seals and returns it once.
   return api<RecoveryPackCreateResponse>("/recovery-pack/create", {
     method: "POST",
     body: JSON.stringify(body),

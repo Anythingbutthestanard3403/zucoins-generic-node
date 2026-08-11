@@ -32,7 +32,11 @@ import {
   type CeremonyJobSnapshot,
 } from "../src/ops/admin-recovery-ceremony.js";
 import { createMemoryRecoveryPackLockoutStore } from "../src/ops/recovery-pack-lockout.js";
-import { createRecoveryPack, RECOVERY_PACK_FORMAT } from "../src/ops/recovery-pack.js";
+import {
+  createRecoveryPackForTests,
+  openRecoveryPack,
+  RECOVERY_PACK_FORMAT,
+} from "../src/ops/recovery-pack.js";
 import { createTestAdminAtomicDeps } from "./support/admin-atomic.js";
 import {
   createVirginVaultMasterState,
@@ -236,7 +240,7 @@ describe("admin recovery-pack create", () => {
     const res = await router(
       "POST",
       "/admin/v1/recovery-pack/create",
-      Buffer.from(JSON.stringify({ recovery_secret: PACK_SECRET, vault_master_key: MASTER })),
+      Buffer.from(JSON.stringify({ vault_master_key: MASTER })),
       { "content-type": "application/json", origin: ORIGIN },
     );
     expect(res.status).toBe(401);
@@ -249,7 +253,7 @@ describe("admin recovery-pack create", () => {
     const res = await router(
       "POST",
       "/admin/v1/recovery-pack/create",
-      Buffer.from(JSON.stringify({ recovery_secret: PACK_SECRET, vault_master_key: MASTER })),
+      Buffer.from(JSON.stringify({ vault_master_key: MASTER })),
       {
         cookie,
         origin: ORIGIN,
@@ -262,14 +266,14 @@ describe("admin recovery-pack create", () => {
     expect(res.body).not.toContain(MASTER);
   });
 
-  it("creates pack from body vault_master_key; audits digest only", async () => {
+  it("creates pack from body vault_master_key; audits digest only; returns secret once", async () => {
     const { router, userStore, auditEvents } = makeRouter({});
     await enrolAdmin(userStore, "pw-good-enough-12");
     const { cookie, csrf } = await login(router, "pw-good-enough-12");
     const res = await router(
       "POST",
       "/admin/v1/recovery-pack/create",
-      Buffer.from(JSON.stringify({ recovery_secret: PACK_SECRET, vault_master_key: MASTER })),
+      Buffer.from(JSON.stringify({ vault_master_key: MASTER })),
       authHeaders(cookie, csrf, nowMs),
     );
     expect(res.status).toBe(200);
@@ -279,18 +283,26 @@ describe("admin recovery-pack create", () => {
       pack_content_sha256: string;
       pack_file_b64: string;
       content_type: string;
+      recovery_secret: string;
     };
     expect(body.object).toBe("recovery_pack_create");
     expect(body.format).toBe(RECOVERY_PACK_FORMAT);
     expect(body.content_type).toBe("application/octet-stream");
     expect(body.pack_content_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.recovery_secret).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(res.body).not.toContain(MASTER);
-    expect(res.body).not.toContain(PACK_SECRET);
 
     const fileUtf8 = Buffer.from(body.pack_file_b64, "base64").toString("utf8");
     expect(fileUtf8).not.toContain(MASTER);
+    expect(fileUtf8).not.toContain(body.recovery_secret);
     const env = JSON.parse(fileUtf8) as { format: string };
     expect(env.format).toBe(RECOVERY_PACK_FORMAT);
+    // Round-trip open under the returned secret.
+    const opened = openRecoveryPack({
+      fileBytes: Buffer.from(body.pack_file_b64, "base64"),
+      secret: body.recovery_secret,
+    });
+    expect(opened.vault_master_key).toBe(MASTER);
 
     expect(auditEvents).toHaveLength(1);
     const audit = auditEvents[0] as {
@@ -301,6 +313,7 @@ describe("admin recovery-pack create", () => {
     expect(audit.kind).toBe("pack_create");
     expect(audit.pack_content_sha256).toBe(body.pack_content_sha256);
     expect(JSON.stringify(audit)).not.toContain(MASTER);
+    expect(JSON.stringify(audit)).not.toContain(body.recovery_secret);
   });
 
   it("creates pack from pending show-once plaintext without body master", async () => {
@@ -315,17 +328,15 @@ describe("admin recovery-pack create", () => {
     const res = await router(
       "POST",
       "/admin/v1/recovery-pack/create",
-      Buffer.from(JSON.stringify({ recovery_secret: PACK_SECRET })),
+      Buffer.from(JSON.stringify({})),
       authHeaders(cookie, csrf, nowMs),
     );
     expect(res.status).toBe(200);
-    const body = JSON.parse(res.body) as { pack_file_b64: string };
+    const body = JSON.parse(res.body) as { pack_file_b64: string; recovery_secret: string };
     expect(res.body).not.toContain(pending);
-    // Round-trip decrypt offline proves correct seal
-    const { openRecoveryPack } = await import("../src/ops/recovery-pack.js");
     const opened = openRecoveryPack({
       fileBytes: Buffer.from(body.pack_file_b64, "base64"),
-      secret: PACK_SECRET,
+      secret: body.recovery_secret,
     });
     expect(opened.vault_master_key).toBe(pending);
   });
@@ -346,9 +357,8 @@ describe("admin recovery-pack create", () => {
     );
     expect(res.status).toBe(400);
     const err = JSON.parse(res.body) as { error: { code: string; message: string } };
-    expect(err.error.code).toBe("weak_recovery_secret");
-    // Non-oracular: names the rule that failed, never the master, the secret or a pack.
-    expect(err.error.message).toMatch(/digits only/);
+    expect(err.error.code).toBe("caller_supplied_recovery_secret");
+    expect(err.error.message).toMatch(/generate-only|must not be supplied/);
     expect(res.body).not.toContain(MASTER);
     expect(res.body).not.toContain("482913");
     expect(res.body).not.toContain("pack_file_b64");
@@ -367,8 +377,8 @@ describe("admin recovery-pack create", () => {
     );
     expect(res.status).toBe(400);
     const err = JSON.parse(res.body) as { error: { code: string; message: string } };
-    expect(err.error.code).toBe("weak_recovery_secret");
-    expect(err.error.message).toMatch(/Crockford base32 alphabet|128 bits of entropy/);
+    expect(err.error.code).toBe("caller_supplied_recovery_secret");
+    expect(err.error.message).toMatch(/generate-only|must not be supplied/);
     expect(res.body).not.toContain("pack_file_b64");
 
     // Ticket false-accept: repeated substring with ≥10 distinct under old proxy.
@@ -384,7 +394,7 @@ describe("admin recovery-pack create", () => {
       authHeaders(cookie, csrf, nowMs + 30_000),
     );
     expect(tiled.status).toBe(400);
-    expect(JSON.parse(tiled.body).error.code).toBe("weak_recovery_secret");
+    expect(JSON.parse(tiled.body).error.code).toBe("caller_supplied_recovery_secret");
 
     // Review B residual: Crockford×26 near-tile / dictionary / step-k still 400.
     const residuals = [
@@ -436,14 +446,57 @@ describe("admin recovery-pack create", () => {
         authHeaders(cookie, csrf, nowMs + 60_000 + i * 30_000),
       );
       expect(resR.status).toBe(400);
-      expect(JSON.parse(resR.body).error.code).toBe("weak_recovery_secret");
+      expect(JSON.parse(resR.body).error.code).toBe("caller_supplied_recovery_secret");
       expect(resR.body).not.toContain("pack_file_b64");
     }
   });
 
   it("re-issues a pack from an existing one without the operator handling the master", async () => {
-    const { fileBytes } = createRecoveryPack({ vaultMasterKey: MASTER, secret: PACK_SECRET });
+    const { fileBytes } = createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: PACK_SECRET });
     const { router, userStore, auditEvents } = makeRouter({});
+    await enrolAdmin(userStore, "pw-good-enough-12");
+    const { cookie, csrf } = await login(router, "pw-good-enough-12");
+    const res = await router(
+      "POST",
+      "/admin/v1/recovery-pack/create",
+      Buffer.from(
+        JSON.stringify({
+          from_pack: fileBytes.toString("utf8"),
+          from_pack_secret: PACK_SECRET,
+        }),
+      ),
+      authHeaders(cookie, csrf, nowMs),
+    );
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as {
+      pack_file_b64: string;
+      pack_content_sha256: string;
+      previous_pack_content_sha256: string | null;
+      recovery_secret: string;
+    };
+    // The replacement carries the same master under a generate-only secret.
+    expect(body.previous_pack_content_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.pack_content_sha256).not.toBe(body.previous_pack_content_sha256);
+    expect(body.recovery_secret).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(body.recovery_secret).not.toBe(PACK_SECRET);
+    expect(
+      openRecoveryPack({
+        fileBytes: Buffer.from(body.pack_file_b64, "base64"),
+        secret: body.recovery_secret,
+      }).vault_master_key,
+    ).toBe(MASTER);
+    expect(res.body).not.toContain(MASTER);
+    // Destruction trail: the audit names the artifact that must now be destroyed.
+    expect(
+      (auditEvents as { previous_pack_content_sha256?: string }[]).some(
+        (e) => e.previous_pack_content_sha256 === body.previous_pack_content_sha256,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses caller-supplied recovery_secret on re-issue (generate-only)", async () => {
+    const { fileBytes } = createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: PACK_SECRET });
+    const { router, userStore } = makeRouter({});
     await enrolAdmin(userStore, "pw-good-enough-12");
     const { cookie, csrf } = await login(router, "pw-good-enough-12");
     const res = await router(
@@ -458,32 +511,39 @@ describe("admin recovery-pack create", () => {
       ),
       authHeaders(cookie, csrf, nowMs),
     );
-    expect(res.status).toBe(200);
-    const body = JSON.parse(res.body) as {
-      pack_file_b64: string;
-      pack_content_sha256: string;
-      previous_pack_content_sha256: string | null;
-    };
-    const { openRecoveryPack, peekPackContentSha256 } = await import(
-      "../src/ops/recovery-pack.js"
-    );
-    // The replacement carries the same master under the new secret only.
-    expect(body.previous_pack_content_sha256).toBe(peekPackContentSha256(fileBytes));
-    expect(body.pack_content_sha256).not.toBe(body.previous_pack_content_sha256);
-    expect(
-      openRecoveryPack({
-        fileBytes: Buffer.from(body.pack_file_b64, "base64"),
-        secret: PACK_SECRET_ALT,
-      }).vault_master_key,
-    ).toBe(MASTER);
-    expect(res.body).not.toContain(MASTER);
-    expect(res.body).not.toContain(PACK_SECRET_ALT);
-    // Destruction trail: the audit names the artifact that must now be destroyed.
-    expect(
-      (auditEvents as { previous_pack_content_sha256?: string }[]).some(
-        (e) => e.previous_pack_content_sha256 === body.previous_pack_content_sha256,
-      ),
-    ).toBe(true);
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error.code).toBe("caller_supplied_recovery_secret");
+    expect(res.body).not.toContain("pack_file_b64");
+  });
+
+  it("refuses Review B r5 residual mnemonics via caller-supplied create (1999 / 2024-no-KEY)", async () => {
+    const residuals = [
+      "HARRYP0TTERWAND1999MNPQRSX",
+      "GAME0FTHR0NES1999MNPQRSXAB",
+      "1NCEPT10NMATR1X2024MNPQRSX",
+      "C0CAC01AC1ASS1C2024MNPQRSX",
+      "H01AMVND0AM1G0S2024MNPQRSX",
+      "9F3KQ2XW7HB4TMZ0RCJ8PNVA5D", // strong shape still refused
+    ];
+    const { router, userStore } = makeRouter({});
+    await enrolAdmin(userStore, "pw-good-enough-12");
+    const { cookie, csrf } = await login(router, "pw-good-enough-12");
+    for (let i = 0; i < residuals.length; i++) {
+      const resR = await router(
+        "POST",
+        "/admin/v1/recovery-pack/create",
+        Buffer.from(
+          JSON.stringify({
+            recovery_secret: residuals[i],
+            vault_master_key: MASTER,
+          }),
+        ),
+        authHeaders(cookie, csrf, nowMs + i * 30_000),
+      );
+      expect(resR.status).toBe(400);
+      expect(JSON.parse(resR.body).error.code).toBe("caller_supplied_recovery_secret");
+      expect(resR.body).not.toContain("pack_file_b64");
+    }
   });
 });
 
@@ -511,7 +571,7 @@ describe("admin recovery-pack prove", () => {
   });
 
   it("decrypts pack and starts ceremony with master (engine sole writer)", async () => {
-    const { fileBytes } = createRecoveryPack({
+    const { fileBytes } = createRecoveryPackForTests({
       vaultMasterKey: MASTER,
       secret: PACK_SECRET,
     });
@@ -560,7 +620,7 @@ describe("admin recovery-pack prove", () => {
   });
 
   it("wrong pack secret does not start ceremony; generic error", async () => {
-    const { fileBytes } = createRecoveryPack({
+    const { fileBytes } = createRecoveryPackForTests({
       vaultMasterKey: MASTER,
       secret: PACK_SECRET,
     });
@@ -595,7 +655,7 @@ describe("admin recovery-pack prove", () => {
     });
     await enrolAdmin(userStore, "pw-good-enough-12");
     const { cookie, csrf } = await login(router, "pw-good-enough-12");
-    const { fileBytes } = createRecoveryPack({
+    const { fileBytes } = createRecoveryPackForTests({
       vaultMasterKey: MASTER,
       secret: PACK_SECRET,
     });
@@ -644,7 +704,7 @@ describe("admin recovery-pack prove", () => {
     const { router, userStore } = makeRouter({ withRunner: false });
     await enrolAdmin(userStore, "pw-good-enough-12");
     const { cookie, csrf } = await login(router, "pw-good-enough-12");
-    const { fileBytes } = createRecoveryPack({
+    const { fileBytes } = createRecoveryPackForTests({
       vaultMasterKey: MASTER,
       secret: PACK_SECRET,
     });

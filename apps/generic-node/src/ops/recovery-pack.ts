@@ -175,6 +175,7 @@ export class RecoveryPackError extends Error {
     | "invalid_payload"
     | "master_key_too_short"
     | "weak_secret"
+    | "caller_supplied_secret"
     | "legacy_pack_v1";
   constructor(code: RecoveryPackError["code"], message: string) {
     super(message);
@@ -1216,13 +1217,17 @@ function deriveKey(secret: string, salt: Uint8Array): Uint8Array {
  * Build a recovery pack file (UTF-8 JSON bytes). Caller supplies vault master;
  * this never logs it. Zeroizes derived key material before return.
  *
- * Omit `secret` to get a generated 130-bit one — that is the intended call. A
- * caller-supplied secret must clear the entropy floor at *creation*: once the
- * artifact exists the seal is fixed and no server-side control can help it.
+ * Generate-only (ZTR-1220 r6): the seal secret is always a server-side CSPRNG
+ * draw via generateRecoverySecret(). Caller-supplied secrets are refused so a
+ * hand-rolled mnemonic cannot weaken custody even when it clears structure
+ * heuristics. Once the artifact exists the seal is fixed.
  */
 export function createRecoveryPack(input: {
   readonly vaultMasterKey: string;
-  /** Optional — generated when omitted. Must clear the entropy floor. */
+  /**
+   * Forbidden on the production seal path. Present only so a mistaken caller
+   * gets an explicit refusal rather than silent ignore.
+   */
   readonly secret?: string;
   /** Test hook — fixed salt (must be ≥16 bytes). */
   readonly salt?: Uint8Array;
@@ -1234,11 +1239,57 @@ export function createRecoveryPack(input: {
   /** The secret the pack is sealed under — show once, never persist. */
   readonly secret: string;
 } {
-  const secret = input.secret ?? generateRecoverySecret();
-  const weakness = recoverySecretWeakness(secret);
+  if (input.secret !== undefined) {
+    throw new RecoveryPackError(
+      "caller_supplied_secret",
+      "recovery pack create is generate-only — do not supply recovery_secret; the node seals under a CSPRNG secret and returns it once",
+    );
+  }
+  return sealRecoveryPack({
+    vaultMasterKey: input.vaultMasterKey,
+    secret: generateRecoverySecret(),
+    salt: input.salt,
+    nonce: input.nonce,
+  });
+}
+
+/**
+ * Test / fixture seal under a fixed secret that already clears
+ * recoverySecretWeakness. Production create/reissue never call this.
+ */
+export function createRecoveryPackForTests(input: {
+  readonly vaultMasterKey: string;
+  readonly secret: string;
+  readonly salt?: Uint8Array;
+  readonly nonce?: Uint8Array;
+}): {
+  readonly envelope: RecoveryPackEnvelope;
+  readonly fileBytes: Buffer;
+  readonly secret: string;
+} {
+  const weakness = recoverySecretWeakness(input.secret);
   if (weakness !== null) {
     throw new RecoveryPackError("weak_secret", weakness);
   }
+  return sealRecoveryPack({
+    vaultMasterKey: input.vaultMasterKey,
+    secret: input.secret,
+    salt: input.salt,
+    nonce: input.nonce,
+  });
+}
+
+function sealRecoveryPack(input: {
+  readonly vaultMasterKey: string;
+  readonly secret: string;
+  readonly salt?: Uint8Array;
+  readonly nonce?: Uint8Array;
+}): {
+  readonly envelope: RecoveryPackEnvelope;
+  readonly fileBytes: Buffer;
+  readonly secret: string;
+} {
+  const secret = input.secret;
   if (input.vaultMasterKey.length < 32) {
     throw new RecoveryPackError(
       "master_key_too_short",
@@ -1461,14 +1512,17 @@ export function openRecoveryPack(input: {
 /**
  * Re-seal an existing pack as v2. The master never leaves this call — it is the
  * only way to replace a compromised-if-leaked v1 artifact without the operator
- * handling the raw vault master key. `newSecret` is generated when omitted and
- * is held to the same entropy floor as any other creation.
+ * handling the raw vault master key. The replacement seal secret is always
+ * generate-only (ZTR-1220 r6) — same policy as createRecoveryPack.
  */
 export function reissueRecoveryPack(input: {
   readonly fileBytes: Uint8Array | string;
   /** Secret the *existing* pack is sealed under (a v1 digit passcode is fine). */
   readonly secret: string;
-  /** Secret for the replacement pack — generated when omitted. */
+  /**
+   * Forbidden on the production re-issue path. Present so a mistaken caller
+   * gets an explicit refusal rather than silent ignore.
+   */
   readonly newSecret?: string;
   /** Explicit opt-in when the existing pack is v1. */
   readonly allowLegacyV1?: boolean;
@@ -1485,11 +1539,11 @@ export function reissueRecoveryPack(input: {
   readonly previousVersion: 1 | 2;
   readonly previousPackContentSha256: string | null;
 } {
-  // Check the replacement secret before decrypting anything: a re-issue that is
-  // going to be refused should never unseal the master in the first place.
   if (input.newSecret !== undefined) {
-    const weakness = recoverySecretWeakness(input.newSecret);
-    if (weakness !== null) throw new RecoveryPackError("weak_secret", weakness);
+    throw new RecoveryPackError(
+      "caller_supplied_secret",
+      "recovery pack re-issue is generate-only — do not supply a replacement secret; the node seals under a CSPRNG secret and returns it once",
+    );
   }
   const previousPackContentSha256 = peekPackContentSha256(input.fileBytes);
   const opened = openRecoveryPack({
@@ -1501,7 +1555,6 @@ export function reissueRecoveryPack(input: {
   try {
     const built = createRecoveryPack({
       vaultMasterKey: holder.master,
-      ...(input.newSecret === undefined ? {} : { secret: input.newSecret }),
       salt: input.salt,
       nonce: input.nonce,
     });

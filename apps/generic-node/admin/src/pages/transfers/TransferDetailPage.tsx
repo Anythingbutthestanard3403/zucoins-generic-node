@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { StatusTag } from "../../components/StatusTag.js";
 import { ApiError } from "../../lib/api.js";
@@ -133,6 +133,16 @@ export function TransferDetailPage() {
     },
   });
 
+  // Device signature is over the challenge preimage, not the TOTP. Capture once
+  // per Approve click so a wrong-code re-prompt does not re-run WebCrypto or
+  // re-fetch the challenge (ZTR-1194).
+  const approveDeviceRef = useRef<{
+    operationId: string;
+    nonce: string;
+    device_key_id: string | null;
+    device_signature: string | null;
+  } | null>(null);
+
   const approve = useTotpGatedMutation(
     async (_: void, totp: string) => {
       const data = q.data;
@@ -140,24 +150,34 @@ export function TransferDetailPage() {
         throw new Error("No open approval challenge");
       }
       const c = data.challenge;
-      // One-tap device sign over server-issued preimage_text (byte-exact).
-      // TOTP remains required; device signature is additive (TOTP floor).
-      let device_key_id: string | null = null;
-      let device_signature: string | null = null;
-      try {
-        const keys = await listDeviceKeys();
-        const locals = await listLocalDeviceRecords();
-        const localIds = new Set(locals.map((l) => l.id));
-        const match = keys.find((k) => localIds.has(k.id)) ?? keys[0];
-        if (match !== undefined) {
-          const local = await getDeviceRecord(match.id);
-          if (local !== null) {
-            device_key_id = match.id;
-            device_signature = await signPreimage(local.privateKey, c.preimage_text);
+      let held = approveDeviceRef.current;
+      if (held === null || held.operationId !== id || held.nonce !== c.nonce) {
+        // One-tap device sign over server-issued preimage_text (byte-exact).
+        // TOTP remains required; device signature is additive (TOTP floor).
+        let device_key_id: string | null = null;
+        let device_signature: string | null = null;
+        try {
+          const keys = await listDeviceKeys();
+          const locals = await listLocalDeviceRecords();
+          const localIds = new Set(locals.map((l) => l.id));
+          const match = keys.find((k) => localIds.has(k.id)) ?? keys[0];
+          if (match !== undefined) {
+            const local = await getDeviceRecord(match.id);
+            if (local !== null) {
+              device_key_id = match.id;
+              device_signature = await signPreimage(local.privateKey, c.preimage_text);
+            }
           }
+        } catch {
+          // Fall through: TOTP-only path if device unavailable (server may still require device).
         }
-      } catch {
-        // Fall through: TOTP-only path if device unavailable (server may still require device).
+        held = {
+          operationId: id,
+          nonce: c.nonce,
+          device_key_id,
+          device_signature,
+        };
+        approveDeviceRef.current = held;
       }
       const result = await postApprove(
         id,
@@ -165,11 +185,12 @@ export function TransferDetailPage() {
           challenge_nonce: c.nonce,
           expected_row_version: c.row_version,
           preimage_sha256: c.preimage_sha256,
-          device_key_id,
-          device_signature,
+          device_key_id: held.device_key_id,
+          device_signature: held.device_signature,
         },
         totp,
       );
+      approveDeviceRef.current = null;
       const polled = await pollSendState(id);
       setPollStatus(polled.status === "unknown" ? result.status : polled.status);
       return result;
@@ -178,6 +199,7 @@ export function TransferDetailPage() {
       title: "Approve external send",
       detail: `Review exact tuple → device sign → fresh TOTP for ${id}`,
       onSuccess: () => {
+        approveDeviceRef.current = null;
         setErr(null);
         setMsg("Approved. Polling state…");
         void qc.invalidateQueries({ queryKey: ["transfer-detail", id] });
@@ -185,6 +207,8 @@ export function TransferDetailPage() {
       },
       onError: (e) => {
         if (isCancelled(e)) return;
+        // Terminal only — withTotpRetry holds the ref across in-loop re-prompts.
+        approveDeviceRef.current = null;
         setMsg(null);
         setErr(formatMoneyError(e, "Approve failed"));
       },

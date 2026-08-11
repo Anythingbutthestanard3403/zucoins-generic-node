@@ -359,7 +359,7 @@ describe("G4 dual-control policy", () => {
 
     it("still collapses a protocol-invalid approve to the opaque code", async () => {
       const res = await challengeThenApprove({ challenge_nonce: randomUUID() });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("approval_rejected");
     });
 
@@ -874,7 +874,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
         mode: "required",
         device: { keyId: null, signature: null },
       });
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
       expect(res.body.error?.code).toBe("approval_rejected");
       expect(JSON.stringify(res.body)).not.toMatch(/device_required|totp/i);
     });
@@ -955,7 +955,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
       expect(body.method).toBe("TOTP_AND_DEVICE");
     });
 
-    it("optional policy + volunteered bad device sig → 403 approval_rejected (opaque)", async () => {
+    it("optional policy + volunteered bad device sig → 401 approval_rejected (opaque)", async () => {
       const pair = generateTestKeyPair();
       const other = generateTestKeyPair();
       const challengeStore = new InMemoryApprovalChallengeStore();
@@ -1016,7 +1016,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
           "x-zp-totp": totpNow(),
         },
       );
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
       const body = JSON.parse(res.body) as { error?: { code: string } };
       expect(body.error?.code).toBe("approval_rejected");
       expect(res.body).not.toMatch(/device_signature_invalid|device_required|totp/i);

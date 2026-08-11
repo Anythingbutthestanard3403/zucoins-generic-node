@@ -67,7 +67,13 @@ export const SEND_APPROVE_ROUTE = "/admin/v1/external-sends/:operation_id/approv
 // Opaque factor-failure envelope. Every non-success path the HTTP layer may surface
 // collapses to this single shape so body-diffing across failure modes reveals nothing.
 export const APPROVAL_FACTOR_FAILURE_CODE = "approval_rejected" as const;
-export const APPROVAL_FACTOR_FAILURE_HTTP_STATUS = 403 as const;
+// Factor failures are authentication-class (wrong TOTP, bad device sig, stale
+// challenge). 401 matches OPERATOR_SESSION never-403 and lets the SPA treat the
+// envelope as a re-promptable step-up challenge (ZTR-1194). Body stays opaque.
+export const APPROVAL_FACTOR_FAILURE_HTTP_STATUS = 401 as const;
+// Doc 01 §4.2: deployment-policy denial stays distinguishable and is not a
+// re-promptable factor challenge — keep 403.
+export const APPROVAL_POLICY_DENIAL_HTTP_STATUS = 403 as const;
 
 // Deployment-policy denial. Doc 01 §4.2 requires optional node policy to stay
 // distinguishable from protocol validity, so a dual-control refusal carries its own
@@ -254,14 +260,17 @@ export type ApproveOutcome =
 
 export function toOpaqueApprovalFailure(reason: ApprovalRejectReason): {
   readonly code: typeof APPROVAL_FACTOR_FAILURE_CODE | typeof APPROVAL_POLICY_DENIAL_CODE;
-  readonly httpStatus: typeof APPROVAL_FACTOR_FAILURE_HTTP_STATUS;
+  readonly httpStatus:
+    | typeof APPROVAL_FACTOR_FAILURE_HTTP_STATUS
+    | typeof APPROVAL_POLICY_DENIAL_HTTP_STATUS;
 } {
-  // Policy denial is distinguishable (§4.2); every FACTOR reason still collapses
-  // to one envelope so body-diffing cannot reveal which factor failed.
+  // Policy denial is distinguishable (§4.2) and keeps 403; every FACTOR reason
+  // still collapses to one 401 envelope so body-diffing cannot reveal which
+  // factor failed (ZTR-1194).
   if (reason === APPROVAL_POLICY_DENIAL_CODE) {
     return {
       code: APPROVAL_POLICY_DENIAL_CODE,
-      httpStatus: APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
+      httpStatus: APPROVAL_POLICY_DENIAL_HTTP_STATUS,
     };
   }
   return {

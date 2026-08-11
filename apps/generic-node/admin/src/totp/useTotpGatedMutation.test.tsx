@@ -251,3 +251,173 @@ describe("expired session on TOTP-gated money mutation (ZTR-1195 D1)", () => {
     expect(useAuth.getState().user).not.toBeNull();
   });
 });
+
+describe("approve opaque factor failure re-prompt (ZTR-1194)", () => {
+  const APPROVAL_REJECTED = {
+    error: { code: "approval_rejected", message: "approval rejected" },
+  };
+  const APPROVAL_401_BODY = JSON.stringify(APPROVAL_REJECTED);
+
+  test("401 approval_rejected re-prompts with try-again copy", async () => {
+    captureRedirect();
+    let moneyPosts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/admin/v1/external-sends/op/approve" && (init?.method ?? "GET") === "POST") {
+          moneyPosts += 1;
+          if (moneyPosts === 1) {
+            return new Response(APPROVAL_401_BODY, { status: 401 });
+          }
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-fresh",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(APPROVAL_401_BODY, { status: 401 });
+      }),
+    );
+
+    const mutationFn = vi.fn(async (_v: void, totp: string) =>
+      api<{ ok: boolean }>("/external-sends/op/approve", {
+        method: "POST",
+        body: JSON.stringify({ challenge_nonce: "n1", expected_row_version: 1 }),
+        totp,
+      }).then(() => "engaged"),
+    );
+    renderHarness(mutationFn);
+
+    await enterCode("111111");
+    expect(await screen.findByText(/Code invalid — try again/)).toBeInTheDocument();
+    await enterCode("999999");
+
+    expect(await screen.findByText("done: engaged")).toBeInTheDocument();
+    expect(moneyPosts).toBe(2);
+    expect(mutationFn).toHaveBeenCalledTimes(2);
+    expect(useAuth.getState().user).not.toBeNull();
+  });
+
+  test("second consecutive failure hints to wait for the next authenticator code", async () => {
+    captureRedirect();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-x",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(APPROVAL_401_BODY, { status: 401 });
+      }),
+    );
+
+    const attempt = vi.fn(async () => {
+      throw new ApiError(401, APPROVAL_REJECTED);
+    });
+    renderHarness(attempt);
+
+    await enterCode("111111");
+    expect(await screen.findByText(/^Code invalid — try again\.$/)).toBeInTheDocument();
+    await enterCode("222222");
+    expect(
+      await screen.findByText(/wait for the next authenticator code/),
+    ).toBeInTheDocument();
+    expect(attempt).toHaveBeenCalledTimes(2);
+  });
+
+  test("challenge + device fields survive a wrong-code retry without re-signing", async () => {
+    captureRedirect();
+    let moneyPosts = 0;
+    const signOnce = vi.fn(async () => "device-sig-held");
+    let heldSig: string | null = null;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === "/admin/v1/external-sends/op/approve" && (init?.method ?? "GET") === "POST") {
+          moneyPosts += 1;
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            device_signature: string | null;
+            challenge_nonce: string;
+          };
+          expect(body.challenge_nonce).toBe("nonce-fixed");
+          expect(body.device_signature).toBe("device-sig-held");
+          if (moneyPosts === 1) {
+            return new Response(APPROVAL_401_BODY, { status: 401 });
+          }
+          return new Response(JSON.stringify({ status: "APPROVED" }), { status: 200 });
+        }
+        if (url === "/admin/v1/me") {
+          return new Response(
+            JSON.stringify({
+              userId: "u1",
+              role: "admin",
+              csrfToken: "csrf-fresh",
+              mustEnrolTotp: false,
+              mustChangePassword: false,
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(APPROVAL_401_BODY, { status: 401 });
+      }),
+    );
+
+    // Mirrors TransferDetailPage: sign once outside the TOTP attempt, reuse on retry.
+    const mutationFn = vi.fn(async (_v: void, totp: string) => {
+      if (heldSig === null) {
+        heldSig = await signOnce();
+      }
+      return api<{ status: string }>("/external-sends/op/approve", {
+        method: "POST",
+        body: JSON.stringify({
+          challenge_nonce: "nonce-fixed",
+          expected_row_version: 3,
+          preimage_sha256: "abc",
+          device_key_id: "dev-1",
+          device_signature: heldSig,
+        }),
+        totp,
+      }).then((r) => r.status);
+    });
+    renderHarness(mutationFn);
+
+    await enterCode("111111");
+    expect(await screen.findByText(/Code invalid — try again/)).toBeInTheDocument();
+    await enterCode("999999");
+
+    expect(await screen.findByText("done: APPROVED")).toBeInTheDocument();
+    expect(signOnce).toHaveBeenCalledTimes(1);
+    expect(moneyPosts).toBe(2);
+    expect(mutationFn).toHaveBeenCalledTimes(2);
+  });
+
+  test("403 approval_rejected still aborts (status must be 401)", async () => {
+    const attempt = vi.fn(async () => {
+      throw new ApiError(403, APPROVAL_REJECTED);
+    });
+    renderHarness(attempt);
+    await enterCode("123456");
+    expect(await screen.findByText(/^terminated:/)).toHaveTextContent(
+      "terminated: approval rejected",
+    );
+    expect(attempt).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Code invalid/)).not.toBeInTheDocument();
+  });
+});

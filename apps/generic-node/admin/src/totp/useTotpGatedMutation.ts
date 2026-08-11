@@ -14,20 +14,41 @@ import {
   useTotpPrompt,
 } from "./TotpPromptProvider.js";
 
-function totpErrorMessage(code: string): string {
-  if (code === "totp_invalid" || code === "invalid_credentials") {
+/**
+ * Operator-facing copy for a re-promptable factor failure.
+ * Approve collapses wrong TOTP / device / challenge into opaque
+ * `approval_rejected` (401) — same "try again" surface as invalid_credentials.
+ * A second failure inside one ceremony may be a burned timestep; nudge wait.
+ */
+function totpErrorMessage(code: string, consecutiveFailures: number): string {
+  if (
+    code === "totp_invalid" ||
+    code === "invalid_credentials" ||
+    code === "approval_rejected"
+  ) {
+    if (consecutiveFailures >= 2) {
+      // Client-only hint: server still returns the opaque envelope (ZTR-1194).
+      // Retyping the same 30s code after a burn surfaces as another rejection.
+      return "Code invalid — wait for the next authenticator code, then try again.";
+    }
     return "Code invalid — try again.";
   }
   return "Code required.";
 }
 
+/**
+ * Re-promptable step-up challenge. Status stays 401 (never-403 money path).
+ * Accept `approval_rejected` explicitly so the approve route's opaque factor
+ * envelope re-prompts in place rather than aborting the ceremony (ZTR-1194).
+ */
 function isTotpChallenge(err: unknown): err is ApiError {
   return (
     err instanceof ApiError &&
     err.status === 401 &&
     (err.code === "totp_required" ||
       err.code === "totp_invalid" ||
-      err.code === "invalid_credentials")
+      err.code === "invalid_credentials" ||
+      err.code === "approval_rejected")
   );
 }
 
@@ -54,6 +75,7 @@ async function withTotpRetry<T>(
   attempt: (totp: string) => Promise<T>,
 ): Promise<T> {
   let errorMessage: string | undefined;
+  let consecutiveFailures = 0;
   for (let retries = 0; ; retries += 1) {
     assertCurrent(signal, isCurrent);
     const totp = await requestCode({ title, detail, errorMessage, signal });
@@ -69,8 +91,9 @@ async function withTotpRetry<T>(
       if (useAuth.getState().user === null) throw err;
       const verdict = await recheckSessionOn401();
       if (verdict === "dead" || verdict === "skipped") throw err;
+      consecutiveFailures += 1;
       if (retries < MAX_TOTP_RETRIES) {
-        errorMessage = totpErrorMessage(err.code);
+        errorMessage = totpErrorMessage(err.code, consecutiveFailures);
         continue;
       }
       throw err;

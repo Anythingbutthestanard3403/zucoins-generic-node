@@ -22,7 +22,6 @@ function renderPage() {
 describe("RecoveryCeremonyPage (Mode A)", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         role: "admin",
@@ -247,13 +246,6 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
     expect(await screen.findByText("Verified")).toBeInTheDocument();
     expect(screen.getByText("Born-blocked")).toBeInTheDocument();
     expect(screen.getByText(/≥1 recovery_verified/i)).toBeInTheDocument();
-  });
-
-  it("shows demo banner in demo mode on pack step", () => {
-    useAuth.setState({ demoMode: true });
-    renderPage();
-    fireEvent.click(screen.getByText(/Continue to recovery pack/i));
-    expect(screen.getByText(/Design preview/)).toBeInTheDocument();
   });
 
   it("documents CLI break-glass still available", () => {

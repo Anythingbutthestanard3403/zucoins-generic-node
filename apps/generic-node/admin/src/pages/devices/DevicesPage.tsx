@@ -35,7 +35,6 @@ import {
   type SecondDeviceIssueResponse,
   postRevokeDevice
 } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 const QUERY_KEY = ["device-keys"] as const;
@@ -56,7 +55,6 @@ interface CeremonyPeek {
 }
 
 export function DevicesPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const deepLinkChallengeId = useMemo(() => {
@@ -77,9 +75,9 @@ export function DevicesPage() {
   const [pendingBDeviceId, setPendingBDeviceId] = useState<string | null>(null);
 
   const list = useQuery({
-    queryKey: [...QUERY_KEY, demoMode],
+    queryKey: [...QUERY_KEY],
     queryFn: listDeviceKeys,
-    enabled: !demoMode });
+    });
 
   const enrol = useTotpGatedMutation(
     async (_: void, totp: string) => runGenesisDeviceEnrol({ label, totp }),
@@ -224,7 +222,7 @@ export function DevicesPage() {
   );
 
   const keys = list.data ?? [];
-  const empty = !demoMode && list.isSuccess && keys.length === 0;
+  const empty = list.isSuccess && keys.length === 0;
 
   async function refreshCeremony(challengeId: string): Promise<CeremonyPeek | null> {
     const peek = (await peekSecondDeviceEnrol(challengeId)) as CeremonyPeek;
@@ -239,7 +237,7 @@ export function DevicesPage() {
 
   // Deep-link consumer: /devices/enrol?challenge_id=
   useEffect(() => {
-    if (demoMode || deepLinkChallengeId === null) return;
+    if (deepLinkChallengeId === null) return;
     let cancelled = false;
     void (async () => {
       setErr(null);
@@ -265,7 +263,7 @@ export function DevicesPage() {
       cancelled = true;
     };
     // Deps intentionally limited to the deep-link id inputs.
-  }, [demoMode, deepLinkChallengeId]);
+  }, [deepLinkChallengeId]);
 
   async function onIssueSecondDevice() {
     setErr(null);
@@ -419,13 +417,9 @@ export function DevicesPage() {
         never sent to the platform or written to plain localStorage.
       </p>
 
-      {demoMode ? (
-        <p className="muted">No fixtures — log in for a live session to manage devices.</p>
-      ) : null}
+      {list.isPending ? <p className="muted">Loading…</p> : null}
 
-      {!demoMode && list.isPending ? <p className="muted">Loading…</p> : null}
-
-      {!demoMode && list.isError ? (
+      {list.isError ? (
         <div className="banner banner-error" role="alert">
           Device inventory unavailable. {formatMoneyError(list.error, "List failed")}
         </div>
@@ -443,7 +437,7 @@ export function DevicesPage() {
       ) : null}
 
       {/* Deep-link / second-device consumer panel */}
-      {!demoMode && showDeepLinkPanel ? (
+      {showDeepLinkPanel ? (
         <div className="card form-card" style={{ marginBottom: 16 }} data-testid="second-device-ceremony">
           <h2 style={{ fontSize: 16, marginBottom: 8 }}>Second-device enrolment</h2>
           <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
@@ -550,7 +544,7 @@ export function DevicesPage() {
         </form>
       ) : null}
 
-      {!demoMode && keys.length > 0 ? (
+      {keys.length > 0 ? (
         <>
           <div className="card form-card" style={{ marginBottom: 16 }}>
             <h2 style={{ fontSize: 16, marginBottom: 8 }}>Add another device (QR)</h2>
@@ -639,7 +633,7 @@ export function DevicesPage() {
         </>
       ) : null}
 
-      {!demoMode && list.isSuccess && keys.length === 0 && !empty ? null : null}
+      {list.isSuccess && keys.length === 0 && !empty ? null : null}
     </div>
   );
 }

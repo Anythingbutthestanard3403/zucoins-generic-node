@@ -6,7 +6,7 @@ import { StatusTag } from "../../components/StatusTag.js";
 import {
   IconArrow, IconHalt, IconMark, IconRefresh,
 } from "../../icons.js";
-import { apiOrDemo } from "../../lib/api.js";
+import { apiSoftRead } from "../../lib/api.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "../../lib/health.js";
 import {
@@ -34,15 +34,7 @@ import {
   packChecklistRowsForEnabled,
   type PackChecklistRow,
 } from "../../lib/packs.js";
-import { useAuth } from "../../store/auth.js";
 import { HaltAction } from "./HaltAction.js";
-
-const CLEAR_HALT: HaltState = {
-  engaged: false,
-  reason: null,
-  updated_at: null,
-  updated_by: null,
-};
 
 /** Honest per-state labels for the overview page header.
  * "Node is healthy" is rendered only when /health/ready genuinely reports ready;
@@ -152,54 +144,52 @@ function exportActivityCsv(
 }
 
 export function OverviewPage() {
-  const demo = useAuth((s) => s.demoMode);
   const [tab, setTab] = useState<ActivityTab>("attention");
   const attentionQ = useQuery({
-    queryKey: ["needs-attention-overview", demo],
+    queryKey: ["needs-attention-overview"],
     queryFn: async () =>
-      apiOrDemo<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: demo ? false : 30_000,
+      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
+    refetchInterval: 30_000,
   });
   const walletsQ = useQuery({
-    queryKey: ["overview-wallets", demo],
+    queryKey: ["overview-wallets"],
     queryFn: listWalletsInventory,
-    refetchInterval: demo ? false : 30_000,
+    refetchInterval: 30_000,
   });
   const opsQ = useQuery({
-    queryKey: ["overview-operations", demo],
+    queryKey: ["overview-operations"],
     queryFn: () => listOperationsInventory(),
-    refetchInterval: demo ? false : 30_000,
+    refetchInterval: 30_000,
   });
-  const haltQueryKey = ["overview", "halt-state", demo] as const;
+  const haltQueryKey = ["overview", "halt-state"] as const;
   const haltQ = useQuery({
     queryKey: haltQueryKey,
     queryFn: async (): Promise<HaltState> => {
-      if (demo) return CLEAR_HALT;
+      
       return fetchHaltState();
     },
-    refetchInterval: demo ? false : 15_000,
+    refetchInterval: 15_000,
   });
 
-  // Real /health/ready probe — never enabled in demo mode, where
-  // the page shows fixture data and never claims a live probe result.
+  // Real /health/ready probe.
   const healthQ = useQuery({
-    queryKey: ["overview", "node-health", demo],
+    queryKey: ["overview", "node-health"],
     queryFn: fetchNodeReadiness,
-    refetchInterval: demo ? false : 15_000,
-    enabled: !demo,
+    refetchInterval: 15_000,
+    
     retry: false,
   });
-  const healthState = deriveNodeHealthUiState(demo, healthQ);
+  const healthState = deriveNodeHealthUiState(healthQ);
 
   const readinessQ = useQuery({
-    queryKey: ["overview", "readiness-checklist", demo],
+    queryKey: ["overview", "readiness-checklist"],
     queryFn: fetchReadinessChecklist,
-    refetchInterval: demo ? false : 30_000,
-    enabled: !demo,
+    refetchInterval: 30_000,
+    
     retry: false,
   });
   const readiness: ReadinessChecklist | null =
-    !demo && readinessQ.data ? readinessQ.data : null;
+    readinessQ.data ? readinessQ.data : null;
   const readinessRows = readiness?.rows ?? [];
   const blockedRows = readinessRows.filter((r) => r.status === "blocked" || r.status === "amber");
   /** Day-0 is done when nothing is blocked/amber — hide the full list by default. */
@@ -212,10 +202,10 @@ export function OverviewPage() {
   const liveAttn = attentionQ.data?.live === true ? attentionQ.data.data : null;
   const attentionCount = liveAttn?.summary.total ?? 0;
   const attentionLive = liveAttn?.operations ?? [];
-  const haltErrored = !demo && haltQ.isError;
+  const haltErrored = haltQ.isError;
   const haltEngaged = !haltErrored && haltQ.data?.engaged === true;
   const haltClear = !haltErrored && haltQ.data?.engaged === false;
-  const haltLoading = haltQ.isFetching && !demo;
+  const haltLoading = haltQ.isFetching ;
   const haltUnknown = !haltLoading && (haltErrored || (!haltEngaged && !haltClear));
   const haltErrorDetail = haltQ.error
     ? formatMoneyError(haltQ.error, "Halt state unavailable.")
@@ -252,17 +242,17 @@ export function OverviewPage() {
 
   // Persistent banner when operator used typed break-glass without a device.
   const setupBreakGlassQ = useQuery({
-    queryKey: ["overview", "setup-device-break-glass", demo],
+    queryKey: ["overview", "setup-device-break-glass"],
     queryFn: async (): Promise<boolean> => {
       const res = await fetch("/admin/v1/setup-state", { credentials: "include" });
       if (!res.ok) return false;
       const body = (await res.json()) as { device_break_glass_active?: boolean };
       return body.device_break_glass_active === true;
     },
-    refetchInterval: demo ? false : 60_000,
-    enabled: !demo,
+    refetchInterval: 60_000,
+    
   });
-  const deviceBreakGlassActive = !demo && setupBreakGlassQ.data === true;
+  const deviceBreakGlassActive = setupBreakGlassQ.data === true;
 
 
   return (
@@ -271,9 +261,7 @@ export function OverviewPage() {
         <div>
           <h1>Overview</h1>
           <p>
-            {demo
-              ? "Design preview — log in for a real session · no fixture balances"
-              : (
+            {(
                 <>
                   {OVERVIEW_HEALTH_LABEL[healthState]}
                   {" · "}<em>{attentionCount} items</em> need attention
@@ -313,8 +301,8 @@ export function OverviewPage() {
         </div>
       ) : null}
 
-      {!demo ? (
-        <section
+
+      <section
           className="card"
           data-testid="readiness-checklist"
           aria-label="Node readiness"
@@ -384,9 +372,8 @@ export function OverviewPage() {
             </>
           )}
         </section>
-      ) : null}
 
-      {!demo && packRows.length > 0 ? (
+      {packRows.length > 0 ? (
         <section
           className="card"
           data-testid="pack-checklist"
@@ -423,9 +410,7 @@ export function OverviewPage() {
             <span className="unit">ZKZ</span>
           </div>
           <div className="delta">
-            {demo ? (
-              <>Log in for a live session — equity is never invented from fixtures</>
-            ) : walletsLive ? (
+            {walletsLive ? (
               <>
                 <strong>Observed on gateway</strong>
                 {" · "}
@@ -438,7 +423,7 @@ export function OverviewPage() {
               <>Wallet inventory unavailable — equity not invented</>
             )}
           </div>
-          {!demo && !walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
+          {!walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
           <div className="chart" aria-hidden>
             <svg viewBox="0 0 600 72" preserveAspectRatio="none">
               <defs>
@@ -471,9 +456,7 @@ export function OverviewPage() {
               <div className="meta">
                 <div className="name">No wallets yet</div>
                 <div className="sub">
-                  {demo
-                    ? "No fixtures — sign in for live inventory"
-                    : walletsLive
+                  {walletsLive
                       ? "Live inventory empty — receive-pool mint runs under signer leadership"
                       : "Waiting for live inventory"}
                 </div>
@@ -582,11 +565,8 @@ export function OverviewPage() {
           ) : (
             <>
               <p className="muted" style={{ padding: 12, margin: 0 }}>
-                {demo
-                  ? "No fixtures — sign in for live attention feed"
-                  : "Attention inventory unavailable"}
+                {"Attention inventory unavailable"}
               </p>
-              {!demo ? <ApiErrorNote error={attentionQ.data?.error} /> : null}
             </>
           )}
         </div>
@@ -598,13 +578,11 @@ export function OverviewPage() {
           {wallets.length === 0 ? (
             <>
               <p className="muted" style={{ padding: 12, margin: 0 }}>
-                {demo
-                  ? "No fixtures — sign in for live wallet pool"
-                  : walletsLive
+                {walletsLive
                     ? "Pool empty"
                     : "Wallet inventory unavailable"}
               </p>
-              {!demo && !walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
+              {!walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
             </>
           ) : (
             wallets.slice(0, 8).map((w) => (
@@ -676,9 +654,7 @@ export function OverviewPage() {
             {activityRows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="muted">
-                  {demo
-                    ? "No fixtures — activity empty until a live session"
-                    : activityLive
+                  {activityLive
                       ? "No activity yet"
                       : (
                         <>

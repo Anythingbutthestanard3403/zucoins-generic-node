@@ -41,7 +41,6 @@ const sendRow = {
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: {
       userId: "u1",
       username: "op",
@@ -147,17 +146,6 @@ describe("ApproveInboxPage", () => {
       expect(screen.getByTestId("approve-empty-unavailable")).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("approve-empty-clear")).not.toBeInTheDocument();
-  });
-
-  it("demo mode never claims clear/unavailable and never fetches", () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage();
-    expect(screen.getByTestId("approve-empty-demo")).toBeInTheDocument();
-    expect(screen.queryByTestId("approve-empty-clear")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("approve-empty-unavailable")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows honesty copy that approve ≠ paid and node never submits SEND", async () => {

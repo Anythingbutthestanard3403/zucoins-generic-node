@@ -57,18 +57,8 @@ describe("ApiKeysPage", () => {
       mustChangePassword: false,
       csrfToken: "csrf-1",
     });
-    useAuth.getState().setDemoMode(false);
   });
 
-  test("demo session shows the honest empty message and does not call the live API", async () => {
-    useAuth.getState().setDemoMode(true);
-    const listSpy = vi.spyOn(money, "listApiKeys");
-    renderPage();
-    expect(screen.getByText(/log in for a live session/i)).toBeInTheDocument();
-    expect(screen.getByText("No API keys listed")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Issue key" })).not.toBeInTheDocument();
-    await waitFor(() => expect(listSpy).not.toHaveBeenCalled());
-  });
 
   test("live session lists keys without the raw secret and can revoke", async () => {
     const listSpy = vi

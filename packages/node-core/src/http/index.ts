@@ -199,17 +199,11 @@ export type {
 
 // security headers + CORS emission (two-tier CSP).
 export {
-  ADMIN_CORS_ALLOW_HEADERS,
-  ADMIN_CORS_ALLOW_METHODS,
   ADMIN_CSP,
   HSTS_VALUE,
   NODE_PERMISSIONS_POLICY,
-  NODE_SECURITY_HEADERS,
-  adminCorsResponseHeaders,
   buildCheckoutCsp,
   computeSecurityHeaders,
-  emitAdminCorsHeaders,
-  isCheckoutFrameAllowed,
 } from "./security-headers.js";
 export type {
   SecurityHeadersConfig,

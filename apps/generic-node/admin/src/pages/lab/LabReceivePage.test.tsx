@@ -9,8 +9,8 @@ const apiMock = vi.fn();
 
 vi.mock("../../store/auth.js", () => ({
   useAuth: Object.assign(
-    (sel: (s: { demoMode: boolean }) => unknown) => sel({ demoMode: false }),
-    { getState: () => ({ demoMode: false, user: { csrfToken: "tok" } }) },
+    (sel: (s: { user: null }) => unknown) => sel({}),
+    { getState: () => ({ user: { csrfToken: "tok" } }) },
   ),
 }));
 

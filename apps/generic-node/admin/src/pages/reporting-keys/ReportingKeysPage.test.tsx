@@ -43,19 +43,8 @@ describe("ReportingKeysPage", () => {
       mustChangePassword: false,
       csrfToken: "csrf-1",
     });
-    useAuth.getState().setDemoMode(false);
   });
 
-  test("demo session shows the honest empty message and does not call the live API", async () => {
-    useAuth.getState().setDemoMode(true);
-    const listSpy = vi.spyOn(money, "listReportingKeys");
-    renderPage();
-    expect(screen.getByText(/log in for a live session/i)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /issue reporting credential/i }),
-    ).not.toBeInTheDocument();
-    await waitFor(() => expect(listSpy).not.toHaveBeenCalled());
-  });
 
   test("issue returns the raw seed once, Done clears it, and a list refetch never re-shows it", async () => {
     const RAW = "51".repeat(32);

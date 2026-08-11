@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, api, apiOrDemo } from "./api.js";
+import { ApiError, api, apiSoftRead } from "./api.js";
 import { useAuth } from "../store/auth.js";
 
 describe("api client", () => {
@@ -12,8 +12,7 @@ describe("api client", () => {
         mustChangePassword: false,
         csrfToken: "csrf-x",
       },
-      demoMode: false,
-    });
+          });
     vi.restoreAllMocks();
   });
 
@@ -34,7 +33,7 @@ describe("api client", () => {
     expect(headers.get("Idempotency-Key")).toBe("idem-1");
   });
 
-  it("apiOrDemo returns fallback on 503 without throwing", async () => {
+  it("apiSoftRead returns fallback on 503 without throwing", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -43,12 +42,12 @@ describe("api client", () => {
         }),
       ),
     );
-    const r = await apiOrDemo("/operations/needs-attention", { operations: [], summary: { total: 0 } });
+    const r = await apiSoftRead("/operations/needs-attention", { operations: [], summary: { total: 0 } });
     expect(r.live).toBe(false);
     expect(r.data.summary.total).toBe(0);
   });
 
-  it("apiOrDemo rethrows 401 so the shell can force re-auth", async () => {
+  it("apiSoftRead rethrows 401 so the shell can force re-auth", async () => {
     // Every route 401s here, /admin/v1/me included, so this also trips the
     // session recheck — capture the redirect rather than letting jsdom navigate.
     Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
@@ -60,12 +59,12 @@ describe("api client", () => {
         }),
       ),
     );
-    await expect(apiOrDemo("/operations/needs-attention", { x: 1 })).rejects.toBeInstanceOf(ApiError);
+    await expect(apiSoftRead("/operations/needs-attention", { x: 1 })).rejects.toBeInstanceOf(ApiError);
     await vi.waitFor(() => expect(useAuth.getState().user).toBeNull());
   });
 
   it.each([400, 404, 409, 429, 500, 503])(
-    "apiOrDemo preserves code/message/requestId on a %i response instead of discarding them",
+    "apiSoftRead preserves code/message/requestId on a %i response instead of discarding them",
     async (status) => {
       vi.stubGlobal(
         "fetch",
@@ -78,7 +77,7 @@ describe("api client", () => {
           ),
         ),
       );
-      const r = await apiOrDemo("/operations/needs-attention", { fallback: true });
+      const r = await apiSoftRead("/operations/needs-attention", { fallback: true });
       expect(r.live).toBe(false);
       expect(r.data).toEqual({ fallback: true });
       expect(r.error).toEqual({
@@ -90,26 +89,17 @@ describe("api client", () => {
     },
   );
 
-  it("apiOrDemo surfaces a network failure as a distinct error code rather than swallowing it", async () => {
+  it("apiSoftRead surfaces a network failure as a distinct error code rather than swallowing it", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
         throw new TypeError("Failed to fetch");
       }),
     );
-    const r = await apiOrDemo("/operations/needs-attention", { fallback: true });
+    const r = await apiSoftRead("/operations/needs-attention", { fallback: true });
     expect(r.live).toBe(false);
     expect(r.error).toMatchObject({ code: "network_error", status: 0 });
     expect(r.error?.message).toMatch(/Failed to fetch/);
-  });
-
-  it("demoMode short-circuits to fixtures without fetch", async () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await apiOrDemo("/anything", { demo: true });
-    expect(r).toEqual({ data: { demo: true }, live: false });
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   describe("ambiguous 401 recovery (ZTR-1195)", () => {

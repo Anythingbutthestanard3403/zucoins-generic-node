@@ -18,15 +18,14 @@ function requireAuthRedirect(
     readonly authed: boolean;
     readonly mustChangePassword?: boolean;
     readonly mustEnrolTotp?: boolean;
-    readonly demoMode?: boolean;
-    readonly complete?: boolean;
+        readonly complete?: boolean;
     readonly next_step?: Day0Step;
     readonly packCreatedLocally?: boolean;
   },
 ): string | null {
   if (!opts.authed) return "/login";
   if (opts.mustChangePassword || opts.mustEnrolTotp) return "/setup";
-  if (opts.demoMode || opts.complete) return null;
+  if (opts.complete) return null;
   const next = refineNextStep(opts.next_step ?? "install", {
     packCreatedLocally: opts.packCreatedLocally === true,
   });
@@ -69,13 +68,6 @@ describe("RequireAuth money-route matrix", () => {
           pathForNextStep(step),
         );
       }
-    }
-  });
-
-  it("complete / demo allows money routes", () => {
-    for (const p of money) {
-      expect(requireAuthRedirect(p, { authed: true, complete: true })).toBeNull();
-      expect(requireAuthRedirect(p, { authed: true, demoMode: true })).toBeNull();
     }
   });
 

@@ -4,16 +4,12 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { listSendOperationsInventory } from "../../lib/money.js";
 import { isPackEnabled, loadEnabledPacks } from "../../lib/packs.js";
-import { useAuth } from "../../store/auth.js";
 
 export function TransfersPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const q = useQuery({
-    queryKey: ["transfers-inventory", demoMode],
+    queryKey: ["transfers-inventory"],
     queryFn: async () => {
-      if (demoMode) {
-        return { live: false as const, data: [] as const, error: undefined };
-      }
+      
       const r = await listSendOperationsInventory();
       return {
         live: r.live,
@@ -41,9 +37,7 @@ export function TransfersPage() {
         <h1>Transfers</h1>
         <div className="toolbar">
           <span className="muted" style={{ fontSize: 12.5 }}>
-            {demoMode
-              ? "No fixtures — log in for live"
-              : loading
+            {loading
                 ? "Loading…"
                 : live
                   ? "Live inventory"
@@ -69,7 +63,7 @@ export function TransfersPage() {
         </div>
       ) : null}
 
-      {!demoMode && !loading && !live ? (
+      {!loading && !live ? (
         <>
           <p className="muted" style={{ marginBottom: 12, fontSize: 12.5 }}>
             <code className="mono">GET /admin/v1/operations?kind=SEND_EXTERNAL</code> unavailable.
@@ -94,9 +88,7 @@ export function TransfersPage() {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="muted">
-                  {demoMode
-                    ? "No fixtures — log in for live"
-                    : loading
+                  {loading
                       ? "Loading…"
                       : live
                         ? "No transfers"

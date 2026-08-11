@@ -30,9 +30,8 @@ export class ApiError extends Error {
 }
 
 /**
- * Structured detail an unavailable `apiOrDemo` read carries through to callers
+ * Structured detail an unavailable soft read carries through to callers
  * (API error envelope: code/message/request_id survive the client).
- * Absent when the fallback came from demo mode rather than a caught failure.
  */
 export interface ApiFailureDetail {
   readonly code: string;
@@ -171,11 +170,11 @@ export async function api<T>(path: string, init?: ApiOptions): Promise<T> {
 }
 
 /**
- * Prefer live JSON. Demo fallback is for **reads** only (design-preview or
- * unmounted inventory). Money **mutations** must use `api()` — never this helper
- * (no fixture success on 404/503 for approve/reject/bless/recovery).
+ * Prefer live JSON for **reads** only. On transport/5xx failures returns the
+ * empty fallback with `live: false` so inventory shells stay honest without
+ * throwing. Money **mutations** must use `api()` — never this helper.
  */
-export async function apiOrDemo<T>(
+export async function apiSoftRead<T>(
   path: string,
   fallback: T,
   init?: ApiOptions,
@@ -183,11 +182,8 @@ export async function apiOrDemo<T>(
   const method = (init?.method ?? "GET").toUpperCase();
   if (method !== "GET" && method !== "HEAD") {
     throw new Error(
-      "apiOrDemo is read-only; money mutations must call api() so 404/503 never looks like success",
+      "apiSoftRead is read-only; money mutations must call api() so 404/503 never looks like success",
     );
-  }
-  if (useAuth.getState().demoMode) {
-    return { data: fallback, live: false };
   }
   try {
     const data = await api<T>(path, init);

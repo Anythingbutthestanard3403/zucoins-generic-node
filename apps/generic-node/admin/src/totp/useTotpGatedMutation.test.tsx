@@ -30,7 +30,7 @@ const LIVE_USER = {
 };
 
 function seedSession() {
-  useAuth.setState({ user: { ...LIVE_USER }, demoMode: false });
+  useAuth.setState({ user: { ...LIVE_USER } });
 }
 
 function captureRedirect(): { readonly to: () => string | undefined } {

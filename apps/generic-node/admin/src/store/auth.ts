@@ -12,10 +12,7 @@ export interface SessionUser {
 
 interface AuthState {
   user: SessionUser | null;
-  /** When true, UI uses fixtures because live APIs are unavailable. */
-  demoMode: boolean;
   setUser: (u: SessionUser | null) => void;
-  setDemoMode: (v: boolean) => void;
   me: () => Promise<SessionUser | null>;
   /** Live generic-node: POST /admin/v1/login (password only — no login-body TOTP). */
   login: (username: string, password: string) => Promise<SessionUser>;
@@ -59,9 +56,7 @@ function sessionFrom(data: Record<string, unknown>): SessionUser {
 
 export const useAuth = create<AuthState>((set, get) => ({
   user: null,
-  demoMode: false,
   setUser: (user) => set({ user }),
-  setDemoMode: (demoMode) => set({ demoMode }),
   me: async () => {
     try {
       const res = await fetch("/admin/v1/me", { credentials: "include" });
@@ -70,7 +65,7 @@ export const useAuth = create<AuthState>((set, get) => ({
         return null;
       }
       const user = sessionFrom((await res.json()) as Record<string, unknown>);
-      set({ user, demoMode: false });
+      set({ user });
       return user;
     } catch {
       set({ user: null });
@@ -86,7 +81,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     });
     if (!res.ok) throw new Error(await errorMessage(res, "Login failed"));
     const user = sessionFrom((await res.json()) as Record<string, unknown>);
-    set({ user, demoMode: false });
+    set({ user });
     return user;
   },
   logout: async () => {
@@ -95,7 +90,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     // (ZTR-1195 / ZTR-1168). Clear react-query cache and cancel any TOTP prompt
     // deliberately — no full page reload.
     const csrf = get().user?.csrfToken ?? "";
-    set({ user: null, demoMode: false });
+    set({ user: null });
     resetClientSessionState();
     // Client-side navigation: History API so react-router picks it up without reload.
     if (typeof window !== "undefined") {
@@ -136,8 +131,7 @@ export const useAuth = create<AuthState>((set, get) => ({
           ...prev,
           mustChangePassword: false,
           csrfToken: csrfToken || prev.csrfToken,
-        },
-        demoMode: false,
+        }
       });
     }
     return { ok: true as const, csrfToken };
@@ -188,8 +182,7 @@ export const useAuth = create<AuthState>((set, get) => ({
           ...prev,
           mustEnrolTotp: false,
           csrfToken: csrfToken || prev.csrfToken,
-        },
-        demoMode: false,
+        }
       });
     }
     return { ok: true as const, csrfToken };

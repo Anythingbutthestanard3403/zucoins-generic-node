@@ -24,7 +24,6 @@ import {
   type RecoveryPackProveResponse,
   type WalletInventoryItem,
 } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type CeremonyStep = "explain" | "pack" | "run" | "verify";
@@ -53,7 +52,6 @@ function useRefuseFramed(): boolean {
 }
 
 export function RecoveryCeremonyPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const [step, setStep] = useState<CeremonyStep>("explain");
   const framed = useRefuseFramed();
 
@@ -108,7 +106,6 @@ export function RecoveryCeremonyPage() {
       {step === "explain" && <ExplainStep onNext={() => setStep("pack")} />}
       {step === "pack" && (
         <PackStep
-          demoMode={demoMode}
           onNext={() => setStep("verify")}
           onBack={() => setStep("explain")}
           onBreakGlass={() => setStep("run")}
@@ -116,12 +113,11 @@ export function RecoveryCeremonyPage() {
       )}
       {step === "run" && (
         <RunStep
-          demoMode={demoMode}
           onNext={() => setStep("verify")}
           onBack={() => setStep("pack")}
         />
       )}
-      {step === "verify" && <VerifyStep demoMode={demoMode} onBack={() => setStep("pack")} />}
+      {step === "verify" && <VerifyStep onBack={() => setStep("pack")} />}
     </div>
   );
 }
@@ -161,14 +157,12 @@ function ExplainStep({ onNext }: { onNext: () => void }) {
  * `/start/backup` and `/start/prove`.
  */
 export function PackStep({
-  demoMode,
   onNext,
   onBack,
   onBreakGlass,
   mode = "both",
   onCreated,
 }: {
-  demoMode: boolean;
   onNext: () => void;
   onBack?: () => void;
   onBreakGlass?: () => void;
@@ -273,7 +267,7 @@ export function PackStep({
 
   function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (demoMode) return;
+    
     const mk = masterKey.trim();
     const from = fromPackText;
     const fromSecret = fromPackSecret;
@@ -291,7 +285,7 @@ export function PackStep({
 
   function onProve(e: FormEvent) {
     e.preventDefault();
-    if (demoMode) return;
+    
     const secret = proveSecret;
     const file = packText;
     setProveSecret("");
@@ -329,12 +323,6 @@ export function PackStep({
         every copy of the old file — the digest of the replaced artifact is recorded in the
         audit trail so the destruction can be signed off.
       </p>
-
-      {demoMode ? (
-        <div className="banner-demo" role="status">
-          Design preview — sign in against a live node to create or prove a pack.
-        </div>
-      ) : null}
 
       {error ? (
         <p className="err" role="alert">
@@ -401,7 +389,7 @@ export function PackStep({
                 setCreateSecret(generateRecoveryPackSecret());
                 setSecretSaved(false);
               }}
-              disabled={demoMode || createMut.isPending}
+              disabled={createMut.isPending}
             >
               Generate a different secret
             </button>
@@ -414,7 +402,7 @@ export function PackStep({
                 type="checkbox"
                 checked={secretSaved}
                 onChange={(e) => setSecretSaved(e.target.checked)}
-                disabled={demoMode || createMut.isPending}
+                disabled={createMut.isPending}
               />{" "}
               I have written this secret down somewhere the pack file is not.
             </label>
@@ -430,7 +418,7 @@ export function PackStep({
               autoComplete="off"
               value={masterKey}
               onChange={(e) => setMasterKey(e.target.value)}
-              disabled={demoMode || createMut.isPending}
+              disabled={createMut.isPending}
               placeholder="≥32 characters when sealed"
               style={{ fontFamily: "var(--mono, monospace)", fontSize: 13 }}
             />
@@ -450,7 +438,7 @@ export function PackStep({
                 data-testid="pack-from-file"
                 type="file"
                 accept="application/json,.json"
-                disabled={demoMode || createMut.isPending}
+                disabled={createMut.isPending}
                 onChange={(e) => readPackFile(e.target.files?.[0] ?? null, setFromPackText)}
               />
             </div>
@@ -463,14 +451,14 @@ export function PackStep({
                 autoComplete="off"
                 value={fromPackSecret}
                 onChange={(e) => setFromPackSecret(e.target.value)}
-                disabled={demoMode || createMut.isPending}
+                disabled={createMut.isPending}
               />
             </div>
           </details>
           <button
             type="submit"
             className="mini-btn primary"
-            disabled={demoMode || createMut.isPending || !secretSaved}
+            disabled={createMut.isPending || !secretSaved}
           >
             {createMut.isPending
               ? "Creating…"
@@ -491,7 +479,7 @@ export function PackStep({
               data-testid="pack-file"
               type="file"
               accept="application/json,.json"
-              disabled={demoMode || proveMut.isPending}
+              disabled={proveMut.isPending}
               onChange={(e) => readPackFile(e.target.files?.[0] ?? null, setPackText)}
             />
           </div>
@@ -504,7 +492,7 @@ export function PackStep({
               autoComplete="off"
               value={proveSecret}
               onChange={(e) => setProveSecret(e.target.value)}
-              disabled={demoMode || proveMut.isPending}
+              disabled={proveMut.isPending}
             />
           </div>
           <div className="field">
@@ -515,7 +503,7 @@ export function PackStep({
                 type="checkbox"
                 checked={proveLegacy}
                 onChange={(e) => setProveLegacy(e.target.checked)}
-                disabled={demoMode || proveMut.isPending}
+                disabled={proveMut.isPending}
               />{" "}
               This is an old v1 pack sealed under a 4–6 digit passcode.
             </label>
@@ -524,7 +512,6 @@ export function PackStep({
             type="submit"
             className="mini-btn primary"
             disabled={
-              demoMode ||
               proveMut.isPending ||
               packText.length === 0 ||
               proveSecret.length === 0
@@ -557,7 +544,7 @@ export function PackStep({
             className="mini-btn primary"
             data-testid="day0-backup-continue"
             onClick={onNext}
-            disabled={!createDigest && !demoMode}
+            disabled={!createDigest }
           >
             Continue to prove
           </button>
@@ -568,11 +555,9 @@ export function PackStep({
 }
 
 function RunStep({
-  demoMode,
   onNext,
   onBack,
 }: {
-  demoMode: boolean;
   onNext: () => void;
   onBack: () => void;
 }) {
@@ -609,9 +594,9 @@ function RunStep({
 
   // Poll progress while running
   const poll = useQuery({
-    queryKey: ["recovery-ceremony-status", ceremonyId, demoMode],
+    queryKey: ["recovery-ceremony-status", ceremonyId],
     queryFn: () => getRecoveryCeremonyStatus(ceremonyId ?? undefined),
-    enabled: !demoMode && ceremonyId !== null,
+    enabled: ceremonyId !== null,
     refetchInterval: (q) => {
       const s = q.state.data?.status;
       if (s === "running") return 1500;
@@ -625,7 +610,7 @@ function RunStep({
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (demoMode) return;
+    
     const key = masterKey;
     // Clear immediately after capture into the mutation (memory-only for POST).
     clearKey();
@@ -646,12 +631,6 @@ function RunStep({
         after submit (success or failure).
       </p>
 
-      {demoMode ? (
-        <div className="banner-demo" role="status">
-          Design preview — sign in against a live node to run the ceremony.
-        </div>
-      ) : null}
-
       <form onSubmit={(e) => void onSubmit(e)} autoComplete="off" style={{ marginTop: 12 }}>
         <div className="field">
           <label htmlFor="vault-master-key">Vault master key</label>
@@ -670,9 +649,9 @@ function RunStep({
             data-form-type="other"
             value={masterKey}
             onChange={(e) => setMasterKey(e.target.value)}
-            disabled={demoMode || running || done}
+            disabled={running || done}
             minLength={32}
-            required={!demoMode}
+            required
             placeholder="≥32 characters"
             style={{ fontFamily: "var(--mono, monospace)", fontSize: 13 }}
           />
@@ -728,7 +707,7 @@ function RunStep({
           <button
             type="submit"
             className="mini-btn primary"
-            disabled={demoMode || running || done || masterKey.length < 32}
+            disabled={running || done || masterKey.length < 32}
           >
             {running ? "Running…" : done ? "Ceremony complete" : "Start ceremony"}
           </button>
@@ -749,17 +728,15 @@ function RunStep({
 }
 
 function VerifyStep({
-  demoMode,
   onBack,
 }: {
-  demoMode: boolean;
   onBack: () => void;
 }) {
   const q = useQuery({
-    queryKey: ["wallets-recovery-verify", demoMode],
+    queryKey: ["wallets-recovery-verify"],
     queryFn: listWalletsInventory,
-    refetchInterval: demoMode ? false : 5_000,
-    enabled: !demoMode,
+    refetchInterval: 5_000,
+    
   });
 
   const live = q.data?.live === true;
@@ -775,7 +752,7 @@ function VerifyStep({
         <code>recovery_verified</code>. This page only reads inventory — it never stamps.
       </p>
 
-      {!demoMode && !live ? (
+      {!live ? (
         <>
           <p className="muted">Wallet inventory unavailable — cannot verify ceremony result.</p>
           <ApiErrorNote error={q.data?.error} />

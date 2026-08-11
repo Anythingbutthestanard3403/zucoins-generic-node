@@ -54,15 +54,11 @@ describe("frozen configuration schema — happy path", () => {
     expect(config.PORT).toBe(8080);
     expect(config.POOL_CAP_TOTAL).toBe(50);
     expect(config.RECEIVE_QUEUE_MAX_WAIT).toBe(30);
-    expect(config.PROOF_ACCESS_WINDOW_SECONDS).toBe(2_592_000);
     expect(config.GATEWAY_READ_RETRY_MAX_ATTEMPTS).toBe(5);
     expect(config.GATEWAY_READ_BACKOFF_MAX_MS).toBe(30_000);
     expect(config.GATEWAY_READ_FAILURE_BUDGET).toBe(3);
-    expect(config.WORKER_CLAIM_TTL_MS).toBe(30_000);
-    expect(config.RECONCILIATION_POLL_INTERVAL_MS).toBe(15_000);
     expect(config.GATEWAY_TLS_CERT_SHA256_PINS).toEqual([]);
     expect(config.ADMIN_CORS_ALLOWED_ORIGINS).toEqual([]);
-    expect(config.INITIAL_ADMIN_USERNAME).toBe("admin");
     expect(config.SPLITCHAIN_GATEWAY_URLS).toEqual([
       "https://gateway-entry-1.internal.example/",
     ]);

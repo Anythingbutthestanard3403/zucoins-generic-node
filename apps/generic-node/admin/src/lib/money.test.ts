@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiOrDemo } from "./api.js";
+import { apiSoftRead } from "./api.js";
 import {
-  assertLiveMoneySession,
   getOperationInventory,
   getWalletInventory,
   listAuditInventory,
@@ -32,49 +31,23 @@ function liveAuth(csrf = "csrf-x") {
       mustChangePassword: false,
       csrfToken: csrf,
     },
-    demoMode: false,
-  });
+      });
 }
 
 function jsonRes(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status });
 }
 
-describe("money mutations — no demo/apiOrDemo success", () => {
+describe("money mutations — no demo/apiSoftRead success", () => {
   beforeEach(() => {
     liveAuth();
     vi.restoreAllMocks();
   });
 
-  it("apiOrDemo throws on POST so mutations cannot hide 404/503", async () => {
+  it("apiSoftRead throws on POST so mutations cannot hide 404/503", async () => {
     await expect(
-      apiOrDemo("/external-sends/x/approve", { ok: true }, { method: "POST", body: "{}" }),
-    ).rejects.toThrow(/apiOrDemo is read-only/);
-  });
-
-  it("assertLiveMoneySession rejects demo mode", () => {
-    useAuth.setState({ demoMode: true });
-    expect(() => assertLiveMoneySession("approve")).toThrow(ApiError);
-  });
-
-  it("postApprove refuses demo mode before fetch", async () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(
-      postApprove(
-        "op",
-        {
-          challenge_nonce: "n",
-          expected_row_version: 1,
-          preimage_sha256: "a".repeat(64),
-          device_key_id: null,
-          device_signature: null,
-        },
-        "123456",
-      ),
-    ).rejects.toBeInstanceOf(ApiError);
-    expect(fetchMock).not.toHaveBeenCalled();
+      apiSoftRead("/external-sends/x/approve", { ok: true }, { method: "POST", body: "{}" }),
+    ).rejects.toThrow(/apiSoftRead is read-only/);
   });
 });
 

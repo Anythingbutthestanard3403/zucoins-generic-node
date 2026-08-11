@@ -8,7 +8,6 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { TotpQrCode } from "../../components/TotpQrCode.js";
 import { ApiError, api } from "../../lib/api.js";
 import { fetchReadinessChecklist, type ReadinessChecklist } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 
 const LAB_CAP = "0.01";
 
@@ -59,7 +58,6 @@ async function postLabReceive(input: {
 }
 
 export function LabReceivePage() {
-  const demo = useAuth((s) => s.demoMode);
   const [amount, setAmount] = useState(LAB_CAP);
   const [keyId, setKeyId] = useState("");
   const [seed, setSeed] = useState("");
@@ -68,10 +66,10 @@ export function LabReceivePage() {
   const [gateLinks, setGateLinks] = useState<readonly LabGateLink[] | null>(null);
 
   const readinessQ = useQuery({
-    queryKey: ["lab-readiness", demo],
+    queryKey: ["lab-readiness"],
     queryFn: fetchReadinessChecklist,
-    enabled: !demo,
-    refetchInterval: demo ? false : 30_000,
+    
+    refetchInterval: 30_000,
     retry: false,
   });
   const checklist: ReadinessChecklist | null = readinessQ.data ?? null;
@@ -106,7 +104,7 @@ export function LabReceivePage() {
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (demo) return;
+    
     mut.mutate({
       amount_zkz: amount.trim(),
       reporting_key_id: keyId.trim(),
@@ -129,11 +127,7 @@ export function LabReceivePage() {
         <code className="mono">verification-complete</code> or the pool wallet stays pinned.
       </div>
 
-      {demo ? (
-        <p className="muted">Design preview — log in for a live lab session.</p>
-      ) : null}
-
-      {!demo && receiveBlocked ? (
+      {receiveBlocked ? (
         <div className="banner banner-error" role="alert" style={{ marginBottom: 16 }}>
           Checklist is not green for Incoming. Lab will not bypass recovery_verified or reporting
           gates.{" "}
@@ -226,7 +220,7 @@ export function LabReceivePage() {
             <button
               type="submit"
               className="mini-btn primary"
-              disabled={mut.isPending || demo}
+              disabled={mut.isPending }
             >
               {mut.isPending ? "Creating + ARM…" : "Create lab receive + ARM"}
             </button>

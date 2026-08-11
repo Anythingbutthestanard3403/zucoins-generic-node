@@ -61,9 +61,4 @@ describe("OfflineBanner honesty", () => {
     rerender(<OfflineBanner healthState="checking" />);
     expect(container).toBeEmptyDOMElement();
   });
-
-  it("stays silent in demo mode (design-preview banner owns honesty)", () => {
-    const { container } = render(<OfflineBanner healthState="offline" demoMode />);
-    expect(container).toBeEmptyDOMElement();
-  });
 });

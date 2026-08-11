@@ -3,7 +3,6 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { App } from "../App.js";
 import { AuditPage } from "./audit/AuditPage.js";
 import { ReportingKeysPage } from "./reporting-keys/ReportingKeysPage.js";
 import { WalletDetailPage } from "./wallets/WalletDetailPage.js";
@@ -12,7 +11,6 @@ import { TotpPromptProvider } from "../totp/index.js";
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: { userId: "u1", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "csrf" },
   });
 }
@@ -55,12 +53,6 @@ describe("admin SPA honesty", () => {
     await waitFor(() => expect(screen.getAllByText(/Audit inventory unavailable/).length).toBeGreaterThan(0));
   });
 
-  it("does not conflate design preview with a live-fetch unavailable state", () => {
-    useAuth.setState({ demoMode: true });
-    renderPage(<AuditPage />);
-    expect(screen.getByText(/No fixtures — log in for a live session to view audit events/)).toBeInTheDocument();
-    expect(screen.queryByText(/Audit inventory unavailable/)).not.toBeInTheDocument();
-  });
 
   it("renders an audit row only from the live inventory GET", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
@@ -120,22 +112,4 @@ describe("admin SPA honesty", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("labels the reporting design preview and never shows a fixture credential as real", () => {
-    useAuth.setState({ demoMode: true });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <TotpPromptProvider>
-          <MemoryRouter><Routes><Route element={<App />}><Route path="*" element={<ReportingKeysPage />} /></Route></Routes></MemoryRouter>
-        </TotpPromptProvider>
-      </QueryClientProvider>,
-    );
-    expect(screen.getByRole("status")).toHaveTextContent(/Design preview.*fixture data/i);
-    expect(
-      screen.getByText(/log in for a live session to manage reporting credentials/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /issue reporting credential/i }),
-    ).not.toBeInTheDocument();
-  });
 });

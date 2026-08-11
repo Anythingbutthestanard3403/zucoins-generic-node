@@ -1,5 +1,5 @@
 // SPA money client for the generic-node admin-router routes.
-// Mutations always go through `api()` (never apiOrDemo — no fixture "success").
+// Mutations always go through `api()` (never apiSoftRead — no fixture "success").
 // Reads may use inventory GETs when mounted; absent routes surface as live:false.
 
 import type {
@@ -12,8 +12,7 @@ import {
   OPERATOR_RECOVERY_ACTIONS,
   RESERVED_RECOVERY_ACTIONS as CONTRACT_RESERVED_RECOVERY_ACTIONS,
 } from "@zucoins/generic-node-contracts/operator-halt";
-import { api, apiOrDemo, ApiError, type ApiFailureDetail, toApiFailureDetail } from "./api.js";
-import { useAuth } from "../store/auth.js";
+import { api, apiSoftRead, ApiError, type ApiFailureDetail, toApiFailureDetail } from "./api.js";
 
 /** Same shared declaration the node projection compiles against (ZTR-1217). */
 export type { WalletInventoryItem };
@@ -130,8 +129,6 @@ async function loadCompleteInventory<T>(
   path: string,
   filters: object = {},
 ): Promise<CompleteInventoryResult<T>> {
-  if (useAuth.getState().demoMode) return { data: [], live: false };
-
   const data: T[] = [];
   const cursors = new Set<string>();
   let cursor: string | undefined;
@@ -215,17 +212,6 @@ export function newIdempotencyKey(): string {
   return `idem-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-/** Guard: demo mode must never claim a money mutation succeeded. */
-export function assertLiveMoneySession(action: string): void {
-  if (useAuth.getState().demoMode) {
-    throw new ApiError(503, {
-      error: {
-        code: "service_unavailable",
-        message: `Design preview cannot ${action}. Sign in against a live node.`,
-      },
-    });
-  }
-}
 
 export async function getApprovalChallenge(operationId: string): Promise<ApprovalChallenge> {
   return api<ApprovalChallenge>(
@@ -244,7 +230,6 @@ export async function postApprove(
   },
   totp: string,
 ): Promise<ApproveSuccess> {
-  assertLiveMoneySession("approve an external send");
   return api<ApproveSuccess>(`/external-sends/${encodeURIComponent(operationId)}/approve`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -258,7 +243,6 @@ export async function postReject(
   body: { expected_row_version: number; reason: string },
   totp: string,
 ): Promise<RejectSuccess> {
-  assertLiveMoneySession("reject an external send");
   return api<RejectSuccess>(`/external-sends/${encodeURIComponent(operationId)}/reject`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -282,7 +266,6 @@ export async function postRecoveryAction(
   },
   totp: string,
 ): Promise<RecoveryActionSuccess> {
-  assertLiveMoneySession("run a recovery action");
   return api<RecoveryActionSuccess>(
     `/operations/${encodeURIComponent(operationId)}/recovery-actions`,
     {
@@ -379,7 +362,6 @@ export async function postBless(
   },
   totp: string,
 ): Promise<unknown> {
-  assertLiveMoneySession("bless a destination");
   return api(`/destinations/${encodeURIComponent(destinationId)}/bless`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -409,7 +391,6 @@ export interface EnrollmentChallengeResponse {
 }
 
 export async function postEnrollmentChallenge(): Promise<EnrollmentChallengeResponse> {
-  assertLiveMoneySession("issue a device enrollment challenge");
   return api<EnrollmentChallengeResponse>("/device-keys/enrollment-challenge", {
     method: "POST",
     body: JSON.stringify({}),
@@ -434,7 +415,6 @@ export async function postGenesisEnrol(
   body: GenesisEnrolBody,
   totp: string,
 ): Promise<GenesisEnrolResult> {
-  assertLiveMoneySession("enrol a device");
   return api<GenesisEnrolResult>("/device-keys/enrol", {
     method: "POST",
     body: JSON.stringify(body),
@@ -451,7 +431,6 @@ export async function postRevokeDevice(
   },
   totp: string,
 ): Promise<{ readonly id: string; readonly revoked: boolean; readonly revoked_at: string | null }> {
-  assertLiveMoneySession("revoke a device");
   return api(`/device-keys/${encodeURIComponent(deviceKeyId)}/revoke`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -461,7 +440,6 @@ export async function postRevokeDevice(
 }
 
 export async function postRetire(destinationId: string, totp: string): Promise<unknown> {
-  assertLiveMoneySession("retire a destination");
   // SPA always gates retire with TOTP (fail-closed client); server is session+CSRF.
   return api(`/destinations/${encodeURIComponent(destinationId)}/retire`, {
     method: "POST",
@@ -682,7 +660,6 @@ export async function postHaltToggle(
   body: { engaged: boolean; reason?: string },
   totp: string,
 ): Promise<HaltState> {
-  assertLiveMoneySession("toggle operator halt");
   return api<HaltState>("/halt", {
     method: "POST",
     body: JSON.stringify(body),
@@ -722,7 +699,7 @@ export async function listApiKeys(): Promise<{
   readonly keys: readonly ApiKeyListing[];
   readonly live: boolean;
 }> {
-  const r = await apiOrDemo<{ readonly keys: readonly ApiKeyListing[] }>("/api-keys", { keys: [] });
+  const r = await apiSoftRead<{ readonly keys: readonly ApiKeyListing[] }>("/api-keys", { keys: [] });
   return { keys: r.data.keys ?? [], live: r.live };
 }
 
@@ -730,7 +707,6 @@ export async function postIssueApiKey(
   scopes: readonly string[] | undefined,
   totp: string,
 ): Promise<ApiKeyIssueResult> {
-  assertLiveMoneySession("issue implementer API key");
   return api<ApiKeyIssueResult>("/api-keys", {
     method: "POST",
     body: JSON.stringify(scopes === undefined ? {} : { scopes }),
@@ -744,7 +720,6 @@ export async function postRevokeApiKey(
   credentialId: string,
   totp: string,
 ): Promise<{ readonly id: string; readonly revoked: boolean }> {
-  assertLiveMoneySession("revoke implementer API key");
   return api<{ id: string; revoked: boolean }>(`/api-keys/${encodeURIComponent(credentialId)}/revoke`, {
     method: "POST",
     body: JSON.stringify({}),
@@ -782,14 +757,13 @@ export async function listReportingKeys(): Promise<{
   readonly keys: readonly ReportingKeyListing[];
   readonly live: boolean;
 }> {
-  const r = await apiOrDemo<{ readonly keys: readonly ReportingKeyListing[] }>("/reporting-keys", {
+  const r = await apiSoftRead<{ readonly keys: readonly ReportingKeyListing[] }>("/reporting-keys", {
     keys: [],
   });
   return { keys: r.data.keys ?? [], live: r.live };
 }
 
 export async function postIssueReportingKey(totp: string): Promise<ReportingKeyIssueResult> {
-  assertLiveMoneySession("issue reporting credential");
   return api<ReportingKeyIssueResult>("/reporting-keys", {
     method: "POST",
     body: JSON.stringify({}),
@@ -811,7 +785,6 @@ export async function postRecoverLostReportingKey(
   lostKeyId: string,
   totp: string,
 ): Promise<ReportingKeyRecoverResult> {
-  assertLiveMoneySession("recover a lost reporting credential");
   return api<ReportingKeyRecoverResult>("/reporting-keys/recover-lost", {
     method: "POST",
     body: JSON.stringify({ lost_key_id: lostKeyId }),
@@ -912,7 +885,6 @@ export async function postRecoveryCeremonyStart(
   },
   totp: string,
 ): Promise<CeremonyStatusResponse> {
-  assertLiveMoneySession("start recovery ceremony");
   return api<CeremonyStatusResponse>("/recovery-ceremony/start", {
     method: "POST",
     body: JSON.stringify(body),
@@ -993,7 +965,6 @@ export async function postRecoveryPackCreate(
   },
   totp: string,
 ): Promise<RecoveryPackCreateResponse> {
-  assertLiveMoneySession("create recovery pack");
   return api<RecoveryPackCreateResponse>("/recovery-pack/create", {
     method: "POST",
     body: JSON.stringify(body),
@@ -1010,7 +981,6 @@ export async function postRecoveryPackProve(
   },
   totp: string,
 ): Promise<RecoveryPackProveResponse> {
-  assertLiveMoneySession("prove recovery pack");
   return api<RecoveryPackProveResponse>("/recovery-pack/prove", {
     method: "POST",
     body: JSON.stringify(body),
@@ -1052,7 +1022,6 @@ export interface SecondDeviceIssueResponse {
 }
 
 export async function issueSecondDeviceEnrol(): Promise<SecondDeviceIssueResponse> {
-  assertLiveMoneySession("issue second-device enrolment");
   return api<SecondDeviceIssueResponse>("/device-enrol/issue", {
     method: "POST",
     body: JSON.stringify({}),
@@ -1068,7 +1037,6 @@ export async function bindSecondDeviceEnrol(body: {
   readonly new_device_public_key: string;
   readonly label: string;
 }): Promise<unknown> {
-  assertLiveMoneySession("bind second-device public key");
   return api("/device-enrol/bind", { method: "POST", body: JSON.stringify(body) });
 }
 
@@ -1081,7 +1049,6 @@ export async function authorizeSecondDeviceEnrol(
   },
   totp: string,
 ): Promise<unknown> {
-  assertLiveMoneySession("authorize second-device enrolment");
   return api("/device-enrol/authorize", {
     method: "POST",
     body: JSON.stringify(body),
@@ -1093,7 +1060,6 @@ export async function completeSecondDeviceEnrol(body: {
   readonly challenge_id: string;
   readonly new_device_pop_signature: string;
 }): Promise<unknown> {
-  assertLiveMoneySession("complete second-device enrolment");
   return api("/device-enrol/complete", { method: "POST", body: JSON.stringify(body) });
 }
 
@@ -1122,14 +1088,12 @@ export async function subscribeOperatorPush(body: {
   readonly p256dh: string;
   readonly auth: string;
 }): Promise<unknown> {
-  assertLiveMoneySession("subscribe operator push");
   return api("/operator-push/subscribe", { method: "POST", body: JSON.stringify(body) });
 }
 
 export async function unsubscribeOperatorPush(
   body: { readonly endpoint: string } | { readonly endpoint_fingerprint: string },
 ): Promise<unknown> {
-  assertLiveMoneySession("unsubscribe operator push");
   return api("/operator-push/unsubscribe", {
     method: "POST",
     body: JSON.stringify(body),

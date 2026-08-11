@@ -77,7 +77,6 @@ async function enterTotp(code = "123456") {
 describe("TransferDetailPage approve happy path", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         username: "admin",
@@ -159,25 +158,5 @@ describe("TransferDetailPage approve happy path", () => {
     ).toBe(true);
     // Polled status surface (may appear more than once via StatusTag)
     expect(screen.getAllByText("APPROVED").length).toBeGreaterThan(0);
-  });
-
-  it("demo mode never POSTs approve", async () => {
-    useAuth.setState({
-      demoMode: true,
-      user: {
-        userId: "demo",
-        username: "demo",
-        role: "admin",
-        mustEnrolTotp: false,
-        mustChangePassword: false,
-        csrfToken: "demo",
-      },
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderDetail();
-    expect((await screen.findAllByText(/no fixtures/i)).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: /approve \(totp\)/i })).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

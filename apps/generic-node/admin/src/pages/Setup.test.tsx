@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  useAuth.setState({ user: null, demoMode: false });
+  useAuth.setState({ user: null });
 });
 
 function renderSetup(initial = "/setup") {
@@ -47,7 +47,6 @@ function authUser(over: Partial<{
 describe("SetupPage TOTP enrol", () => {
   it("after password already changed, enrol→confirm clears mustEnrolTotp and leaves setup", async () => {
     useAuth.setState({
-      demoMode: false,
       user: authUser({ mustEnrolTotp: true }),
     });
 
@@ -143,7 +142,6 @@ describe("SetupPage TOTP enrol", () => {
 
   it("does not show the old mustEnrolTotp trap that demanded ADMIN_TOTP_SECRET", () => {
     useAuth.setState({
-      demoMode: false,
       user: authUser({ mustEnrolTotp: true }),
     });
     vi.stubGlobal(
@@ -159,7 +157,7 @@ describe("SetupPage TOTP enrol", () => {
 
 describe("SetupPage wizard W3–W6 + vault show-once", () => {
   it("mandatory W3 PWA wall: QR is node origin only; no happy-path skip; lab skip advances", async () => {
-    useAuth.setState({ demoMode: false, user: authUser() });
+    useAuth.setState({ user: authUser() });
 
     let currentStep = "W3";
     let pwaInstalled = false;
@@ -228,7 +226,7 @@ describe("SetupPage wizard W3–W6 + vault show-once", () => {
   });
 
   it("vault show-once never hits localStorage; W6 has no ceremony placeholder ack", async () => {
-    useAuth.setState({ demoMode: false, user: authUser() });
+    useAuth.setState({ user: authUser() });
 
     let currentStep = "W5";
     const master = "generated-vault-master-key-value-32chars-xx";
@@ -340,7 +338,7 @@ describe("SetupPage wizard W3–W6 + vault show-once", () => {
 
 describe("SetupPage wizard W4 Device #1", () => {
   it("typed BREAK GLASS on W4; vault key never hits localStorage; W6 has no ceremony placeholder ack", async () => {
-    useAuth.setState({ demoMode: false, user: authUser() });
+    useAuth.setState({ user: authUser() });
 
     let currentStep = "W4";
     const master = "generated-vault-master-key-value-32chars-xx";
@@ -472,7 +470,7 @@ describe("SetupPage wizard W4 Device #1", () => {
   });
 
   it("W4 blocks Home until enrol or typed break-glass — no quiet skip button", async () => {
-    useAuth.setState({ demoMode: false, user: authUser() });
+    useAuth.setState({ user: authUser() });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

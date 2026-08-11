@@ -7,7 +7,7 @@ import {
   IconKey, IconLock, IconLogo, IconLogout, IconMoon, IconPin,
   IconTarget, IconWallet, IconBell, IconSettings,
 } from "./icons.js";
-import { apiOrDemo } from "./lib/api.js";
+import { apiSoftRead } from "./lib/api.js";
 import { fetchEffectiveConfig } from "./pages/settings/SettingsPage.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "./lib/health.js";
 import { EMPTY_NEEDS_ATTENTION, type NeedsAttentionResponse } from "./lib/ops.js";
@@ -99,7 +99,6 @@ export function productionNavLabels(attentionBadge?: number): string[] {
 export function App() {
   const logout = useAuth((s) => s.logout);
   const user = useAuth((s) => s.user);
-  const demoMode = useAuth((s) => s.demoMode);
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [pinned, setPinned] = useState(() => localStorage.getItem(PIN_KEY) === "1");
@@ -113,32 +112,29 @@ export function App() {
   useEffect(() => subscribeDeferredInstallPrompt(setDeferredPrompt), []);
 
   const attentionQ = useQuery({
-    queryKey: ["needs-attention-nav", demoMode],
+    queryKey: ["needs-attention-nav"],
     queryFn: async () =>
-      apiOrDemo<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: demoMode ? false : 30_000,
-    enabled: Boolean(user) && !demoMode,
+      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
+    refetchInterval: 30_000,
+    enabled: Boolean(user),
   });
   const attentionBadge = attentionQ.data?.live
     ? attentionQ.data.data.summary.total
-    : demoMode
-      ? 3
-      : undefined;
+    : undefined;
   const sections = buildSections(attentionBadge);
 
-  // Real /health/ready probe — never enabled in demo mode, where
-  // the shell shows fixture data and never claims a live probe result.
+  // Real /health/ready probe.
   const healthQ = useQuery({
     queryKey: ["node-health"],
     queryFn: fetchNodeReadiness,
-    refetchInterval: demoMode ? false : 15_000,
-    enabled: !demoMode,
+    refetchInterval: 15_000,
+    
     retry: false,
   });
-  const healthState = deriveNodeHealthUiState(demoMode, healthQ);
+  const healthState = deriveNodeHealthUiState(healthQ);
 
   const settingsQ = useQuery({
-    queryKey: ["effective-config-shell", demoMode],
+    queryKey: ["effective-config-shell"],
     queryFn: fetchEffectiveConfig,
     staleTime: 60_000,
     enabled: Boolean(user),
@@ -253,12 +249,7 @@ export function App() {
         </header>
 
         <div className="body" id="main-content" tabIndex={-1}>
-          {demoMode ? (
-            <div className="banner-demo" role="status">
-              Design preview — fixture data. Sign in against this node for live attention and dual-control flows.
-            </div>
-          ) : null}
-          <OfflineBanner healthState={healthState} demoMode={demoMode} />
+          <OfflineBanner healthState={healthState} />
           {pathname === "/" ? (
             <InstallHomeNudge
               deferredPrompt={deferredPrompt}
@@ -281,7 +272,7 @@ export function App() {
             </b>
           </span>
           <span className="sep">·</span>
-          <span>Session <b className="ok">{demoMode ? "demo" : "live"}</b></span>
+          <span>Session <b className="ok">{"live"}</b></span>
           <span className="sep">·</span>
           <span style={{ marginLeft: "auto" }}>generic-node-ui</span>
         </footer>

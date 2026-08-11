@@ -9,7 +9,6 @@ export * from "./halt.js";
 export * from "./halt-evidence.js";
 export * from "./halt-gate.js";
 export * from "./halt-sql.js";
-export * from "./idempotency.js";
 // pure recovery classification + permitted-action derivation.
 export {
   FORBIDDEN_RECOVERY_ACTIONS,

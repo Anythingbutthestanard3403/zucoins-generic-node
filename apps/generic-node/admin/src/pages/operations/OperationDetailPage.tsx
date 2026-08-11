@@ -20,20 +20,14 @@ import {
   type RecoveryDetail,
 } from "../../lib/money.js";
 import { operationKindLabel } from "../../lib/labels.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type LoadResult =
   | { kind: "ok"; inventory: OperationInventoryDetail | null; recovery: RecoveryDetail | null }
   | { kind: "missing"; message: string };
 
-async function loadOperation(id: string, demoMode: boolean): Promise<LoadResult> {
-  if (demoMode) {
-    return {
-      kind: "missing",
-      message: "No fixtures — log in for a live session to load operation " + id,
-    };
-  }
+async function loadOperation(id: string): Promise<LoadResult> {
+  
 
   // Inventory + recovery in parallel. Either alone is enough to paint a useful page;
   // 404 on one side must not blank the other.
@@ -144,18 +138,17 @@ function EvidenceList({ items }: { items: readonly EvidenceManifestItem[] }) {
 
 export function OperationDetailPage() {
   const { id = "" } = useParams();
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const q = useQuery({
-    queryKey: ["operation-detail", id, demoMode],
-    queryFn: () => loadOperation(id, demoMode),
+    queryKey: ["operation-detail", id],
+    queryFn: () => loadOperation(id),
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const d = query.state.data;
-      if (!d || d.kind !== "ok" || demoMode) return false;
+      if (!d || d.kind !== "ok" ) return false;
       const status = d.recovery?.status ?? d.inventory?.status ?? "";
       const terminal = Boolean(d.inventory?.terminal_at) || /LANDED|EXPIRED|REJECTED|FAILED/i.test(status);
       return terminal ? false : 10_000;
@@ -410,7 +403,7 @@ export function OperationDetailPage() {
             Nonce issued {recovery.recovery_nonce_issued_at} · expires{" "}
             {recovery.recovery_nonce_expires_at} · row {recovery.row_version}
           </p>
-          {recovery.permitted_actions.length === 0 ? (
+          {(recovery.permitted_actions ?? []).length === 0 ? (
             <p className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>
               {isSuccessLand
                 ? "No operator action required — classification is healthy."
@@ -428,7 +421,7 @@ export function OperationDetailPage() {
                           key={action}
                           type="button"
                           className="mini-btn primary"
-                          disabled={act.isPending || demoMode}
+                          disabled={act.isPending }
                           onClick={() => {
                             setErr(null);
                             setMsg(null);

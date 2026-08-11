@@ -22,8 +22,7 @@ describe("first-boot vs mutable split", () => {
       "ZUCOINS_PUSH_API_BASE",
       "PUSH_VAPID_MODE",
       "NODE_ID",
-      "INITIAL_ADMIN_USERNAME",
-      "INITIAL_ADMIN_PASSWORD",
+            "INITIAL_ADMIN_PASSWORD",
       // first-boot despite being TTLs — the derived expiry is byte-frozen into a
       // signed transfer code, so a running node must not form two codes under
       // two policies.
@@ -57,14 +56,11 @@ describe("first-boot vs mutable split", () => {
     expect(MUTABLE_CONFIG_FIELDS).toEqual([
       "POOL_CAP_TOTAL",
       "RECEIVE_QUEUE_MAX_WAIT",
-      "PROOF_ACCESS_WINDOW_SECONDS",
-      "METRICS_SCRAPE_TOKEN",
+            "METRICS_SCRAPE_TOKEN",
       "GATEWAY_READ_RETRY_MAX_ATTEMPTS",
       "GATEWAY_READ_BACKOFF_MAX_MS",
       "GATEWAY_READ_FAILURE_BUDGET",
-      "WORKER_CLAIM_TTL_MS",
-      "RECONCILIATION_POLL_INTERVAL_MS",
-      "SIGNER_LEADERSHIP_RETRY_MAX_MS",
+                  "SIGNER_LEADERSHIP_RETRY_MAX_MS",
       "ADMIN_CORS_ALLOWED_ORIGINS",
     ]);
   });

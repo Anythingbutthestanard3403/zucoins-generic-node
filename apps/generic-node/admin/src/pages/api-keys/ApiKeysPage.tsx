@@ -16,14 +16,12 @@ import {
   type ApiKeyIssueResult,
 } from "../../lib/money.js";
 import { credentialPrefixKind } from "../../lib/labels.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 const QUERY_KEY = ["api-keys"] as const;
 
 export function ApiKeysPage() {
   const navigate = useNavigate();
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [issued, setIssued] = useState<ApiKeyIssueResult | null>(null);
   const [copied, setCopied] = useState(false);
@@ -32,9 +30,9 @@ export function ApiKeysPage() {
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   const list = useQuery({
-    queryKey: [...QUERY_KEY, demoMode],
+    queryKey: [...QUERY_KEY],
     queryFn: listApiKeys,
-    enabled: !demoMode,
+    
   });
 
   const issue = useTotpGatedMutation<ApiKeyIssueResult, void>(
@@ -74,13 +72,13 @@ export function ApiKeysPage() {
 
   const keys = list.data?.keys ?? [];
   const live = list.data?.live === true;
-  const unavailable = !demoMode && !live;
+  const unavailable = !live;
 
   return (
     <div className="page">
       <div className="page-title-row">
         <h1>Keys</h1>
-        {!demoMode && list.isSuccess && !unavailable ? (
+        {list.isSuccess && !unavailable ? (
           <button
             type="button"
             className="pill primary"
@@ -108,13 +106,9 @@ export function ApiKeysPage() {
         then revoking the old one) and store that secret in your implementer backend.
       </p>
 
-      {demoMode ? (
-        <p className="muted">No fixtures — log in for a live session to manage keys.</p>
-      ) : null}
+      {list.isPending ? <p className="muted">Loading…</p> : null}
 
-      {!demoMode && list.isPending ? <p className="muted">Loading…</p> : null}
-
-      {!demoMode && list.isError ? (
+      {list.isError ? (
         <div className="banner banner-error" role="alert">
           API key inventory and issuing are not available. No keys can be shown or issued until
           the live node responds.
@@ -174,7 +168,7 @@ export function ApiKeysPage() {
         </div>
       ) : null}
 
-      {demoMode || (list.isSuccess && !unavailable) ? (
+      {(list.isSuccess && !unavailable) ? (
         <div className="table-wrap" style={{ marginTop: 12 }}>
         <table>
           <thead>
@@ -188,13 +182,7 @@ export function ApiKeysPage() {
             </tr>
           </thead>
           <tbody>
-            {demoMode ? (
-              <tr>
-                <td colSpan={6} className="muted">
-                  No API keys listed
-                </td>
-              </tr>
-            ) : keys.length === 0 ? (
+            {keys.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">
                   No API keys listed

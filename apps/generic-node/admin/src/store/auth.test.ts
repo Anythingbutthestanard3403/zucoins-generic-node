@@ -3,7 +3,7 @@ import { useAuth } from "./auth.js";
 
 describe("auth store paths (generic-node live surface)", () => {
   beforeEach(() => {
-    useAuth.setState({ user: null, demoMode: false });
+    useAuth.setState({ user: null });
     vi.restoreAllMocks();
   });
 

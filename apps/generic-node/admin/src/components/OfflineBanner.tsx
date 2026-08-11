@@ -2,8 +2,6 @@ import type { NodeHealthUiState } from "../lib/health.js";
 
 export type OfflineBannerProps = {
   healthState: NodeHealthUiState;
-  /** Design-preview mode already has its own honesty banner — skip offline claim there. */
-  demoMode?: boolean;
 };
 
 const COPY: Partial<Record<NodeHealthUiState, string>> = {
@@ -15,10 +13,9 @@ const COPY: Partial<Record<NodeHealthUiState, string>> = {
 
 /**
  * Shell-level honesty banner when the node is offline or degraded.
- * Never invents demo balances as live; never claims healthy without a probe.
+ * Never invents balances as live; never claims healthy without a probe.
  */
-export function OfflineBanner({ healthState, demoMode = false }: OfflineBannerProps) {
-  if (demoMode) return null;
+export function OfflineBanner({ healthState }: OfflineBannerProps) {
   const text = COPY[healthState];
   if (!text) return null;
   return (

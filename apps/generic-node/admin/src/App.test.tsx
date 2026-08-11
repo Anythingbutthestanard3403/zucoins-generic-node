@@ -21,7 +21,6 @@ const adminSrc = dirname(fileURLToPath(import.meta.url));
 
 function authenticateDemo() {
   useAuth.setState({
-    demoMode: true,
     user: {
       userId: "demo",
       username: "demo",
@@ -35,7 +34,6 @@ function authenticateDemo() {
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: {
       userId: "u1",
       username: "op",
@@ -118,29 +116,6 @@ describe("App shell", () => {
     }
   });
 
-  it("labels the only fixture mode with the design-preview banner (restored, was honesty.test.tsx)", () => {
-    cleanup();
-    authenticateDemo();
-    renderShell(<div>body</div>);
-    expect(screen.getByRole("status")).toHaveTextContent(/Design preview.*fixture data/i);
-  });
-
-  it("does not show the design-preview banner in a live (non-demo) session", () => {
-    cleanup();
-    useAuth.setState({
-      demoMode: false,
-      user: {
-        userId: "u1",
-        username: "op",
-        role: "admin",
-        mustEnrolTotp: false,
-        mustChangePassword: false,
-        csrfToken: "x",
-      },
-    });
-    renderShell(<div>body</div>);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
 
   it("shell DOM exposes only production nav labels", () => {
     authenticateDemo();
@@ -193,23 +168,6 @@ describe("Overview product boundary", () => {
   });
 });
 
-describe("Overview honesty: ungated fixture zeros + stale-data-under-unavailable", () => {
-  it("demo mode never renders 0 counts — uses em-dash fallback", () => {
-    cleanup();
-    authenticateDemo();
-    renderShell(<OverviewPage />);
-    const stats = screen.getAllByTestId("three-ops-stats")[0]!;
-    const text = stats.textContent ?? "";
-    expect(text).toContain("—");
-  });
-
-  it("demo mode activity section shows demo message, not 'No activity yet'", () => {
-    cleanup();
-    authenticateDemo();
-    const { container } = renderShell(<OverviewPage />);
-    expect(container.textContent).toContain("No fixtures");
-  });
-});
 
 describe("node health chrome — real /health/ready, no hard-coded Healthy", () => {
   afterEach(() => {
@@ -266,16 +224,6 @@ describe("node health chrome — real /health/ready, no hard-coded Healthy", () 
     expect(screen.queryByText(/1248/)).not.toBeInTheDocument();
   });
 
-  it("does not show offline honesty banner in design preview", async () => {
-    cleanup();
-    authenticateDemo();
-    stubHealthFetch(() => {
-      throw new TypeError("Failed to fetch");
-    });
-    renderShell(<div>body</div>);
-    expect(screen.queryByTestId("offline-honesty-banner")).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/Design preview/i);
-  });
 
   it("Notifications button is genuinely wired: navigates to Approve inbox", () => {
     cleanup();

@@ -22,3 +22,6 @@ No byte-level capture of a production `POST /v1/receivers/push/:id` was availabl
 - `tsc -b` green
 - push-* + config + transport tests green
 - `boundaries` app-shell allowlist miss for `generic-node-contracts/observation` is pre-existing on origin/main (unrelated)
+
+## Head SHA
+`e922e94609d4895131330d4a978919cf24617a7a`

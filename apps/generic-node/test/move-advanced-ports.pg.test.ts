@@ -987,6 +987,94 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
   );
 
   it(
+    "ZTR-1223: operator retraction clears attention_required; a later ambiguous tick re-raises without a status edge",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.destinationWalletId,
+        leaseRole: "MOVE_DESTINATION",
+      });
+      const wallets = [seeded.sourceWalletId, seeded.destinationWalletId];
+      const signer = stubNodeIdentitySigner(seeded.signingKeyId);
+      const ambiguous = pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY);
+
+      const first = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(first).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      const parked = await readAttention(seeded.operationId);
+      expect(parked.status).toBe("NEEDS_ATTENTION");
+      expect(parked.attention_required).toBe(true);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+
+      // Operator retraction (sql-attention-retraction-store.ts): clear the live flag only.
+      // Status stays NEEDS_ATTENTION — that is the frozen contract and the bug surface.
+      await pool.query(
+        `UPDATE operations
+            SET attention_required = false,
+                attention_reason = NULL,
+                attention_detail = NULL,
+                row_version = row_version + 1,
+                updated_at = now()
+          WHERE id = $1::uuid AND attention_required = true`,
+        [seeded.operationId],
+      );
+      const retracted = await readAttention(seeded.operationId);
+      expect(retracted.status).toBe("NEEDS_ATTENTION");
+      expect(retracted.attention_required).toBe(false);
+      expect(retracted.attention_reason).toBeNull();
+
+      // Same ambiguous verdict after retraction must re-raise: guard keys on
+      // attention_required, not status. Dual-chain event for the new episode; leases held.
+      const reraise = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(reraise).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+
+      const again = await readAttention(seeded.operationId);
+      expect(again.status).toBe("NEEDS_ATTENTION");
+      expect(again.attention_required).toBe(true);
+      expect(again.attention_reason).toBe("VERIFICATION_INDETERMINATE");
+      expect(again.attention_detail).toContain("PATH_DISAGREEMENT");
+      expect(await nodeEventTypes(seeded.operationId)).toEqual([
+        "operation.needs_attention",
+        "operation.needs_attention",
+      ]);
+      expect(await implementerEventTypes(again.implementer_id)).toEqual([
+        "operation.needs_attention",
+        "operation.needs_attention",
+      ]);
+      expect(await heldLeases(wallets)).toHaveLength(2);
+
+      // Flag already raised → second tick is a hold, no third event (one-shot per episode).
+      const held = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(held).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      expect(await nodeEventTypes(seeded.operationId)).toEqual([
+        "operation.needs_attention",
+        "operation.needs_attention",
+      ]);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "INVARIANT_BREACH: a lease that is no longer ACTIVE parks at NEEDS_ATTENTION with LEASE_INVARIANT_VIOLATION and releases nothing",
     async () => {
       const seeded = await seedMoveOperation(true, {

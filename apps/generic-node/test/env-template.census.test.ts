@@ -20,6 +20,7 @@ import {
   loadNodeConfig,
   NodeConfigurationError,
 } from "../src/config/load.js";
+import { loadStage1Config } from "../src/stage1-config.js";
 
 // Keys the template may assign even though they are absent from
 // NODE_ENV_CONFIG_SCHEMA, because a different loader reads them from the
@@ -58,23 +59,43 @@ describe("deployment template census — apps/generic-node/.env.example", () => 
   });
 
   it("a copied template passes loadNodeConfig validation", () => {
-    // NODE_ENV is forced to development because the production placeholder
-    // refusal (placeholders.ts) is a separate, deliberate gate with its own
-    // coverage in config-placeholders.test.ts; this census proves the frozen
-    // schema itself accepts every shipped value.
-    const env = {
-      ...Object.fromEntries(templateAssignments()),
-      NODE_ENV: "development",
-    };
+    // Template ships NODE_ENV=development (ZTR-1206). Production placeholder
+    // refusal (placeholders.ts) is a separate gate covered in
+    // config-placeholders.test.ts; this census proves the frozen schema
+    // accepts every shipped value as-is.
+    const env = Object.fromEntries(templateAssignments());
     const warn = vi.fn();
     expect(loadNodeConfig(env, warn)).toBeDefined();
   });
 
+  it("local-dev posture: NODE_ENV=development + BACKUP_SCHEDULE_ENABLED=false (ZTR-1206)", () => {
+    // Durable-backup gate stays fail-closed for production+backup-off
+    // (stage1-production.test.ts). The template must not ship that pair.
+    const assignments = templateAssignments();
+    expect(assignments.get("NODE_ENV")).toBe("development");
+    expect(assignments.get("BACKUP_SCHEDULE_ENABLED")).toBe("false");
+    const templatePath = fileURLToPath(new URL("../.env.example", import.meta.url));
+    const template = readFileSync(templatePath, "utf8");
+    // AC3: both vars document that production must enable the backup schedule.
+    expect(template).toContain(
+      "MUST set NODE_ENV=production AND BACKUP_SCHEDULE_ENABLED=true",
+    );
+    expect(template).toContain(
+      "stage-1 refuses NODE_ENV=production + this=false",
+    );
+  });
+
+  it("copied template stage-1 config loads without durable-backup refusal", () => {
+    // AC1: after cp .env.example .env (+ filling CHANGE_ME secrets elsewhere),
+    // stage-1 must not refuse on the NODE_ENV + BACKUP_SCHEDULE_ENABLED pair.
+    const env = Object.fromEntries(templateAssignments());
+    const config = loadStage1Config(env);
+    expect(config.nodeEnv).toBe("development");
+    expect(config.backup).toBeUndefined();
+  });
+
   it("custody load still fails closed on the template's unset VAULT_MASTER_KEY", () => {
-    const env = {
-      ...Object.fromEntries(templateAssignments()),
-      NODE_ENV: "development",
-    };
+    const env = Object.fromEntries(templateAssignments());
     let error: unknown;
     try {
       loadCustodyNodeConfig(env, vi.fn());

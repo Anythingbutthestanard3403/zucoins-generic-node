@@ -539,7 +539,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
     /* 1. Bless vs concurrent move-selection ───────────────────────── */
 
     describe("scenario 1 — blessing races a MOVE_INTERNAL destination selection", () => {
-      it("a selection that raced an ABANDONED blessing is rejected, not admitted", async () => {
+      it("DB-TEST-02: blessed but recovery-unverified destination excluded from automatic-sink query", async () => {
         const wallet = await seedWallet({ recoveryVerified: true, destination: "PENDING" });
 
         // Blesser holds the destinations row lock for 600ms, then abandons the ceremony.

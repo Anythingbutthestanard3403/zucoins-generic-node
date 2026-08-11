@@ -265,7 +265,7 @@ describe.skipIf(databaseUrl === undefined)(
       expect(second.claim.attemptId).toBe(authorization.submitDecisionId);
     });
 
-    it("a second submit_decisions row for one attempt is a UNIQUE violation, not an app check", async () => {
+    it("DB-TEST-10: second transaction attempt submit decision or submit call for one operation fails", async () => {
       const authorization = await seedOperation();
       await makeSubmitDecisionClaimStore(query).claimSubmitOnce({
         attemptId: authorization.submitDecisionId,

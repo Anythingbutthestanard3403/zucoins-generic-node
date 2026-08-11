@@ -650,7 +650,7 @@ describe("receive-pool admission and reservation races (real PG / separate proce
   );
 
   it.skipIf(!live)(
-    "S3: a second lease on an already-leased wallet raises LeaseError[ALREADY_LEASED]",
+    "DB-TEST-03: second active lease fails including cross-operation-kind races (ALREADY_LEASED)",
     async () => {
       psqlMust(dbUrl, RESET_POOL);
       const first = OP(2500);

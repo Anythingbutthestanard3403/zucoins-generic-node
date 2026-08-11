@@ -833,7 +833,7 @@ describe("ledger export + retention safety (real PostgreSQL)", () => {
     ).toBe("1");
   });
 
-  it("5. retention / proof-access expiry revokes access only; permanent rows untouched", async () => {
+  it("DB-TEST-20: retention jobs revoke proof access without deleting any permanent row", async () => {
     if (skip()) return;
     drillsRun += 1;
 

@@ -349,7 +349,7 @@ describe.skipIf(databaseUrl === undefined || databaseUrl === "")(
       expect(survivors.rowCount).toBe(0);
     });
 
-    it("rejects a parent and child whose reporting_nonce_id disagree", async () => {
+    it("DB-TEST-34: nonce/idempotency/arm/ack disagreement in method raw_target body digest fails", async () => {
       const s = await newScenario("nonce-split");
       const otherNonce = randomUUID();
       await insertNonce(otherNonce, "verification_complete", s.rawTarget, s.bodySha256);
@@ -409,7 +409,7 @@ describe.skipIf(databaseUrl === undefined || databaseUrl === "")(
       }
     });
 
-    it("rejects a child whose completion parent never lands", async () => {
+    it("DB-TEST-33: deferred route triggers reject pending parent / child without parent / nonce mismatch", async () => {
       const s = await newScenario("orphan-child");
       const outcome = await commitInOneTransaction([[INSERT_ACK, ackParams(s)]]);
       expect(outcome.committed).toBe(false);

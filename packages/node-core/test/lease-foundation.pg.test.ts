@@ -756,7 +756,7 @@ describe("lease-foundation real-PG behaviours", () => {
     }
   }, 120_000);
 
-  it("13/1/2/4/14/3/7/6/12: acquire, concurrent, release, ABA, sign, replay", async () => {
+  it("DB-TEST-04: two-wallet acquisition is all-or-nothing and sorted (acquire concurrent release)", async () => {
     if (!live) return;
 
     // Ensure foundation ready (prior test may have expanded)

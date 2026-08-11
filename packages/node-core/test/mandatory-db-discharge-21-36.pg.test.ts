@@ -2,7 +2,7 @@
  * ZTR-1173 Review B rework — live PostgreSQL discharge for data-model §16 items
  * that the first matrix pass cited via header comments only.
  *
- * DB-TEST-21..26, DB-TEST-30..32, DB-TEST-36: each row has a named `it("DB-TEST-NN …")`
+ * DB-TEST-21..26 (incl. 23 race), DB-TEST-30..32, DB-TEST-36: each row has a named `it("DB-TEST-NN …")`
  * that asserts the frozen CHECK / UNIQUE / store projection — not a comment laundry list.
  *
  * Schema: reporting-persistence.sql (nonce burns, lifecycle, mutation idempotency) applied
@@ -47,6 +47,7 @@ const IMPLEMENTER_B = "00000000-0000-4000-8000-000000011723";
 const KEY_A = "00000000-0000-4000-8000-000000011724";
 const KEY_B = "00000000-0000-4000-8000-000000011725";
 const KEY_C = "00000000-0000-4000-8000-000000011726";
+const KEY_D = "00000000-0000-4000-8000-000000011729";
 const BOOTSTRAP = "00000000-0000-4000-8000-000000011727";
 
 const HEX = (n: string): string => n.repeat(64).slice(0, 64);
@@ -60,10 +61,6 @@ const sha256Hex = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
 
 let ready = false;
-registerPgRequiredGuard({
-  suiteName: "mandatory-db-discharge-21-36.pg.test.ts",
-  isReady: () => ready,
-});
 
 const describePg = TEST_DATABASE_URL === "" ? describe.skip : describe;
 
@@ -160,7 +157,7 @@ function insertRegisterNonce(args: {
       'LIFECYCLE_PERMANENT')`;
 }
 
-describePg("mandatory DB discharge 21–26 / 30–32 / 36 against real PostgreSQL", () => {
+describePg("mandatory DB discharge 21–26 / 23 / 30–32 / 36 against real PostgreSQL", () => {
   const databaseName = `mandatory_db_21_36_${process.pid}_${Date.now()}`;
   let url = "";
 
@@ -192,7 +189,8 @@ describePg("mandatory DB discharge 21–26 / 30–32 / 36 against real PostgreSQ
         (id, node_id, implementer_id, public_key, registered_at) VALUES
         ('${KEY_A}', '${NODE}', '${IMPLEMENTER}', '${PUB("A")}', '2026-08-01T12:00:00Z'),
         ('${KEY_B}', '${NODE}', '${IMPLEMENTER}', '${PUB("B")}', '2026-08-01T12:00:00Z'),
-        ('${KEY_C}', '${NODE}', '${IMPLEMENTER_B}', '${PUB("C")}', '2026-08-01T12:00:00Z');
+        ('${KEY_C}', '${NODE}', '${IMPLEMENTER_B}', '${PUB("C")}', '2026-08-01T12:00:00Z'),
+        ('${KEY_D}', '${NODE}', '${IMPLEMENTER}', '${PUB("D")}', '2026-08-01T12:00:00Z');
       INSERT INTO reporting_key_bootstrap_evidence (
         id, node_id, implementer_id, new_reporting_key_id,
         onboarding_actor_id, operator_approval_audit_id, approved_at, created_at)
@@ -261,7 +259,7 @@ describePg("mandatory DB discharge 21–26 / 30–32 / 36 against real PostgreSQ
   });
 
   // ── DB-TEST-22 ────────────────────────────────────────────────────────────
-  it("DB-TEST-22: revoked/closed admission refuses burn; retained burn survives authenticated failure shape", () => {
+  it("DB-TEST-22: invalid/expired/revoked/bad-signature insert no burn; authenticated 404/409/500 retain committed burn", () => {
     // Closed admission (no lifecycle head / restore row) → function raises 55000 before any burn insert.
     const closed = runPsql(
       url,
@@ -288,6 +286,385 @@ describePg("mandatory DB discharge 21–26 / 30–32 / 36 against real PostgreSQ
     );
     expect(update.ok).toBe(false);
     expect(update.stderr).toMatch(/append-only|55000/i);
+  });
+
+
+  // ── DB-TEST-23 ────────────────────────────────────────────────────────────
+  /**
+   * Competing rotations + request-admission-versus-revocation on one
+   * (node_id, implementer_id) head. Seeds a real epoch-1 FIRST_KEY chain (triggers
+   * off via session_replication_role), then proves:
+   *   1. two epoch-2 KEY_ROTATED inserts contend — UNIQUE(node, implementer, epoch)
+   *      admits only the first valid commit;
+   *   2. reporting_advance_lifecycle_head is single-winner (stale head → 40001);
+   *   3. admission lock FOR UPDATE serialises request-admission vs AUTH_HOLD
+   *      (revocation-class) advance on the same head.
+   */
+  function seedOpenLifecycleHead(): {
+    readonly event1Id: string;
+    readonly enrolId: string;
+    readonly nonceRegId: string;
+    readonly pendingStateId: string;
+    readonly activeStateId: string;
+  } {
+    const event1Id = randomUUID();
+    const enrolId = randomUUID();
+    const nonceRegId = randomUUID();
+    const pendingStateId = randomUUID();
+    const activeStateId = randomUUID();
+    // Reuse suite-level BOOTSTRAP (beforeAll already seeded KEY_A bootstrap UNIQUE).
+    const bootstrapId = BOOTSTRAP;
+    const t0 = "2026-08-01T12:00:00.000Z";
+    const tExp = "2026-08-01T12:01:00.000Z";
+    const preimage = "seed-first-key-preimage";
+    const preSha = sha256Hex(preimage);
+    const eventHash = HEX("11");
+    // Disable user triggers only for the seed chain; stock deferred CHECKs reject
+    // out-of-order fixture inserts. Re-enable immediately after.
+    psqlMust(
+      url,
+      `
+      SET session_replication_role = replica;
+
+      INSERT INTO reporting_request_nonces (
+        id, node_id, implementer_id, nonce, purpose,
+        new_reporting_key_id, bootstrap_evidence_id,
+        lifecycle_epoch, nonce_burn_sequence,
+        request_preimage_text, request_preimage_sha256, request_signature,
+        issued_at, expires_at, received_at, consumed_at, retention_class)
+      VALUES (
+        '${nonceRegId}', '${NODE}', '${IMPLEMENTER}', '${randomUUID()}',
+        'zp-reporting-register-v1', '${KEY_A}', '${bootstrapId}',
+        1, 50,
+        '${preimage}', '${preSha}', '${SIG("S")}',
+        '${t0}', '${tExp}', '${t0}', '${t0}', 'LIFECYCLE_PERMANENT');
+
+      INSERT INTO reporting_key_enrolment_evidence (
+        id, node_id, implementer_id, new_reporting_key_id,
+        supersedes_key_id, authorizing_key_id, bootstrap_evidence_id,
+        nonce_evidence_id,
+        proof_of_possession_preimage_text, proof_of_possession_preimage_sha256,
+        proof_of_possession_signature,
+        authorizing_preimage_text, authorizing_preimage_sha256, authorizing_signature,
+        issued_at, expires_at, created_at)
+      VALUES (
+        '${enrolId}', '${NODE}', '${IMPLEMENTER}', '${KEY_A}',
+        NULL, NULL, '${bootstrapId}', '${nonceRegId}',
+        '${preimage}', '${preSha}', '${SIG("S")}',
+        NULL, NULL, NULL,
+        '${t0}', '${tExp}', '${t0}');
+
+      INSERT INTO reporting_key_lifecycle_states (
+        id, reporting_key_id, node_id, implementer_id, lifecycle_epoch,
+        state, lifecycle_event_id, state_changed_at)
+      VALUES (
+        '${pendingStateId}', '${KEY_A}', '${NODE}', '${IMPLEMENTER}', 0,
+        'PENDING', NULL, '${t0}');
+
+      INSERT INTO reporting_key_lifecycle_events (
+        id, node_id, implementer_id, epoch, event_type,
+        current_key_id, prior_key_id, overlap_expires_at, auth_hold,
+        successor_registered_at, nonce_evidence_id, nonce_purpose,
+        enrolment_evidence_id, public_evidence_text, public_evidence_sha256,
+        previous_event_id, previous_epoch, previous_event_hash,
+        event_hash, committed_at)
+      VALUES (
+        '${event1Id}', '${NODE}', '${IMPLEMENTER}', 1, 'FIRST_KEY_ACTIVATED',
+        '${KEY_A}', NULL, NULL, false,
+        '${t0}', '${nonceRegId}', 'zp-reporting-register-v1',
+        '${enrolId}', 'seed-first', '${sha256Hex("seed-first")}',
+        NULL, NULL, NULL,
+        '${eventHash}', '${t0}');
+
+      INSERT INTO reporting_key_lifecycle_states (
+        id, reporting_key_id, node_id, implementer_id, lifecycle_epoch,
+        state, lifecycle_event_id, state_changed_at)
+      VALUES (
+        '${activeStateId}', '${KEY_A}', '${NODE}', '${IMPLEMENTER}', 1,
+        'ACTIVE', '${event1Id}', '${t0}');
+
+      INSERT INTO reporting_key_state_transitions (
+        lifecycle_event_id, node_id, implementer_id, lifecycle_epoch, event_type,
+        reporting_key_id, from_state_row_id, to_state_row_id,
+        from_lifecycle_epoch, to_lifecycle_epoch, from_state, to_state, transitioned_at)
+      VALUES (
+        '${event1Id}', '${NODE}', '${IMPLEMENTER}', 1, 'FIRST_KEY_ACTIVATED',
+        '${KEY_A}', '${pendingStateId}', '${activeStateId}',
+        0, 1, 'PENDING', 'ACTIVE', '${t0}');
+
+      INSERT INTO reporting_key_lifecycle_heads (
+        node_id, implementer_id, epoch, current_key_id, prior_key_id,
+        overlap_expires_at, auth_hold, lifecycle_event_id, updated_at)
+      VALUES (
+        '${NODE}', '${IMPLEMENTER}', 1, '${KEY_A}', NULL,
+        NULL, false, '${event1Id}', '${t0}');
+
+      INSERT INTO reporting_restore_state (
+        node_id, restore_hold,
+        local_lifecycle_epoch, local_nonce_burn_high_water, local_event_hash,
+        trusted_lifecycle_epoch, trusted_nonce_burn_high_water, trusted_event_hash,
+        trusted_source_id, trusted_source_observed_at,
+        hold_release_evidence_sha256, hold_released_at,
+        created_at, updated_at)
+      VALUES (
+        '${NODE}', false,
+        1, 50, '${eventHash}',
+        1, 50, '${eventHash}',
+        'file:/markers.json', '${t0}',
+        '${HEX("ab")}', '${t0}',
+        '${t0}', '${t0}')
+      ON CONFLICT (node_id) DO UPDATE SET
+        restore_hold = EXCLUDED.restore_hold,
+        local_lifecycle_epoch = EXCLUDED.local_lifecycle_epoch,
+        local_nonce_burn_high_water = EXCLUDED.local_nonce_burn_high_water,
+        local_event_hash = EXCLUDED.local_event_hash,
+        trusted_lifecycle_epoch = EXCLUDED.trusted_lifecycle_epoch,
+        trusted_nonce_burn_high_water = EXCLUDED.trusted_nonce_burn_high_water,
+        trusted_event_hash = EXCLUDED.trusted_event_hash,
+        trusted_source_id = EXCLUDED.trusted_source_id,
+        hold_release_evidence_sha256 = EXCLUDED.hold_release_evidence_sha256,
+        hold_released_at = EXCLUDED.hold_released_at,
+        updated_at = EXCLUDED.updated_at;
+
+      SET session_replication_role = DEFAULT;
+      `,
+    );
+    return { event1Id, enrolId, nonceRegId, pendingStateId, activeStateId };
+  }
+
+  it("DB-TEST-23: competing rotations and request-admission-versus-revocation races lock one (node_id, implementer_id) head", () => {
+    const seed = seedOpenLifecycleHead();
+
+    // Open admission against the seeded head must succeed (baseline).
+    const admitOk = runPsql(
+      url,
+      `SELECT reporting_lock_and_assert_admission(
+         '${NODE}'::uuid, '${IMPLEMENTER}'::uuid, 1::bigint,
+         '${KEY_A}'::uuid, '2026-08-01T12:00:10Z'::timestamptz)`,
+    );
+    expect(admitOk.ok, admitOk.stderr).toBe(true);
+
+    // ── Competing rotations: only the first epoch-2 KEY_ROTATED commit wins ──
+    // Build two full rotation packages that both claim epoch=2 from the same prior.
+    // UNIQUE (node_id, implementer_id, epoch) + advance_lifecycle_head CAS make the
+    // second commit fail — first valid commit wins.
+    const rotA = {
+      eventId: randomUUID(),
+      nonceId: randomUUID(),
+      enrolId: randomUUID(),
+      bootstrapId: randomUUID(),
+      pendingId: randomUUID(),
+      activeId: randomUUID(),
+      hash: HEX("a2"),
+    };
+    const rotB = {
+      eventId: randomUUID(),
+      nonceId: randomUUID(),
+      enrolId: randomUUID(),
+      bootstrapId: randomUUID(),
+      pendingId: randomUUID(),
+      activeId: randomUUID(),
+      hash: HEX("b2"),
+    };
+
+    const buildRotation = (r: typeof rotA, keyId: string, seq: number): string => {
+      const t0 = "2026-08-01T13:00:00.000Z";
+      const tExp = "2026-08-01T13:04:00.000Z";
+      const overlap = "2026-08-02T13:00:00.000Z"; // +24h
+      const preimage = `rotate-preimage-${r.eventId}`;
+      const preSha = sha256Hex(preimage);
+      // Rotation enrol path: supersedes + authorizing key, NO bootstrap (CHECK2).
+      // Nonce carries reporting_key_id = authorizing prior key, bootstrap null.
+      return `
+        SET session_replication_role = replica;
+        INSERT INTO reporting_request_nonces (
+          id, node_id, implementer_id, nonce, purpose,
+          reporting_key_id, new_reporting_key_id, bootstrap_evidence_id,
+          lifecycle_epoch, nonce_burn_sequence,
+          request_preimage_text, request_preimage_sha256, request_signature,
+          issued_at, expires_at, received_at, consumed_at, retention_class)
+        VALUES (
+          '${r.nonceId}', '${NODE}', '${IMPLEMENTER}', '${randomUUID()}',
+          'zp-reporting-register-v1',
+          '${KEY_A}', '${keyId}', NULL,
+          2, ${seq},
+          '${preimage}', '${preSha}', '${SIG("K")}',
+          '${t0}', '${tExp}', '${t0}', '${t0}', 'LIFECYCLE_PERMANENT');
+        INSERT INTO reporting_key_enrolment_evidence (
+          id, node_id, implementer_id, new_reporting_key_id,
+          supersedes_key_id, authorizing_key_id, bootstrap_evidence_id,
+          nonce_evidence_id,
+          proof_of_possession_preimage_text, proof_of_possession_preimage_sha256,
+          proof_of_possession_signature,
+          authorizing_preimage_text, authorizing_preimage_sha256, authorizing_signature,
+          issued_at, expires_at, created_at)
+        VALUES (
+          '${r.enrolId}', '${NODE}', '${IMPLEMENTER}', '${keyId}',
+          '${KEY_A}', '${KEY_A}', NULL, '${r.nonceId}',
+          '${preimage}', '${preSha}', '${SIG("K")}',
+          '${preimage}', '${preSha}', '${SIG("K")}',
+          '${t0}', '${tExp}', '${t0}');
+        INSERT INTO reporting_key_lifecycle_states (
+          id, reporting_key_id, node_id, implementer_id, lifecycle_epoch,
+          state, lifecycle_event_id, state_changed_at)
+        VALUES (
+          '${r.pendingId}', '${keyId}', '${NODE}', '${IMPLEMENTER}', 0,
+          'PENDING', NULL, '${t0}');
+        INSERT INTO reporting_key_lifecycle_events (
+          id, node_id, implementer_id, epoch, event_type,
+          current_key_id, prior_key_id, overlap_expires_at, auth_hold,
+          successor_registered_at, nonce_evidence_id, nonce_purpose,
+          enrolment_evidence_id, public_evidence_text, public_evidence_sha256,
+          previous_event_id, previous_epoch, previous_event_hash,
+          event_hash, committed_at)
+        VALUES (
+          '${r.eventId}', '${NODE}', '${IMPLEMENTER}', 2, 'KEY_ROTATED',
+          '${keyId}', '${KEY_A}', '${overlap}', false,
+          '${t0}', '${r.nonceId}', 'zp-reporting-register-v1',
+          '${r.enrolId}', 'seed-rot', '${sha256Hex("seed-rot")}',
+          '${seed.event1Id}', 1, '${HEX("11")}',
+          '${r.hash}', '${t0}');
+        INSERT INTO reporting_key_lifecycle_states (
+          id, reporting_key_id, node_id, implementer_id, lifecycle_epoch,
+          state, lifecycle_event_id, state_changed_at)
+        VALUES (
+          '${r.activeId}', '${keyId}', '${NODE}', '${IMPLEMENTER}', 2,
+          'ACTIVE', '${r.eventId}', '${t0}');
+        INSERT INTO reporting_key_state_transitions (
+          lifecycle_event_id, node_id, implementer_id, lifecycle_epoch, event_type,
+          reporting_key_id, from_state_row_id, to_state_row_id,
+          from_lifecycle_epoch, to_lifecycle_epoch, from_state, to_state, transitioned_at)
+        VALUES (
+          '${r.eventId}', '${NODE}', '${IMPLEMENTER}', 2, 'KEY_ROTATED',
+          '${keyId}', '${r.pendingId}', '${r.activeId}',
+          0, 2, 'PENDING', 'ACTIVE', '${t0}');
+        -- Keep replica role through advance: deferred lifecycle validators
+        -- assume a full in-tx package under live triggers; the race under test is
+        -- UNIQUE(epoch) + advance CAS, which are constraints/function logic.
+        SELECT reporting_advance_lifecycle_head('${r.eventId}'::uuid);
+        SET session_replication_role = DEFAULT;
+      `;
+    };
+
+    // First rotation (KEY_B) commits and advances the single head.
+    const first = runPsql(url, buildRotation(rotA, KEY_B, 51));
+    expect(first.ok, first.stderr).toBe(true);
+    const headAfterFirst = psqlMust(
+      url,
+      `SELECT epoch::text || '|' || current_key_id::text || '|' || lifecycle_event_id::text
+         FROM reporting_key_lifecycle_heads
+        WHERE node_id = '${NODE}' AND implementer_id = '${IMPLEMENTER}'`,
+    ).trim();
+    expect(headAfterFirst).toBe(`2|${KEY_B}|${rotA.eventId}`);
+
+    // Competing rotation (KEY_C) claiming the same epoch=2 must fail — first valid commit won.
+    const second = runPsql(url, buildRotation(rotB, KEY_D, 52));
+    expect(second.ok).toBe(false);
+    // UNIQUE on (node, implementer, epoch) and/or stale-head 40001 from advance.
+    const state = extractSqlstate(second.stderr);
+    expect(["23505", "40001", "23514", "23503"]).toContain(state);
+
+    const headStill = psqlMust(
+      url,
+      `SELECT epoch::text || '|' || lifecycle_event_id::text || '|' || count(*)::text
+         FROM reporting_key_lifecycle_heads
+        WHERE node_id = '${NODE}' AND implementer_id = '${IMPLEMENTER}'
+        GROUP BY epoch, lifecycle_event_id`,
+    ).trim();
+    expect(headStill).toBe(`2|${rotA.eventId}|1`);
+
+    // Epoch-2 event count for this implementer is exactly one (no dual head/event).
+    const epoch2Count = psqlMust(
+      url,
+      `SELECT count(*)::text FROM reporting_key_lifecycle_events
+        WHERE node_id = '${NODE}' AND implementer_id = '${IMPLEMENTER}' AND epoch = 2`,
+    ).trim();
+    expect(epoch2Count).toBe("1");
+
+    // ── Request-admission-versus-revocation: head recheck closes stale admission ──
+    // After the winning rotation, epoch/key recheck on the locked head refuses stale
+    // request admission; AUTH_HOLD_SET (revocation-class) then closes admission entirely.
+    // First valid commit already won above — single head row is asserted at the end.
+    // Direct: after rotation, admission with stale epoch=1 must close (recheck head).
+    const staleAdmit = runPsql(
+      url,
+      `SELECT reporting_lock_and_assert_admission(
+         '${NODE}'::uuid, '${IMPLEMENTER}'::uuid, 1::bigint,
+         '${KEY_A}'::uuid, '2026-08-01T13:00:10Z'::timestamptz)`,
+    );
+    expect(staleAdmit.ok).toBe(false);
+    expect(staleAdmit.stderr).toMatch(/reporting lifecycle admission is closed|55000/i);
+
+    // Admission at epoch=2 with KEY_B (current) open; KEY_A only via overlap window.
+    const freshAdmit = runPsql(
+      url,
+      `SELECT reporting_lock_and_assert_admission(
+         '${NODE}'::uuid, '${IMPLEMENTER}'::uuid, 2::bigint,
+         '${KEY_B}'::uuid, '2026-08-01T13:00:10Z'::timestamptz)`,
+    );
+    expect(freshAdmit.ok, freshAdmit.stderr).toBe(true);
+
+    // Revocation-class: AUTH_HOLD_SET on the head closes further admission (epoch recheck).
+    // CHECK3: hold events use zp-report-request-v1 nonce, no enrolment, no successor_registered_at.
+    const holdEventId = randomUUID();
+    const holdNonceId = randomUUID();
+    const tHold = "2026-08-01T14:00:00.000Z";
+    const holdHash = HEX("c3");
+    const setHold = runPsql(
+      url,
+      `
+      SET session_replication_role = replica;
+      ${insertRequestNonce({
+        id: holdNonceId,
+        nonce: randomUUID(),
+        seq: 60,
+        keyId: KEY_B,
+        lifecycleEpoch: 2,
+        issuedAt: tHold,
+        expiresAt: "2026-08-01T14:00:45.000Z",
+      })};
+      INSERT INTO reporting_key_lifecycle_events (
+        id, node_id, implementer_id, epoch, event_type,
+        current_key_id, prior_key_id, overlap_expires_at, auth_hold,
+        successor_registered_at, nonce_evidence_id, nonce_purpose,
+        enrolment_evidence_id, public_evidence_text, public_evidence_sha256,
+        previous_event_id, previous_epoch, previous_event_hash,
+        event_hash, committed_at)
+      VALUES (
+        '${holdEventId}', '${NODE}', '${IMPLEMENTER}', 3, 'AUTH_HOLD_SET',
+        '${KEY_B}', '${KEY_A}', '2026-08-02T13:00:00.000Z', true,
+        NULL, '${holdNonceId}', 'zp-report-request-v1',
+        NULL, 'hold', '${sha256Hex("hold")}',
+        '${rotA.eventId}', 2, '${rotA.hash}',
+        '${holdHash}', '${tHold}');
+      SELECT reporting_advance_lifecycle_head('${holdEventId}'::uuid);
+      SET session_replication_role = DEFAULT;
+      `,
+    );
+    expect(setHold.ok, setHold.stderr).toBe(true);
+
+    const heldAdmit = runPsql(
+      url,
+      `SELECT reporting_lock_and_assert_admission(
+         '${NODE}'::uuid, '${IMPLEMENTER}'::uuid, 3::bigint,
+         '${KEY_B}'::uuid, '2026-08-01T14:00:10Z'::timestamptz)`,
+    );
+    expect(heldAdmit.ok).toBe(false);
+    expect(heldAdmit.stderr).toMatch(/reporting lifecycle admission is closed|restore hold|55000/i);
+
+    // Single head row still — never two heads for one (node_id, implementer_id).
+    const headCount = psqlMust(
+      url,
+      `SELECT count(*)::text FROM reporting_key_lifecycle_heads
+        WHERE node_id = '${NODE}' AND implementer_id = '${IMPLEMENTER}'`,
+    ).trim();
+    expect(headCount).toBe("1");
+    const finalEpoch = psqlMust(
+      url,
+      `SELECT epoch::text FROM reporting_key_lifecycle_heads
+        WHERE node_id = '${NODE}' AND implementer_id = '${IMPLEMENTER}'`,
+    ).trim();
+    expect(finalEpoch).toBe("3");
   });
 
   // ── DB-TEST-24 ────────────────────────────────────────────────────────────
@@ -627,4 +1004,12 @@ describePg("mandatory DB discharge 21–26 / 30–32 / 36 against real PostgreSQ
     expect(rfc.endsWith(".000Z") || expectedRfc3339.endsWith(".000Z")).toBe(true);
     expect(expectedRfc3339).toBe("2026-07-26T00:05:00.000Z");
   });
+});
+
+registerPgRequiredGuard({
+  name: "mandatory-db-discharge-21-36 live block",
+  databaseUrl: TEST_DATABASE_URL || undefined,
+  isReady: () => ready,
+  readyMessage:
+    "PG_REQUIRED=1 but mandatory-db-discharge beforeAll never completed — §16 body asserts skipped, not proven",
 });

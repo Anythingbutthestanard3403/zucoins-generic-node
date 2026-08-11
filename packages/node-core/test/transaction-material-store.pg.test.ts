@@ -314,7 +314,7 @@ describe.skipIf(databaseUrl === undefined)(
     });
 
     // mandatory database test 8 — JSONB is absent from all authoritative-byte columns.
-    it("no column across the three tables is jsonb, json, or bytea (mandatory database test 8)", async () => {
+    it("DB-TEST-08: JSONB is absent from all authoritative-byte columns", async () => {
       expect(
         await scalar(
           `SELECT coalesce(string_agg(table_name || '.' || column_name || ':' || data_type, ','), 'none')
@@ -358,7 +358,7 @@ describe.skipIf(databaseUrl === undefined)(
     });
 
     // mandatory database test 7 — exact preimage, transaction and partial bytes survive round-trip.
-    it("golden preimage, signature and settled-body bytes survive round-trip byte-identically (mandatory database test 7)", async () => {
+    it("DB-TEST-07: exact artifact approval preimage transaction partial observation event bytes round-trip", async () => {
       const { operationId, approvalId } = await seedOperation();
       await insertSignIntent(query, signIntentFor(operationId, approvalId));
       await insertTransactionAttempt(query, {
@@ -509,7 +509,7 @@ describe.skipIf(databaseUrl === undefined)(
     });
 
     // mandatory database test 9 — a persisted external partial cannot be replaced, even after expiry or crash.
-    it("a persisted partial cannot be replaced: same operation breaks the PK, same approval breaks UNIQUE (mandatory database test 9)", async () => {
+    it("DB-TEST-09: persisted external partial cannot be replaced even after expiry or crash", async () => {
       const { operationId, approvalId } = await seedOperation();
       await insertPartial(query, partialFor(operationId, approvalId));
 

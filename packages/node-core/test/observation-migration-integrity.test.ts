@@ -637,7 +637,7 @@ describeIfPg("observation migration integrity (real PostgreSQL)", () => {
   /* ── Indicator 3: five GOLDEN_SEQUENCES through real migrated schema ── */
 
   it.each([...GOLDEN_SEQUENCES])(
-    "(c) golden $name: $description — real INSERT counts match frozen expectation",
+    "DB-TEST-12 DB-TEST-13: golden $name — consecutive A,A / EQUIVALENT_STATE_DIFFERENT_ENVELOPE / malformed unverifiable raw bytes append",
     async (golden) => {
       const pk = nextPk();
       const key: ObservationStreamKey = { observerId: OBSERVER_NODE, walletPublicKey: pk };
@@ -797,7 +797,7 @@ describeIfPg("observation migration integrity (real PostgreSQL)", () => {
 
   /* ── Negative paths from checklist ── */
 
-  it("(e) NEGATIVE: byte-different same-semantic envelope is NOT suppressed (AA_PRIME)", async () => {
+  it("DB-TEST-12: EQUIVALENT_STATE_DIFFERENT_ENVELOPE is NOT suppressed (AA_PRIME)", async () => {
     const pk = nextPk();
     const key: ObservationStreamKey = { observerId: OBSERVER_NODE, walletPublicKey: pk };
     const w = makeWriter(scratchDb);

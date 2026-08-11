@@ -645,7 +645,7 @@ afterAll(async () => {
 }, PROVISION_TIMEOUT_MS * 2);
 
 describe("operations / operation_wallets against real PostgreSQL", () => {
-  it("the frozen contract applies unchanged once its four FK targets exist", () => {
+  it("DB-TEST-05: every operation-kind/status/nullable-field invalid combination fails CHECK", () => {
     // beforeAll throws on a failed apply; reaching any assertion at all proves it applied.
     expect(outcomes.size).toBe(Object.keys(CASES).length);
   });

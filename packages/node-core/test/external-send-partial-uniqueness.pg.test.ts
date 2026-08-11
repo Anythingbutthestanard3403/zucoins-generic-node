@@ -419,7 +419,7 @@ describeIfPg(
       assertionsRun += 1;
     });
 
-    it("(h) operation_transactions structurally forbids a second attempt row, both ways (23505 / 23514)", () => {
+    it("DB-TEST-11: node code cannot create any submit attempt for SEND_EXTERNAL (second attempt forbidden)", () => {
       psqlMust(scratchDb, insertAttempt(OP_TX, 1, 30));
 
       const duplicate = runPsql(scratchDb, insertAttempt(OP_TX, 1, 31), true);

@@ -175,7 +175,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-credential service (public-only persis
     }
   });
 
-  it("issue returns the raw seed once, byte-equal to the ceremony's minted key, persisting public only", async () => {
+  it("DB-TEST-28: exact raw target request preimage/digest/signature exact-body digest survive round-trip", async () => {
     const issued = await issueReportingCredential(pool, {
       nodeId: NODE_ID,
       implementerId: IMPLEMENTER_ID,

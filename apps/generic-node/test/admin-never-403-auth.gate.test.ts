@@ -124,6 +124,8 @@ function makeRouter(opts?: {
     },
   };
   const loadOperation = opts?.loadOperation ?? (async () => null);
+  const destinationService =
+    opts?.destinationService ?? createFailClosedDestinationService();
 
   const router = createAdminRouter({
     sessions,
@@ -138,6 +140,7 @@ function makeRouter(opts?: {
       challengeStore,
       loadOperation,
       deviceSignaturePolicy,
+      destinationService,
     }),
     sendDecisionStore: {
       rejectCreated: async () => {
@@ -178,7 +181,7 @@ function makeRouter(opts?: {
       },
       storeIdempotency: async () => {},
     },
-    destinationService: opts?.destinationService ?? createFailClosedDestinationService(),
+    destinationService,
     newRequestId: () => randomUUID(),
     halt: {
       gate: createHaltGate(RUNNING),

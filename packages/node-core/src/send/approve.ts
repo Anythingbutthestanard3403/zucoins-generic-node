@@ -267,9 +267,10 @@ export function toOpaqueApprovalFailure(reason: ApprovalRejectReason): {
     | typeof APPROVAL_FACTOR_FAILURE_HTTP_STATUS
     | typeof APPROVAL_POLICY_DENIAL_HTTP_STATUS;
 } {
-  // Policy denial is distinguishable (§4.2) and keeps 403; every FACTOR reason
-  // still collapses to one 401 envelope so body-diffing cannot reveal which
-  // factor failed (ZTR-1194).
+  // Policy denial is distinguishable by code (§4.2); HTTP status is 401 for both
+  // policy and factor paths so OPERATOR_SESSION never-403 holds (ZTR-1191). Factor
+  // reasons still collapse to one opaque envelope so body-diffing cannot reveal
+  // which factor failed (ZTR-1194).
   if (reason === APPROVAL_POLICY_DENIAL_CODE) {
     return {
       code: APPROVAL_POLICY_DENIAL_CODE,

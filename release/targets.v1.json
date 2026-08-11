@@ -1,0 +1,272 @@
+{
+  "$schema": "./targets.schema.json",
+  "schemaVersion": 1,
+  "controlGlobs": [
+    ".claude/agents/**",
+    ".codex/agents/**",
+    ".github/workflows/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "ORCHESTRATION.md",
+    "docs/DECISIONS.md",
+    "release/**",
+    "scripts/build-decisions.mjs",
+    "scripts/check-decision-citation-support.py",
+    "scripts/check-decision-citation-support.selftest.sh",
+    "scripts/check-decision-citation-support.sh",
+    "scripts/check-decision-citations.sh",
+    "scripts/check-decision-ids.sh",
+    "scripts/check-decision-pins.py",
+    "scripts/check-decision-pins.selftest.sh",
+    "scripts/check-decision-pins.sh",
+    "scripts/check-decision-test-paths*.sh",
+    "scripts/check-merged-migration-state*.mjs",
+    "scripts/check-phantom-settles*.mjs",
+    "scripts/check-schema-census*.mjs",
+    "scripts/claim*.py",
+    "scripts/lease-provenance.mjs",
+    "scripts/money-path-scan*.mjs",
+    "scripts/release-targets*.mjs",
+    "scripts/remediate-orphaned-lease*.mjs",
+    "scripts/verdict-integrity*.mjs",
+    "scripts/verify-railway-release-binding*.mjs"
+  ],
+  "ignoredGlobs": [
+    "docs/**",
+    "**/*.md",
+    "tasks/**",
+    ".gitleaks.toml",
+    ".prettierignore",
+    ".gitignore",
+    ".eslintignore",
+    ".npmrc",
+    ".editorconfig",
+    ".nvmrc",
+    ".prettierrc",
+    ".prettierrc.json",
+    ".prettierrc.json5",
+    ".prettierrc.yml",
+    ".prettierrc.yaml",
+    ".prettierrc.js",
+    ".prettierrc.cjs",
+    ".prettierrc.mjs",
+    ".prettierrc.toml",
+    "eslint.config.mjs",
+    "vitest.config.ts",
+    "vitest.aliases.ts",
+    "vitest.global-setup.ts",
+    "scripts/gen-operator-alert-docs.mjs",
+    "scripts/linear.py",
+    "perf-budget.json",
+    "evidence/**"
+  ],
+  "targets": [
+    {
+      "id": "backup-assurance-runner",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "ops/backup-assurance/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "normal-release-gate",
+      "liveAcceptance": "not-required-no-custody",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "docs-site",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "docs-site/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "normal-release-gate",
+      "liveAcceptance": "not-required",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "funded-manual-node",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "apps/node/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "riley-explicit-in-session",
+      "liveAcceptance": "real-zkz-gated",
+      "rollbackRef": "release/README.md#funded-node-boundary",
+      "externalBinding": null
+    },
+    {
+      "id": "generic-node",
+      "active": true,
+      "provider": "railway",
+      "deployMode": "manual-riley-gated",
+      "classificationGlobs": [
+        "patches/**",
+        "apps/generic-node/**",
+        "packages/generic-node-contracts/**",
+        "packages/node-core/**",
+        "packages/consumer-example/**",
+        "packages/generic-node-consumer/**",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.json",
+        "tsconfig.base.json"
+      ],
+      "configPath": "apps/generic-node/railway.json",
+      "dockerfilePath": "apps/generic-node/Dockerfile",
+      "watchPatterns": [
+        "/apps/generic-node/**",
+        "/packages/node-core/**",
+        "/pnpm-lock.yaml",
+        "/pnpm-workspace.yaml",
+        "/tsconfig.base.json"
+      ],
+      "healthGate": {
+        "path": "/health/ready",
+        "expectedStatus": 200,
+        "stabilization": "provider-healthcheck"
+      },
+      "migrationRequired": true,
+      "approval": "riley-explicit-in-session",
+      "liveAcceptance": "not-required-no-custody",
+      "rollbackRef": "release/README.md#generic-node-boundary",
+      "externalBinding": {
+        "driftCheck": "manual-riley-gated-read-only",
+        "logicalService": "generic-node",
+        "logicalEnvironment": "production",
+        "sourceMode": "repository",
+        "branch": "main",
+        "configPath": "apps/generic-node/railway.json"
+      }
+    },
+    {
+      "id": "hosted-platform",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "apps/platform/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "normal-release-gate",
+      "liveAcceptance": "not-required",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "merchant-node-artifact",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "apps/merchant-node/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "artifact-publication-gate",
+      "liveAcceptance": "merchant-owned",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "platform-v2",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "apps/platform-v2/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "riley-explicit-in-session",
+      "liveAcceptance": "not-required-no-custody",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "public-reference-node",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "public-node/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "manual-offline-publish",
+      "liveAcceptance": "not-required-no-custody",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "release-drift-check-runner",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "release/drift-check/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "normal-release-gate",
+      "liveAcceptance": "not-required-no-custody",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    },
+    {
+      "id": "website",
+      "active": false,
+      "provider": "none",
+      "deployMode": "none",
+      "classificationGlobs": [
+        "website/**"
+      ],
+      "configPath": null,
+      "dockerfilePath": null,
+      "watchPatterns": [],
+      "healthGate": null,
+      "migrationRequired": false,
+      "approval": "normal-release-gate",
+      "liveAcceptance": "not-required",
+      "rollbackRef": "release/README.md#rollback-evidence",
+      "externalBinding": null
+    }
+  ]
+}

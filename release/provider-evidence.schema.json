@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "release-provider-evidence-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "target", "provider", "status", "checkedFields", "commitSha", "rollbackRef"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "target": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "provider": { "enum": ["railway", "vercel", "ghcr"] },
+    "status": { "enum": ["MATCH", "DRIFT", "UNOBSERVABLE"] },
+    "checkedFields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["logicalService", "logicalEnvironment", "sourceMode", "branch", "configPath", "dockerfilePath", "healthcheckPath", "watchPatterns"] }
+    },
+    "commitSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "rollbackRef": { "type": "string", "pattern": "^[A-Za-z0-9._/#-]+$" },
+    "driftFields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z]+$" }
+    }
+  }
+}

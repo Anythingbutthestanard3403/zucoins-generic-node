@@ -70,7 +70,7 @@
     "nounsChecked": 39,
     "nounsOk": 39,
     "nounsFailed": 0,
-    "foreignKeysChecked": 193,
+    "foreignKeysChecked": 189,
     "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
@@ -1005,23 +1005,9 @@
       "ok": true
     },
     {
-      "source": "lease_groups(root_operation_id)",
-      "target": "operations(id)",
-      "onDelete": "NO ACTION",
-      "onUpdate": "UNSPECIFIED",
-      "ok": true
-    },
-    {
       "source": "lease_group_operations(lease_group_id)",
       "target": "lease_groups(id)",
       "onDelete": "UNSPECIFIED",
-      "onUpdate": "UNSPECIFIED",
-      "ok": true
-    },
-    {
-      "source": "lease_group_operations(operation_id)",
-      "target": "operations(id)",
-      "onDelete": "NO ACTION",
       "onUpdate": "UNSPECIFIED",
       "ok": true
     },
@@ -1043,20 +1029,6 @@
       "source": "wallet_active_leases(lease_group_id)",
       "target": "lease_groups(id)",
       "onDelete": "UNSPECIFIED",
-      "onUpdate": "UNSPECIFIED",
-      "ok": true
-    },
-    {
-      "source": "wallet_active_leases(root_operation_id)",
-      "target": "operations(id)",
-      "onDelete": "NO ACTION",
-      "onUpdate": "UNSPECIFIED",
-      "ok": true
-    },
-    {
-      "source": "wallet_active_leases(operation_id)",
-      "target": "operations(id)",
-      "onDelete": "NO ACTION",
       "onUpdate": "UNSPECIFIED",
       "ok": true
     },

@@ -48,44 +48,6 @@ function dbUrl(name: string): string {
   return base.replace(/\/[^/]+$/, `/${name}`);
 }
 
-/** Minimal schema carrying the restore_hold CHECK the force-upsert must satisfy. */
-const MINIMAL_SCHEMA_SQL = `
-CREATE TABLE nodes (
-  id uuid PRIMARY KEY,
-  display_name text NOT NULL
-);
-
-CREATE TABLE reporting_restore_state (
-  node_id uuid PRIMARY KEY REFERENCES nodes(id),
-  restore_hold boolean NOT NULL DEFAULT true,
-  local_lifecycle_epoch bigint,
-  local_nonce_burn_high_water bigint,
-  local_event_hash text,
-  trusted_lifecycle_epoch bigint,
-  trusted_nonce_burn_high_water bigint,
-  trusted_event_hash text,
-  trusted_source_id text,
-  trusted_source_observed_at timestamptz,
-  hold_release_evidence_sha256 text,
-  hold_released_at timestamptz,
-  created_at timestamptz NOT NULL,
-  updated_at timestamptz NOT NULL,
-  CHECK (
-    restore_hold
-    OR
-    (trusted_source_id IS NOT NULL
-      AND local_lifecycle_epoch IS NOT NULL
-      AND local_nonce_burn_high_water IS NOT NULL
-      AND local_event_hash IS NOT NULL
-      AND local_lifecycle_epoch = trusted_lifecycle_epoch
-      AND local_nonce_burn_high_water = trusted_nonce_burn_high_water
-      AND local_event_hash = trusted_event_hash
-      AND hold_release_evidence_sha256 IS NOT NULL
-      AND hold_released_at IS NOT NULL)
-  )
-);
-`;
-
 const EVIDENCE_HASH = "ab".repeat(32);
 const EVENT_HASH = "cd".repeat(32);
 

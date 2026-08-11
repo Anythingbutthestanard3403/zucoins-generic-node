@@ -23,6 +23,8 @@ import {
   ensureActiveNodeSigningKey,
   toBase64UrlPadded,
   type NodeEventSigner,
+  mintSubscriptionHandlePlaintext,
+  hashSubscriptionHandle,
 } from "@zucoins/node-core";
 
 import { ensureNodeIdentitySigningKey, ensureNodeRow } from "../src/bootstrap/genesis.js";
@@ -390,17 +392,36 @@ describe.skipIf(!PG_AVAILABLE)(
           const reqSha = createHash("sha256")
             .update(`recv|${operationId}`, "utf8")
             .digest("hex");
+          // Create-time body must already carry sh_… — READY worker fail-closes without it (ZTR-1142).
+          const createHandle = mintSubscriptionHandlePlaintext();
           await pool.query(
             `INSERT INTO receive_operations (
                operation_id, implementer_id, node_id, kind, status,
                http_method, route, idempotency_key, request_sha256,
-               amount_zkz, anchor, ttl_ms, after_landing_kind
+               amount_zkz, anchor, ttl_ms, after_landing_kind,
+               completed_at, response_status, response_body
              ) VALUES (
                $1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'CREATED',
                'POST', '/v1/receives', $4, $5,
-               '0.01', 'receive-expiry-wiring', 300000, 'HOLD'
+               '0.01', 'receive-expiry-wiring', 300000, 'HOLD',
+               now(), 202, $6
              )`,
-            [operationId, implementerId, nodeId, `idem-${operationId}`, reqSha],
+            [
+              operationId,
+              implementerId,
+              nodeId,
+              `idem-${operationId}`,
+              reqSha,
+              JSON.stringify({ subscription_handle: createHandle }),
+            ],
+          );
+          await pool.query(
+            `INSERT INTO subscription_handles (
+               id, node_id, operation_id, handle_hash, expires_at, created_at
+             ) VALUES (
+               $1::uuid, $2::uuid, $3::uuid, $4::sha256_hex, now() + interval '1 hour', now()
+             )`,
+            [randomUUID(), nodeId, operationId, hashSubscriptionHandle(createHandle)],
           );
 
           // Tick until the receive reaches READY.
@@ -537,6 +558,30 @@ describe.skipIf(!PG_AVAILABLE)(
              VALUES ($1::uuid, $2::uuid, 'RECEIVER')`,
             [unformedOpId, unformedWalletId],
           );
+          // Dual-chain operation.expired owner lookup requires receive_operations (ZTR-1146).
+          // CREATED rows must keep wallet_id NULL (receive_operations_no_receiver_while_created).
+          const unformedHandle = mintSubscriptionHandlePlaintext();
+          await pool.query(
+            `INSERT INTO receive_operations (
+               operation_id, implementer_id, node_id, kind, status,
+               http_method, route, idempotency_key, request_sha256,
+               amount_zkz, anchor, ttl_ms, after_landing_kind,
+               completed_at, response_status, response_body
+             ) VALUES (
+               $1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'CREATED',
+               'POST', '/v1/receives', $4, $5,
+               '1', 'receive-expiry-wiring-unformed', 300000, 'HOLD',
+               now(), 202, $6
+             )`,
+            [
+              unformedOpId,
+              implementerId,
+              nodeId,
+              `idem-unformed-${unformedOpId}`,
+              reqSha,
+              JSON.stringify({ subscription_handle: unformedHandle }),
+            ],
+          );
           await plantReceiveLease(pool, {
             walletId: unformedWalletId,
             operationId: unformedOpId,
@@ -645,6 +690,31 @@ describe.skipIf(!PG_AVAILABLE)(
           auditLog: new InMemoryVaultAccessAuditLog(),
         });
 
+        // Attention dual-chain-appends operation.needs_attention — needs real EVENT_SIGNING.
+        const eventKeyClient = await pool.connect();
+        let eventSigner: NodeEventSigner;
+        try {
+          await eventKeyClient.query("BEGIN");
+          const eventKey = await ensureActiveNodeSigningKey({
+            sql: {
+              query: async <R>(text: string, params?: readonly unknown[]) => {
+                const result = await eventKeyClient.query(text, params as never);
+                return { rows: result.rows as R[] };
+              },
+            },
+            rootKey,
+            nodeId,
+            purpose: "EVENT_SIGNING",
+          });
+          await eventKeyClient.query("COMMIT");
+          eventSigner = {
+            signingKeyId: eventKey.signingKeyId,
+            sign: (bytes) => toBase64UrlPadded(Buffer.from(eventKey.sign(bytes))),
+          };
+        } finally {
+          eventKeyClient.release();
+        }
+
         const logs: string[] = [];
         const handle = startMoneyWorkers({
           pool,
@@ -660,8 +730,6 @@ describe.skipIf(!PG_AVAILABLE)(
             receiveTtlMaxSecs: 3600,
             tickIntervalMs: 0,
             allowGenesisT0Stub: true,
-            // Expiry sweep produces no events — no EVENT_SIGNING signer here. // contract-allow:sweep:frozen structural vocabulary
-            allowMissingEventSigner: true,
           },
           logger: {
             info: (m) => logs.push(m),
@@ -675,6 +743,7 @@ describe.skipIf(!PG_AVAILABLE)(
             assertHaltAdmitsKind: () => {},
           },
           nodeIdentitySigner: () => null,
+          eventSigner: () => eventSigner,
         });
 
         try {
@@ -711,6 +780,30 @@ describe.skipIf(!PG_AVAILABLE)(
             `INSERT INTO operation_wallets (operation_id, wallet_id, operation_role, t0_observation_id)
              VALUES ($1::uuid, $2::uuid, 'RECEIVER', $3::uuid)`,
             [operationId, walletId, t0ObservationId],
+          );
+          // Dual-chain owner lookup + create-body carrier for this planted READY.
+          const attHandle = mintSubscriptionHandlePlaintext();
+          await pool.query(
+            `INSERT INTO receive_operations (
+               operation_id, implementer_id, node_id, kind, status,
+               http_method, route, idempotency_key, request_sha256,
+               amount_zkz, anchor, ttl_ms, after_landing_kind, wallet_id,
+               completed_at, response_status, response_body
+             ) VALUES (
+               $1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'READY',
+               'POST', '/v1/receives', $4, $5,
+               '1', 'receive-expiry-wiring-att', 300000, 'HOLD', $6::uuid,
+               now(), 201, $7
+             )`,
+            [
+              operationId,
+              implementerId,
+              nodeId,
+              `idem-att-${operationId}`,
+              sha,
+              walletId,
+              JSON.stringify({ subscription_handle: attHandle }),
+            ],
           );
 
           // Plant a lease.

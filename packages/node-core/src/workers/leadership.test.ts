@@ -694,7 +694,7 @@ describe("loss detection is driven by the connection, not the clock (AC5)", () =
     expect(latch.held).toBe(true);
 
     handlers[0]!();
-    // Ownership dispose is async (end()); drain microtasks then join releaseFlight.
+    // Ownership dispose is async (end()); flush microtasks then join releaseFlight.
     await Promise.resolve();
     await Promise.resolve();
     await held!.release();

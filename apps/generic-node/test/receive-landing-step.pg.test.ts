@@ -392,6 +392,30 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
        VALUES ($1::uuid, $2::uuid, 'RECEIVER', $3::uuid)`,
       [operationId, walletId, t0ObservationId],
     );
+    // Dual-chain needs_attention looks up owner on receive_operations (ZTR-1146).
+    await pool.query(
+      `INSERT INTO receive_operations (
+         operation_id, implementer_id, node_id, kind, status,
+         http_method, route, idempotency_key, request_sha256,
+         amount_zkz, anchor, ttl_ms, after_landing_kind, wallet_id,
+         completed_at, response_status, response_body
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'READY',
+         'POST', '/v1/receives', $4, $5,
+         $6, 'recv', 300000, 'HOLD', $7::uuid,
+         now(), 201, $8
+       )`,
+      [
+        operationId,
+        implementerId,
+        nodeId,
+        `idem-${operationId}`,
+        sha256HexOfText(operationId),
+        RECEIVE_AMOUNT_ZKZ,
+        walletId,
+        JSON.stringify({ subscription_handle: `sh_landing_${operationId.replace(/-/g, "").slice(0, 24)}` }),
+      ],
+    );
 
     // Receiver lease — held before the landing and asserted still held after it (One-in-flight).
     await pool.query(
@@ -517,6 +541,10 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
   }
 
   function stepDeps(nodeId: string, exchange: GatewayExchangeTransport) {
+    const signer = signers.get(nodeId);
+    if (signer === undefined) {
+      throw new Error(`stepDeps: no EVENT_SIGNING signer for node ${nodeId}`);
+    }
     return {
       pool,
       nodeId,
@@ -528,6 +556,8 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
         exchange,
       }),
       store: landingStoreFor(nodeId),
+      // Attention park dual-chain-appends operation.needs_attention (ZTR-1146).
+      eventSigner: signer,
     };
   }
 
@@ -1204,11 +1234,15 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
 
       expect(await statusOf(parked.operationId)).toBe(RECEIVE_LANDED_STATUS);
 
-      // One landing ⇒ one authoritative event on each chain. The loser's CAS matched nothing,
-      // so its whole transaction — including its event append — rolled back.
+      // One landing ⇒ exactly one receive.landed on each chain. The loser's landing CAS
+      // matched nothing and rolled back its landed append; the loser's post-CAS
+      // indeterminate path may open an attention episode (operation.needs_attention) —
+      // that is a separate dual-chain append outside the landing TX, not a second land.
       const chains = await dualChainRowsFor(parked.operationId);
-      expect(chains.node).toHaveLength(1);
-      expect(chains.implementer).toHaveLength(1);
+      const landedNode = chains.node.filter((e) => e.event_type === "receive.landed");
+      const landedImpl = chains.implementer.filter((e) => e.event_type === "receive.landed");
+      expect(landedNode).toHaveLength(1);
+      expect(landedImpl).toHaveLength(1);
 
       // No duplicate seq anywhere on this node's chain.
       const dupes = await pool.query(
@@ -1249,18 +1283,27 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
       );
       expect(noSliceEvent.rowCount).toBe(0);
       const chains = await dualChainRowsFor(parked.operationId);
-      expect(chains.node).toEqual([]);
-      expect(chains.implementer).toEqual([]);
+      // Landing store refused the land (no store signer) — no receive.landed.
+      // Attention park still dual-chain-appends operation.needs_attention when the step
+      // carries an EVENT_SIGNING signer (closing rule; ZTR-1146).
+      expect(chains.node.every((e) => e.event_type === "operation.needs_attention")).toBe(true);
+      expect(chains.implementer.every((e) => e.event_type === "operation.needs_attention")).toBe(
+        true,
+      );
+      expect(chains.node.length).toBeGreaterThanOrEqual(1);
       // The receiver lease is untouched by a refused landing.
       expect(await leaseHeld(parked.walletId)).toBe(true);
 
       // And the same row still lands normally once a signer is present — the refusal parked
-      // it, it did not poison it.
+      // it, it did not poison it. Attention may already be open; landing does not require
+      // attention_required=false.
       const retried = await runReceiveLandingStep(stepDeps(parked.nodeId, headExchange()));
       expect(retried.landed).toEqual([parked.operationId]);
       const afterRetry = await dualChainRowsFor(parked.operationId);
-      expect(afterRetry.node).toHaveLength(1);
-      expect(afterRetry.implementer).toHaveLength(1);
+      expect(afterRetry.node.filter((e) => e.event_type === "receive.landed")).toHaveLength(1);
+      expect(afterRetry.implementer.filter((e) => e.event_type === "receive.landed")).toHaveLength(
+        1,
+      );
     },
     PG_TEST_TIMEOUT_MS,
   );

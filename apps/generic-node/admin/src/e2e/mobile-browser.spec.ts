@@ -221,6 +221,9 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     // /transfers/new was never a declared route (main.tsx declares /transfers and /transfers/:id),
     // so the loop below used to iterate an empty list on the catch-all redirect and assert nothing.
     await authenticated(page, `/transfers/${E2E_OPERATION_ID}`);
+    // Challenge UI (reject-reason label) mounts after the fixture-backed loadTransfer query;
+    // wait for it so a slow self-hosted paint does not sample an empty label list.
+    await expect(page.locator('label[for="reject-reason"]')).toBeVisible({ timeout: 15_000 });
     const labels = await page.locator("label[for]").allTextContents();
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {

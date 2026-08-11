@@ -741,7 +741,7 @@ describe.skipIf(!PG_AVAILABLE)("SQL boot recovery store/actions (disposable PG)"
       [operationId, nodeId, implementerId, `idem-${operationId}`, sha256HexOfText(operationId)],
     );
 
-    await actions.setAttention(operationId, "boot recovery invariant breach", 1);
+    await actions.setAttention(operationId, "LEASE_INVARIANT_VIOLATION", 1);
     const afterHit = await pool.query<{
       attention_required: boolean;
       attention_reason: string | null;
@@ -751,16 +751,16 @@ describe.skipIf(!PG_AVAILABLE)("SQL boot recovery store/actions (disposable PG)"
       [operationId],
     );
     expect(afterHit.rows[0]!.attention_required).toBe(true);
-    expect(afterHit.rows[0]!.attention_reason).toBe("boot recovery invariant breach");
+    expect(afterHit.rows[0]!.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
 
     // CAS miss: expectedRowVersion no longer matches the row's current row_version.
     logger.lines.length = 0;
-    await actions.setAttention(operationId, "should not overwrite", 999);
+    await actions.setAttention(operationId, "OPERATOR_PARKED", 999);
     const afterMiss = await pool.query<{ attention_reason: string | null }>(
       `SELECT attention_reason FROM operations WHERE id = $1::uuid`,
       [operationId],
     );
-    expect(afterMiss.rows[0]!.attention_reason).toBe("boot recovery invariant breach");
+    expect(afterMiss.rows[0]!.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
     expect(logger.lines.some((l) => l.includes("CAS miss") && l.includes(operationId))).toBe(true);
   });
 });

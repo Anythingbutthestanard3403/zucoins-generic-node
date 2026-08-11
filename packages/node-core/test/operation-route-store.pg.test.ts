@@ -95,6 +95,16 @@ const prerequisiteDdl = ((): string => {
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
 const RECEIVE_DDL = readSchema("receive-admission.sql");
 const SEND_DDL = readSchema("send-external-create.sql");
+const MOVE_OBSERVATION_EVIDENCE_DDL = `
+CREATE TABLE IF NOT EXISTS move_observation_evidence (
+  operation_id uuid PRIMARY KEY,
+  source_t0_observation_id uuid NOT NULL,
+  destination_t0_observation_id uuid NOT NULL,
+  source_terminal_observation_id uuid,
+  destination_terminal_observation_id uuid,
+  verified_at timestamptz
+);
+`;
 /** subscription_handles only (sha256_hex already from base-enums-domains). */
 const SUBSCRIPTION_HANDLES_DDL = ((): string => {
   const raw = readSchema("session-subscription-stores.sql");
@@ -369,6 +379,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
+    applyDdl(scratchDb, MOVE_OBSERVATION_EVIDENCE_DDL);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
     applyDdl(scratchDb, PROJECTION_FRAGMENT);
     applyDdl(scratchDb, SEND_DDL);

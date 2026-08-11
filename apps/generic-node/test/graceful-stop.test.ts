@@ -472,7 +472,14 @@ describe("shutdown registry composition — mid-flight / shared latch / boot sta
     for (let i = 0; i < 20 && !events.includes("boot-recovery-enter"); i++) {
       await new Promise((resolve) => setImmediate(resolve));
     }
-    expect(events).toEqual(["migrations", "vault", "leadership", "stamp", "boot-recovery-enter"]);
+    expect(events).toEqual([
+      "migrations",
+      "vault",
+      "gateway",
+      "leadership",
+      "stamp",
+      "boot-recovery-enter",
+    ]);
     expect(sawStampDuringRecovery).toBe(true);
     expect(registry.leadership).toBeDefined();
     expect(registry.authority.held).toBe(true);

@@ -332,11 +332,19 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   "config/index.ts": "-> config/env-schema.ts (./env-schema.js:2)",
   "config/load.ts": "-> config/env-schema.ts (./env-schema.js:7)",
   "config/mutable.ts": "@zucoins/node-core:28",
+  "dr/cli.ts":
+    "@zucoins/node-core:1 (DR CLI entry; latent barrel reach — no submit write call site)",
+  "dr/drill.ts":
+    "@zucoins/node-core:1 (DR drill orchestration; no submit write call site)",
+  "dr/index.ts":
+    "-> dr/drill.ts (DR barrel; no submit write call site)",
   // Node-origin embed shell. Value-imports buildCheckoutCsp + computeSecurityHeaders
   // (response security headers) from the barrel; serves static embed HTML only —
   // latent barrel reach, no submit factory or ledger call site.
   "embed-spa.ts":
     "@zucoins/node-core:21 (embed CSP + security headers; no submit write call site)",
+  "gateway/observed-read.ts":
+    "@zucoins/node-core:1 (gateway observed-read adapter; OBSERVE only — no submit write call site)",
   "health/index.ts": "-> health/routes.ts (./routes.js:1)",
   "health/routes.ts": "@zucoins/node-core:18",
   "http-adapter.ts": "@zucoins/node-core:18",
@@ -390,6 +398,8 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
     "@zucoins/node-core:1 (settle steps; the declared RECEIVE write-path caller)",
   "money-workers/send-formation-observer.ts":
     "@zucoins/node-core:1 (SEND OBSERVE compose; no submit write call site)",
+  "money-workers/send-signer-deps.ts":
+    "@zucoins/node-core:1 (SEND signer dependency wiring; no submit write call site)",
   "money-workers/send-sql-ports.ts":
     "@zucoins/node-core:1 (SEND claim/lease/form SQL ports; no submit write call site)",
   // SEND completion observe-lander. Read-only get_transaction OBSERVE plus the
@@ -404,6 +414,8 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
     "@zucoins/node-core:1 (confirm-read + observation-ledger append; no submit write call site)",
   "money-workers/sql-landing-store.ts":
     "@zucoins/node-core:1 (landing DB-TX; no submit write call site)",
+  "money-workers/sql-observation-persistence.ts":
+    "@zucoins/node-core:1 (observation ledger persistence; no submit write call site)",
   "money-workers/start-money-workers.ts":
     "@zucoins/node-core:1 (pool scale/assign/form + candidate intake + settle + SEND + MOVE; no submit write call site)",
   // the Web Push slices — channel-1 Web Push. push/sql-store.ts is deliberately ABSENT:
@@ -429,6 +441,8 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   "operations/sql-recovery-store.ts": "@zucoins/node-core:22",
   "operations/sql-attention-retraction-store.ts":
     "@zucoins/node-core:1 (attention retraction CAS + audit insert; no submit write call site)",
+  "operations/sql-operator-park-store.ts":
+    "@zucoins/node-core:1 (operator park CAS + audit insert; no submit write call site)",
   "operations/rotate-master-key.cli.ts": "@zucoins/node-core:20",
   // Strict-JSON intake gate: parseStrictJson + VerificationCompleteBody.
   // Latent barrel reach only (types + parseStrictJson/apiErrorResponse) — no submit
@@ -446,6 +460,8 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   // The single vault root-KDF salt resolver every derivation path calls (ZTR-1159). Reaches
   // the barrel for deriveRootKey / openWalletSecret only; it chooses a salt and proves the
   // derived key opens an envelope — no submit write call site.
+  "vault/boot-canary.ts":
+    "@zucoins/node-core:1 (vault unlock canary seal/unseal; no submit write call site)",
   "vault/root-kdf-salt.ts": "@zucoins/node-core:1 (root-KDF salt resolution; no submit write call site)",
   // Recovery_verified ceremony pack (landed separately on main).
   // Pre-existing gap, unrelated to this suite's slice; latent barrel reach only, no submit
@@ -466,6 +482,8 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
     "@zucoins/node-core:1 (reporting list/stream/snapshot + durable subscription handles; no submit write call site)",
   "full-http-mount.ts": "@zucoins/node-core:1 (ROUTE_POLICIES composition; value import of reporting+admin factories — no submit write call site)",
   "runtime-listener.ts": "@zucoins/node-core:16",
+  "stage1-main.ts":
+    "@zucoins/node-core:1 (stage1 composition root; no submit write call site)",
   "storage-pressure.ts": "@zucoins/node-core:17",
 };
 

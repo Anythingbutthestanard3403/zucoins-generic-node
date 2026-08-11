@@ -436,6 +436,7 @@ describe("node-core dependency boundaries", () => {
         // Frozen observation wire vocabulary for SQL anomaly/stream persistence (ZTR-1127).
         "@zucoins/generic-node-contracts/observation",
         "@zucoins/generic-node-contracts/operations",
+        "@zucoins/generic-node-contracts/operations/events",
         "@zucoins/generic-node-contracts/operator-halt",
         "@zucoins/node-core",
         "@zucoins/node-core/data",
@@ -445,6 +446,7 @@ describe("node-core dependency boundaries", () => {
         // zero-custody stage1-main.ts, which must not reach a vault/signing/
         // submit surface.
         "@zucoins/node-core/observability",
+        "@zucoins/node-core/verifier/consumer",
         "drizzle-orm/node-postgres",
         "drizzle-orm/node-postgres/migrator",
         // aes128gcm decrypt lives in node-core (`decryptWebPushPayload` over

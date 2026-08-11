@@ -23,6 +23,9 @@ import {
 import { createProductionRouteSurface } from "../../src/full-http-mount.js";
 import { createVerificationMaterialSource } from "../../src/reporting/live-reporting-reads.js";
 
+/** Non-zero 32-byte test vault root for SqlAdminUserStore composition (ZTR-1134 B3). */
+const ZTR_1134_TEST_VAULT_ROOT = Buffer.alloc(32, 0xa7);
+
 const HOST = process.env.PGHOST ?? "127.0.0.1";
 const PORT = Number(process.env.PGPORT ?? "5432");
 const USER = process.env.PGUSER ?? process.env.USER ?? "postgres";
@@ -45,7 +48,10 @@ function completeConfig(overrides: Record<string, unknown> = {}) {
   return {
     nodeId: randomUUID(), pool: fakePool, env: { NODE_ENV: "production" },
     rateLimiter: fakeRate, proofBodyStore: fakeProof, verificationAccessStore: fakeAccess,
-    vaultAccessAuditLog: fakeAudit, ...overrides,
+    vaultAccessAuditLog: fakeAudit,
+    // Required when defaulting SqlAdminUserStore (ZTR-1134); production always supplies it.
+    vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
+    ...overrides,
   } as never;
 }
 

@@ -347,6 +347,7 @@ const executeInsert = (args: InsertArgs): string =>
     lit(args.sourceWalletId ?? SOURCE_WALLET),
     lit(args.destinationId === undefined ? DESTINATION_ID : args.destinationId),
     lit(args.spawnedFrom ?? null),
+    lit(null), // client_reference ($8)
     lit(args.idempotencyKey),
     lit(args.requestSha256 ?? SHA_A),
   ].join(", ")});`;
@@ -355,13 +356,14 @@ const rawOperationInsert = (args: InsertArgs): string =>
   `INSERT INTO operations (` +
   `id, node_id, implementer_id, kind, status, amount_zkz, ` +
   `source_wallet_id, destination_id, spawned_from_operation_id, ` +
-  `idempotency_key, request_sha256, formation_state` +
+  `client_reference, idempotency_key, request_sha256, formation_state` +
   `) VALUES (` +
   `${lit(args.operationId)}, ${lit(NODE_ID)}, ${lit(IMPLEMENTER_ID)}, ` +
   `'MOVE_INTERNAL', 'CREATED', ${lit(args.amountZkz ?? "5.5")}, ` +
   `${lit(args.sourceWalletId ?? SOURCE_WALLET)}, ` +
   `${lit(args.destinationId === undefined ? DESTINATION_ID : args.destinationId)}, ` +
   `${lit(args.spawnedFrom ?? null)}, ` +
+  `NULL, ` +
   `${lit(args.idempotencyKey)}, ${lit(args.requestSha256 ?? SHA_A)}, 'NOT_REQUIRED');`;
 
 const countRows = (db: string, table: string, where: string): string =>

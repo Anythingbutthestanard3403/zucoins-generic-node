@@ -233,6 +233,7 @@ describe.skipIf(!PG_AVAILABLE)("destination bless/retire atomicity (disposable P
       state text NOT NULL, recovery_verified_at timestamptz)`);
     await pool.query(`CREATE TABLE destinations (
       id uuid PRIMARY KEY, node_id uuid NOT NULL, wallet_id uuid NOT NULL, state text NOT NULL,
+      label text NOT NULL DEFAULT '',
       blessed_at timestamptz, blessed_by_device_key_id uuid, blessing_artifact_id uuid,
       retired_at timestamptz, created_at timestamptz NOT NULL)`);
     await pool.query(`CREATE TABLE operator_device_keys (

@@ -279,14 +279,10 @@ export async function tryAcquireSignerLeadership(
     client.removeListener("end", onEnd);
     // Already latched lost by onLoss. Destroy is the terminal disposition — do not
     // client.release() afterward (end/release(true) already retired the session).
-    try {
-      await destroySessionMandatory(
-        "signer leadership ownership lost",
-      );
-    } catch (err) {
-      // stickyReleaseErr + failed already set inside destroySessionMandatory.
-      throw err;
-    }
+    // stickyReleaseErr + failed already set inside destroySessionMandatory on throw.
+    await destroySessionMandatory(
+      "signer leadership ownership lost",
+    );
     // Destroy succeeded — lock free server-side with the session. Terminal OK for
     // later release() joins; never pool-return after end.
     releaseOutcome = "pooled";

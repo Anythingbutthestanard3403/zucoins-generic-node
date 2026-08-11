@@ -211,6 +211,13 @@ describePg("durable subscription_handles restart (real PG)", () => {
         attention_required boolean NOT NULL DEFAULT false,
         updated_at timestamptz NOT NULL DEFAULT now()
       );
+      -- Lookup joins receive_operations as a fallback implementer_id source
+      -- (sql-subscription-handle-store.ts); empty stub satisfies the LEFT JOIN.
+      CREATE TABLE receive_operations (
+        operation_id uuid PRIMARY KEY,
+        node_id uuid NOT NULL,
+        implementer_id uuid NOT NULL
+      );
       CREATE TABLE subscription_handles (
         id uuid PRIMARY KEY,
         node_id uuid NOT NULL,

@@ -225,7 +225,7 @@ export async function deriveContinuitySnapshotOnClient(
       SELECT epoch, event_hash
         FROM projected_heads
        WHERE epoch IS NOT NULL AND event_hash IS NOT NULL
-       ORDER BY epoch DESC, committed_at DESC, implementer_id DESC
+       ORDER BY epoch DESC, committed_at DESC, implementer_id DESC -- contract-allow:order:frozen structural vocabulary
        LIMIT 1
     )
     SELECT terminal.epoch::text AS lifecycle_epoch,

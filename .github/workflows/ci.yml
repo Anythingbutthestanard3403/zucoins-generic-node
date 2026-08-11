@@ -1,0 +1,104 @@
+name: CI
+
+# Hosted ubuntu-latest on this account creates jobs that never assign a runner
+# (empty steps, runner_name="", ~2–8s failure) — observed on both private
+# BuildFailed startups and public canary ubuntu jobs. Self-hosted macOS runner
+# (label ztr1137) is the operative delivery path. Repo is public so Actions
+# schedules; keep it public or re-prove private+billing before flipping back.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+
+jobs:
+  quality-and-tests:
+    name: Build, lint, contracts, full tests, and structural gates
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
+    env:
+      PG_REQUIRED: "1"
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          clean: true
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
+        with:
+          version: 11.13.0
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Resolve PostgreSQL credentials
+        run: |
+          command -v psql
+          command -v pg_isready
+          if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres; then
+            echo "Using PGUSER=$PGUSER"
+          elif pg_isready -h "$PGHOST" -p "$PGPORT" -U "$USER" -d postgres; then
+            echo "PGUSER=$USER" >> "$GITHUB_ENV"
+            echo "PGPASSWORD=" >> "$GITHUB_ENV"
+          else
+            echo "PostgreSQL not reachable under PG_REQUIRED=1" >&2
+            exit 1
+          fi
+      - name: Verify PostgreSQL is reachable
+        run: pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres
+      - name: Build
+        run: pnpm build
+      - name: Lint
+        run: pnpm lint
+      - name: Contracts suite
+        run: pnpm --filter @zucoins/generic-node-contracts test
+      - name: Full test suite with PostgreSQL required
+        run: pnpm test
+      - name: Boundary gates
+        run: pnpm test:boundaries
+      - name: Schema census
+        run: node scripts/check-schema-census.mjs
+      - name: Admin unit tests (explicit required surface)
+        run: pnpm --filter @zucoins/generic-node-ui test
+
+  admin-playwright:
+    name: Admin Playwright (Chromium)
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          clean: true
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
+        with:
+          version: 11.13.0
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build contracts consumed by the admin bundle
+        run: pnpm --filter @zucoins/generic-node-contracts build
+      - name: Install Chromium
+        run: pnpm --filter @zucoins/generic-node-ui exec playwright install chromium
+      - name: Run Playwright
+        run: pnpm --filter @zucoins/generic-node-ui test:e2e

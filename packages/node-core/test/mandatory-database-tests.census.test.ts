@@ -74,9 +74,6 @@ const loadSpecItems = (): string[] => {
   return items;
 };
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 /**
  * Body opens PostgreSQL. A bare `.pg.test.ts` suffix is not enough — empty or
  * comment-only files must not green the census.
@@ -182,10 +179,10 @@ const extractItCallbackBody = (body: string, siteIndex: number): string => {
   // Find the matching title close, then the callback start.
   const from = body.slice(siteIndex);
   // After it(...title...,  we expect function / async / arrow
-  const afterTitle = from.search(/["'\`]/);
+  const afterTitle = from.search(/["'`]/);
   if (afterTitle < 0) return "";
   // skip opening quote of title already at start of match — find end of title string
-  const titleOpen = from.search(/["'\`]/);
+  const titleOpen = from.search(/["'`]/);
   const quote = from[titleOpen]!;
   let i = titleOpen + 1;
   while (i < from.length && from[i] !== quote) {

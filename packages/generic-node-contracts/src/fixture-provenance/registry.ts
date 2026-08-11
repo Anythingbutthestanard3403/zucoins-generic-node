@@ -5,6 +5,7 @@ import { APPROVAL_FIXTURE_RECORDS } from "./records/approval.ts";
 import { ARTIFACTS_FIXTURE_RECORDS } from "./records/artifacts.ts";
 import { EVENT_COMMIT_FIXTURE_RECORDS } from "./records/event-commit.ts";
 import { PUSH_FIXTURE_RECORDS } from "./records/push.ts";
+import { SEND_REDEMPTION_FIXTURE_RECORDS } from "./records/send-redemption.ts";
 import { RECEIVE_GOLDEN_FIXTURE_RECORDS } from "./records/receive-golden.ts";
 import { RECOVERY_DRILL_FIXTURE_RECORDS } from "./records/recovery-drill.ts";
 import { TRANSFER_CODE_FIXTURE_RECORDS } from "./records/transfer-code.ts";
@@ -35,6 +36,7 @@ export const FIXTURE_PROVENANCE_REGISTRY: readonly FixtureProvenanceRecord[] = [
   ...PUSH_FIXTURE_RECORDS,
   ...RECEIVE_GOLDEN_FIXTURE_RECORDS,
   ...RECOVERY_DRILL_FIXTURE_RECORDS,
+  ...SEND_REDEMPTION_FIXTURE_RECORDS,
   ...TRANSFER_CODE_FIXTURE_RECORDS,
 ];
 

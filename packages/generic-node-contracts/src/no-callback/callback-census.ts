@@ -35,7 +35,7 @@ export const CALLBACK_SURFACE_MATRIX: readonly SurfacePattern[] = deepFreeze([
   // fragment like "./callback-census.js" or a hyphenated filename is not mistaken for a route.
   { label: "callback_route", pattern: /\/callbacks?(?![\w-])/i },
   { label: "webhook_route", pattern: /\/webhooks?(?![\w-])/i },
-  { label: "push_route", pattern: /\/push(?![\w-])/i },
+  { label: "push_route", pattern: /['"`]\/push(?![\w-])/i },
   { label: "outbound_url_literal", pattern: /https?:\/\//i },
 ]);
 

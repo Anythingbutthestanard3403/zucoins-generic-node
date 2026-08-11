@@ -71,7 +71,7 @@ const SYNTHETIC_TRIGGERS: Readonly<Record<SafetyAlertSignal, number>> = {
 
 describe("safety alerts — signal catalogue", () => {
   describe("rule catalogue", () => {
-    it("defines the required signal classes in order", () => {
+    it("defines the required signal classes in catalogue sequence", () => {
       expect([...SAFETY_ALERT_SIGNALS]).toEqual([
         "invariant_breach",
         "duplicate_submit_attempt",

@@ -466,6 +466,19 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "arm-wallet-gate.test.ts, which proves BEGIN → body → COMMIT on one pinned client",
     },
   ],
+  "apps/generic-node/src/operations/sql-operator-park-store.ts": [
+    {
+      site: "createSqlOperatorParkStore.commitPark",
+      pathClass: "money-path",
+      isolation: "READ COMMITTED",
+      mechanism: "ROW_LOCK",
+      covering:
+        "`SQL_LOCK … FOR UPDATE` on operations, taken as the FIRST statement so " +
+        "not-found / already-flagged / conflict are all decided under the lock. Appends to " +
+        "audit_log, an append-only authoritative table, hence money-path.",
+      pinned: "pool.connect() → BEGIN → lock → CAS park → audit insert → COMMIT on one client",
+    },
+  ],
   "apps/generic-node/src/operations/sql-attention-retraction-store.ts": [
     {
       site: "createSqlAttentionRetractionStore.commit",

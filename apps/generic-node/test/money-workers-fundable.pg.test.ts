@@ -56,6 +56,8 @@ import {
   type Uuid,
   type WalletPublicKey,
   VaultSqlStore,
+  mintSubscriptionHandlePlaintext,
+  hashSubscriptionHandle,
 } from "@zucoins/node-core";
 
 import { ensureNodeIdentitySigningKey, ensureNodeRow } from "../src/bootstrap/genesis.js";
@@ -434,17 +436,36 @@ describe.skipIf(!PG_AVAILABLE)("money workers fundable path (disposable PG)", ()
 
         const operationId = randomUUID();
         const reqSha = createHash("sha256").update(`recv|${operationId}`, "utf8").digest("hex");
+        // Create-time body must already carry sh_… — READY worker fail-closes without it (ZTR-1142).
+        const createHandle = mintSubscriptionHandlePlaintext();
         await pool.query(
           `INSERT INTO receive_operations (
              operation_id, implementer_id, node_id, kind, status,
              http_method, route, idempotency_key, request_sha256,
-             amount_zkz, anchor, ttl_ms, after_landing_kind
+             amount_zkz, anchor, ttl_ms, after_landing_kind,
+             completed_at, response_status, response_body
            ) VALUES (
              $1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'CREATED',
              'POST', '/v1/receives', $4, $5,
-             '0.01', 'money-workers-fundable', 300000, 'HOLD'
+             '0.01', 'money-workers-fundable', 300000, 'HOLD',
+             now(), 202, $6
            )`,
-          [operationId, implementerId, nodeId, `idem-${operationId}`, reqSha],
+          [
+            operationId,
+            implementerId,
+            nodeId,
+            `idem-${operationId}`,
+            reqSha,
+            JSON.stringify({ subscription_handle: createHandle }),
+          ],
+        );
+        await pool.query(
+          `INSERT INTO subscription_handles (
+             id, node_id, operation_id, handle_hash, expires_at, created_at
+           ) VALUES (
+             $1::uuid, $2::uuid, $3::uuid, $4::sha256_hex, now() + interval '1 hour', now()
+           )`,
+          [randomUUID(), nodeId, operationId, hashSubscriptionHandle(createHandle)],
         );
 
         await waitFor(

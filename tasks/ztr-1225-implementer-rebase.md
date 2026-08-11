@@ -3,7 +3,7 @@
 - **lane:** implementer
 - **run:** `7be9a03f-0b91-473a-9701-dc8a6d855c38`
 - **prior CONFLICTING head:** `4b99a62a0cdfc41e265adef2dc86e9342aee1d52`
-- **new HEAD:** `db84f06b1b1a0a2ee126fd51c504ebf981b1cd2e`
+- **product HEAD (pre-docs tip):** `c06cc242afb4b78afe636578fd50293a551a8687`
 - **base:** `origin/main` @ `dac8a97ccfbedba730672a3fa2cc2263db46e8fe`
 - **PR:** #90 (`ztr-1225-typecheck-tests`)
 - **worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1225-rebase`
@@ -21,7 +21,7 @@ root `package.json`, ZTR-1217 wallet inventory D3 fixtures). Dual/review at
 git rebase origin/main
 # commit 1/4 (de81d63 typecheck:tests product): CONFLICT package.json only
 # commits 2–4 (evidence, r2 nodeId, r2 pin): clean
-# + follow-up commit: inventory D3 stub casts for typecheck green on new main
+# + follow-up: inventory D3 stub casts for typecheck green on new main
 ```
 
 ### Conflict resolution (`package.json`)
@@ -42,7 +42,10 @@ rejects that under generic `R`. Fixed by matching the file's existing pattern
 
 ## Commits after rebase (onto `dac8a97ccfbedba730672a3fa2cc2263db46e8fe`)
 
+Product + r2 replay + inventory cast. Docs tip = PR `headRefOid` after push.
+
 ```
+1cea6878 docs(tasks): pin ZTR-1225 rebase tip SHA after handoff commit
 db84f06b docs(tasks): ZTR-1225 implementer rebase handoff (PR #90)
 c06cc242 fix(test): cast ZTR-1217 inventory SQL stubs for typecheck:tests (ZTR-1225)
 8ab615c4 docs(tasks): ZTR-1225 r2 implementer evidence head pin
@@ -59,8 +62,9 @@ cf32f670 fix(test): restore nodeId on admin router fixtures (ZTR-1225 r2)
 | `createRecoveryPack` passcode→secret | kept |
 | gateway/genesis T0 `.observe` role arity | kept |
 | **r2** restore `nodeId` on admin router fixtures; drop deps `as never` | **kept** (`cf32f670` replay) |
+| inventory D3 stub casts post-rebase | **added** (`c06cc242afb4b78afe636578fd50293a551a8687`) |
 
-## Verify at product HEAD
+## Verify at product HEAD `c06cc242afb4b78afe636578fd50293a551a8687`
 
 | Command | Result |
 |---|---|

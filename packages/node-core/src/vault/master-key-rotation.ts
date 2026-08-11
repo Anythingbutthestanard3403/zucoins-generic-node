@@ -177,6 +177,17 @@ export interface TotpSecretRotationCensus {
   readonly rows: readonly TotpSecretRotationRow[];
 }
 
+/**
+ * Apps-level root-keyed boot canary (ZTR-1177). Not a SEALED_STORES registry entry
+ * (seal site lives under apps/), but still durable under the vault root and must
+ * participate in master-key rotation or post-rotate unlock bricks on the correct key.
+ * Grain is 0-or-1 (`node_settings.vault.boot_canary_v1`).
+ */
+export interface BootCanaryRotationCensus {
+  /** Existing envelope text, or null when the row is absent. */
+  readonly envelope: string | null;
+}
+
 export interface MasterKeyRotationInput {
   /** Registry snapshot (typically `SEALED_STORES` from the schema contract). */
   readonly sealedStores: readonly RegisteredSealedStore[];
@@ -191,6 +202,12 @@ export interface MasterKeyRotationInput {
   readonly pushReceiverSecrets?: PushSecretRotationCensus;
   /** TOTP_SECRET census; required when that registered store is IMPLEMENTED. */
   readonly totpSecrets?: TotpSecretRotationCensus;
+  /**
+   * Boot-canary census (apps root-keyed envelope). Optional only for unit tests that
+   * do not exercise the canary; production CLI always wires it. When `countBootCanaryRows`
+   * is provided the coordinator rewraps 0-or-1 rows inside the ceremony UoW.
+   */
+  readonly bootCanary?: BootCanaryRotationCensus;
   /**
    * Key-ring carrying BOTH the old root (retained) and the new root (writer during
    * rotation). writerEpoch must equal journal.toEpoch once begin succeeds; for a
@@ -225,6 +242,11 @@ export interface MasterKeyRotationInput {
   readonly commitPushSecrets?: (rows: readonly PushSecretRotationRow[]) => Promise<void>;
   /** Persist every rewrapped TOTP secret row in the same rotation transaction. */
   readonly commitTotpSecrets?: (rows: readonly TotpSecretRotationRow[]) => Promise<void>;
+  /**
+   * Persist the rewrapped boot-canary envelope (UPDATE node_settings) in the same
+   * rotation transaction. Required when countBootCanaryRows > 0.
+   */
+  readonly commitBootCanary?: (envelope: string) => Promise<void>;
   /**
    * Injected NODE_SIGNING_KEYS rewrap (composition wires signing-keys/rewrap). Required
    * when census is non-empty.
@@ -265,6 +287,24 @@ export interface MasterKeyRotationInput {
         readonly rewrappedRows: readonly TotpSecretRotationRow[];
       }>;
   /**
+   * Injected boot-canary rewrap (composition wires apps/.../boot-canary). Required when
+   * countBootCanaryRows > 0. Must open under oldRoot and reseal under newRoot.
+   */
+  readonly rewrapBootCanary?: (input: {
+    readonly oldRootKey: Uint8Array;
+    readonly newRootKey: Uint8Array;
+    readonly envelope: string;
+  }) =>
+    | {
+        readonly result: SealedStoreRewrapResult;
+        readonly rewrappedEnvelope: string;
+      }
+    | Promise<{
+        readonly result: SealedStoreRewrapResult;
+        readonly rewrappedEnvelope: string;
+      }>;
+
+  /**
    * Authoritative live `vault` row count, re-read INSIDE the ceremony fence (D-A2).
    *
    * `walletVault` is a snapshot the caller takes before `interlock.acquire` /
@@ -289,6 +329,12 @@ export interface MasterKeyRotationInput {
   readonly countPushSecretRows?: () => Promise<number>;
   /** Authoritative TOTP secret row count inside the ceremony fence. */
   readonly countTotpSecretRows?: () => Promise<number>;
+  /**
+   * Authoritative boot-canary row count (0 or 1) inside the ceremony fence.
+   * When provided, the coordinator always runs the canary step (including the
+   * zero-row path). Production CLI always wires this port.
+   */
+  readonly countBootCanaryRows?: () => Promise<number>;
   /**
    * Required exclusive unit of work. begin takes the ceremony session advisory lock
    * (+ nested vault TX); commit ends the vault TX only; end releases the session
@@ -794,6 +840,7 @@ export async function rotateMasterKey(
     let nodeSigningRewrapped: readonly NodeSigningKeyRotationRow[] = [];
     let pushSecretsRewrapped: readonly PushSecretRotationRow[] = [];
     let totpSecretsRewrapped: readonly TotpSecretRotationRow[] = [];
+    let bootCanaryRewrapped: string | null = null;
 
     for (const store of input.sealedStores) {
       if (store.rewrapStatus === "DEFERRED_NO_SEAL_RUNTIME") {
@@ -1027,6 +1074,87 @@ export async function rotateMasterKey(
       );
     }
 
+    // Apps-level root-keyed boot canary (ZTR-1177). Outside SEALED_STORES (seal site is
+    // under apps/), but durable under the vault root — must rewrap in this UoW or the
+    // next unlock under the new master key fails closed on the stale envelope.
+    if (input.countBootCanaryRows !== undefined) {
+      const canaryCount = await input.countBootCanaryRows();
+      if (canaryCount !== 0 && canaryCount !== 1) {
+        throw new MasterKeyRotationError(
+          "ROTATION_ABORTED",
+          `VAULT_BOOT_CANARY count must be 0 or 1 (got ${canaryCount})`,
+        );
+      }
+      const censusEnvelope = input.bootCanary?.envelope ?? null;
+      const censusPresent = censusEnvelope !== null && censusEnvelope.length > 0;
+      if (canaryCount === 1 && !censusPresent) {
+        throw new MasterKeyRotationError(
+          "ROTATION_ABORTED",
+          "VAULT_BOOT_CANARY row present but bootCanary census envelope is missing",
+        );
+      }
+      if (canaryCount === 0 && censusPresent) {
+        throw new MasterKeyRotationError(
+          "ROTATION_ABORTED",
+          "VAULT_BOOT_CANARY census has an envelope but authoritative count is 0",
+        );
+      }
+      let result: SealedStoreRewrapResult;
+      if (canaryCount === 0) {
+        result = { rowsBefore: 0, rowsAfter: 0, rewrapped: 0 };
+        bootCanaryRewrapped = null;
+      } else {
+        if (input.rewrapBootCanary === undefined || input.commitBootCanary === undefined) {
+          throw new MasterKeyRotationError(
+            "ROTATION_REFUSED",
+            "VAULT_BOOT_CANARY row present but rewrap/commit ports are missing",
+          );
+        }
+        let report: {
+          readonly result: SealedStoreRewrapResult;
+          readonly rewrappedEnvelope: string;
+        };
+        try {
+          report = await input.rewrapBootCanary({
+            oldRootKey: input.oldRootKey,
+            newRootKey: input.newRootKey,
+            envelope: censusEnvelope as string,
+          });
+        } catch (err) {
+          if (err instanceof MasterKeyRotationError) throw err;
+          throw new MasterKeyRotationError(
+            "ROTATION_ABORTED",
+            err instanceof Error
+              ? err.message
+              : "VAULT_BOOT_CANARY rewrap failed under the old root",
+            err,
+          );
+        }
+        if (
+          report.result.rowsBefore !== 1 ||
+          report.result.rowsAfter !== 1 ||
+          report.result.rewrapped !== 1
+        ) {
+          throw new MasterKeyRotationError(
+            "ROTATION_ABORTED",
+            `VAULT_BOOT_CANARY rewrap count parity failed (before=${report.result.rowsBefore} after=${report.result.rowsAfter} rewrapped=${report.result.rewrapped})`,
+          );
+        }
+        result = report.result;
+        bootCanaryRewrapped = report.rewrappedEnvelope;
+      }
+      stores.push({ storeId: "VAULT_BOOT_CANARY", status: "REWRAPPED", result });
+      logger.info(
+        {
+          event: "rotate.store_done",
+          store: "VAULT_BOOT_CANARY",
+          rows: result.rowsAfter,
+          rewrapped: result.rewrapped,
+        },
+        "master-key rotation: VAULT_BOOT_CANARY re-wrapped",
+      );
+    }
+
     const durationMs = Date.now() - startedAt;
     const baseOutcome = {
       committed: false as boolean,
@@ -1083,6 +1211,15 @@ export async function rotateMasterKey(
         );
       }
       await input.commitTotpSecrets(totpSecretsRewrapped);
+    }
+    if (bootCanaryRewrapped !== null) {
+      if (input.commitBootCanary === undefined) {
+        throw new MasterKeyRotationError(
+          "ROTATION_REFUSED",
+          "VAULT_BOOT_CANARY rewrapped but commitBootCanary port is missing",
+        );
+      }
+      await input.commitBootCanary(bootCanaryRewrapped);
     }
     await input.unitOfWork.commit();
     // Vault TX closed; session lease still held (uowStarted stays true until end).
@@ -1486,6 +1623,50 @@ async function verifyCompletedStoreCensus(
       `store ${store.id} is IMPLEMENTED but has no ROTATION_COMPLETE verifier`,
     );
   }
+
+  // Apps boot canary — same 0-or-1 proof under the new root when the port is wired.
+  if (input.countBootCanaryRows !== undefined) {
+    const count = await input.countBootCanaryRows();
+    if (count !== 0 && count !== 1) {
+      throw new MasterKeyRotationError(
+        "ROTATION_STATE",
+        `VAULT_BOOT_CANARY finalize count must be 0 or 1 (got ${count})`,
+      );
+    }
+    const envelope = input.bootCanary?.envelope ?? null;
+    if (count === 1) {
+      if (envelope === null || envelope.length === 0) {
+        throw new MasterKeyRotationError(
+          "ROTATION_STATE",
+          "VAULT_BOOT_CANARY finalize requires census envelope when row is present",
+        );
+      }
+      if (input.rewrapBootCanary === undefined) {
+        throw new MasterKeyRotationError(
+          "ROTATION_STATE",
+          "VAULT_BOOT_CANARY finalize requires rewrapBootCanary as new-root open verifier",
+        );
+      }
+      try {
+        // Open-proof under new root: oldRootKey === newRootKey means "already under writer".
+        const proof = await input.rewrapBootCanary({
+          oldRootKey: input.newRootKey,
+          newRootKey: input.newRootKey,
+          envelope,
+        });
+        assertCompletedRewrapParity("VAULT_BOOT_CANARY", count, proof.result);
+      } catch (err) {
+        if (err instanceof MasterKeyRotationError) throw err;
+        throw new MasterKeyRotationError(
+          "ROTATION_STATE",
+          "VAULT_BOOT_CANARY does not open under new root during ROTATION_COMPLETE finalize",
+          err,
+        );
+      }
+    }
+    stores.push(completedStoreReport("VAULT_BOOT_CANARY", count));
+  }
+
   return stores;
 }
 

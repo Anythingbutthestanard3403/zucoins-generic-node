@@ -22,6 +22,10 @@ import {
   openVaultBootCanary,
   proveVaultRootWithBootCanary,
   sealVaultBootCanary,
+  rewrapVaultBootCanary,
+  commitVaultBootCanary,
+  countVaultBootCanaryRows,
+  loadVaultBootCanary,
   type VaultBootCanarySqlExecutor,
 } from "../../src/vault/boot-canary.js";
 import { HISTORICAL_ROOT_KDF_SALT } from "../../src/vault/root-kdf-salt.js";
@@ -183,3 +187,99 @@ describe("proveVaultRootWithBootCanary — durable round-trip", () => {
     ).resolves.toMatchObject({ action: "opened" });
   });
 });
+
+describe("rewrapVaultBootCanary (ZTR-1177 r2 rotation)", () => {
+  const nodeId = "11111111-1111-4111-8111-111111111111";
+  const rootA = Buffer.alloc(32, 0xa1);
+  const rootB = Buffer.alloc(32, 0xb2);
+
+  it("reseals under the new root so prove/open succeed after rotation", () => {
+    const sealedA = sealVaultBootCanary(rootA, nodeId);
+    const { result, rewrappedEnvelope } = rewrapVaultBootCanary({
+      oldRootKey: rootA,
+      newRootKey: rootB,
+      nodeId,
+      envelope: sealedA,
+    });
+    expect(result).toEqual({ rowsBefore: 1, rowsAfter: 1, rewrapped: 1 });
+    expect(rewrappedEnvelope).not.toBe(sealedA);
+    expect(rewrappedEnvelope.startsWith(`${VAULT_BOOT_CANARY_ENVELOPE_PREFIX}.`)).toBe(true);
+
+    // Old root no longer opens the rewrapped envelope.
+    expect(() => openVaultBootCanary(rootA, nodeId, rewrappedEnvelope)).toThrow(
+      /VAULT_BOOT_CANARY_DOES_NOT_OPEN/,
+    );
+
+    const opened = openVaultBootCanary(rootB, nodeId, rewrappedEnvelope);
+    try {
+      expect(Buffer.from(opened).toString("utf8")).toBe(VAULT_BOOT_CANARY_PLAINTEXT);
+    } finally {
+      opened.fill(0);
+    }
+  });
+
+  it("refuses rewrap when the old root cannot open the durable canary", () => {
+    const sealedA = sealVaultBootCanary(rootA, nodeId);
+    expect(() =>
+      rewrapVaultBootCanary({
+        oldRootKey: rootB, // wrong "old"
+        newRootKey: rootB,
+        nodeId,
+        envelope: sealedA,
+      }),
+    ).toThrow(/VAULT_BOOT_CANARY_DOES_NOT_OPEN/);
+  });
+
+  it("commit updates the durable row; wrong-key prove still fails closed without overwrite", async () => {
+    const sealedA = sealVaultBootCanary(rootA, nodeId);
+    const store = new Map<string, string>([[VAULT_BOOT_CANARY_SETTING_KEY, sealedA]]);
+    const sql = {
+      async query<T extends Record<string, unknown>>(sqlText: string, params?: readonly unknown[]) {
+        if (sqlText.includes("COUNT(*)")) {
+          const n = store.has(VAULT_BOOT_CANARY_SETTING_KEY) ? 1 : 0;
+          return { rows: [{ n }] as unknown as T[] };
+        }
+        if (sqlText.startsWith("SELECT setting_value")) {
+          const v = store.get(String(params?.[0]));
+          return { rows: (v === undefined ? [] : [{ setting_value: v }]) as unknown as T[] };
+        }
+        if (sqlText.includes("UPDATE node_settings")) {
+          const key = String(params?.[0]);
+          const val = String(params?.[1]);
+          if (!store.has(key)) return { rows: [] as T[] };
+          store.set(key, val);
+          return { rows: [{ setting_key: key }] as unknown as T[] };
+        }
+        if (sqlText.includes("INSERT INTO node_settings")) {
+          const key = String(params?.[0]);
+          const val = String(params?.[1]);
+          if (!store.has(key)) store.set(key, val);
+          return { rows: [] as T[] };
+        }
+        throw new Error(`unexpected sql: ${sqlText}`);
+      },
+    };
+
+    expect(await countVaultBootCanaryRows(sql)).toBe(1);
+    const report = rewrapVaultBootCanary({
+      oldRootKey: rootA,
+      newRootKey: rootB,
+      nodeId,
+      envelope: sealedA,
+    });
+    await commitVaultBootCanary(sql, report.rewrappedEnvelope);
+    expect(await loadVaultBootCanary(sql)).toBe(report.rewrappedEnvelope);
+
+    // Post-rotation prove under new root succeeds.
+    const ok = await proveVaultRootWithBootCanary({ sql, nodeId, rootKey: rootB });
+    expect(ok.action).toBe("opened");
+
+    // Wrong root without rotation proof still fails closed and does NOT overwrite.
+    const before = await loadVaultBootCanary(sql);
+    await expect(
+      proveVaultRootWithBootCanary({ sql, nodeId, rootKey: rootA }),
+    ).rejects.toThrow(/VAULT_BOOT_CANARY_DOES_NOT_OPEN/);
+    expect(await loadVaultBootCanary(sql)).toBe(before);
+  });
+});
+

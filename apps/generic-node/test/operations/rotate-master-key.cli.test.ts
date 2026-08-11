@@ -25,6 +25,11 @@ import {
   runRotateMasterKeyCli,
 } from "../../src/operations/rotate-master-key.cli.js";
 import {
+  sealVaultBootCanary,
+  openVaultBootCanary,
+  VAULT_BOOT_CANARY_PLAINTEXT,
+} from "../../src/vault/boot-canary.js";
+import {
   HISTORICAL_ROOT_KDF_SALT,
   resolveCeremonyRootKdfSalt,
   type RootKdfSaltSource,
@@ -150,6 +155,9 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         loadTotpSecretsCensus: { rows: [] },
         countTotpSecretRows: async () => 0,
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        loadBootCanaryCensus: { envelope: null },
+        countBootCanaryRows: async () => 0,
         journal: new InMemoryMasterKeyRotationJournal(1),
         interlock: { async acquire() {}, async release() {} },
         resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
@@ -182,6 +190,9 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 1,
       loadTotpSecretsCensus: { rows: [] },
       countTotpSecretRows: async () => 0,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      loadBootCanaryCensus: { envelope: null },
+      countBootCanaryRows: async () => 0,
       journal,
       interlock: { async acquire() {}, async release() {} },
       resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
@@ -218,6 +229,9 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 1,
       loadTotpSecretsCensus: { rows: [] },
       countTotpSecretRows: async () => 0,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      loadBootCanaryCensus: { envelope: null },
+      countBootCanaryRows: async () => 0,
       journal,
       interlock: { async acquire() {}, async release() {} },
       resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
@@ -286,6 +300,9 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => durable.push.length,
       loadTotpSecretsCensus: { rows: [] },
       countTotpSecretRows: async () => 0,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      loadBootCanaryCensus: { envelope: null },
+      countBootCanaryRows: async () => 0,
       journal,
       interlock: { async acquire() {}, async release() {} },
       resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
@@ -333,6 +350,9 @@ describe("runRotateMasterKeyCli", () => {
         loadPushSecretsCensus: { rows: [] },
         loadTotpSecretsCensus: { rows: [] },
         countTotpSecretRows: async () => 0,
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        loadBootCanaryCensus: { envelope: null },
+        countBootCanaryRows: async () => 0,
         ...counts,
         journal,
         interlock: { async acquire() {}, async release() {} },
@@ -375,6 +395,9 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 0,
       loadTotpSecretsCensus: { rows: [] },
       countTotpSecretRows: async () => 0,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      loadBootCanaryCensus: { envelope: null },
+      countBootCanaryRows: async () => 0,
       journal: new InMemoryMasterKeyRotationJournal(1),
       interlock: { async acquire() {}, async release() {} },
       // A node that predates ZTR-1159: no persisted row, so the resolver answers the literal.
@@ -411,6 +434,9 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         loadTotpSecretsCensus: { rows: [] },
         countTotpSecretRows: async () => 0,
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        loadBootCanaryCensus: { envelope: null },
+        countBootCanaryRows: async () => 0,
         journal: new InMemoryMasterKeyRotationJournal(1),
         interlock: { async acquire() {}, async release() {} },
         resolveRootKdfSalt: saltPort({
@@ -447,6 +473,9 @@ describe("runRotateMasterKeyCli", () => {
       countPushSecretRows: async () => 0,
       loadTotpSecretsCensus: { rows: [] },
       countTotpSecretRows: async () => 0,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      loadBootCanaryCensus: { envelope: null },
+      countBootCanaryRows: async () => 0,
       journal: new InMemoryMasterKeyRotationJournal(1),
       interlock: { async acquire() {}, async release() {} },
       resolveRootKdfSalt: saltPort({ persisted: { salt: minted, source: "genesis_random" } }),
@@ -483,6 +512,9 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         loadTotpSecretsCensus: { rows: [] },
         countTotpSecretRows: async () => 0,
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        loadBootCanaryCensus: { envelope: null },
+        countBootCanaryRows: async () => 0,
         journal: new InMemoryMasterKeyRotationJournal(1),
         interlock: { async acquire() {}, async release() {} },
         resolveRootKdfSalt: saltPort({
@@ -510,6 +542,9 @@ describe("runRotateMasterKeyCli", () => {
         countPushSecretRows: async () => 0,
         loadTotpSecretsCensus: { rows: [] },
         countTotpSecretRows: async () => 0,
+        nodeId: "11111111-1111-4111-8111-111111111111",
+        loadBootCanaryCensus: { envelope: null },
+        countBootCanaryRows: async () => 0,
         journal,
         interlock: { async acquire() {}, async release() {} },
         resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
@@ -524,3 +559,85 @@ describe("runRotateMasterKeyCli", () => {
     expect((await journal.read()).writerEpoch).toBe(1);
   });
 });
+
+describe("runRotateMasterKeyCli boot canary rewrap (ZTR-1177 r2)", () => {
+  const NODE_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("rewrites the durable canary under the new root inside the ceremony", async () => {
+    const { row: w1 } = makeRow(1, 1);
+    const journal = new InMemoryMasterKeyRotationJournal(1);
+    const sealedA = sealVaultBootCanary(OLD_ROOT, NODE_ID);
+    let durableCanary = sealedA;
+    let committedCanary: string | null = null;
+
+    const result = await runRotateMasterKeyCli({
+      loadCensus: { rows: [w1] },
+      countWalletVaultRows: async () => 1,
+      countNodeSigningKeyRows: async () => 0,
+      loadPushSecretsCensus: { rows: [] },
+      countPushSecretRows: async () => 0,
+      loadTotpSecretsCensus: { rows: [] },
+      countTotpSecretRows: async () => 0,
+      nodeId: NODE_ID,
+      loadBootCanaryCensus: { envelope: sealedA },
+      countBootCanaryRows: async () => 1,
+      commitBootCanary: async (envelope) => {
+        committedCanary = envelope;
+        durableCanary = envelope;
+      },
+      journal,
+      interlock: { async acquire() {}, async release() {} },
+      resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
+      unitOfWork: new InMemoryRotationUnitOfWork(),
+      commitWalletVault: async () => {},
+      fromEpoch: 1,
+      env: env(),
+      argv: ["node", "rotate-master-key.cli.js"],
+      logger: { info() {}, error() {} },
+    });
+
+    expect(result.committed).toBe(true);
+    expect(committedCanary).not.toBeNull();
+    expect(committedCanary).not.toBe(sealedA);
+    // New root opens; old root does not.
+    const opened = openVaultBootCanary(NEW_ROOT, NODE_ID, committedCanary!);
+    try {
+      expect(Buffer.from(opened).toString("utf8")).toBe(VAULT_BOOT_CANARY_PLAINTEXT);
+    } finally {
+      opened.fill(0);
+    }
+    expect(() => openVaultBootCanary(OLD_ROOT, NODE_ID, committedCanary!)).toThrow(
+      /VAULT_BOOT_CANARY_DOES_NOT_OPEN/,
+    );
+    expect(durableCanary).toBe(committedCanary);
+  });
+
+  it("refuses rotation when canary row exists but commitBootCanary is unwired", async () => {
+    const { row: w1 } = makeRow(1, 1);
+    await expect(
+      runRotateMasterKeyCli({
+        loadCensus: { rows: [w1] },
+        countWalletVaultRows: async () => 1,
+        countNodeSigningKeyRows: async () => 0,
+        loadPushSecretsCensus: { rows: [] },
+        countPushSecretRows: async () => 0,
+        loadTotpSecretsCensus: { rows: [] },
+        countTotpSecretRows: async () => 0,
+        nodeId: NODE_ID,
+        loadBootCanaryCensus: { envelope: "zp-vault-boot-canary-v1.dGVzdA==" },
+        countBootCanaryRows: async () => 1,
+        // commitBootCanary intentionally omitted
+        journal: new InMemoryMasterKeyRotationJournal(1),
+        interlock: { async acquire() {}, async release() {} },
+        resolveRootKdfSalt: saltPort({ persisted: { salt: SALT, source: "environment" } }),
+        unitOfWork: new InMemoryRotationUnitOfWork(),
+        commitWalletVault: async () => {},
+        fromEpoch: 1,
+        env: env(),
+        argv: ["node", "rotate-master-key.cli.js"],
+        logger: { info() {}, error() {} },
+      }),
+    ).rejects.toThrow(/commitBootCanary port is not wired/);
+  });
+});
+

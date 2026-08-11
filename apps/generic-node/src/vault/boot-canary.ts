@@ -18,6 +18,9 @@
 // - AES-256-GCM under a store-unique HKDF label (same shape as TOTP / push seals).
 // - AAD binds nodeId so a row cannot be transplanted between nodes.
 // - Failure names the vault-unlock step and carries no key material.
+// - Master-key rotation MUST rewrap (or delete+reseal) this envelope under the new
+//   root in the same ceremony UoW as other root-keyed stores — insert-only first-boot
+//   semantics intentionally have no overwrite path outside rotation (ZTR-1177 r2).
 
 import {
   createCipheriv,
@@ -311,3 +314,155 @@ export async function proveVaultRootWithBootCanary(deps: {
 
   return { verified: action === "opened", action };
 }
+
+/**
+ * Load the durable boot-canary envelope, or null when absent.
+ * Used by unlock prove and by master-key rotation census.
+ */
+export async function loadVaultBootCanary(
+  sql: VaultBootCanarySqlExecutor,
+): Promise<string | null> {
+  return loadCanary(sql);
+}
+
+/**
+ * Authoritative 0-or-1 count of the boot-canary row inside the ceremony fence.
+ * Parity is against this count, never a pre-fence snapshot length alone.
+ */
+export async function countVaultBootCanaryRows(
+  sql: VaultBootCanarySqlExecutor,
+): Promise<number> {
+  const { rows } = await sql.query<{ n: string | number }>(
+    "SELECT COUNT(*)::int AS n FROM node_settings WHERE setting_key = $1",
+    [VAULT_BOOT_CANARY_SETTING_KEY],
+  );
+  const n = rows[0]?.n;
+  if (n === undefined) return 0;
+  return typeof n === "number" ? n : Number(n);
+}
+
+/**
+ * Persist a rewrapped canary envelope under the existing settings key.
+ * UPDATE only — rotation never inserts a first canary (first seal is unlock's job).
+ * Bumps row_version; fails closed when the row disappeared mid-ceremony.
+ */
+export async function commitVaultBootCanary(
+  sql: VaultBootCanarySqlExecutor,
+  sealed: string,
+): Promise<void> {
+  if (typeof sealed !== "string" || sealed.length === 0) {
+    throw new VaultBootCanaryError(
+      "VAULT_BOOT_CANARY_MALFORMED",
+      "rotation commit refused an empty boot canary envelope",
+    );
+  }
+  const { rows } = await sql.query<{ setting_key: string }>(
+    `UPDATE node_settings
+        SET setting_value = $2,
+            row_version = row_version + 1,
+            updated_at = now()
+      WHERE setting_key = $1
+      RETURNING setting_key`,
+    [VAULT_BOOT_CANARY_SETTING_KEY, sealed],
+  );
+  if (rows.length !== 1) {
+    throw new VaultBootCanaryError(
+      "VAULT_BOOT_CANARY_MALFORMED",
+      "rotation commit could not update the boot canary row",
+    );
+  }
+}
+
+export interface VaultBootCanaryRewrapInput {
+  readonly oldRootKey: Uint8Array;
+  readonly newRootKey: Uint8Array;
+  readonly nodeId: string;
+  /** Existing durable envelope (must open under oldRootKey). */
+  readonly envelope: string;
+}
+
+export interface VaultBootCanaryRewrapReport {
+  readonly result: {
+    readonly rowsBefore: number;
+    readonly rowsAfter: number;
+    readonly rewrapped: number;
+  };
+  readonly rewrappedEnvelope: string;
+}
+
+/**
+ * Value-preserving master-key rewrap for the boot canary (0-or-1 row).
+ *
+ * Open under old root (refuse rotation if AEAD fails), reseal under new root with a
+ * fresh nonce, round-trip open + plaintext check. Pure over the envelope — caller
+ * owns the DB commit boundary (same UoW as other sealed-store commits).
+ */
+export function rewrapVaultBootCanary(
+  input: VaultBootCanaryRewrapInput,
+): VaultBootCanaryRewrapReport {
+  assertRootKey(input.oldRootKey);
+  assertRootKey(input.newRootKey);
+  assertNodeId(input.nodeId);
+
+  let opened: Buffer;
+  try {
+    opened = openVaultBootCanary(input.oldRootKey, input.nodeId, input.envelope);
+  } catch (err) {
+    if (err instanceof VaultBootCanaryError) {
+      throw new VaultBootCanaryError(
+        err.code,
+        "master-key rotation: boot canary does not open under the old root — " +
+          "refusing to advance (canary would brick vault-unlock under the new key)",
+      );
+    }
+    throw err;
+  }
+
+  try {
+    const expected = Buffer.from(VAULT_BOOT_CANARY_PLAINTEXT, "utf8");
+    if (!plaintextsEqual(opened, expected)) {
+      throw new VaultBootCanaryError(
+        "VAULT_BOOT_CANARY_PLAINTEXT_MISMATCH",
+        "master-key rotation: boot canary plaintext mismatch under the old root",
+      );
+    }
+  } finally {
+    opened.fill(0);
+  }
+
+  const resealed = sealVaultBootCanary(input.newRootKey, input.nodeId);
+  if (resealed === input.envelope) {
+    throw new VaultBootCanaryError(
+      "VAULT_BOOT_CANARY_MALFORMED",
+      "master-key rotation: boot canary reseal produced an identical envelope",
+    );
+  }
+
+  let roundTrip: Buffer;
+  try {
+    roundTrip = openVaultBootCanary(input.newRootKey, input.nodeId, resealed);
+  } catch (err) {
+    if (err instanceof VaultBootCanaryError) throw err;
+    throw new VaultBootCanaryError(
+      "VAULT_BOOT_CANARY_DOES_NOT_OPEN",
+      "master-key rotation: rewrapped boot canary does not open under the new root",
+    );
+  }
+  try {
+    const expected = Buffer.from(VAULT_BOOT_CANARY_PLAINTEXT, "utf8");
+    if (!plaintextsEqual(roundTrip, expected)) {
+      throw new VaultBootCanaryError(
+        "VAULT_BOOT_CANARY_PLAINTEXT_MISMATCH",
+        "master-key rotation: rewrapped boot canary plaintext mismatch under the new root",
+      );
+    }
+  } finally {
+    roundTrip.fill(0);
+  }
+
+  return {
+    result: { rowsBefore: 1, rowsAfter: 1, rewrapped: 1 },
+    rewrappedEnvelope: resealed,
+  };
+}
+

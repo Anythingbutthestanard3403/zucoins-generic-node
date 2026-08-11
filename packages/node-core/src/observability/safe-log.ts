@@ -98,13 +98,17 @@ const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s
 
 /**
  * URL userinfo with a password (`scheme://user:pass@host`). The whole userinfo
- * segment is censored — splitting on the first `:` would mis-handle passwords
- * that themselves contain colons. Username-only forms (`scheme://user@host`)
- * and path forms that happen to contain `@` (pnpm `file:///…/pkg@1.2.3`) are
- * left alone: the former is uncommon in free-text diagnostics, the latter is
- * ordinary stack material that must not be chewed.
+ * segment is censored. Delimiters:
+ * - last `@` before the host (passwords may themselves contain `@`, e.g. `P@ssw0rd`)
+ * - a `:` required inside userinfo so username-only forms (`scheme://user@host`)
+ *   and path forms that happen to contain `@` (pnpm `file:///…/pkg@1.2.3`) are
+ *   left alone: the former is uncommon in free-text diagnostics, the latter is
+ *   ordinary stack material that must not be chewed.
+ * Greedy `*` on a class that permits `@` makes the engine take the rightmost
+ * `@` that still leaves a `:` in the captured userinfo — first-`@` stop would
+ * leak the password tail (`postgres://u:P@ssw0rd@h` → `…[redacted]@ssw0rd@h`).
  */
-const TEXT_URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^@\s"'<>]*:[^@\s"'<>]*)@/g;
+const TEXT_URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'<>]*:[^\s"'<>]*)@/g;
 
 /**
  * Candidate bare tokens for the high-entropy pass. Length floor is deliberate:

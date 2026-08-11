@@ -269,6 +269,37 @@ describe("scrubText redacts bare tokens and URL userinfo (ZTR-1215)", () => {
     expect(out).toBe(`postgresql://${REDACTED}@localhost/db`);
   });
 
+  it("redacts URL userinfo when the password itself contains @", () => {
+    // libpq / operators treat the last @ as host delimiter; first-@ stop leaks tails.
+    const dsn = "postgresql://u:p@art@two@localhost/db";
+    const out = scrubText(dsn);
+    expect(out).not.toContain("p@art@two");
+    expect(out).not.toContain("art@two");
+    expect(out).toBe(`postgresql://${REDACTED}@localhost/db`);
+
+    const common = "postgres://u:P@ssw0rd@h/db";
+    const outCommon = scrubText(common);
+    expect(outCommon).not.toContain("ssw0rd");
+    expect(outCommon).toBe(`postgres://${REDACTED}@h/db`);
+  });
+
+  it("redacts @-in-password tails inside free-text DATABASE_URL lines", () => {
+    const tail = "ssw0rd-UniqueXX";
+    const line = `DATABASE_URL=postgres://node:p@${tail}@db.internal/generic`;
+    const out = scrubText(line);
+    expect(out).not.toContain(tail);
+    expect(out).not.toContain(`p@${tail}`);
+    expect(out).toContain(`postgres://${REDACTED}@db.internal/generic`);
+    expect(out).toContain("DATABASE_URL=");
+
+    const errLine =
+      "Error: connect failed postgres://app:MyP@ss-Word-99@10.0.0.5:5432/zucoins";
+    const outErr = scrubText(errLine);
+    expect(outErr).not.toContain("ss-Word-99");
+    expect(outErr).not.toContain("MyP@ss-Word-99");
+    expect(outErr).toContain(`postgres://${REDACTED}@10.0.0.5:5432/zucoins`);
+  });
+
   it("does not over-redact ordinary prose or short money-path values", () => {
     expect(scrubText("reason: bad_sig count=3 amount=1.00")).toBe(
       "reason: bad_sig count=3 amount=1.00",

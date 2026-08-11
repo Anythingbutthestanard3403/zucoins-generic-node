@@ -726,7 +726,7 @@ export async function postHaltToggle(
 
 // Implementer API key management. The raw key is
 // returned exactly once on issue and is never logged here; the operator copies it
-// into their merchant website backend env (never customer browser JS).
+// into their implementer website backend env (never customer browser JS).
 export interface ApiKeyListing {
   readonly id: string;
   readonly prefix: string;

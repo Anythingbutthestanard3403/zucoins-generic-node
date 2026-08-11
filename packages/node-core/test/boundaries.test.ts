@@ -47,8 +47,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   "event-log": ["protocol"],
   gateway: ["protocol"],
   // Observation capture may surface through api routes and data ports.
-  observation: ["protocol", "api", "data"],
-  verifier: ["protocol", "gateway"],
+  observation: ["protocol"],
+  verifier: ["protocol"],
   core: ["protocol", "data", "gateway", "verifier"],
   // GET /v1/events binds the reporting credential pipeline to the
   // implementer-scoped read-service; api may import reporting for that binder only.
@@ -56,7 +56,7 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // Admin recovery inspection/actions live under operator/ and surface via api/.
   // api/routes/operation-routes maps PushSubscriptionRequiredError from push.
   api: ["protocol", "core", "reporting", "move", "operator", "push"],
-  operator: ["protocol", "data", "core"],
+  operator: ["protocol"],
   // Reporting wraps protocol/ed25519-verify for UTF-8 preimage convenience.
   reporting: ["protocol"],
   "proof-body": [],
@@ -122,6 +122,14 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   push: ["vault"],
   testkit: ["protocol", "data", "gateway", "verifier", "operator"],
 };
+
+/** Explicit bipartite cycle the architecture accepts today (ZTR-1167).
+ * `data` loads schema pack metadata; `schema` loads migration helpers from `data`.
+ * Whole-graph acyclicity treats only this pair as allowed; any other cycle fails the gate.
+ */
+const ACCEPTED_INTERNAL_CYCLES: ReadonlyArray<readonly [ModuleName, ModuleName]> = [
+  ["data", "schema"],
+] as const;
 
 interface SourceImport {
   readonly file: string;
@@ -336,6 +344,77 @@ describe("node-core dependency boundaries", () => {
 
   it("keeps every internal import within the allowed direction", () => {
     expect(directionViolations(sourceImports)).toEqual([]);
+  });
+
+  it("ALLOWED_INTERNAL_IMPORTS is acyclic except for named accepted cycles", () => {
+    const allowedPairs = new Set<string>();
+    for (const [from, targets] of Object.entries(ALLOWED_INTERNAL_IMPORTS) as Array<
+      [ModuleName, readonly ModuleName[]]
+    >) {
+      for (const to of targets) {
+        allowedPairs.add(`${from}->${to}`);
+      }
+    }
+    for (const [a, b] of ACCEPTED_INTERNAL_CYCLES) {
+      expect(allowedPairs.has(`${a}->${b}`)).toBe(true);
+      expect(allowedPairs.has(`${b}->${a}`)).toBe(true);
+    }
+    const acceptedUndirected = new Set(
+      ACCEPTED_INTERNAL_CYCLES.map(([a, b]) => [a, b].sort().join("|")),
+    );
+
+    // Tarjan-style: any strongly connected component larger than 1, or a 1-node self-loop,
+    // is a cycle. Self-loops are never accepted.
+    const nodes = Object.keys(ALLOWED_INTERNAL_IMPORTS) as ModuleName[];
+    const index = new Map<ModuleName, number>();
+    const lowlink = new Map<ModuleName, number>();
+    const onStack = new Set<ModuleName>();
+    const stack: ModuleName[] = [];
+    let next = 0;
+    const sccs: ModuleName[][] = [];
+
+    const strongConnect = (v: ModuleName): void => {
+      index.set(v, next);
+      lowlink.set(v, next);
+      next += 1;
+      stack.push(v);
+      onStack.add(v);
+      for (const w of ALLOWED_INTERNAL_IMPORTS[v]) {
+        if (!index.has(w)) {
+          strongConnect(w);
+          lowlink.set(v, Math.min(lowlink.get(v)!, lowlink.get(w)!));
+        } else if (onStack.has(w)) {
+          lowlink.set(v, Math.min(lowlink.get(v)!, index.get(w)!));
+        }
+      }
+      if (lowlink.get(v) === index.get(v)) {
+        const comp: ModuleName[] = [];
+        for (;;) {
+          const w = stack.pop()!;
+          onStack.delete(w);
+          comp.push(w);
+          if (w === v) break;
+        }
+        sccs.push(comp);
+      }
+    };
+
+    for (const n of nodes) {
+      if (!index.has(n)) strongConnect(n);
+    }
+
+    const unexpected = sccs.filter((comp) => {
+      if (comp.length === 1) {
+        const only = comp[0]!;
+        return ALLOWED_INTERNAL_IMPORTS[only].includes(only);
+      }
+      if (comp.length === 2) {
+        const key = [...comp].sort().join("|");
+        return !acceptedUndirected.has(key);
+      }
+      return true;
+    });
+    expect(unexpected).toEqual([]);
   });
 
   it("contains no product-surface dependency", () => {

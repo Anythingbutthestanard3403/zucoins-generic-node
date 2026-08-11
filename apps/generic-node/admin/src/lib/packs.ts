@@ -6,8 +6,8 @@
  * setup_state prefs port exists; shape is enabled_packs M|T|P|X.
  *
  *   M — Accept external value   → RECEIVE_EXTERNAL + full Connect kit
- *   T — Internal treasury       → MOVE_INTERNAL + blessed sinks
- *   P — External payouts        → SEND_EXTERNAL + Approve inbox (node never chain-submits SEND)
+ *   T — Internal moves          → MOVE_INTERNAL + blessed sinks
+ *   P — External sends          → SEND_EXTERNAL + Approve inbox (node never chain-submits SEND)
  *   X — Headless                → API/OpenAPI/pin/verifier only (default when none of M/T/P)
  */
 
@@ -52,7 +52,7 @@ export const PACK_DEFINITIONS: readonly PackDefinition[] = [
   },
   {
     id: "T",
-    title: "Internal treasury",
+    title: "Internal moves",
     purpose:
       "Move value between wallets you control on this node. Composes Internal transfer " +
       "(MOVE_INTERNAL) with blessed automatic sinks. No storefront required.",
@@ -61,7 +61,7 @@ export const PACK_DEFINITIONS: readonly PackDefinition[] = [
   },
   {
     id: "P",
-    title: "External payouts",
+    title: "External sends",
     purpose:
       "Request outgoing value that needs dual-control approval. Composes Outgoing " +
       "(SEND_EXTERNAL / needs approval). The node never chain-submits SEND — after " +
@@ -74,7 +74,7 @@ export const PACK_DEFINITIONS: readonly PackDefinition[] = [
     title: "Headless",
     purpose:
       "API-only operation: OpenAPI, discovery pin, and consumer verifier pointers. " +
-      "No forced merchant website copy. Always available; default when no other pack is on.",
+      "No forced implementer website copy. Always available; default when no other pack is on.",
     ops: [],
     toggleable: false,
   },
@@ -200,7 +200,7 @@ export const PACK_M_CHECKLIST: readonly Omit<PackChecklistRow, "status">[] = [
     pack: "M",
     title: "Full Connect kit understood",
     detail:
-      "create → ARM → transfer_code → pin → independent verify → verification-complete. Wake ≠ proof. Skip verification-complete and the pool drains.",
+      "create → ARM → transfer_code → pin → independent verify → verification-complete. Wake ≠ proof. Skip verification-complete and the pool stays exhausted (receiver PINNED).",
     href: "/integration",
   },
   {
@@ -208,7 +208,7 @@ export const PACK_M_CHECKLIST: readonly Omit<PackChecklistRow, "status">[] = [
     pack: "M",
     title: "Destination policy: HOLD vs INTERNAL_MOVE",
     detail:
-      "After landing, HOLD leaves value in the receive wallet; INTERNAL_MOVE consolidates to a blessed sink. Still only three ops — no sweeps product.",
+      "After landing, HOLD leaves value in the receive wallet; INTERNAL_MOVE consolidates to a blessed sink. Still only three ops — no retired product chrome.",
     href: "/destinations",
   },
 ] as const;
@@ -242,7 +242,7 @@ export const PACK_T_CHECKLIST: readonly Omit<PackChecklistRow, "status">[] = [
     pack: "T",
     title: "MOVE_INTERNAL path documented",
     detail:
-      "Implementer API creates Internal transfers. Activity shows them with plain labels. No merchant website required.",
+      "Implementer API creates Internal transfers. Activity shows them with plain labels. No implementer website required.",
     href: "/operations",
   },
 ] as const;
@@ -268,7 +268,7 @@ export const PACK_P_CHECKLIST: readonly Omit<PackChecklistRow, "status">[] = [
     pack: "P",
     title: "Approver familiar with inbox",
     detail:
-      "Open Transfers / pending approvals. Practice the flow before production payouts.",
+      "Open Transfers / pending approvals. Practice the flow before production sends.",
     href: "/transfers",
   },
   {
@@ -343,7 +343,7 @@ export const KIT_GENERATOR_REGISTRY: readonly KitGeneratorSlot[] = [
   {
     id: "treasury_move_guide",
     pack: "T",
-    title: "Internal treasury guide",
+    title: "Internal moves guide",
     description:
       "Bless sinks in-UI, create MOVE_INTERNAL via implementer API, read Activity with plain Internal transfer labels.",
     usesConnectKit: false,
@@ -351,7 +351,7 @@ export const KIT_GENERATOR_REGISTRY: readonly KitGeneratorSlot[] = [
   {
     id: "payout_dual_control_guide",
     pack: "P",
-    title: "External payout dual-control guide",
+    title: "External send dual-control guide",
     description:
       "Request SEND server-side → Approve inbox (TOTP + device) → recipient finishes. Approve ≠ paid; node never chain-submits SEND.",
     usesConnectKit: false,
@@ -361,7 +361,7 @@ export const KIT_GENERATOR_REGISTRY: readonly KitGeneratorSlot[] = [
     pack: "X",
     title: "Headless pointers",
     description:
-      "OpenAPI surface, /.well-known/zupay-node discovery pin, and @zucoins/generic-node-consumer / consumer-example verifiers. No forced merchant copy.",
+      "OpenAPI surface, /.well-known/zupay-node discovery pin, and @zucoins/generic-node-consumer / consumer-example verifiers. No forced implementer copy.",
     usesConnectKit: false,
   },
 ] as const;
@@ -379,8 +379,8 @@ export function buildPackGuideText(slotId: KitGeneratorId, nodeBaseUrl: string):
   const base = nodeBaseUrl.replace(/\/$/, "");
   switch (slotId) {
     case "treasury_move_guide":
-      return `ZU NODE — PACK T INTERNAL TREASURY GUIDE
-========================================
+      return `ZU NODE — PACK T INTERNAL MOVES GUIDE
+=====================================
 
 Three money ops only. This pack composes Internal transfer (MOVE_INTERNAL).
 
@@ -391,11 +391,11 @@ Three money ops only. This pack composes Internal transfer (MOVE_INTERNAL).
 4. Create MOVE_INTERNAL via implementer API (server-side ik_… bearer).
 5. Activity / Operations shows Internal transfer with plain labels.
 
-No merchant website required. No sweeps product chrome. No fourth money verb.
+No implementer website required. No retired product chrome. No fourth money verb.
 `;
     case "payout_dual_control_guide":
-      return `ZU NODE — PACK P EXTERNAL PAYOUTS (DUAL-CONTROL)
-===============================================
+      return `ZU NODE — PACK P EXTERNAL SENDS (DUAL-CONTROL)
+=============================================
 
 Three money ops only. This pack composes Outgoing (SEND_EXTERNAL / needs approval).
 
@@ -415,7 +415,7 @@ Approve alone ≠ paid. Never claim node chain-submits SEND.
       return `ZU NODE — PACK X HEADLESS POINTERS
 =================================
 
-No forced merchant website copy. Operate via API only.
+No forced implementer website copy. Operate via API only.
 
 1. OpenAPI / route surface on this node (implementer + admin).
 2. Discovery pin: GET ${base}/.well-known/zupay-node
@@ -441,8 +441,8 @@ Still only three money ops: Incoming, Internal transfer, Outgoing (needs approva
 // ---------------------------------------------------------------------------
 
 /**
- * Assert production nav labels/paths stay free of Sessions/Sweeps/Webhooks/Orders
- * chrome after pack enablement. Packs must not inject nav entries.
+ * Assert production nav labels/paths stay free of retired product-projection chrome
+ * after pack enablement. Packs must not inject nav entries.
  */
 export function assertPacksPreserveNavInvariant(
   navLabels: readonly string[],
@@ -454,11 +454,11 @@ export function assertPacksPreserveNavInvariant(
     }
   }
   for (const label of navLabels) {
-    if (/session|sweep|webhook|orders?/i.test(label) && !/^reporting$/i.test(label)) {
-      // "Reporting" is allowed; bare Sessions/Sweeps/Webhooks/Orders are not.
+    if (/session|sweep|webhook|orders?/i.test(label) && !/^reporting$/i.test(label)) { // contract-allow:sweep,order:retired-nav-label-guard
+      // "Reporting" is allowed; bare retired product-projection labels are not.
       if (
         FORBIDDEN_NAV_LABELS.includes(label as (typeof FORBIDDEN_NAV_LABELS)[number]) ||
-        /^orders?$/i.test(label)
+        /^orders?$/i.test(label) // contract-allow:order:retired-nav-label-guard
       ) {
         throw new Error(`packs must not add forbidden nav label: ${label}`);
       }
@@ -472,10 +472,10 @@ export function assertPacksPreserveNavInvariant(
   for (const p of navPaths) {
     if (
       p === "/sessions" ||
-      p === "/sweeps" ||
+      p === "/sweeps" || // contract-allow:sweep:retired-nav-path-guard
       p === "/webhooks" ||
-      p === "/orders" ||
-      p.startsWith("/orders/")
+      p === "/orders" || // contract-allow:order:retired-nav-path-guard
+      p.startsWith("/orders/") // contract-allow:order:retired-nav-path-guard
     ) {
       throw new Error(`packs must not add forbidden nav path: ${p}`);
     }
@@ -486,4 +486,4 @@ export function assertPacksPreserveNavInvariant(
 export const THREE_OPS_COMPOSITION_COPY =
   "Packs compose the same three money ops only: Incoming (RECEIVE_EXTERNAL), " +
   "Internal transfer (MOVE_INTERNAL), and Outgoing (SEND_EXTERNAL / needs approval). " +
-  "No fourth verb. No Sessions, Sweeps, Webhooks, or Orders chrome.";
+  "No fourth verb. No retired product-projection chrome.";

@@ -197,10 +197,10 @@ export function DestinationsPage() {
           data-testid="pack-t-bless-guidance"
           style={{ marginBottom: 16 }}
         >
-          <strong>Pack T — Internal treasury.</strong> Bless ≥1 automatic sink here in-UI
+          <strong>Pack T — Internal moves.</strong> Bless ≥1 automatic sink here in-UI
           (device signature + fresh TOTP over <code className="mono">zp-destination-bless-v1</code>).
           No CLI required. Internal transfer (MOVE_INTERNAL) consolidates to blessed sinks —
-          still only three money ops; no sweeps product chrome. No merchant website required.
+          still only three money ops; no retired product chrome. No implementer website required.
         </div>
       ) : null}
 

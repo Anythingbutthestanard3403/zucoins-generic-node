@@ -23,12 +23,14 @@
     "scripts/check-merged-migration-state*.mjs",
     "scripts/check-phantom-settles*.mjs",
     "scripts/check-schema-census*.mjs",
+    "scripts/assert-origin-url*.mjs",
     "scripts/claim*.py",
     "scripts/lease-provenance.mjs",
     "scripts/money-path-scan*.mjs",
     "scripts/release-targets*.mjs",
     "scripts/remediate-orphaned-lease*.mjs",
     "scripts/verdict-integrity*.mjs",
+    "scripts/verify-local.sh",
     "scripts/verify-railway-release-binding*.mjs"
   ],
   "ignoredGlobs": [

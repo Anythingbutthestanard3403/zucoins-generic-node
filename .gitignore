@@ -33,3 +33,8 @@ apps/generic-node/test/.artifacts/
 # Local env overrides
 .env.local
 .env.*.local
+
+# Python bytecode from scripts/claim.py / linear.py
+__pycache__/
+scripts/__pycache__/
+*.py[cod]

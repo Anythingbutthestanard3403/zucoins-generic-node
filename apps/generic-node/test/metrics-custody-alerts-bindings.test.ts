@@ -154,6 +154,74 @@ describe("ZTR-1144 custody alert bindings", () => {
     expect(delivered).toContain("gateway_read_failure");
   });
 
+  // ZTR-1144 D3 residual — in-process 503 arm must not ride the DB-truth gate on queue_caps.
+  it("pages queue_caps from process 503 counter when DB-truth is unavailable", async () => {
+    const delivered: string[] = [];
+    const evaluator = createSafetyAlertEvaluator({
+      channels: {
+        log: {
+          kind: "log",
+          deliver: async (n) => {
+            delivered.push(`${n.signal}:${n.severity}`);
+          },
+        },
+      },
+    });
+    const metrics = createNodeMetrics();
+    metrics.receiveQueueFull503.inc({});
+    const snapshot = {
+      ...emptyOperationalSnapshot(),
+      // Fallback DB gauges look full — must not be the reason we page (or clear).
+      queueDepth: 10,
+      poolCapTotal: 10,
+      capUtilizationPercent: 100,
+      totalWallets: 10,
+      pinnedWallets: 10,
+      signerLeadershipHeld: 1 as const,
+    };
+    await evaluateAndDispatchCustodyAlerts(
+      evaluator,
+      snapshot,
+      false,
+      custodyAlertCountersFromMetrics(metrics),
+    );
+    expect(delivered).toContain("queue_caps:P1");
+    // Pure DB-truth signals still suppressed.
+    expect(delivered).not.toContain("lease_age");
+    expect(delivered).not.toContain("attention_backlog");
+  });
+
+  it("does not page queue_caps from fallback depth/pool/pinned alone when DB-truth is down", async () => {
+    const delivered: string[] = [];
+    const evaluator = createSafetyAlertEvaluator({
+      channels: {
+        log: {
+          kind: "log",
+          deliver: async (n) => {
+            delivered.push(n.signal);
+          },
+        },
+      },
+    });
+    await evaluateAndDispatchCustodyAlerts(
+      evaluator,
+      {
+        ...emptyOperationalSnapshot(),
+        queueDepth: 10,
+        poolCapTotal: 10,
+        capUtilizationPercent: 100,
+        totalWallets: 5,
+        pinnedWallets: 5,
+        oldestLeaseAgeSecs: 600,
+        signerLeadershipHeld: 1 as const,
+      },
+      false,
+      {},
+    );
+    expect(delivered).not.toContain("queue_caps");
+    expect(delivered).not.toContain("lease_age");
+  });
+
   it("composition: MOVE park and boot recovery emit onInvariantBreach (source ratchet)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join, dirname } = await import("node:path");

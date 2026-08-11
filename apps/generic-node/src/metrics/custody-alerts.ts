@@ -10,15 +10,20 @@
 // process counters (invariant breach, duplicate submit, anomalies, gateway-read,
 // queue-full 503, proof-budget path gaps).
 //
-// databaseTruthAvailable (REVIEW B): lease_age, queue_caps, attention_backlog and
-// queue_oldest_age are DB-truth gauges. When the snapshot source falls back to a
-// stamps-only snapshot (DB probe failed, or the DB-truth query threw mid-scrape —
-// snapshot-source.ts), those readings are 0 for "unknown", not "healthy". Evaluating
-// them against a fallback zero would silently CLEAR a real stuck-lease/queue alert
-// during exactly the DB instability that makes a stuck lease most likely — worse than
-// not firing. So those readings are omitted from evaluation (not zeroed) whenever
-// databaseTruthAvailable is false; process-stamp and counter-backed signals always
-// evaluate.
+// databaseTruthAvailable (REVIEW B / D3): lease_age, attention_backlog, queue_oldest_age
+// and the DB arms of queue_caps (depth / pool-cap / pinned) are DB-truth gauges. When the
+// snapshot source falls back to a stamps-only snapshot (DB probe failed, or the DB-truth
+// query threw mid-scrape — snapshot-source.ts), those readings are 0 for "unknown", not
+// "healthy". Evaluating them against a fallback zero would silently CLEAR a real stuck
+// lease/queue alert during exactly the DB instability that makes a stuck lease most
+// likely — worse than not firing. So those readings are omitted from evaluation (not
+// zeroed) whenever databaseTruthAvailable is false.
+//
+// queue_caps 503 arm is process-counter-backed (`gn_receive_queue_full_503_total`) and
+// must still evaluate during a DB blip — mirrors Prom GenericNodeReceiveQueueFull503
+// (no gn_database_truth_available conjunct). When DB-truth is down we evaluate
+// queue_caps from the 503 rate alone (if any); when 503 is also zero the signal is
+// omitted entirely so fallback zeros cannot clear a prior depth/pool/pinned page.
 //
 // Delivery: log always; webhook when OPERATOR_ALERT_WEBHOOK_URL is configured
 // (https-only, no credentials). Advisory only — never gates admission or releases
@@ -36,10 +41,12 @@ import {
   type SafetyAlertSignal,
 } from "@zucoins/node-core";
 
-/** DB-truth-only signals: must not be evaluated from a fallback (unknown) snapshot. */
+/**
+ * Fully DB-truth-only signals: must not be evaluated from a fallback (unknown) snapshot.
+ * queue_caps is hybrid — see evaluateAndDispatchCustodyAlerts (DB arms gated; 503 arm live).
+ */
 const DB_TRUTH_ONLY_SIGNALS: readonly SafetyAlertSignal[] = [
   "lease_age",
-  "queue_caps",
   "attention_backlog",
   "queue_oldest_age",
 ];
@@ -152,10 +159,11 @@ export function custodyAlertCountersFromMetrics(metrics: NodeMetrics): CustodyAl
  * are swallowed by the evaluator itself.
  *
  * `databaseTruthAvailable` (default true, for callers still on the earlier pre-DB-truth
- * shape) gates DB-truth signals: when false, those readings are omitted from
- * evaluation entirely rather than evaluated against the fallback snapshot's zeros, so a
- * real stuck lease/queue from before the DB blip keeps alerting instead of silently
- * clearing. Process-stamp and counter-backed signals always evaluate.
+ * shape) gates fully DB-truth signals and the DB arms of queue_caps: when false, those
+ * readings are omitted from evaluation entirely rather than evaluated against the
+ * fallback snapshot's zeros, so a real stuck lease/queue from before the DB blip keeps
+ * alerting instead of silently clearing. Process-stamp and counter-backed signals
+ * always evaluate — including the queue_caps 503 arm (ZTR-1144 D3 residual).
  */
 export async function evaluateAndDispatchCustodyAlerts(
   evaluator: SafetyAlertEvaluator,
@@ -163,13 +171,29 @@ export async function evaluateAndDispatchCustodyAlerts(
   databaseTruthAvailable = true,
   counters: CustodyAlertProcessCounters = {},
 ): Promise<void> {
-  const full = deriveSafetyAlertReadings(custodyAlertInputFromSnapshot(snapshot, counters));
-  const excluded: ReadonlySet<SafetyAlertSignal> = databaseTruthAvailable
-    ? new Set(snapshot.backupLastSuccessAvailable === 1 ? [] : ["backup_age"])
-    : new Set([
-        ...DB_TRUTH_ONLY_SIGNALS,
-        ...(snapshot.backupLastSuccessAvailable === 1 ? [] : ["backup_age" as const]),
-      ]);
+  const input = custodyAlertInputFromSnapshot(snapshot, counters);
+  // When DB-truth is down, zero the DB arms of queue_caps so fallback zeros cannot
+  // contribute a false "healthy" max, then re-derive. The 503 rate stays as mapped.
+  const readingInput: SafetyAlertMetricInput = databaseTruthAvailable
+    ? input
+    : {
+        ...input,
+        receiveQueueUtilization: 0,
+        poolCapUtilization: 0,
+        pinnedPoolRatio: 0,
+      };
+  const full = deriveSafetyAlertReadings(readingInput);
+
+  const excluded = new Set<SafetyAlertSignal>(
+    snapshot.backupLastSuccessAvailable === 1 ? [] : ["backup_age"],
+  );
+  if (!databaseTruthAvailable) {
+    for (const signal of DB_TRUTH_ONLY_SIGNALS) excluded.add(signal);
+    // Hybrid queue_caps: keep only when the process 503 arm is live; otherwise omit
+    // so a prior depth/pool/pinned page is not cleared by fallback zeros.
+    if (input.receiveQueueFull503Rate <= 0) excluded.add("queue_caps");
+  }
+
   const readings: Partial<Record<SafetyAlertSignal, number>> = {};
   for (const [signal, value] of Object.entries(full) as [SafetyAlertSignal, number][]) {
     if (!excluded.has(signal)) readings[signal] = value;

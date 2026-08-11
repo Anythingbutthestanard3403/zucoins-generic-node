@@ -461,6 +461,31 @@ describe("G4 operator push", () => {
     expect(body.subscriptions).toEqual([]);
   });
 
+  it("rejects fabricated operator-push key material (ZTR-1168)", async () => {
+    const { router, userStore } = makeRouter();
+    const auth = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/operator-push/subscribe",
+      Buffer.from(
+        JSON.stringify({
+          endpoint: "https://operator-push.local/pending/1",
+          p256dh: "pending-p256dh-placeholder-value-xx",
+          auth: "pending-auth-placeholder-xx",
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body) as { error?: { message?: string } };
+    expect(body.error?.message ?? "").toMatch(/valid Web Push key material|p256dh/i);
+  });
+
   it("subscribe + preview payload forbids secrets", async () => {
     const { router, userStore, operatorPushStore } = makeRouter();
     const auth = await login(router, userStore);
@@ -470,8 +495,8 @@ describe("G4 operator push", () => {
       Buffer.from(
         JSON.stringify({
           endpoint: "https://push.example/ep/abc",
-          p256dh: "public-p256dh-value-here",
-          auth: "auth-secret-not-returned",
+          p256dh: "BAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+          auth: "AAECAwQFBgcICQoLDA0ODw",
         }),
       ),
       {
@@ -482,13 +507,13 @@ describe("G4 operator push", () => {
       },
     );
     expect(sub.status).toBe(200);
-    expect(sub.body).not.toContain("auth-secret-not-returned");
+    expect(sub.body).not.toContain("AAECAwQFBgcICQoLDA0ODw");
     // Store must retain openable sealed auth (not sealed:<length> discard).
     const stored = operatorPushStore.listByOperator(NODE_ID, auth.userId);
     expect(stored).toHaveLength(1);
     expect(stored[0]!.authSealed.startsWith("zp-op-push-auth-v1.")).toBe(true);
     expect(stored[0]!.authSealed).not.toMatch(/^sealed:\d+$/);
-    expect(stored[0]!.authSealed).not.toContain("auth-secret-not-returned");
+    expect(stored[0]!.authSealed).not.toContain("AAECAwQFBgcICQoLDA0ODw");
 
     const preview = await router(
       "POST",
@@ -663,8 +688,8 @@ describe("G4 operator push notify on challenge issue", () => {
       Buffer.from(
         JSON.stringify({
           endpoint: "https://push.example/ep/notify-test",
-          p256dh: "public-p256dh-value-here",
-          auth: "auth-secret-for-notify",
+          p256dh: "BAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+          auth: "AAECAwQFBgcICQoLDA0ODw",
         }),
       ),
       {

@@ -62,6 +62,52 @@ const noFloatAmount = {
   },
 };
 
+
+// SPA-wide bare-amount float ban (ZTR-1168 interim). The import-gated rule above
+// never fires in admin/src because the SPA does not import ZkzDecimalString yet.
+// Apply the same roads unconditionally under the operator console tree.
+const noFloatAmountAdmin = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "in the operator SPA, ban parseFloat / Number() / toFixed / toLocaleString / Intl.NumberFormat on amount paths",
+    },
+    schema: [],
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        if (
+          node.callee.type === "Identifier" &&
+          (node.callee.name === "parseFloat" || node.callee.name === "Number")
+        ) {
+          context.report({
+            node,
+            message: `${node.callee.name}( in operator SPA — amount_zkz is a decimal string end to end. Render by string slicing; a JavaScript number must be unreachable.`,
+          });
+        }
+      },
+      MemberExpression(node) {
+        if (node.property.type !== "Identifier") return;
+        const name = node.property.name;
+        if (name === "toFixed" || name === "toLocaleString" || name === "parseFloat") {
+          context.report({
+            node,
+            message: `${name} in operator SPA — amount_zkz is a decimal string end to end. Render by string slicing; a JavaScript number must be unreachable.`,
+          });
+        }
+        if (name === "NumberFormat" && node.object.type === "Identifier" && node.object.name === "Intl") {
+          context.report({
+            node,
+            message: `Intl.NumberFormat in operator SPA — amount_zkz is a decimal string end to end. Render by string slicing; a JavaScript number must be unreachable.`,
+          });
+        }
+      },
+    };
+  },
+};
+
 // Operator-console dead-control ban. A `<button>` with no onClick,
 // type="submit", or disabled compiles and renders as clickable but does
 // nothing — a control must be wired or explicitly inert.
@@ -165,5 +211,13 @@ export default tseslint.config(
       },
     },
     rules: { "admin-ui/button-must-be-interactive-or-inert": "error" },
+  },
+  {
+    files: ["apps/generic-node/admin/src/**/*.{ts,tsx}"],
+    ignores: ["apps/generic-node/admin/src/**/*.{test,spec}.{ts,tsx}", "apps/generic-node/admin/src/e2e/**"],
+    plugins: {
+      "amounts-admin": { rules: { "no-float-amount": noFloatAmountAdmin } },
+    },
+    rules: { "amounts-admin/no-float-amount": "error" },
   },
 );

@@ -21,6 +21,8 @@ import {
   type Day0Step,
   type SetupStateDay0,
 } from "./funnel/day0.js";
+import { decideSetupStateHttp } from "./funnel/setup-state-gate.js";
+import { bindSessionQueryClient } from "./lib/session-reset.js";
 import "./styles.css";
 
 // Capture Chromium install prompt early (must preventDefault before first paint settles).
@@ -67,6 +69,7 @@ const OperatorSecurityPage = lazy(() =>
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 0 } },
 });
+bindSessionQueryClient(queryClient);
 
 function AuthGate({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
@@ -111,9 +114,15 @@ function RequireAuth({ children }: { children: ReactNode }) {
     void fetch("/admin/v1/setup-state", { credentials: "include" })
       .then(async (res) => {
         if (cancelled) return;
-        if (!res.ok) {
-          // Fail open to app if setup API missing (older nodes); password/TOTP still gated above.
+        const decision = decideSetupStateHttp(res);
+        if (decision.kind === "open_legacy") {
+          // Genuine 404 only — older nodes without setup-state. Password/TOTP still gated above.
           setGate({ kind: "ok" });
+          return;
+        }
+        if (decision.kind === "closed") {
+          // 5xx / other errors: fail closed into the earliest funnel step.
+          setGate({ kind: "funnel", next: "install" });
           return;
         }
         const body = (await res.json()) as SetupStateDay0;
@@ -132,7 +141,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
         setGate({ kind: "funnel", next });
       })
       .catch(() => {
-        if (!cancelled) setGate({ kind: "ok" });
+        // Network rejection — fail closed (ZTR-1168).
+        if (!cancelled) setGate({ kind: "funnel", next: "install" });
       });
     return () => {
       cancelled = true;
@@ -181,7 +191,13 @@ function RequireFunnel({ children }: { children: ReactNode }) {
     void fetch("/admin/v1/setup-state", { credentials: "include" })
       .then(async (res) => {
         if (cancelled) return;
-        if (!res.ok) {
+        const decision = decideSetupStateHttp(res);
+        if (decision.kind === "open_legacy") {
+          // 404: no setup-state API — treat funnel as complete for older nodes.
+          setNext("home");
+          return;
+        }
+        if (decision.kind === "closed") {
           setNext("install");
           return;
         }

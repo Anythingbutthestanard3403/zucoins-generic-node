@@ -115,6 +115,8 @@ describe("api client", () => {
   describe("ambiguous 401 recovery (ZTR-1195)", () => {
     /** jsdom cannot navigate; capture the href the logout path assigns. */
     function captureRedirect(): { readonly to: () => string | undefined } {
+      // ZTR-1168: logout navigates client-side via history.pushState + popstate.
+      const pushState = vi.spyOn(window.history, "pushState");
       const assign = vi.fn();
       Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
       Object.defineProperty(window.location, "href", {
@@ -122,7 +124,11 @@ describe("api client", () => {
         set: assign,
         get: () => "",
       });
-      return { to: () => assign.mock.calls[0]?.[0] as string | undefined };
+      return {
+        to: () =>
+          (pushState.mock.calls.find((c) => c[2] === "/login")?.[2] as string | undefined) ??
+          (assign.mock.calls[0]?.[0] as string | undefined),
+      };
     }
 
     const AUTH_401 = JSON.stringify({

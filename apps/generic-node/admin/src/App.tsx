@@ -8,6 +8,7 @@ import {
   IconTarget, IconWallet, IconBell, IconSettings,
 } from "./icons.js";
 import { apiOrDemo } from "./lib/api.js";
+import { fetchEffectiveConfig } from "./pages/settings/SettingsPage.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "./lib/health.js";
 import { EMPTY_NEEDS_ATTENTION, type NeedsAttentionResponse } from "./lib/ops.js";
 import { useAuth } from "./store/auth.js";
@@ -136,6 +137,41 @@ export function App() {
   });
   const healthState = deriveNodeHealthUiState(demoMode, healthQ);
 
+  const settingsQ = useQuery({
+    queryKey: ["effective-config-shell", demoMode],
+    queryFn: fetchEffectiveConfig,
+    staleTime: 60_000,
+    enabled: Boolean(user),
+    retry: false,
+  });
+  const settings = settingsQ.data?.data;
+  const networkLabel = (() => {
+    if (!settings) return "Node";
+    const host = settings.gateway_hosts[0];
+    if (host) {
+      const short = host.replace(/^https?:\/\//, "").split("/")[0] ?? host;
+      return short.length > 28 ? `${short.slice(0, 26)}…` : short;
+    }
+    if (settings.public_base_url) {
+      try {
+        return new URL(settings.public_base_url).host || "Node";
+      } catch {
+        return "Node";
+      }
+    }
+    return "Node";
+  })();
+  const versionLabel = settings?.version ? ` · ${settings.version}` : "";
+  const displayName = user?.username?.trim() || null;
+  const initials = (() => {
+    if (!displayName) return null;
+    const parts = displayName.split(/[\s._@-]+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+    }
+    return displayName.slice(0, 2).toUpperCase();
+  })();
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
@@ -192,7 +228,9 @@ export function App() {
 
       <div className="main">
         <header className="top">
-          <span className="meta-chip">SplitChain · test</span>
+          <span className="meta-chip" data-testid="network-label">
+            {networkLabel}{versionLabel}
+          </span>
           <span className="meta-chip">
             <span className={`live ${HEALTH_DOT_CLASS[healthState]}`} /> {HEALTH_LABEL[healthState]}
           </span>
@@ -209,8 +247,8 @@ export function App() {
             <IconBell />
           </button>
           <div className="who">
-            <div className="av">OP</div>
-            <span>{user?.username ?? "admin"}</span>
+            {initials ? <div className="av" aria-hidden>{initials}</div> : null}
+            {displayName ? <span>{displayName}</span> : <span className="muted">Signed in</span>}
           </div>
         </header>
 

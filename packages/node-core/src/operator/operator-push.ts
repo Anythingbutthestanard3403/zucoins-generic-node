@@ -58,11 +58,49 @@ export interface OperatorPushSubscription {
   readonly userAgent: string | null;
 }
 
+
+/**
+ * Web Push p256dh is an uncompressed P-256 public point (65 bytes: 0x04||X||Y)
+ * encoded base64url (or standard base64). Auth is a 16-byte secret, same encoding.
+ * Reject placeholder / fabricated material before it reaches the store (ZTR-1168).
+ */
+export function isValidOperatorPushP256dh(value: string): boolean {
+  if (typeof value !== "string" || value.length < 40 || value.length > 200) return false;
+  if (/pending|placeholder|example|test-only/i.test(value)) return false;
+  const bytes = tryDecodeWebPushKey(value);
+  return bytes !== null && bytes.length === 65 && bytes[0] === 0x04;
+}
+
+export function isValidOperatorPushAuth(value: string): boolean {
+  if (typeof value !== "string" || value.length < 10 || value.length > 64) return false;
+  if (/pending|placeholder|example|test-only/i.test(value)) return false;
+  const bytes = tryDecodeWebPushKey(value);
+  return bytes !== null && bytes.length === 16;
+}
+
+function tryDecodeWebPushKey(value: string): Buffer | null {
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+    const buf = Buffer.from(normalized + pad, "base64");
+    return buf.length > 0 ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stable short fingerprint of a full endpoint (matches list API truncation). */
+export function operatorPushEndpointFingerprint(endpoint: string): string {
+  return endpoint.slice(0, 48);
+}
+
 export interface OperatorPushSubscriptionStore {
   listByOperator(nodeId: string, operatorId: string): readonly OperatorPushSubscription[];
   listActiveByNode(nodeId: string): readonly OperatorPushSubscription[];
   upsert(row: OperatorPushSubscription): void;
   deleteByEndpoint(nodeId: string, operatorId: string, endpoint: string): boolean;
+  /** Delete by the same fingerprint the list API returns (full endpoint is not listed). */
+  deleteByEndpointFingerprint(nodeId: string, operatorId: string, fingerprint: string): boolean;
 }
 
 export class InMemoryOperatorPushSubscriptionStore implements OperatorPushSubscriptionStore {
@@ -90,6 +128,18 @@ export class InMemoryOperatorPushSubscriptionStore implements OperatorPushSubscr
   deleteByEndpoint(nodeId: string, operatorId: string, endpoint: string): boolean {
     const idx = this.rows.findIndex(
       (r) => r.nodeId === nodeId && r.operatorId === operatorId && r.endpoint === endpoint,
+    );
+    if (idx < 0) return false;
+    this.rows.splice(idx, 1);
+    return true;
+  }
+
+  deleteByEndpointFingerprint(nodeId: string, operatorId: string, fingerprint: string): boolean {
+    const idx = this.rows.findIndex(
+      (r) =>
+        r.nodeId === nodeId &&
+        r.operatorId === operatorId &&
+        operatorPushEndpointFingerprint(r.endpoint) === fingerprint,
     );
     if (idx < 0) return false;
     this.rows.splice(idx, 1);

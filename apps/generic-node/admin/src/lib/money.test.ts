@@ -660,3 +660,33 @@ describe("recovery action UI honesty", () => {
     );
   });
 });
+
+describe("newIdempotencyKey (ZTR-1168)", () => {
+  it("returns a string without throwing when randomUUID is absent", async () => {
+    const { newIdempotencyKey } = await import("./money.js");
+    const real = globalThis.crypto;
+    let n = 0;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues: (arr: Uint8Array) => {
+          n += 1;
+          for (let i = 0; i < arr.length; i++) arr[i] = (i + n) & 0xff;
+          return arr;
+        },
+      },
+    });
+    try {
+      const a = newIdempotencyKey();
+      const b = newIdempotencyKey();
+      expect(typeof a).toBe("string");
+      expect(a.length).toBeGreaterThan(10);
+      expect(a).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      expect(a).not.toBe(b);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
+    }
+  });
+});

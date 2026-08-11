@@ -87,6 +87,9 @@ import {
   assertSafeSecondDeviceQr,
   buildOperatorPushPayload,
   assertOperatorPushPayloadSafe,
+  isValidOperatorPushP256dh,
+  isValidOperatorPushAuth,
+  operatorPushEndpointFingerprint,
   notifyOperatorsPendingAttention,
   noopOperatorPushSender,
   type DualControlMode,
@@ -1003,6 +1006,11 @@ export interface AdminRouteDeps {
      * sender is later configured. When omitted, subscribe fails closed (503).
      */
     readonly sealAuth: (authPlaintext: string) => string;
+    /**
+     * VAPID application-server public key (URL-safe base64) for browser
+     * PushManager.subscribe. When null/omitted, Enable is unavailable in the SPA.
+     */
+    readonly vapidPublicKey?: string | null;
   };
   readonly recoveryStore: RecoveryInspectionStore;
   readonly recoveryActionStore: RecoveryActionStore;
@@ -2001,12 +2009,13 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           opt_in: false,
           wired: false,
           note: "Operator push is optional and separate from wallet receiver push. Inbox remains source of truth.",
+          vapid_public_key: null,
           subscriptions: [],
         });
       }
       const subs = deps.operatorPush.store.listByOperator(nodeId, gate.user.id).map((s) => ({
         id: s.id,
-        endpoint_fingerprint: s.endpoint.slice(0, 48),
+        endpoint_fingerprint: operatorPushEndpointFingerprint(s.endpoint),
         created_at: s.createdAt,
         user_agent: s.userAgent,
       }));
@@ -2014,6 +2023,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         opt_in: true,
         wired: true,
         note: "Operator push is optional and separate from wallet receiver push. Deny/skip still uses the manual inbox.",
+        vapid_public_key: deps.operatorPush.vapidPublicKey ?? null,
         subscriptions: subs,
       });
     }
@@ -4079,11 +4089,17 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         typeof body.endpoint !== "string" ||
         body.endpoint.length < 8 ||
         typeof body.p256dh !== "string" ||
-        body.p256dh.length < 8 ||
-        typeof body.auth !== "string" ||
-        body.auth.length < 8
+        typeof body.auth !== "string"
       ) {
         return fail(400, "validation_error", "endpoint, p256dh, and auth required", requestId);
+      }
+      if (!isValidOperatorPushP256dh(body.p256dh) || !isValidOperatorPushAuth(body.auth)) {
+        return fail(
+          400,
+          "validation_error",
+          "p256dh and auth must be valid Web Push key material",
+          requestId,
+        );
       }
       let authSealed: string;
       try {
@@ -4122,11 +4138,19 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       if (deps.operatorPush === undefined) {
         return fail(503, "service_unavailable", "operator push not wired (optional)", requestId);
       }
-      const body = parsedBody as { endpoint?: string };
-      if (typeof body.endpoint !== "string" || body.endpoint.length === 0) {
-        return fail(400, "validation_error", "endpoint required", requestId);
+      const body = parsedBody as { endpoint?: string; endpoint_fingerprint?: string };
+      let removed = false;
+      if (typeof body.endpoint === "string" && body.endpoint.length > 0) {
+        removed = deps.operatorPush.store.deleteByEndpoint(nodeId, gate.user.id, body.endpoint);
+      } else if (typeof body.endpoint_fingerprint === "string" && body.endpoint_fingerprint.length > 0) {
+        removed = deps.operatorPush.store.deleteByEndpointFingerprint(
+          nodeId,
+          gate.user.id,
+          body.endpoint_fingerprint,
+        );
+      } else {
+        return fail(400, "validation_error", "endpoint or endpoint_fingerprint required", requestId);
       }
-      const removed = deps.operatorPush.store.deleteByEndpoint(nodeId, gate.user.id, body.endpoint);
       return ok(200, { removed, note: "Manual inbox still works without push." });
     }
 

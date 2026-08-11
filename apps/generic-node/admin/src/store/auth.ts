@@ -1,3 +1,4 @@
+import { resetClientSessionState } from "../lib/session-reset.js";
 import { create } from "zustand";
 
 export interface SessionUser {
@@ -89,12 +90,18 @@ export const useAuth = create<AuthState>((set, get) => ({
     return user;
   },
   logout: async () => {
-    // Local clear + navigate first so a hung revoke POST cannot keep
+    // Local clear + client-side navigate first so a hung revoke POST cannot keep
     // RequireAuth open or let a TOTP step-up re-prompt after session death
-    // (ZTR-1195). Server revoke is best-effort with the snapped CSRF.
+    // (ZTR-1195 / ZTR-1168). Clear react-query cache and cancel any TOTP prompt
+    // deliberately — no full page reload.
     const csrf = get().user?.csrfToken ?? "";
     set({ user: null, demoMode: false });
-    window.location.href = "/login";
+    resetClientSessionState();
+    // Client-side navigation: History API so react-router picks it up without reload.
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/login");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
     try {
       await fetch("/admin/v1/logout", {
         method: "POST",

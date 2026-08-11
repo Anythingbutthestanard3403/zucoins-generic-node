@@ -96,6 +96,10 @@ export {
   type SqlDeviceKeyStore,
   type SqlEnrollmentChallengeStore,
 } from "./sql-device-store.js";
+export {
+  createSqlEnrollmentAuditLog,
+  createSqlDeviceRevocationAuditLog,
+} from "./sql-enrollment-audit.js";
 
 // Second-device QR enrolment.
 export {

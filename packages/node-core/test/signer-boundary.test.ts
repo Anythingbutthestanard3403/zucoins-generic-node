@@ -434,3 +434,47 @@ describe("money-path gates fail-closed", () => {
     ).toThrow(MoneyPathGatesMissingError);
   });
 });
+
+describe("wallet state recheck inside lease transaction (ZTR-1171)", () => {
+  it("refuses when assertWalletMaySign on tx ports rejects after lease is valid", async () => {
+    const { WalletSigningHaltedError } = await import("../src/core/signer-boundary.js");
+    const auditEntries: SignerAuditEntry[] = [];
+    const vaultSigner: VaultSigner = { sign: vi.fn().mockResolvedValue("c2lnbmF0dXJlLWJ5dGVz") };
+    const lease = makeLease();
+    await expect(
+      signUnderLease(
+        {
+          leadership: { held: true },
+          leaseReader: { readActiveLease: vi.fn().mockResolvedValue(lease) },
+          vaultSigner,
+          auditLog: {
+            append: vi.fn().mockImplementation(async (e: SignerAuditEntry) => {
+              auditEntries.push(e);
+            }),
+          },
+          now: () => FIXED_TIME,
+          assertMoneyAdmitted: () => {},
+          assertCanOperate: () => {},
+          // Outer gate admits — quarantine happens after lease was taken.
+          assertWalletMaySign: async () => {},
+          withSignTransaction: async (body) =>
+            body({
+              leaseReader: { readActiveLease: vi.fn().mockResolvedValue(lease) },
+              auditLog: {
+                append: vi.fn().mockImplementation(async (e: SignerAuditEntry) => {
+                  auditEntries.push(e);
+                }),
+              },
+              assertWalletMaySign: async (walletId: string) => {
+                throw new WalletSigningHaltedError(walletId);
+              },
+            }),
+        },
+        makeCapability(),
+      ),
+    ).rejects.toThrow(/wallet signing halted/);
+    expect(vaultSigner.sign).not.toHaveBeenCalled();
+    expect(auditEntries.some((e) => e.outcome === "REJECTED")).toBe(true);
+  });
+});
+

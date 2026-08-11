@@ -64,6 +64,13 @@
       "when": 1784500000008,
       "tag": "0008_admin_totp_drop_plaintext",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784500000009,
+      "tag": "0009_vault_master_seal_salted_verifier",
+      "breakpoints": true
     }
   ]
 }

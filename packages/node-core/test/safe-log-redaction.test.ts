@@ -239,6 +239,27 @@ describe("redaction never mutates the caller's object", () => {
   });
 });
 
+describe("recovery-pack field names (ZTR-1171)", () => {
+  it("redacts passcode and pack_file_b64 on a recovery-pack request body", () => {
+    const body = {
+      object: "recovery_pack_prove",
+      passcode: "1234-SHOULD-NOT-LOG",
+      pack_file_b64: "SEALED-MASTER-BLOB-SHOULD-NOT-LOG",
+      packFileB64: "ALSO-SEALED-SHOULD-NOT-LOG",
+      operator_id: "op-1",
+    };
+    const out = redactLogFields(body);
+    expect(out.passcode).toBe(REDACTED);
+    expect(out.pack_file_b64).toBe(REDACTED);
+    expect(out.packFileB64).toBe(REDACTED);
+    expect(out.operator_id).toBe("op-1");
+    const json = JSON.stringify(out);
+    expect(json).not.toContain("1234-SHOULD-NOT-LOG");
+    expect(json).not.toContain("SEALED-MASTER-BLOB-SHOULD-NOT-LOG");
+    expect(json).not.toContain("ALSO-SEALED-SHOULD-NOT-LOG");
+  });
+});
+
 describe("backup/export dump census", () => {
   it("assertDumpSecretFree accepts ciphertext field names after redact path", () => {
     const dump = {

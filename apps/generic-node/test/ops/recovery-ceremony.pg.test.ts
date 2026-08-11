@@ -437,6 +437,7 @@ describe("recovery ceremony pack (real Postgres, fail-closed)", () => {
           env: {
             DATABASE_URL: databaseUrl,
             VAULT_MASTER_KEY: MASTER,
+            VAULT_MASTER_KEY_ALLOW_ENV: "1",
             NODE_ID: nodeId,
             ADMIN_TOTP_CODE: generateTotpCode(totpSecretBytes, nowMs),
           },

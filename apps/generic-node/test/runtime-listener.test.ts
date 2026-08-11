@@ -270,7 +270,7 @@ describe("createNodeRuntimeListener — runtime dispatch through the node:http s
 
     const conflictedReject = async () => ({
       status: 409,
-      body: JSON.stringify({ error: { code: "operation_conflict" } }),
+      body: JSON.stringify({ error: { code: "operation_version_conflict" } }),
       headers: { "content-type": "application/json; charset=utf-8" },
     });
     await invoke(

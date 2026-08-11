@@ -3,6 +3,8 @@
 // verification_material_available_until.
 
 import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
+import type { WalletKeyOrigin, WalletState } from "@zucoins/generic-node-contracts/custody";
+import { verifyAutomaticSinkEligibility } from "@zucoins/generic-node-contracts/custody";
 
 import type {
   SnapshotAttentionItem,
@@ -22,10 +24,19 @@ const OPS_SELECT = `
 SELECT id::text AS operation_id,
        kind::text AS operation_type,
        status::text AS state,
+       amount_zkz,
        row_version::bigint AS row_version,
        attention_required,
-       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
        attention_reason,
+       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
+       CASE WHEN terminal_at IS NULL THEN NULL
+            ELSE to_char(terminal_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+       END AS terminal_at,
+       CASE WHEN verification_material_available_until IS NULL THEN NULL
+            ELSE to_char(verification_material_available_until AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+       END AS verification_material_available_until,
        COALESCE(attention_episode, 0)::int AS attention_episode
   FROM operations
  WHERE node_id = $1::uuid
@@ -39,12 +50,19 @@ SELECT id::text AS operation_id,
 `;
 
 const DEST_SELECT = `
-SELECT id::text AS destination_id,
-       state::text AS state
-  FROM destinations
- WHERE node_id = $1::uuid
-   AND state IN ('PENDING', 'BLESSED', 'RETIRED')
- ORDER BY created_at ASC, id ASC -- contract-allow:order:frozen structural vocabulary
+SELECT d.id::text AS destination_id,
+       d.state::text AS state,
+       w.key_origin::text AS key_origin,
+       w.state::text AS wallet_state,
+       CASE WHEN w.recovery_verified_at IS NULL THEN NULL
+            ELSE to_char(w.recovery_verified_at AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+       END AS recovery_verified_at
+  FROM destinations d
+  JOIN wallets w ON w.id = d.wallet_id
+ WHERE d.node_id = $1::uuid
+   AND d.state IN ('PENDING', 'BLESSED', 'RETIRED')
+ ORDER BY d.created_at ASC, d.id ASC -- contract-allow:order:frozen structural vocabulary
 `;
 
 function asString(value: unknown): string {
@@ -93,9 +111,24 @@ export function createPgSnapshotStateReader(
           operationId: asString(row.operation_id),
           operationType: asString(row.operation_type) as OperationKind,
           state: asString(row.state),
+          amountZkz: asString(row.amount_zkz),
           rowVersion: asNumber(row.row_version),
           attentionRequired: asBool(row.attention_required),
+          attentionReason:
+            row.attention_reason === null || row.attention_reason === undefined
+              ? null
+              : asString(row.attention_reason),
+          createdAt: asString(row.created_at),
           updatedAt: asString(row.updated_at),
+          terminalAt:
+            row.terminal_at === null || row.terminal_at === undefined
+              ? null
+              : asString(row.terminal_at),
+          verificationMaterialAvailableUntil:
+            row.verification_material_available_until === null ||
+            row.verification_material_available_until === undefined
+              ? null
+              : asString(row.verification_material_available_until),
         }),
       );
 
@@ -114,9 +147,22 @@ export function createPgSnapshotStateReader(
         if (state !== "PENDING" && state !== "BLESSED" && state !== "RETIRED") {
           throw new Error(`unexpected destination state: ${state}`);
         }
+        const keyOrigin = asString(row.key_origin) as WalletKeyOrigin;
+        const walletState = asString(row.wallet_state) as WalletState;
+        const recoveryVerifiedAt =
+          row.recovery_verified_at === null || row.recovery_verified_at === undefined
+            ? null
+            : asString(row.recovery_verified_at);
+        const decision = verifyAutomaticSinkEligibility({
+          keyOrigin,
+          destinationState: state,
+          recoveryVerifiedAt,
+          walletState,
+        });
         return Object.freeze({
           destinationId: asString(row.destination_id),
           state,
+          moveEligible: decision.eligible,
         });
       });
 

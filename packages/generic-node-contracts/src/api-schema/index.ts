@@ -74,6 +74,8 @@ export type {
   ReceiveExternalResponse,
 } from "./receive-external.ts";
 
+export { RECEIVE_CREATE_SYNC_201_SUPERSESSION } from "./receive-create-201-supersession.ts";
+
 export {
   MoveInternalRequestSchema,
   MoveInternalResponseSchema,

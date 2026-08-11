@@ -3263,7 +3263,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                 );
                 if (outcome.outcome === "CONFLICT") {
                   throw Object.assign(new Error("operation conflict"), {
-                    code: "operation_conflict",
+                    code: "operation_version_conflict",
                     status: 409,
                   });
                 }
@@ -3303,7 +3303,9 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   deviceKeyId: body.device_key_id as never,
                 });
                 if (outcome.status === "not_found") throw Object.assign(new Error("not found"), { code: "not_found", status: 404 });
-                if (outcome.status === "authorization_rejected" || outcome.status === "invalid_transition" || outcome.status === "wallet_not_node_generated") {
+                if (outcome.status === "authorization_rejected" || outcome.status === "invalid_transition") {
+                  // Opaque rejection — does not distinguish key_origin / signature / transition
+                  // (ZTR-1170; wallet_not_node_generated collapsed in destination.bless).
                   throw Object.assign(new Error(outcome.status), {
                     code: "approval_rejected",
                     status: APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
@@ -3362,7 +3364,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             if (!lived.ok) return { outcome: "abort", response: fail(lived.status, lived.code, lived.message, requestId) };
             const outcome = await ports.destinationService.retire({ nodeId: nodeId as never, destinationId: m[1]! as never });
             if (outcome.status === "not_found") return { outcome: "abort", response: fail(404, "not_found", "destination not found", requestId) };
-            if (outcome.status === "invalid_transition") return { outcome: "abort", response: fail(409, "operation_conflict", "invalid transition", requestId) };
+            if (outcome.status === "invalid_transition") return { outcome: "abort", response: fail(409, "operation_version_conflict", "invalid transition", requestId) };
             return { outcome: "commit", status: 200, responseBody: outcome.destination };
           },
         });

@@ -20,17 +20,27 @@ const ops: readonly SnapshotOperation[] = [
     operationId: "33333333-3333-4333-8333-333333333333",
     operationType: "RECEIVE_EXTERNAL",
     state: "READY",
+    amountZkz: "1.5",
     rowVersion: 2,
     attentionRequired: false,
+    attentionReason: null,
+    createdAt: "2026-07-18T00:00:00.000Z",
     updatedAt: "2026-07-18T00:00:00.000Z",
+    terminalAt: null,
+    verificationMaterialAvailableUntil: null,
   },
   {
     operationId: "44444444-4444-4444-8444-444444444444",
     operationType: "SEND_EXTERNAL",
     state: "NEEDS_ATTENTION",
+    amountZkz: "2",
     rowVersion: 1,
     attentionRequired: true,
+    attentionReason: "manual_review",
+    createdAt: "2026-07-18T00:00:01.000Z",
     updatedAt: "2026-07-18T00:00:01.000Z",
+    terminalAt: null,
+    verificationMaterialAvailableUntil: null,
   },
 ];
 
@@ -59,7 +69,7 @@ describe("snapshot service", () => {
     const reader = new InMemorySnapshotStateReader();
     reader.seed(IMPLEMENTER_ID, {
       operations: ops,
-      destinations: [{ destinationId: "d1", state: "BLESSED" }],
+      destinations: [{ destinationId: "d1", state: "BLESSED", moveEligible: true }],
       attentionItems: [
         {
           operationId: "44444444-4444-4444-8444-444444444444",
@@ -79,7 +89,7 @@ describe("snapshot service", () => {
     const snapshot = await service.capture(IMPLEMENTER_ID);
     expect(snapshot.implementerWatermarkSeq).toBe("2");
     expect(snapshot.operations).toHaveLength(2);
-    expect(snapshot.destinations).toEqual([{ destinationId: "d1", state: "BLESSED" }]);
+    expect(snapshot.destinations).toEqual([{ destinationId: "d1", state: "BLESSED", moveEligible: true }]);
     expect(await service.latest(IMPLEMENTER_ID)).toEqual(snapshot);
   });
 
@@ -139,6 +149,37 @@ describe("snapshot service", () => {
     expect(parsed.implementer_watermark_seq).toBe("1043");
     expect(body).not.toContain("private_key");
     expect(body).not.toContain("transfer_code");
+  });
+
+  it("renderSnapshotBody emits §3 operation shape and move_eligible (ZTR-1170)", () => {
+    const body = renderSnapshotBody({
+      implementerId: IMPLEMENTER_ID,
+      implementerWatermarkSeq: "7",
+      operations: ops,
+      destinations: [{ destinationId: "d1", state: "BLESSED", moveEligible: true }],
+      attentionItems: [],
+      capturedAt: "2026-07-18T00:00:00.000Z",
+    });
+    const parsed = JSON.parse(body) as {
+      operations: Array<Record<string, unknown>>;
+      destinations: Array<Record<string, unknown>>;
+    };
+    expect(parsed.operations[0]).toEqual({
+      operation_id: ops[0]!.operationId,
+      operation_type: "RECEIVE_EXTERNAL",
+      state: "READY",
+      amount_zkz: "1.5",
+      row_version: 2,
+      attention_required: false,
+      attention_reason: null,
+      created_at: "2026-07-18T00:00:00.000Z",
+      updated_at: "2026-07-18T00:00:00.000Z",
+      terminal_at: null,
+      verification_material_available_until: null,
+    });
+    expect(parsed.destinations).toEqual([
+      { destination_id: "d1", state: "BLESSED", move_eligible: true },
+    ]);
   });
 
   it("captureTimeoutMs rejects with SnapshotCaptureTimeoutError and leaves store empty", async () => {

@@ -29,12 +29,17 @@ describe("handleGetStateSnapshot", () => {
           operationId: "33333333-3333-4333-8333-333333333333",
           operationType: "RECEIVE_EXTERNAL",
           state: "READY",
+          amountZkz: "1",
           rowVersion: 1,
           attentionRequired: false,
+          attentionReason: null,
+          createdAt: "2026-07-18T00:00:00.000Z",
           updatedAt: "2026-07-18T00:00:00.000Z",
+          terminalAt: null,
+          verificationMaterialAvailableUntil: null,
         },
       ],
-      destinations: [{ destinationId: "d1", state: "BLESSED" }],
+      destinations: [{ destinationId: "d1", state: "BLESSED", moveEligible: false }],
       attentionItems: [],
     });
     const response = await handleGetStateSnapshot(
@@ -58,7 +63,8 @@ describe("handleGetStateSnapshot", () => {
     };
     expect(body.implementer_watermark_seq).toBe("1");
     expect(body.operations).toHaveLength(1);
-    expect(body.destinations).toEqual([{ destination_id: "d1", state: "BLESSED" }]);
+    expect(body.destinations).toEqual([{ destination_id: "d1", state: "BLESSED", move_eligible: false }]);
+    expect((body.operations[0] as { amount_zkz: string }).amount_zkz).toBe("1");
     expect(body.active_counts).toEqual({ READY: 1 });
     expect(response.body).not.toContain("private_key");
     expect(response.body).not.toContain("transfer_code");

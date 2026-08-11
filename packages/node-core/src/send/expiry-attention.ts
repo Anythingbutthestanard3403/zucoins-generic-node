@@ -216,7 +216,9 @@ export function isPastExpiry(
   if (!Number.isSafeInteger(nowUnixSecs)) {
     throw new RangeError("isPastExpiry: nowUnixSecs must be a safe integer");
   }
-  return nowUnixSecs >= Number(redemptionExpiryUnixSecs);
+  // Doc 11 §11.9 EXP-BOUNDARY-02: clock==expiry is still inside the window (servable).
+  // Past-expiry / park starts at clock=expiry+1 (strict greater-than).
+  return nowUnixSecs > Number(redemptionExpiryUnixSecs);
 }
 
 /**

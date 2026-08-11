@@ -108,9 +108,11 @@ describe("evaluatePostDeliveryExpiry", () => {
     expect(r.remainingSecs).toBe(1);
   });
 
-  it("PAST_EXPIRY_PARK_ATTENTION at exact T2 boundary (inclusive)", () => {
+  it("NOT_YET_EXPIRED at exact T2 boundary (doc §11.9 window includes equality)", () => {
     const r = evaluatePostDeliveryExpiry({ ...base, nowUnixSecs: 1784333100 });
-    expect(r.outcome).toBe("PAST_EXPIRY_PARK_ATTENTION");
+    expect(r.outcome).toBe("NOT_YET_EXPIRED");
+    if (r.outcome !== "NOT_YET_EXPIRED") return;
+    expect(r.remainingSecs).toBe(0);
   });
 
   it("PAST_EXPIRY_PARK_ATTENTION well past T2 (still no terminal)", () => {
@@ -164,9 +166,10 @@ describe("evaluatePostDeliveryExpiry", () => {
 });
 
 describe("isPastExpiry / oracleEligibleAtUnixSecs", () => {
-  it("inclusive boundary", () => {
-    expect(isPastExpiry("100", 100)).toBe(true);
+  it("equality is still inside the window (doc §11.9 BOUNDARY-02)", () => {
+    expect(isPastExpiry("100", 100)).toBe(false);
     expect(isPastExpiry("100", 99)).toBe(false);
+    expect(isPastExpiry("100", 101)).toBe(true);
   });
 
   it("oracle eligibility = T2 + aging margin (F1.2 fixture)", () => {

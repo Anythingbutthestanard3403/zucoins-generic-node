@@ -58,6 +58,7 @@ import {
   type ReceiveLeasePort,
   type ReceiveReadyEventAppender,
   type GatewayExchangeTransport,
+  readGatewayAction,
   type ReceiveT0Observer,
   type SendFormationObserver,
   type SenderPreflightObserver,
@@ -235,6 +236,11 @@ export interface StartMoneyWorkersDeps {
    */
   readonly gatewayMaxAttempts?: number;
   readonly gatewayBackoffMaxMs?: number;
+  /**
+   * ZTR-1162: production injects createObservedGatewayRead so every money-path
+   * gateway read stamps readiness success/failure. Absent → bare readGatewayAction.
+   */
+  readonly readGatewayAction?: typeof readGatewayAction;
   /** Optional observer override (tests). When set, gatewayUrls/stub selection is skipped. */
   readonly t0Observer?: ReceiveT0Observer;
   /**
@@ -985,6 +991,7 @@ export function resolveMoneyPathT0Observer(deps: {
   readonly gatewayExchange?: GatewayExchangeTransport;
   readonly gatewayMaxAttempts?: number;
   readonly gatewayBackoffMaxMs?: number;
+  readonly readGatewayAction?: typeof readGatewayAction;
   readonly t0Observer?: ReceiveT0Observer;
   readonly allowGenesisT0Stub?: boolean;
   readonly metricsHooks?: MetricsHooks;
@@ -1012,6 +1019,9 @@ export function resolveMoneyPathT0Observer(deps: {
         ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
         ...(deps.moneyPathStatementTimeoutMs !== undefined
           ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
+          : {}),
+        ...(deps.readGatewayAction !== undefined
+          ? { readGatewayAction: deps.readGatewayAction }
           : {}),
       }),
       kind: "gateway",
@@ -1058,6 +1068,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     gatewayExchange: deps.gatewayExchange,
     gatewayMaxAttempts: deps.gatewayMaxAttempts,
     gatewayBackoffMaxMs: deps.gatewayBackoffMaxMs,
+    ...(deps.readGatewayAction !== undefined
+      ? { readGatewayAction: deps.readGatewayAction }
+      : {}),
     t0Observer: deps.t0Observer,
     allowGenesisT0Stub: deps.config.allowGenesisT0Stub,
     ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
@@ -1150,6 +1163,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           ...(deps.moneyPathStatementTimeoutMs !== undefined
             ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
             : {}),
+          ...(deps.readGatewayAction !== undefined
+            ? { readGatewayAction: deps.readGatewayAction }
+            : {}),
         })
       : null);
 
@@ -1172,6 +1188,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
             moneyPathStatementTimeoutMs: statementTimeoutMs,
+            ...(deps.readGatewayAction !== undefined
+              ? { readGatewayAction: deps.readGatewayAction }
+              : {}),
           }),
           store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
             statementTimeoutMs,
@@ -1389,6 +1408,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
               ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
               : {}),
             moneyPathStatementTimeoutMs: statementTimeoutMs,
+            ...(deps.readGatewayAction !== undefined
+              ? { readGatewayAction: deps.readGatewayAction }
+              : {}),
           }),
           store: createSqlExternalSendLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
             statementTimeoutMs,
@@ -1444,6 +1466,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             : {}),
           ...(deps.gatewayBackoffMaxMs !== undefined
             ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
+            : {}),
+          ...(deps.readGatewayAction !== undefined
+            ? { readGatewayAction: deps.readGatewayAction }
             : {}),
         },
         logger: deps.logger,

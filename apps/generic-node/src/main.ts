@@ -72,7 +72,6 @@ import {
   migrateLeaseFoundation,
   migrateTotpSecretsAtRest,
   type NodeEventSigner,
-  readGatewayAction,
   runDeterministicBootRecovery,
   SIGNER_LEADERSHIP_LOCK_ID,
   SqlCredentialStore,
@@ -117,6 +116,7 @@ import {
   type SignerLeadershipHandle,
   type StampedLeadershipHandle,
 } from "./boot/index.js";
+import { createObservedGatewayRead } from "./gateway/observed-read.js";
 import { createSqlBootRecovery } from "./boot/sql-boot-recovery.js";
 import { acquireSignerLeadershipWithBoundedRetry } from "./boot/signer-leadership-retry.js";
 import { PlaceholderSecretError } from "./config/placeholders.js";
@@ -349,6 +349,10 @@ async function main(): Promise<void> {
   dbProbeKeepWarm.unref();
 
   const readiness = new NodeReadiness(config.GATEWAY_READ_FAILURE_BUDGET);
+  // ZTR-1162: single producer for gateway read success/failure stamps. Every
+  // runtime (and boot smoke) gateway read routes through this so
+  // GATEWAY_READ_FAILURE_BUDGET is actually counted and cannot drift.
+  const observedGatewayRead = createObservedGatewayRead(readiness);
 
   const storageProbePath = process.cwd();
   const hostStorageCollector = createHostEvidenceRuntimeMetricsCollector({
@@ -1296,7 +1300,7 @@ async function main(): Promise<void> {
       // via the typed read path (get_transaction__v1 — never submit). Empty id
       // is a valid form body; gateway may 4xx; transport/protocol errors throw
       // and keep readiness false (fail-closed).
-      await readGatewayAction(
+      await observedGatewayRead(
         "get_transaction__v1",
         { transaction_id: "" },
         {
@@ -1343,6 +1347,10 @@ async function main(): Promise<void> {
       // Fail closed rather than arming the settle step with an empty endpoint: a defined-but-
       // empty submitGateway would burn the one-shot claim against a non-endpoint. env-schema
       // already enforces .min(1), so this only ever fires if that guarantee is weakened.
+      //
+      // ZTR-1162: submit targets URLs[0] with NO failover by design. Submit is
+      // single-shot (never-blind-retry); only the bounded READ path may iterate
+      // endpoints. Do not "fix" this to multi-endpoint failover.
       const submitEndpoint = config.SPLITCHAIN_GATEWAY_URLS[0];
       if (submitEndpoint === undefined) {
         throw new Error("startMoneyWorkers requires at least one configured gateway endpoint");
@@ -1393,6 +1401,8 @@ async function main(): Promise<void> {
         gatewayExchange,
         gatewayMaxAttempts: config.GATEWAY_READ_RETRY_MAX_ATTEMPTS,
         gatewayBackoffMaxMs: config.GATEWAY_READ_BACKOFF_MAX_MS,
+        // ZTR-1162: stamp readiness on every money-path gateway read outcome.
+        readGatewayAction: observedGatewayRead,
         runUnderLeadership: (work) => stamped.runUnderLeadership(work),
         trackSigningInflight: (work) =>
           shutdownRegistry.authority.trackSigningInflight(work),

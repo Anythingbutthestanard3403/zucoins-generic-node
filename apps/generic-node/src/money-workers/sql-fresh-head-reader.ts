@@ -76,6 +76,11 @@ export interface SqlFreshHeadReaderDeps {
   readonly backoffMaxMs?: number;
   /** Transaction-local money-path statement_timeout (ZTR-1156). */
   readonly moneyPathStatementTimeoutMs?: number;
+  /**
+   * ZTR-1162: production injects createObservedGatewayRead so readiness is stamped
+   * on every outcome. Absent → bare readGatewayAction (unit tests).
+   */
+  readonly readGatewayAction?: typeof readGatewayAction;
 }
 
 /**
@@ -91,7 +96,8 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
   }
 
   return async (walletPublicKey: string): Promise<FreshHeadRead> => {
-    const result = await readGatewayAction(
+    const read = deps.readGatewayAction ?? readGatewayAction;
+    const result = await read(
       "get_transaction__v1",
       // Canonical codec — shared with the other three wallet-head readers so the
       // field name cannot drift again.

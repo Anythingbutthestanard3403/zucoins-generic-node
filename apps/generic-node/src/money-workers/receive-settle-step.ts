@@ -84,6 +84,11 @@ export interface ReceiveSettleStepDeps {
      */
     readonly maxAttempts?: number;
     readonly backoffMaxMs?: number;
+    /**
+     * ZTR-1162: production injects createObservedGatewayRead so readiness is stamped
+     * on every outcome. Absent → bare readGatewayAction (unit tests).
+     */
+    readonly readGatewayAction?: typeof readGatewayAction;
   };
   readonly logger: MoneyWorkerLogger;
   readonly metricsHooks?: MetricsHooks;
@@ -240,7 +245,8 @@ function createLeaseReader(query: SqlQueryFn) {
  */
 export function createReceiverHeadReader(deps: ReceiveSettleStepDeps) {
   return async (receiverPublicKey: string): Promise<string | null> => {
-    const result = await readGatewayAction(
+    const read = deps.gateway.readGatewayAction ?? readGatewayAction;
+    const result = await read(
       "get_transaction__v1",
       // The canonical codec is the ONE place this shape is spelled — every
       // wallet-head read (this confirm-read, gateway-t0-observer.ts, sql-fresh-head-reader.ts,

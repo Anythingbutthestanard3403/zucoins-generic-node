@@ -338,6 +338,15 @@ export const CONFIG_FIELD_SCHEMAS = {
     .min(1000, "GATEWAY_READ_BACKOFF_MAX_MS must be between 1000 and 600000")
     .max(600000, "GATEWAY_READ_BACKOFF_MAX_MS must be between 1000 and 600000")
     .default(30000),
+  // ZTR-1162: consecutive gateway-read failures tolerated after first success.
+  // Exceeding the budget closes observation_read_capable and reports status
+  // "degraded" on /health/ready (HTTP 503) while leaving other gates intact.
+  // Decision (observe-first posture already matches the evaluator): the budget
+  // IS a readiness flip today — status=degraded, not a silent metric-only
+  // signal — because evaluateReadinessFromProbes already treats
+  // observationDegraded as the degraded verdict. Metrics
+  // (gn_observation_degraded) mirror the same stamp. Do not loosen the flip
+  // without a new decision; operators page on degraded/503.
   GATEWAY_READ_FAILURE_BUDGET: z.coerce
     .number()
     .int("GATEWAY_READ_FAILURE_BUDGET must be an integer")

@@ -206,11 +206,17 @@ export function createGatewaySenderPreflightObserver(deps: {
   /** GATEWAY_READ_BACKOFF_MAX_MS — absent resolves to the read primitive's default. */
   readonly backoffMaxMs?: number;
   readonly moneyPathStatementTimeoutMs?: number;
+  /**
+   * ZTR-1162: production injects createObservedGatewayRead so readiness is stamped
+   * on every outcome. Absent → bare readGatewayAction (unit tests).
+   */
+  readonly readGatewayAction?: typeof readGatewayAction;
 }): SenderPreflightObserver {
   return {
     async observe(senderPubkey, _role): Promise<SenderPreflightObservation> {
       try {
-        const result = await readGatewayAction(
+        const read = deps.readGatewayAction ?? readGatewayAction;
+        const result = await read(
           "get_transaction__v1",
           // Canonical codec — shared with the other three wallet-head readers so the
           // field name cannot drift again.

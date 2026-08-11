@@ -44,7 +44,16 @@ describe("DUAL_CONTROL_MODE production wiring", () => {
     expect(call).not.toMatch(/dualControlMode:\s*"(single_operator|two_human)"/);
   });
 
-  it("the mount composes the dual-control policy from the mode it was handed", () => {
+  it("main.ts boot log resolves effective mode via dualControlPolicy.getMode (ZTR-1214 D3)", () => {
+    // Must not claim "effective" while only printing env DUAL_CONTROL_MODE.
+    expect(mainSrc).toMatch(/dualControlPolicy[\s\S]{0,200}getMode\s*\(/);
+    expect(mainSrc).toMatch(/dual-control mode env=\$\{envMode\} effective=\$\{effectiveMode\}/);
+    expect(mainSrc).not.toMatch(
+      /dual-control mode=\$\{config\.DUAL_CONTROL_MODE\}/,
+    );
+  });
+
+  it("the mount composes the dual-control policy from the mode it was handed", async () => {
     const surface = createProductionRouteSurface({
       nodeId: NODE_ID,
       pool: fakePool,
@@ -53,16 +62,17 @@ describe("DUAL_CONTROL_MODE production wiring", () => {
     });
     // Reads back through the same deps object the admin router mounts, so this also
     // catches dualControlPolicy being dropped from the composition (it has been once).
-    expect(surface.adminRouteDeps.dualControlPolicy?.getMode()).toBe("two_human");
+    // SQL port with empty node_settings uses dualControlMode as defaultMode (ZTR-1214).
+    expect(await surface.adminRouteDeps.dualControlPolicy?.getMode()).toBe("two_human");
   });
 
-  it("single_operator is carried through as configured, not as a fallback", () => {
+  it("single_operator is carried through as configured, not as a fallback", async () => {
     const surface = createProductionRouteSurface({
       nodeId: NODE_ID,
       pool: fakePool,
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       dualControlMode: "single_operator",
     });
-    expect(surface.adminRouteDeps.dualControlPolicy?.getMode()).toBe("single_operator");
+    expect(await surface.adminRouteDeps.dualControlPolicy?.getMode()).toBe("single_operator");
   });
 });

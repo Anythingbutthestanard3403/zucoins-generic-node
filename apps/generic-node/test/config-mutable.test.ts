@@ -44,8 +44,7 @@ describe("first-boot vs mutable split", () => {
       // deployment-platform healthcheck timeout — tied to railway.json,
       // not a runtime knob. Changing it requires a redeploy to match.
       "RAILWAY_HEALTHCHECK_TIMEOUT_MS",
-      // read once at boot into the dual-control policy port; nothing re-applies a
-      // changed value to a running node, so mutable would be a lie (ZTR-1148).
+      // Env is pre-mutation default only; runtime changes use guarded POST (ZTR-1214).
       "DUAL_CONTROL_MODE",
       // Runtime pg.Pool + leadership ownership knobs are composition-time only (ZTR-1156).
       "DB_POOL_MAX",

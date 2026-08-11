@@ -525,6 +525,29 @@ function parseDeviceSignaturePolicyBody(
   return { ok: true, body: { mode: raw.mode } };
 }
 
+function parseDualControlPolicyBody(
+  raw: unknown,
+): ParseOk<{ mode: DualControlMode }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (raw.mode !== "single_operator" && raw.mode !== "two_human") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "mode must be single_operator or two_human",
+    };
+  }
+  const known = new Set(["mode"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { mode: raw.mode } };
+}
+
 const KNOWN_SCOPES = new Set<string>(IMPLEMENTER_SCOPES);
 
 // Review rework: validate a path `:id` is a canonical lowercase UUID BEFORE the TOTP
@@ -1015,7 +1038,10 @@ export interface AdminRouteDeps {
   readonly deviceRevocationAuditLog?: DeviceRevocationAuditLog | null;
   readonly deviceRevocationSideEffects?: DeviceRevocationSideEffects | null;
   readonly breakGlassStore?: BreakGlassAuthorityStore | null;
-  /** Dual-control policy. When omitted, single_operator. */
+  /**
+   * Dual-control policy. When omitted on money approve / challenge / GET,
+   * fail closed to two_human (never silently single_operator — ZTR-1214 D2).
+   */
   readonly dualControlPolicy?: DualControlPolicyPort;
   /**
    * Additive device-signature policy for external-send approval (doc 07 §17.10).
@@ -1196,6 +1222,12 @@ export interface AdminMutationTxPorts {
    * Approve-path reads may still use deps.deviceSignaturePolicy (fail-closed).
    */
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
+  /**
+   * TX-scoped dual-control policy (ZTR-1214). Mutation writes MUST use this port
+   * so node_settings + audit_log commit/roll back with the admin mutation TX.
+   * GET/approve reads may still use deps.dualControlPolicy.
+   */
+  readonly dualControlPolicy?: DualControlPolicyPort;
 }
 
 export interface AdminRouterResponse {
@@ -1774,9 +1806,15 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             }
           }
           {
-            const mode: DualControlMode = deps.dualControlPolicy
-              ? await deps.dualControlPolicy.getMode()
-              : "single_operator";
+            // Missing port fails closed to two_human (peer device-sig → required).
+            let mode: DualControlMode = "two_human";
+            if (deps.dualControlPolicy !== undefined) {
+              try {
+                mode = await deps.dualControlPolicy.getMode();
+              } catch {
+                mode = "two_human";
+              }
+            }
             const copy = DUAL_CONTROL_COPY[mode];
             return ok(200, {
               ...outcome.response,
@@ -2009,9 +2047,16 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     if (verb === "GET" && pathname === "/admin/v1/dual-control-policy") {
       const gate = await gateMoneyMutation(sessions, authReq, { userStore: deps.userStore, csrf, labTotp: labTotpOrNull(totp) });
       if (!gate.ok) return authFail(gate, requestId);
-      const mode: DualControlMode = deps.dualControlPolicy
-        ? await deps.dualControlPolicy.getMode()
-        : "single_operator";
+      // Fail closed when the port is absent or unreadable: surface two_human
+      // (never single_operator — ZTR-1214 D2; peer device-sig GET → required).
+      let mode: DualControlMode = "two_human";
+      if (deps.dualControlPolicy !== undefined) {
+        try {
+          mode = await deps.dualControlPolicy.getMode();
+        } catch {
+          mode = "two_human";
+        }
+      }
       const copy = DUAL_CONTROL_COPY[mode];
       return ok(200, {
         mode,
@@ -2683,6 +2728,79 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // POST /admin/v1/dual-control-policy — guarded mutation (fresh TOTP + audit). ZTR-1214.
+    if (verb === "POST" && pathname === "/admin/v1/dual-control-policy") {
+      if (deps.dualControlPolicy === undefined || deps.dualControlPolicy.setMode === undefined) {
+        return fail(503, "service_unavailable", "dual-control policy not writable", requestId);
+      }
+      const routeId = "admin_dual_control_policy";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const policyPort = ports.dualControlPolicy;
+          if (policyPort === undefined || policyPort.setMode === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "transactional dual-control policy not wired", requestId),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseDualControlPolicyBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              await policyPort.setMode!(body.mode, {
+                actorId: user.id,
+                nodeId,
+              });
+              const mode = body.mode;
+              const copy = DUAL_CONTROL_COPY[mode];
+              return {
+                mode,
+                short: copy.short,
+                long: copy.long,
+                approve_hint: copy.approve_hint,
+              };
+            },
+          });
+          if (!guarded.ok) {
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return {
+            outcome: "commit" as const,
+            status: 200,
+            responseBody: guarded.result,
+          };
+        },
+      });
+    }
+
     // --- Mode A recovery ceremony start ---
     // POST: session+CSRF+fresh TOTP; master key only in body; digests-only response.
     // CLI break-glass remains (run-recovery-ceremony.js).
@@ -3242,9 +3360,16 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             const body = lived.body;
             const totpConfig = await resolveOperatorTotpConfig(deps.userStore, gate.user.id, labTotpOrNull(totp));
             if (totpConfig === null) return { outcome: "abort", response: fail(401, "invalid_credentials", "authentication required", requestId) };
-            const dualMode: DualControlMode = deps.dualControlPolicy
-              ? await deps.dualControlPolicy.getMode()
-              : "single_operator";
+            // Missing / unreadable dual-control port fails closed to two_human
+            // (never single_operator — ZTR-1214 D2; peer device-sig → require).
+            let dualMode: DualControlMode = "two_human";
+            if (deps.dualControlPolicy !== undefined) {
+              try {
+                dualMode = await deps.dualControlPolicy.getMode();
+              } catch {
+                dualMode = "two_human";
+              }
+            }
             // Server policy OR volunteered request — never the request body alone (ZTR-1143).
             // Unreadable / missing policy fails closed (require).
             let policyRequiresDevice = true;

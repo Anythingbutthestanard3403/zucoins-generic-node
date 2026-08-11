@@ -199,6 +199,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // operations.attention_reason (+ send_operations) text → attention_reason enum (ZTR-1147).
   // Value-preserving USING cast after free-text purge for already-applied DBs. Appended.
   "attention-reason-enum",
+  // Dual-control policy durable home (ZTR-1214). Pins pack order after node_settings +
+  // audit_log; does not seed a default (boot env remains pre-mutation truth). Appended.
+  "dual-control-policy",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

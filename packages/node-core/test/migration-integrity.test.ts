@@ -200,6 +200,8 @@ const SCHEMA_FILES = [
   "lease-operation-foreign-keys.sql",
   // operations.attention_reason text → attention_reason enum (ZTR-1147). ALTER/CREATE TYPE only.
   "attention-reason-enum.sql",
+  // Dual-control policy home (ZTR-1214). Prerequisite assert only (no CREATE TABLE).
+  "dual-control-policy.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -221,6 +223,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "transaction-material-byte-immutability.sql",
   "lease-operation-foreign-keys.sql",
   "attention-reason-enum.sql",
+  "dual-control-policy.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -501,6 +504,12 @@ const GREENFIELD: Record<
   "attention-reason-enum.sql": {
     // CREATE TYPE is unconditional when missing; column ALTERs no-op without tables.
     applies: true,
+  },
+  // Prerequisite assert on node_settings (operational-stores) + audit_log.
+  // Uses RAISE EXCEPTION (not a FK/ALTER) so the stderr fragment is the custom message.
+  "dual-control-policy.sql": {
+    applies: false,
+    missingFragment: "dual-control-policy requires node_settings",
   },
 };
 

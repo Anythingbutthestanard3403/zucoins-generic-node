@@ -1,6 +1,6 @@
 # ZTR-1167 implementer handoff
 
-**PR:** (filled after open)  
+**PR:** #87  
 **Head SHA:** `e7233ecc4330ebe28bd9b961688662be4e703978`  
 **Branch:** `ztr-1167-contract-gate-doc-drift`
 

@@ -47,4 +47,4 @@ Re-run opposed A+B at the new head before merge.
 
 ## Head SHA
 
-`2c93b4d9b45f701885ef8906dc09f2fa8bb02454`
+`df6cba4a93270ed89239aeba8d1764ea86bc2727`

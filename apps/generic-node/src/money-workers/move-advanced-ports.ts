@@ -743,10 +743,14 @@ export function createMoveAdvancedPorts(
           const txQuery = createSqlQueryFn(client);
 
           const opRows = await txQuery(
-            `SELECT status::text AS status, row_version::text AS rv FROM operations WHERE id = $1::uuid`,
+            `SELECT status::text AS status, row_version::text AS rv,
+                    attention_required
+               FROM operations WHERE id = $1::uuid`,
             [operationId],
           );
-          const op = opRows[0] as { status: string; rv: string } | undefined;
+          const op = opRows[0] as
+            | { status: string; rv: string; attention_required: boolean }
+            | undefined;
           if (op === undefined) {
             await client.query("ROLLBACK");
             return { ok: false, reason: "operation not found" };
@@ -756,12 +760,15 @@ export function createMoveAdvancedPorts(
             return { ok: false, reason: `unexpected operation status: ${op.status}`, holdReconcile: true };
           }
           const expectedState: "CREATED" | "NEEDS_ATTENTION" = op.status;
+          const attentionRequired = op.attention_required === true;
 
-          // A parked move has no NEEDS_ATTENTION → NEEDS_ATTENTION edge in the frozen
-          // MOVE_INTERNAL transition table, so a later tick that reaches a non-landing verdict
-          // again must not re-append: it holds, keeps both leases, and leaves the row as it
-          // stands. Without this, assertFrozenTransition would (correctly) throw once per tick.
-          if (outcome.kind !== "LANDED_VERIFIED" && expectedState === "NEEDS_ATTENTION") {
+          // Re-park guard keys on attention_required (the live flag), not status
+          // (ZTR-1223). Operator retraction clears attention_required while leaving
+          // status='NEEDS_ATTENTION'; a subsequent ambiguous tick must be able to re-raise.
+          // While the flag is still raised, a non-landing verdict is a no-op hold: the
+          // frozen MOVE_INTERNAL table has no NEEDS_ATTENTION → NEEDS_ATTENTION edge, and
+          // re-appending would throw once per tick.
+          if (outcome.kind !== "LANDED_VERIFIED" && attentionRequired) {
             await client.query("ROLLBACK");
             return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
           }
@@ -773,7 +780,7 @@ export function createMoveAdvancedPorts(
           const dataText =
             outcome.kind === "LANDED_VERIFIED"
               ? buildMoveLandedEventData(outcome, nowIso)
-              : buildMoveNeedsAttentionEventData(outcome, nowIso);
+              : buildMoveNeedsAttentionEventData(outcome as MoveParkingOutcome, nowIso);
           const dataSha256 = sha256HexUtf8(dataText);
 
           const nodeEventInput: NodeEventInput = {
@@ -806,6 +813,92 @@ export function createMoveAdvancedPorts(
             previousEventHash: seqInfo.previousEventHash,
             eventHash,
           };
+
+          // Post-retraction re-raise (ZTR-1223): status may still be NEEDS_ATTENTION while
+          // attention_required is false. There is no frozen NEEDS_ATTENTION → NEEDS_ATTENTION
+          // edge, so persistMoveOutcome cannot re-park. Raise the flag + dual-chain event only
+          // (same shape as receive-landing / operator-park), leave status unchanged.
+          if (outcome.kind !== "LANDED_VERIFIED" && expectedState === "NEEDS_ATTENTION") {
+            const parkingOutcome = outcome as MoveParkingOutcome;
+            const attentionReason = toAttentionReason(parkingOutcome.reason);
+            const attentionDetail = `${parkingOutcome.kind} ${JSON.stringify(parkingOutcome.reason)}`;
+            const raised = await txQuery(
+              `UPDATE operations
+                  SET attention_required = true,
+                      attention_reason = $2::attention_reason,
+                      attention_detail = $3,
+                      attention_episode = attention_episode + 1,
+                      row_version = row_version + 1,
+                      updated_at = $4::timestamptz
+                WHERE id = $1::uuid
+                  AND kind = 'MOVE_INTERNAL'
+                  AND status = 'NEEDS_ATTENTION'
+                  AND attention_required = false
+                  AND row_version = $5::bigint
+              RETURNING id`,
+              [
+                operationId,
+                attentionReason,
+                attentionDetail,
+                nowIso,
+                Number(op.rv),
+              ],
+            );
+            if (raised[0] === undefined) {
+              await client.query("ROLLBACK");
+              return { ok: false, reason: "persist: PRECONDITION_UNMET", holdReconcile: true };
+            }
+
+            await txQuery(
+              `INSERT INTO node_events
+                 (seq, event_id, canonical_version, node_id, operation_id, wallet_id, event_type,
+                  data_text, data_sha256, preimage_text, preimage_sha256, signing_key_id, signature,
+                  previous_event_hash, event_hash, created_at)
+               VALUES
+                 ($1::bigint, $2::uuid, 1, $3::uuid, $4::uuid, NULL, $5::text,
+                  $6::text, $7::text, $8::text, $9::text, $10::uuid, $11::text,
+                  $12::text, $13::text, $14::timestamptz)`,
+              [
+                event.seq,
+                event.eventId,
+                event.nodeId,
+                operationId,
+                event.eventType,
+                event.dataText,
+                event.dataSha256,
+                event.preimageText,
+                event.preimageSha256,
+                event.signingKeyId,
+                event.signature,
+                event.previousEventHash,
+                event.eventHash,
+                nowIso,
+              ],
+            );
+
+            const identity = deps.nodeIdentitySigner();
+            if (identity === null) throw new Error("node identity signer unavailable");
+            await appendImplementerEventLeg(txQuery, {
+              nodeId: deps.nodeId,
+              implementerId: details.implementerId,
+              eventId: event.eventId,
+              eventType: event.eventType,
+              operationId,
+              walletId: null,
+              dataSha256,
+              nodeEventHash: event.eventHash,
+              createdAt: nowIso,
+              signer: asSyncEventSigner(identity),
+            });
+
+            await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
+            await client.query("COMMIT");
+            deps.logger.info(
+              `move reconcile: op=${operationId} re-raised attention outcome=${parkingOutcome.kind} ` +
+                `reason=${attentionReason}`,
+            );
+            return { ok: false, reason: `reconcile: ${parkingOutcome.kind}`, holdReconcile: true };
+          }
 
           const persistResult = await persistMoveOutcome(txQuery, {
             operationId,

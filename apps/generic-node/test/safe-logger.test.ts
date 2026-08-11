@@ -160,3 +160,78 @@ describe("entry points hold no raw console call", () => {
     });
   }
 });
+
+// ZTR-1215: DR / operator CLIs and the in-process pool error handler must use
+// the same redactor seam. A raw console.* in any of these files is the defect.
+describe("DR/operator CLI surfaces hold no raw console call (ZTR-1215)", () => {
+  const CONSOLE_CALL = /\bconsole\.(log|error|warn|info|debug|trace)\s*\(/;
+  const SURFACES = [
+    "dr/cli.ts",
+    "dr/schedule.ts",
+    "db/client.ts",
+    "db/migrate.ts",
+    "ops/run-recovery-ceremony.ts",
+    "operations/rotate-master-key.cli.ts",
+  ] as const;
+
+  for (const rel of SURFACES) {
+    it(`${rel} logs only through the redacting adapter`, () => {
+      const source = readFileSync(
+        fileURLToPath(new URL(`../src/${rel}`, import.meta.url)),
+        "utf8",
+      );
+      const offenders = source
+        .split("\n")
+        .map((line, index) => ({ line, number: index + 1 }))
+        .filter(({ line }) => CONSOLE_CALL.test(line))
+        // Default parameter `sink: SafeLoggerSink = console` is the injection
+        // seam, not a write — allow the bare identifier, refuse the call form.
+        .filter(({ line }) => CONSOLE_CALL.test(line))
+        .map(({ line, number }) => `${rel}:${number}: ${line.trim()}`);
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it("createSafeCliIo redacts a bare secret on the DR CLI default sink", async () => {
+    const { createSafeCliIo } = await import("../src/boot/safe-logger.js");
+    const { REDACTED } = await import("@zucoins/node-core/observability");
+    const lines: string[] = [];
+    const io = createSafeCliIo({
+      log: (m) => lines.push(m),
+      error: (m) => lines.push(m),
+    });
+    const secret = "AbCdEfGhIjKlMnOpQrStUvWx012345";
+    io.error(`drill failed postgres://u:${secret}@h/db bare=${secret}`);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain(secret);
+    expect(lines[0]).toContain(REDACTED);
+  });
+
+  it("pool idle-error handler redacts a driver message that quotes a DSN password", async () => {
+    const { createPool } = await import("../src/db/client.js");
+    const { REDACTED } = await import("@zucoins/node-core/observability");
+    const secret = "S3cret-Passw0rd-UniqueXX";
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+    };
+    try {
+      const pool = createPool("postgres://user:pass@127.0.0.1:1/does-not-matter");
+      try {
+        pool.emit(
+          "error",
+          new Error(`Connection terminated unexpectedly password=${secret}`),
+        );
+      } finally {
+        await pool.end();
+      }
+    } finally {
+      console.error = origError;
+    }
+    expect(errors.length).toBeGreaterThan(0);
+    const joined = errors.join("\n");
+    expect(joined).not.toContain(secret);
+    expect(joined).toContain(REDACTED);
+  });
+});

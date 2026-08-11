@@ -8,6 +8,7 @@ import {
   REDACTED,
   assertDumpSecretFree,
   findUnredactedSecretKeys,
+  isHighEntropyToken,
   isNeverLog,
   normalizeKey,
   notFoundErrorBody,
@@ -219,6 +220,83 @@ describe("scrubText redacts every quote shape free text arrives in", () => {
     expect(out.detail.note).toBe(`vault unlock failed vaultMasterKey=${REDACTED}`);
     // No assignment shape, no change — a money-path string stays byte-exact.
     expect(out.amount).toBe("1.00");
+  });
+});
+
+// ZTR-1215: widen scrubText past assignment-shaped fragments. A bare token or a
+// URL userinfo credential that reaches free text must still be censored, and
+// ordinary prose must stay intact.
+describe("scrubText redacts bare tokens and URL userinfo (ZTR-1215)", () => {
+  const BARE_SECRET = "AbCdEfGhIjKlMnOpQrStUvWx012345"; // mixed case + digit, ≥24
+  const HEX_SECRET = "a1b2c3d4e5f60718293a4b5c6d7e8f90"; // 32 hex
+
+  it("redacts a bare high-entropy token with no surrounding key=", () => {
+    const out = scrubText(`operator paste leaked ${BARE_SECRET} mid-line`);
+    expect(out).not.toContain(BARE_SECRET);
+    expect(out).toContain(REDACTED);
+    expect(out).toContain("operator paste leaked");
+  });
+
+  it("redacts a bare 32-char hex token", () => {
+    const out = scrubText(`token material ${HEX_SECRET} end`);
+    expect(out).not.toContain(HEX_SECRET);
+    expect(out).toBe(`token material ${REDACTED} end`);
+  });
+
+  it("redacts URL userinfo credentials (postgres / https)", () => {
+    const pg = "postgres://node_user:S3cret-Passw0rd@db.internal:5432/generic";
+    const outPg = scrubText(`connect failed ${pg}`);
+    expect(outPg).not.toContain("S3cret-Passw0rd");
+    expect(outPg).not.toContain("node_user");
+    expect(outPg).toContain(`postgres://${REDACTED}@db.internal:5432/generic`);
+
+    const https = "https://api:zp_live_AbCdEfGhIjKlMnOp@gateway.example/v1";
+    const outHttps = scrubText(`upstream ${https}`);
+    expect(outHttps).not.toContain("zp_live_AbCdEfGhIjKlMnOp");
+    expect(outHttps).toContain(`https://${REDACTED}@gateway.example/v1`);
+  });
+
+  it("does not treat file:///…/pkg@version stack frames as URL userinfo", () => {
+    const frame =
+      "file:///Volumes/Ai Building/.zup-scratch/ztr-1215-impl/node_modules/.pnpm/vitest@3.2.7/node_modules/vitest/dist/index.js";
+    expect(scrubText(frame)).toBe(frame);
+  });
+
+  it("redacts URL userinfo when the password itself contains a colon", () => {
+    const dsn = "postgresql://u:p:art:two@localhost/db";
+    const out = scrubText(dsn);
+    expect(out).not.toContain("p:art:two");
+    expect(out).toBe(`postgresql://${REDACTED}@localhost/db`);
+  });
+
+  it("does not over-redact ordinary prose or short money-path values", () => {
+    expect(scrubText("reason: bad_sig count=3 amount=1.00")).toBe(
+      "reason: bad_sig count=3 amount=1.00",
+    );
+    expect(scrubText("wallet recovery_verified_at stamped successfully")).toBe(
+      "wallet recovery_verified_at stamped successfully",
+    );
+    // Short mixed tokens stay — the bare-token floor is 24 chars.
+    expect(scrubText("code AbCdEfGh123 is fine")).toBe("code AbCdEfGh123 is fine");
+    // UUIDs stay — operators need them in diagnostics.
+    const uuid = "a1b2c3d4-e5f6-4718-893a-4b5c6d7e8f90";
+    expect(scrubText(`ceremony_id=${uuid}`)).toContain(uuid);
+  });
+
+  it("is idempotent across the new passes", () => {
+    const input = `dsn=postgres://u:S3cret-Passw0rd@h/db bare=${BARE_SECRET}`;
+    const once = scrubText(input);
+    expect(scrubText(once)).toBe(once);
+    expect(once).not.toContain("S3cret-Passw0rd");
+    expect(once).not.toContain(BARE_SECRET);
+  });
+
+  it("classifies high-entropy candidates without flagging prose", () => {
+    expect(isHighEntropyToken(BARE_SECRET)).toBe(true);
+    expect(isHighEntropyToken(HEX_SECRET)).toBe(true);
+    expect(isHighEntropyToken("123456789012345678901234")).toBe(false);
+    expect(isHighEntropyToken("abcdefghijklmnopqrstuvwx")).toBe(false);
+    expect(isHighEntropyToken(REDACTED)).toBe(false);
   });
 });
 

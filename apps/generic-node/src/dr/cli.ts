@@ -2,6 +2,7 @@
 
 import { resolve } from "node:path";
 
+import { createSafeCliIo } from "../boot/safe-logger.js";
 import { exportEncryptedBackup, restoreEncryptedBackup } from "./encrypted-backup.js";
 import { runDrill } from "./drill.js";
 import {
@@ -33,10 +34,9 @@ export interface CliIo {
   readonly error: (line: string) => void;
 }
 
-const defaultIo: CliIo = {
-  log: (l) => console.log(l),
-  error: (l) => console.error(l),
-};
+// Same redactor chokepoint as main/stage1 — a DR command cannot print an
+// unredacted secret by talking to console directly (ZTR-1215).
+const defaultIo: CliIo = createSafeCliIo();
 
 function usage(): string {
   return `generic-node dr — encrypted backup / restore / drill / markers

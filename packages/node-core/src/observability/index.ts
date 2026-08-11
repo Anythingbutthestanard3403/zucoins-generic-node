@@ -5,6 +5,7 @@ export {
   REDACTED,
   assertDumpSecretFree,
   findUnredactedSecretKeys,
+  isHighEntropyToken,
   isNeverLog,
   normalizeKey,
   notFoundErrorBody,

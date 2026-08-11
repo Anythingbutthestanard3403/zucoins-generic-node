@@ -55,6 +55,7 @@ import {
   type TotpConfig,
 } from "@zucoins/node-core";
 
+import { createSafeCliIo } from "../boot/safe-logger.js";
 import { normalizeDatabaseUrl } from "../db/session-endpoint.js";
 import {
   exportLiveBackupArchive,
@@ -70,6 +71,10 @@ import {
 } from "../vault/root-kdf-salt.js";
 
 const MIN_MASTER_KEY_CHARS = 32;
+
+// Same redactor chokepoint as main/stage1 — ceremony diagnostics must not print
+// an unredacted secret (ZTR-1215).
+const cliIo = createSafeCliIo();
 
 export interface RunRecoveryCeremonyEnv {
   readonly DATABASE_URL?: string;
@@ -120,7 +125,7 @@ export interface RunRecoveryCeremonySummary {
 }
 
 function fail(message: string): never {
-  console.error(`run-recovery-ceremony: ${message}`);
+  cliIo.error(`run-recovery-ceremony: ${message}`);
   // Vitest / library callers: throw so the suite can assert. CLI entry still ends the process.
   if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
     throw new Error(message);
@@ -279,7 +284,7 @@ export async function resolveCeremonyMasterKey(
   if (envFlagTrue(env[allowKey as keyof RunRecoveryCeremonyEnv] as string | undefined)) {
     const fromEnv = env[opts.label]?.trim();
     if (fromEnv !== undefined && fromEnv !== "") {
-      console.error(
+      cliIo.error(
         `run-recovery-ceremony: WARNING: ${opts.label} taken from process environment ` +
           `(${allowKey}=1). Doc 07 §5.5.2 forbids persistent env for ceremony secrets — ` +
           `prefer ${fdKey} or an interactive TTY prompt.`,
@@ -287,7 +292,7 @@ export async function resolveCeremonyMasterKey(
       return fromEnv;
     }
   } else if (env[opts.label]?.trim()) {
-    console.error(
+    cliIo.error(
       `run-recovery-ceremony: ignoring ${opts.label} in the environment ` +
         `(set ${allowKey}=1 to opt in, or use ${fdKey} / interactive prompt).`,
     );
@@ -745,8 +750,9 @@ export async function runRecoveryCeremony(deps: {
       exportId,
     };
 
-    // Never keys — public digests and outcome counts only.
-    console.log(
+    // Never keys — public digests and outcome counts only. JSON line is
+    // re-redacted structurally by createSafeCliIo (ZTR-1215).
+    cliIo.log(
       JSON.stringify({
         ok: summary.ok,
         ceremony_id: summary.ceremonyId,

@@ -41,6 +41,7 @@ import {
   type RotationUnitOfWork,
 } from "@zucoins/node-core";
 
+import { createSafeRotationLogger } from "../boot/safe-logger.js";
 import type { ResolvedRootKdfSalt } from "../vault/root-kdf-salt.js";
 import { rewrapVaultBootCanary } from "../vault/boot-canary.js";
 
@@ -192,14 +193,9 @@ async function resolveSalt(
   }
 }
 
-const defaultLogger: RotationLogger = {
-  info: (obj, msg) => {
-    console.log(JSON.stringify({ level: "info", msg, ...obj }));
-  },
-  error: (obj, msg) => {
-    console.error(JSON.stringify({ level: "error", msg, ...obj }));
-  },
-};
+// Structured fields go through redactLogFields before JSON serialization so a
+// never-log key cannot reach stdout even when the CLI builds the payload (ZTR-1215).
+const defaultLogger: RotationLogger = createSafeRotationLogger();
 
 /**
  * Programmatic entry used by tests and by a composition root. Validates env, derives

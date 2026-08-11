@@ -36,7 +36,7 @@ function frozenReadyBody(rowVersion: number, state: string): string {
       observation_id: "obs-t0",
       projection: { s: "s", p: "p", b_zkz: "0" },
     },
-    subscription_handle: null,
+    subscription_handle: "sh_test_live_row",
   });
 }
 
@@ -70,8 +70,14 @@ function storeWithRow(row: StoredReceiveOperation | null) {
     queueCap: 8,
     receive: {
       findDestination: async () => null,
-      insertInProgress: async () => ({ kind: "INSERTED" as const }),
-      insertQueuedIfCapAllows: async () => ({ kind: "INSERTED" as const }),
+      insertInProgress: async () => ({
+        kind: "INSERTED" as const,
+        subscriptionHandlePlaintext: "sh_test_live_row",
+      }),
+      insertQueuedIfCapAllows: async () => ({
+        kind: "INSERTED" as const,
+        subscriptionHandlePlaintext: "sh_test_live_row",
+      }),
       findByIdempotency: async () => null,
       completeOperation: async () => true,
       findByOperationId: async () => row,

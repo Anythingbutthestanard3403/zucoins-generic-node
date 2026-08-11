@@ -38,7 +38,11 @@ export interface ReceiveResponse {
   readonly transfer_code: string | null;
   readonly expected_artifact: ExpectedArtifact | null;
   readonly t0: { readonly observation_id: string; readonly projection: { readonly s: string; readonly p: string; readonly b_zkz: string } } | null;
-  readonly subscription_handle: string | null;
+  /**
+   * One-time `sh_…` plaintext on create (201/202) and idempotent replay of that
+   * create body. Point GET strips this field. Never null on a successful create.
+   */
+  readonly subscription_handle: string;
 }
 
 export interface InternalMoveResponse {

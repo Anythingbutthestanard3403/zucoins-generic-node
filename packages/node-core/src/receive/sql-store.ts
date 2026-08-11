@@ -15,6 +15,14 @@
 // unique_violation propagates and is mapped to WALLET_IN_FLIGHT by constraint name. There is
 // no pre-read anywhere in this file that could decide either outcome ahead of the database.
 
+import { randomUUID } from "node:crypto";
+
+import {
+  DEFAULT_SUBSCRIPTION_HANDLE_POST_TERMINAL_TTL_MS,
+  hashSubscriptionHandle,
+  mintSubscriptionHandlePlaintext,
+} from "../api/subscription-handle.js";
+import { INSERT_SUBSCRIPTION_HANDLE } from "../api/sql-subscription-handle-store.js";
 import type {
   ReceiveAdmissionStore,
   ReceiveDestinationRecord,
@@ -26,6 +34,18 @@ import type {
   StoredReceiveOperation,
 } from "./admission.js";
 import { RECEIVE_ADMISSION_LOCK_KEY } from "./pool-allocator.js";
+
+/**
+ * Absolute handle expiry at mint time. The operation may still be live for its
+ * receive TTL; the handle must outlive that window plus the post-terminal grace
+ * so subscribe remains authorized through terminal + 15m. Callers never store
+ * the plaintext — only the hash lands in subscription_handles.
+ */
+function subscriptionHandleExpiresAtIso(operation: ReceiveOperation, nowMs: number): string {
+  const absoluteMs =
+    nowMs + operation.ttlMs + DEFAULT_SUBSCRIPTION_HANDLE_POST_TERMINAL_TTL_MS;
+  return new Date(absoluteMs).toISOString();
+}
 
 // The narrow node-postgres-shaped query surface the store depends on. `pg.Pool` and
 // `pg.PoolClient` both satisfy it structurally; a test double implements it in-process.
@@ -121,6 +141,8 @@ export const STATEMENTS = {
   COUNT_QUEUED: `SELECT count(*)::int AS depth FROM receive_operations WHERE node_id = $1 AND status = 'CREATED' AND wallet_id IS NULL`,
   // Same key + statement as pool-allocator admitReceive (RECEIVE_ADMISSION_LOCK_KEY).
   LOCK_ADMISSION_QUEUE: `SELECT pg_advisory_xact_lock($1) AS locked`,
+  // Hashed subscription handle — plaintext never a bind parameter.
+  INSERT_SUBSCRIPTION_HANDLE,
 } as const;
 
 interface OperationRow {
@@ -315,6 +337,11 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
     throw error;
   }
 
+  /**
+   * Insert the admission row and, on win, mint + persist the subscription handle
+   * hash in the same executor (same TX when called under withTransaction).
+   * Returns the plaintext once; only the hash is durable.
+   */
   private async insertOn(
     executor: SqlExecutor,
     operation: ReceiveOperation,
@@ -327,14 +354,32 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
       );
       // ON CONFLICT DO NOTHING targets the idempotency constraint only, so zero rows means
       // another caller already holds this key.
-      return result.rows.length === 0 ? { kind: "IDEMPOTENCY_CONFLICT" } : { kind: "INSERTED" };
+      if (result.rows.length === 0) return { kind: "IDEMPOTENCY_CONFLICT" };
+
+      const plaintext = mintSubscriptionHandlePlaintext();
+      const handleHash = hashSubscriptionHandle(plaintext);
+      const nowMs = Date.now();
+      await executor.query(STATEMENTS.INSERT_SUBSCRIPTION_HANDLE, [
+        randomUUID(),
+        operation.nodeId,
+        operation.operationId,
+        handleHash,
+        subscriptionHandleExpiresAtIso(operation, nowMs),
+      ]);
+      return { kind: "INSERTED", subscriptionHandlePlaintext: plaintext };
     } catch (error) {
       return this.mapInsertError(error, operation);
     }
   }
 
   async insertInProgress(operation: ReceiveOperation): Promise<ReceiveInsertOutcome> {
-    return this.insertOn(this.sql, operation);
+    // Mint + hash write must share a TX with the admission insert so a partial
+    // failure cannot leave an operation without a handle (or a handle without an op).
+    try {
+      return await this.txFactory.withTransaction(async (tx) => this.insertOn(tx, operation));
+    } catch (error) {
+      return this.mapInsertError(error, operation);
+    }
   }
 
   async insertQueuedIfCapAllows(
@@ -352,6 +397,9 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
     // One-in-flight unique_violation aborts the PG transaction: let it throw out of withTransaction
     // (so the factory ROLLBACKs) and map the error here. Catching inside the TX and
     // returning WALLET_IN_FLIGHT would leave the session aborted and fail COMMIT.
+    //
+    // Subscription handle hash is written in the same TX as the admission insert so a
+    // handle never exists without its operation and vice versa (ZTR-1142).
     try {
       return await this.txFactory.withTransaction(async (tx) => {
         await tx.query(STATEMENTS.LOCK_ADMISSION_QUEUE, [RECEIVE_ADMISSION_LOCK_KEY]);
@@ -360,13 +408,7 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
         ]);
         const depth = Number(depthResult.rows[0]?.depth ?? 0);
         if (depth >= queueCap) return { kind: "QUEUE_FULL" as const };
-        const result = await tx.query<{ operation_id: string }>(
-          STATEMENTS.INSERT_IN_PROGRESS,
-          this.operationInsertParams(operation),
-        );
-        return result.rows.length === 0
-          ? ({ kind: "IDEMPOTENCY_CONFLICT" } as const)
-          : ({ kind: "INSERTED" } as const);
+        return this.insertOn(tx, operation);
       });
     } catch (error) {
       return this.mapInsertError(error, operation);

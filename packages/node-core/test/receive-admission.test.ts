@@ -37,6 +37,7 @@ import {
   type SqlExecutor,
   type SqlQueryResult,
 } from "../src/receive/sql-store.js";
+import { hashSubscriptionHandle } from "../src/api/subscription-handle.js";
 
 const DEST_ID = "11111111-1111-4111-8111-111111111111";
 const DEST_WALLET = "22222222-2222-4222-8222-222222222222";
@@ -55,6 +56,7 @@ const NON_TERMINAL = new Set(["CREATED", "READY"]);
 
 class InProcessSqlExecutor implements SqlExecutor {
   readonly rows: Record<string, unknown>[] = [];
+  readonly subscriptionHandles: Record<string, unknown>[] = [];
   readonly destinations = new Map<string, Record<string, unknown>>();
 
   addDestination(record: Record<string, unknown>): void {
@@ -71,6 +73,24 @@ class InProcessSqlExecutor implements SqlExecutor {
       return found === undefined ? [] : [found];
     }
     if (text === STATEMENTS.INSERT_IN_PROGRESS) return this.insert(params);
+    if (text === STATEMENTS.INSERT_SUBSCRIPTION_HANDLE) {
+      const handleHash = params[3] as string;
+      if (this.subscriptionHandles.some((h) => h.handle_hash === handleHash)) {
+        throw uniqueViolation("subscription_handles_handle_hash_key");
+      }
+      if (this.subscriptionHandles.some((h) => h.operation_id === params[2])) {
+        throw uniqueViolation("subscription_handles_operation_id_key");
+      }
+      // Only the hash is durable — plaintext is never a bind parameter.
+      this.subscriptionHandles.push({
+        id: params[0],
+        node_id: params[1],
+        operation_id: params[2],
+        handle_hash: handleHash,
+        expires_at: params[4],
+      });
+      return [{ id: params[0] }];
+    }
     if (text === STATEMENTS.LOCK_ADMISSION_QUEUE) {
       // Advisory lock is a no-op in-process; real serialisation is proven on live PG.
       return [{ locked: true }];
@@ -363,6 +383,17 @@ describe("admitReceiveExternal", () => {
     expect(result.operation.route).toBe(RECEIVE_CANONICAL_ROUTE);
     expect(sql.rows).toHaveLength(1);
     expect(sql.rows[0].request_sha256).toBe(canonicalRequestSha256(validRequest()));
+    // ZTR-1142: mint in the same TX; only the hash is durable.
+    expect(result.subscriptionHandlePlaintext.startsWith("sh_")).toBe(true);
+    expect(sql.subscriptionHandles).toHaveLength(1);
+    expect(sql.subscriptionHandles[0].handle_hash).toBe(
+      hashSubscriptionHandle(result.subscriptionHandlePlaintext),
+    );
+    expect(sql.subscriptionHandles[0].operation_id).toBe("op-001");
+    // Plaintext must never appear as a bind / durable field.
+    expect(JSON.stringify(sql.subscriptionHandles)).not.toContain(
+      result.subscriptionHandlePlaintext,
+    );
   });
 
   it("replays the first completed execution byte-identically for same key + same hash", async () => {

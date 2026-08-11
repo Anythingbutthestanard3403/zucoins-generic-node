@@ -383,6 +383,7 @@ export {
 } from "./operation-subscribe.js";
 export {
   createSqlSubscriptionHandleStore,
+  INSERT_SUBSCRIPTION_HANDLE,
   type SubscriptionHandleSqlExecutor,
 } from "./sql-subscription-handle-store.js";
 export {

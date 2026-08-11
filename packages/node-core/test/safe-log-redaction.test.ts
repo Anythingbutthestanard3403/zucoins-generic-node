@@ -34,6 +34,10 @@ describe("normalizeKey / classifiers", () => {
     expect(isNeverLog(normalizeKey("totpSecret"))).toBe(true);
     expect(isNeverLog(normalizeKey("apiKeyPlaintext"))).toBe(true);
     expect(isNeverLog(normalizeKey("walletPubkey"))).toBe(false);
+    // ZTR-1142: subscription handle plaintext is never-log.
+    expect(isNeverLog(normalizeKey("subscription_handle"))).toBe(true);
+    expect(isNeverLog(normalizeKey("subscriptionHandle"))).toBe(true);
+    expect(isNeverLog(normalizeKey("subscriptionHandlePlaintext"))).toBe(true);
   });
 
   it("truncation ≠ redaction buckets", () => {

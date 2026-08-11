@@ -36,6 +36,9 @@ export function isNeverLog(name: string): boolean {
   if (name.includes("totp") || name.includes("otpcod") || name === "otp") return true;
   if (name.includes("sessionid") && name.includes("raw")) return true;
   if (name === "sessiontoken" || name === "sessionsecret") return true;
+  // Subscription handle plaintext (`sh_…`) — returned once on create; never log.
+  // Covers subscription_handle / subscriptionHandle / subscriptionHandlePlaintext.
+  if (name.includes("subscriptionhandle")) return true;
   // Raw SplitChain evidence bodies / exact preimages outside surface.
   if (name.includes("rawpreimage") || name.includes("rawevidence") || name === "gatewayresponse") {
     return true;

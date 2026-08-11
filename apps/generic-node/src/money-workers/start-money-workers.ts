@@ -608,6 +608,26 @@ async function advanceAssignedReceive(deps: {
     return;
   }
 
+  // Preserve the create-time subscription_handle plaintext in the READY body so
+  // idempotent create replay (and frozen READY schema) keep the same handle.
+  // Plaintext is only ever minted once at admit; we re-embed the stored value.
+  let priorSubscriptionHandle: string | null = null;
+  try {
+    const prior = await deps.pool.query<{ response_body: string | null }>(
+      `SELECT response_body FROM receive_operations WHERE operation_id = $1::uuid`,
+      [deps.row.operationId],
+    );
+    const raw = prior.rows[0]?.response_body;
+    if (typeof raw === "string" && raw.length > 0) {
+      const parsed = JSON.parse(raw) as { subscription_handle?: unknown };
+      if (typeof parsed.subscription_handle === "string" && parsed.subscription_handle.length > 0) {
+        priorSubscriptionHandle = parsed.subscription_handle;
+      }
+    }
+  } catch {
+    priorSubscriptionHandle = null;
+  }
+
   const commitResult = await withTransaction(
     deps.pool,
     async (tx) =>
@@ -619,6 +639,7 @@ async function advanceAssignedReceive(deps: {
         destinationId: afterLanding.kind === "INTERNAL_MOVE" ? afterLanding.destination_id : null,
         sql: tx,
         events: deps.events(tx),
+        subscriptionHandle: priorSubscriptionHandle,
       }),
     deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
   );

@@ -207,6 +207,7 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       const event = await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "EVENT_SIGNING" });
 
       const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const doc = await surface.discoveryDocument();
 
@@ -245,6 +246,7 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       const baseline = await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "NODE_IDENTITY" });
 
       const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const before = await surface.discoveryDocument();
       const priorKeyId = before.expected_artifact_public_keys[0]!.key_id;
@@ -305,6 +307,7 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       await ensureSigningKeyInTx(pool, { rootKey, nodeId, purpose: "EVENT_SIGNING" });
 
       const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const first = await surface.discoveryDocument();
 
@@ -312,6 +315,7 @@ describe.skipIf(!PG_AVAILABLE)("discovery publishes the durable signing-key regi
       // see byte-identical keys — proving the document comes from durable storage, not from
       // whatever a single process happened to ensure in memory at boot.
       const restartedSurface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT, nodeId, pool });
       const second = await restartedSurface.discoveryDocument();
 

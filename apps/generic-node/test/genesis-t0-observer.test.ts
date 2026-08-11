@@ -5,6 +5,8 @@
 import type { Pool } from "pg";
 import { describe, expect, it } from "vitest";
 
+import { RECEIVE_T0_OBSERVATION_ROLE } from "@zucoins/node-core";
+
 import { createGenesisT0Observer } from "../src/money-workers/genesis-t0-observer.js";
 
 class SqlStateError extends Error {
@@ -57,7 +59,7 @@ describe("genesis T0 observer retry (ZTR-1155)", () => {
   it("re-runs the capture body on 40001 and returns VERIFIED", async () => {
     const { pool, statements, releases } = fakePool({ code: "40001", failures: 1 });
 
-    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET);
+    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET, RECEIVE_T0_OBSERVATION_ROLE);
 
     expect(result.kind).toBe("VERIFIED");
     // Two BEGINs = the body ran twice. One BEGIN would mean the retry is dead code — the
@@ -74,7 +76,7 @@ describe("genesis T0 observer retry (ZTR-1155)", () => {
   it("does not retry a non-serialization failure, and still maps it to INDETERMINATE", async () => {
     const { pool, statements } = fakePool({ code: "23505", failures: 5 });
 
-    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET);
+    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET, RECEIVE_T0_OBSERVATION_ROLE);
 
     expect(result.kind).toBe("INDETERMINATE");
     // Exactly one attempt: withSerializationRetry rethrows a non-40001/40P01 immediately, and
@@ -88,7 +90,7 @@ describe("genesis T0 observer retry (ZTR-1155)", () => {
   it("exhausted 40001 retries surface as INDETERMINATE, not as a thrown tick error", async () => {
     const { pool, statements } = fakePool({ code: "40001", failures: 99 });
 
-    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET);
+    const result = await createGenesisT0Observer({ pool, nodeId: NODE_ID }).observe(WALLET, RECEIVE_T0_OBSERVATION_ROLE);
 
     expect(result.kind).toBe("INDETERMINATE");
     // DEFAULT_SERIALIZATION_RETRY_POLICY.maxAttempts = 5 (CONVENTIONS.md §2).

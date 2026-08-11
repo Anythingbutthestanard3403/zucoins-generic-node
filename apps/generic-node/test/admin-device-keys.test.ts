@@ -235,7 +235,6 @@ async function login(
   const password = "correct-horse-battery-staple";
   const user: AdminUser = {
     id: randomUUID(),
-    nodeId: NODE_ID,
     username: "admin",
     passwordHash: await hashPassword(password),
     role: "admin",
@@ -368,7 +367,7 @@ describe("admin device genesis enrol + revoke", () => {
         "x-csrf-token": auth.csrf,
         "content-type": "application/json",
         "x-zp-totp": code,
-        "idempotency-key": "idem-device-enrol-" + "x" * 16,
+        "idempotency-key": "idem-device-enrol-" + "x".repeat(16),
       },
     );
     expect(enrolRes.status).toBe(200);
@@ -443,7 +442,7 @@ describe("admin device genesis enrol + revoke", () => {
         "x-csrf-token": auth.csrf,
         "content-type": "application/json",
         "x-zp-totp": "000000",
-        "idempotency-key": "idem-device-badtotp-" + "y" * 12,
+        "idempotency-key": "idem-device-badtotp-" + "y".repeat(12),
       },
     );
     expect(enrolRes.status).toBeGreaterThanOrEqual(401);

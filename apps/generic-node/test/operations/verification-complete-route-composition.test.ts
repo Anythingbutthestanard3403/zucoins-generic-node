@@ -47,6 +47,7 @@ describe("verification-complete LIVE mount (schema + route composition)", () => 
 
   it("AC4: the surface advertises verification_complete as a live engine", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
@@ -148,7 +149,7 @@ describe("D1/D2: body validation rejects before any DB touch", () => {
       },
       bodyBytes: new TextEncoder().encode(bodyText),
       lastEventId: null,
-    }) as VerifiedReportRequest;
+    }) as unknown as VerifiedReportRequest;
 
   const runWith = async (bodyText: string) => {
     const handler = createVerificationCompleteRouteHandler({

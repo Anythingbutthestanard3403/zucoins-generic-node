@@ -19,8 +19,8 @@ import {
 
 import { createProductionMetricsSnapshotSource } from "../src/metrics/snapshot-source.js";
 
-const EMPTY_ROWS_DB: MetricsSqlExecutor = {
-  async query(text) {
+const EMPTY_ROWS_DB = {
+  async query(text: string) {
     if (text === METRICS_SNAPSHOT_STATEMENTS.QUEUE_DEPTH_AND_OLDEST_AGE) {
       return { rows: [{ depth: 0, oldest_age_secs: 0 }] };
     }
@@ -32,7 +32,7 @@ const EMPTY_ROWS_DB: MetricsSqlExecutor = {
     }
     return { rows: [] };
   },
-};
+} as MetricsSqlExecutor;
 
 function readyState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessStateInputs {
   return {
@@ -279,8 +279,8 @@ describe("createProductionMetricsSnapshotSource — readinessReady transitions",
 describe("createProductionMetricsSnapshotSource — DB-truth counters (the 'drops runtime counters' defect)", () => {
   it("reflects live wallet/lease/queue/operation counts from the DB, not the empty stub", async () => {
     const dbProbe = new CachedDbProbe(async () => {});
-    const db: MetricsSqlExecutor = {
-      async query(text) {
+    const db = {
+      async query(text: string) {
         if (text === METRICS_SNAPSHOT_STATEMENTS.COUNT_WALLETS_BY_STATE) {
           return { rows: [{ state: "AVAILABLE", wallets: 3 }, { state: "PINNED", wallets: 1 }] };
         }
@@ -301,7 +301,7 @@ describe("createProductionMetricsSnapshotSource — DB-truth counters (the 'drop
         }
         return { rows: [] };
       },
-    };
+    } as MetricsSqlExecutor;
     const source = createProductionMetricsSnapshotSource({
       getState: () => readyState(),
       dbProbe,

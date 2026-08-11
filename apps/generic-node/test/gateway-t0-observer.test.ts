@@ -520,7 +520,7 @@ describe("real T0 OBSERVE (offline)", () => {
       }),
     });
 
-    const outcome: ReceiveT0Observation = await observer.observe(walletPk);
+    const outcome: ReceiveT0Observation = await observer.observe(walletPk, RECEIVE_T0_OBSERVATION_ROLE);
     expect(outcome.kind).toBe("VERIFIED");
     if (outcome.kind !== "VERIFIED") return;
 
@@ -572,7 +572,7 @@ describe("real T0 OBSERVE (offline)", () => {
       }),
     });
 
-    const outcome = await observer.observe(walletPk);
+    const outcome = await observer.observe(walletPk, RECEIVE_T0_OBSERVATION_ROLE);
     expect(outcome.kind).toBe("VERIFIED");
     if (outcome.kind !== "VERIFIED") return;
     expect(outcome.projection.role).toBe("genesis");
@@ -596,7 +596,7 @@ describe("real T0 OBSERVE (offline)", () => {
       }),
     });
 
-    const outcome = await observer.observe(SEED_03);
+    const outcome = await observer.observe(SEED_03, RECEIVE_T0_OBSERVATION_ROLE);
     expect(outcome.kind).toBe("VERIFIED");
     if (outcome.kind !== "VERIFIED") return;
 
@@ -643,14 +643,14 @@ describe("real T0 OBSERVE (offline)", () => {
       }),
     });
 
-    const first = await observer.observe(SEED_02);
+    const first = await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
     expect(first.kind).toBe("VERIFIED");
     if (first.kind !== "VERIFIED") return;
     const pred = MANIFEST.predecessor.role_relative_projection.seed_02_receiver;
     expect(first.projection.S).toBe(pred.S);
     expect(first.projection.B).toBe(pred.B);
 
-    const second = await observer.observe(SEED_02);
+    const second = await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
     expect(second.kind).toBe("VERIFIED");
     if (second.kind !== "VERIFIED") return;
     const tgt = MANIFEST.target.role_relative_projection.seed_02_sender;
@@ -698,10 +698,10 @@ describe("real T0 OBSERVE (offline)", () => {
       }),
     });
 
-    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
-    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
+    expect((await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE)).kind).toBe("VERIFIED");
+    expect((await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE)).kind).toBe("VERIFIED");
     // Anomalous relationship must never surface as VERIFIED (D1).
-    const third = await observer.observe(SEED_02);
+    const third = await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
     expect(third.kind).toBe("INDETERMINATE");
     if (third.kind === "INDETERMINATE") {
       expect(third.detail).toMatch(/REGRESSION/);
@@ -816,9 +816,9 @@ describe("real T0 OBSERVE (offline)", () => {
         },
       }),
     });
-    await observer.observe(SEED_02);
-    await observer.observe(SEED_02);
-    const outcome = await observer.observe(SEED_02);
+    await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
+    await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
+    const outcome = await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
     expect(outcome.kind).toBe("INDETERMINATE");
     expect(pool._anomalies[0]!.kind).toBe("REGRESSION");
   });
@@ -863,12 +863,12 @@ describe("real T0 OBSERVE (offline)", () => {
       gatewayUrls: [GATEWAY_A],
       exchange: syntheticGenesisExchange(),
     });
-    const first = await observer.observe(walletPk);
+    const first = await observer.observe(walletPk, RECEIVE_T0_OBSERVATION_ROLE);
     expect(first.kind).toBe("VERIFIED");
 
     // Re-simulate production later OBSERVE (e.g. landing): same stream writer, different bytes.
     // Cursor next_wallet_seq=2 so seq=1 UNIQUE collision is impossible.
-    const follow = await observer.observe(walletPk);
+    const follow = await observer.observe(walletPk, RECEIVE_T0_OBSERVATION_ROLE);
     // Genesis re-observation is byte-identical → SUPPRESS sighting (no new row), same tip id.
     expect(follow.kind).toBe("VERIFIED");
     if (first.kind === "VERIFIED" && follow.kind === "VERIFIED") {
@@ -903,8 +903,8 @@ describe("real T0 OBSERVE (offline)", () => {
       exchange: bad,
     });
     const wallet = mintTestWalletPublicKey();
-    const first = await observer.observe(wallet);
-    const second = await observer.observe(wallet);
+    const first = await observer.observe(wallet, RECEIVE_T0_OBSERVATION_ROLE);
+    const second = await observer.observe(wallet, RECEIVE_T0_OBSERVATION_ROLE);
     expect(first.kind).toBe("UNVERIFIED");
     expect(second.kind).toBe("UNVERIFIED");
     expect(pool._observations).toHaveLength(2);
@@ -1093,7 +1093,7 @@ describe("real T0 OBSERVE (offline)", () => {
       gatewayUrls: [GATEWAY_A],
       exchange: bad,
     });
-    await observer.observe(SEED_02);
+    await observer.observe(SEED_02, RECEIVE_T0_OBSERVATION_ROLE);
     expect(pool._anomalies[0]!.kind).toBe("MALFORMED_ENVELOPE");
     expect(pool._audits).toContain("anomaly.retain_raw_alert_no_sign");
   });

@@ -521,7 +521,7 @@ async function seedParkedSend(
     destination_address: DEST_PUBKEY,
     amount_zkz: AMOUNT_ZKZ,
     references_operation_id: null,
-  });
+  } as Parameters<typeof buildSendExternalExpectedArtifact>[0]);
   const artifactSignature = signText(artifactPreimage.preimageText, nodeIdentityPrivateKey);
 
   await pool.query(
@@ -773,7 +773,7 @@ function landerDeps(
     readFreshHead: createSqlFreshHeadReader({
       pool, nodeId, gatewayUrls: [GATEWAY_A], exchange,
     }),
-    store: createSqlExternalSendLandingStore(pool, sendSigners.get(nodeId)),
+    store: createSqlExternalSendLandingStore(pool, sendSigners.get(nodeId) ?? null),
     nodeId,
     deviceKeyStore: new InMemoryDeviceKeyStore(),
     // ZTR-1146: park path dual-chains operation.needs_attention with EVENT_SIGNING.
@@ -1422,7 +1422,7 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
 
       const unsigned = await tickSendCompletionLander({
         ...landerDeps(parked.nodeId, headExchange()),
-        store: createSqlExternalSendLandingStore(pool),
+        store: createSqlExternalSendLandingStore(pool, null),
       });
       expect(unsigned.landed).toEqual([]);
 

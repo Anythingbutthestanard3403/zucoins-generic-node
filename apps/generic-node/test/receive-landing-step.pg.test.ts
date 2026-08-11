@@ -454,7 +454,7 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
       step_2_preimage_text: TARGET_STEP2_PREIMAGE_TEXT,
       step_2_preimage_sha256: sha256HexOfText(TARGET_STEP2_PREIMAGE_TEXT),
     });
-    await advanceAttemptPhase(query, operationId, PARKED_ATTEMPT_PHASE, {
+    await advanceAttemptPhase(query, operationId, PARKED_ATTEMPT_PHASE as "STEP2_SIGNATURE_PERSISTED", {
       step_2_signature: MANIFEST.target.step_2_signature,
       completed_transaction_text: TARGET_SETTLED_TEXT,
       completed_transaction_sha256: sha256HexOfText(TARGET_SETTLED_TEXT),
@@ -499,7 +499,7 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
 
   /** The landing store bound to the seeded node's own EVENT_SIGNING signer. */
   function landingStoreFor(nodeId: string): ReceiveLandingStore {
-    return createSqlReceiveLandingStore(pool, signers.get(nodeId));
+    return createSqlReceiveLandingStore(pool, signers.get(nodeId) ?? null);
   }
 
   /** Both signed chains for one operation, in append order. */
@@ -1264,7 +1264,7 @@ describe.skipIf(!PG_AVAILABLE)("receive landing commit (disposable PG)", () => {
       // must ride with the status CAS, so it must not land at all.
       const unsignedRun = await runReceiveLandingStep({
         ...stepDeps(parked.nodeId, headExchange()),
-        store: createSqlReceiveLandingStore(pool),
+        store: createSqlReceiveLandingStore(pool, null),
       });
       expect(unsignedRun.landed).toEqual([]);
       expect(unsignedRun.indeterminate).toHaveLength(1);

@@ -63,7 +63,7 @@ describe("boot queue rebuild seeds (ZTR-1172 §7.7)", () => {
       listActiveLeases: async () => [],
       listNonterminalOperations: async () => [],
       listLeaseGroupOperations: async () => [],
-      listKeyCorrespondenceRows: async () => [],
+      listKeyCorrespondence: async () => [],
       listObservationCursors: async () => cursors,
       readRawResponseBytes: async (id) => (id === "obs-1" ? new Uint8Array(prior) : null),
       listQueuedReceiveOperationIds: async () => ["recv-1"],
@@ -102,7 +102,7 @@ describe("stream writer boot seed handoff (ZTR-1172 §7.7)", () => {
     let step = 0;
     const effects = createSqlStreamWriterEffects({
       sql: {
-        query: async () => {
+        query: (async () => {
           step += 1;
           if (step % 3 === 1) {
             return { rows: [{ last_recorded_observation_id: "obs-row-1" }] };
@@ -141,7 +141,7 @@ describe("stream writer boot seed handoff (ZTR-1172 §7.7)", () => {
               },
             ],
           };
-        },
+        }) as never,
       },
       project: () => {
         throw new Error("project unused in loadPrior-only test");
@@ -153,12 +153,14 @@ describe("stream writer boot seed handoff (ZTR-1172 §7.7)", () => {
 
     const prior = await effects.loadPrior({ observerId: "obs-1", walletPublicKey: "wallet-pk" });
     expect(prior).not.toBeNull();
-    expect(Buffer.from(prior!.lastRecorded.rawResponseBytes).equals(Buffer.from(seeded))).toBe(
+    if (prior === null) throw new Error("expected prior");
+    expect(Buffer.from(prior.lastRecorded!.rawResponseBytes).equals(Buffer.from(seeded))).toBe(
       true,
     );
 
     const prior2 = await effects.loadPrior({ observerId: "obs-1", walletPublicKey: "wallet-pk" });
-    expect(Buffer.from(prior2!.lastRecorded.rawResponseBytes).equals(Buffer.from(sqlRaw))).toBe(
+    if (prior2 === null) throw new Error("expected prior2");
+    expect(Buffer.from(prior2.lastRecorded!.rawResponseBytes).equals(Buffer.from(sqlRaw))).toBe(
       true,
     );
   });

@@ -85,6 +85,7 @@ describe("reporting list/stream/snapshot composition census (no PG)", () => {
 
   it("surface reports the reporting engines live + durable subscription_handles", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),
@@ -102,6 +103,7 @@ describe("reporting list/stream/snapshot composition census (no PG)", () => {
 
   it("AC: no reporting headers on GET /v1/events → 401 (credential gate still holds)", async () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),

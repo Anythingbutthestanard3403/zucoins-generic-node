@@ -463,10 +463,6 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   "vault/boot-canary.ts":
     "@zucoins/node-core:1 (vault unlock canary seal/unseal; no submit write call site)",
   "vault/root-kdf-salt.ts": "@zucoins/node-core:1 (root-KDF salt resolution; no submit write call site)",
-  // Recovery_verified ceremony pack (landed separately on main).
-  // Pre-existing gap, unrelated to this suite's slice; latent barrel reach only, no submit
-  // write call site.
-  "ops/sql-restored-instance.ts": "@zucoins/node-core:1 (recovery ceremony pack; no submit write call site)",
   // admin-SPA reporting credential surface. Value-imports
   // bootstrap/reporting-key-enrol.ts (issueReportingCredential), which reaches the barrel;
   // it names no submit factory or ledger — reporting credential issue/list only.

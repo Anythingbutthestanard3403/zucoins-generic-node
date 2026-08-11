@@ -21,13 +21,34 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import {
+// Plain .mjs manifest helper — pin the named surface via a single-module import cast.
+// @ts-expect-error plain .mjs has no emitted declarations
+import * as validateManifest from "../deploy/validate-manifest.mjs";
+type ParsedDeploymentManifest = {
+  readonly containerName: string;
+  readonly env: Map<string, { readonly kind: string; readonly secretName?: string; readonly secretKey?: string }>;
+  readonly podSecurityContext: { readonly runAsNonRoot: boolean };
+  readonly containerSecurityContext: { readonly readOnlyRootFilesystem: boolean };
+  readonly readinessPath: string;
+  readonly livenessPath: string;
+};
+
+const {
   parseDeploymentManifest,
   deriveSmokeEnv,
   ManifestError,
   MANDATORY_ENV,
   SECRET_FIELDS,
-} from "../deploy/validate-manifest.mjs";
+} = validateManifest as {
+  parseDeploymentManifest: (text: string) => ParsedDeploymentManifest;
+  deriveSmokeEnv: (
+    parsed: ParsedDeploymentManifest,
+    opts: { substitutions: unknown; secretValues: unknown },
+  ) => Record<string, string>;
+  ManifestError: new (...args: unknown[]) => Error;
+  MANDATORY_ENV: readonly string[];
+  SECRET_FIELDS: Map<string, string>;
+};
 import { loadCustodyNodeConfig, NodeConfigurationError } from "../src/config/index.js";
 import { PlaceholderSecretError } from "../src/config/placeholders.js";
 import { runBootLane, NodeReadiness, type SignerLeadershipHandle } from "../src/boot/index.js";
@@ -195,7 +216,7 @@ describe("manifest boots the real config + boot lane (AC#2)", () => {
     const gatewaySeen: string[][] = [];
     const readiness = new NodeReadiness(config.GATEWAY_READ_FAILURE_BUDGET);
     const makeHandle = (): SignerLeadershipHandle => ({
-      release: () => events.push("leadership:release"),
+      release: (): void => { events.push("leadership:release"); },
     });
     const result = await runBootLane({
       readiness,
@@ -239,7 +260,7 @@ describe("manifest boots the real config + boot lane (AC#2)", () => {
     expect(readiness.snapshot().ready).toBe(true);
   });
 
-  it.each(MANDATORY_ENV)(
+  it.each([...MANDATORY_ENV] as string[])(
     "refuses boot when %s is omitted (per-field fail-closed, before any DB/gateway work)",
     (field) => {
       const env = derivedEnv();

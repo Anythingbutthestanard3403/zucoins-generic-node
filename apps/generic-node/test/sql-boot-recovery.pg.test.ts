@@ -591,7 +591,7 @@ describe.skipIf(!PG_AVAILABLE)("SQL boot recovery store/actions (disposable PG)"
       [randomUUID(), nodeId, seeded.operationId, sha256HexOfText(`artifact-${seeded.operationId}`)],
     );
 
-    const { store } = createSqlBootRecovery(pool, logger);
+    const { store } = createSqlBootRecovery(pool, logger, {} as never);
     const ops = await store.listNonterminalOperations();
     const op = ops.find((o) => o.operationId === seeded.operationId);
     expect(op).toBeDefined();
@@ -609,7 +609,7 @@ describe.skipIf(!PG_AVAILABLE)("SQL boot recovery store/actions (disposable PG)"
       [randomUUID(), nodeId, seeded.operationId, sha256HexOfText(`step1-${seeded.operationId}`)],
     );
 
-    const { store } = createSqlBootRecovery(pool, logger);
+    const { store } = createSqlBootRecovery(pool, logger, {} as never);
     const ops = await store.listNonterminalOperations();
     const op = ops.find((o) => o.operationId === seeded.operationId);
     expect(op).toBeDefined();

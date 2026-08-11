@@ -55,7 +55,7 @@ function makeSql(initial: string | null = null): {
         const key = String(params?.[0] ?? "");
         const value = store.get(key);
         return {
-          rows: (value === undefined ? [] : [{ setting_value: value }]) as T[],
+          rows: (value === undefined ? [] : [{ setting_value: value }]) as unknown as T[],
         };
       }
       if (text.includes("INSERT INTO node_settings")) {

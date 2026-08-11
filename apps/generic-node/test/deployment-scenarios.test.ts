@@ -226,10 +226,12 @@ describe("deployment scenario 2 — schema mismatch (migration rejects)", () => 
       pingDb: surfaceNotYetWired("database adapter"),
     });
     const events: string[] = [];
-    const deps = happyDeps(readiness, events);
-    deps.runMigrations = async () => {
-      events.push("migrations:attempt");
-      throw new Error("schema version 7 is incompatible with release 6 (migration 0042)");
+    const deps = {
+      ...happyDeps(readiness, events),
+      runMigrations: async () => {
+        events.push("migrations:attempt");
+        throw new Error("schema version 7 is incompatible with release 6 (migration 0042)");
+      },
     };
 
     const result = await runBootLane(deps);
@@ -614,8 +616,10 @@ describe("deployment scenario 8 — restart (re-run from step 1, no stale state)
   it("re-executes the lane from migrations with fresh readiness gates after a stub failure", async () => {
     const firstReadiness = new NodeReadiness(3);
     const firstEvents: string[] = [];
-    const firstDeps = happyDeps(firstReadiness, firstEvents);
-    firstDeps.unlockVault = surfaceNotYetWired("vault unlock");
+    const firstDeps = {
+      ...happyDeps(firstReadiness, firstEvents),
+      unlockVault: surfaceNotYetWired("vault unlock"),
+    };
 
     const first = await runBootLane(firstDeps);
     expect(first.ready).toBe(false);
@@ -697,8 +701,10 @@ describe("deployment scenario 8 — restart (re-run from step 1, no stale state)
 
     // First boot fails closed at the vault step.
     const firstEvents: string[] = [];
-    const failing = makeDeps(new NodeReadiness(3), firstEvents);
-    failing.unlockVault = surfaceNotYetWired("vault unlock");
+    const failing = {
+      ...makeDeps(new NodeReadiness(3), firstEvents),
+      unlockVault: surfaceNotYetWired("vault unlock"),
+    };
     const first = await runBootLane(failing);
     expect(first.ready).toBe(false);
     expect(firstEvents).toEqual(["migrations"]);

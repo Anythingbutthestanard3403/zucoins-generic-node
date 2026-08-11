@@ -182,12 +182,13 @@ describe("signer leadership wiring (readiness gate)", () => {
   function lockPool(grantOnAttempt: number): LeadershipLockPool {
     let attempt = 0;
     return {
-      connect: async () => ({
-        query: async () => ({ rows: [{ locked: ++attempt >= grantOnAttempt }] }),
-        on: () => {},
-        removeListener: () => {},
-        release: () => {},
-      }),
+      connect: async () =>
+        ({
+          query: async () => ({ rows: [{ locked: ++attempt >= grantOnAttempt }] }),
+          on: () => {},
+          removeListener: () => {},
+          release: () => {},
+        }) as never,
     };
   }
 
@@ -250,12 +251,13 @@ describe("acquireSignerLeadershipWithBoundedRetry (rolling-deploy handover; ZPAY
   function lockPool(grantOnAttempt: number): LeadershipLockPool {
     let attempt = 0;
     return {
-      connect: async () => ({
-        query: async () => ({ rows: [{ locked: ++attempt >= grantOnAttempt }] }),
-        on: () => {},
-        removeListener: () => {},
-        release: () => {},
-      }),
+      connect: async () =>
+        ({
+          query: async () => ({ rows: [{ locked: ++attempt >= grantOnAttempt }] }),
+          on: () => {},
+          removeListener: () => {},
+          release: () => {},
+        }) as never,
     };
   }
 
@@ -427,7 +429,7 @@ describe("boot recovery wiring", () => {
     const readiness = new NodeReadiness(3);
     const deps = { ...happyDeps(events, readiness) } as Record<string, unknown>;
     delete deps.runBootRecovery;
-    const result = await runBootLane(deps as Parameters<typeof runBootLane>[0]);
+    const result = await runBootLane(deps as unknown as Parameters<typeof runBootLane>[0]);
     expect(result.ready).toBe(false);
     expect(result.failedStep).toBe("boot-recovery");
     expect(events).toContain("gateway-read"); // deploy-ready before leadership (ZPAY-252)
@@ -463,7 +465,7 @@ describe("boot recovery wiring", () => {
         ...happyDeps(events, readiness),
         runBootRecovery: async () => {
           events.push("boot-recovery");
-          return report as { ready: boolean; invariantBreach: boolean };
+          return report as unknown as { ready: boolean; invariantBreach: boolean };
         },
       };
       const result = await runBootLane(deps);

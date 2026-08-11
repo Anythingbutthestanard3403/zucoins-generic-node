@@ -108,7 +108,7 @@ describe("continuity markers", () => {
             rows: [{ lifecycle_epoch: "7", nonce_burn_high_water: "42", terminal_event_hash: HASH }],
           };
         },
-      },
+      } as never,
       "11111111-1111-4111-8111-111111111111",
     );
     expect(snapshot).toEqual({ lifecycleEpoch: 7n, nonceBurnHighWater: 42n, terminalEventHash: HASH });

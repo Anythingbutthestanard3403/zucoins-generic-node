@@ -147,6 +147,7 @@ const uniquePubkey = (): string => `${randomUUID().replace(/-/g, "")}AAAAAAAAAAA
 describe("production factory binds durable reporting (no PG)", () => {
   it("createProductionRouteSurface constructs DurableReportingRequestStore", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: randomUUID(),
       pool: { query: async () => ({ rows: [] }), connect: async () => ({}) } as never,
@@ -436,6 +437,7 @@ describe.skipIf(!PG_AVAILABLE)(
         await seedOpenAdmission(nodeId, implementerId, keyId);
 
         const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
           vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
           nodeId,
           pool,

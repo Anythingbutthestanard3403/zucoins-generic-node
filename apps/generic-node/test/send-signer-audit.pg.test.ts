@@ -334,7 +334,7 @@ describe.skipIf(!PG_AVAILABLE)("signer_audit — SEND production wiring (real PG
     async () => {
       const seeded = await seedSendForSigning();
 
-      const before = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+      const before = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
       expect(before.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(false);
 
       await seedActiveSendSourceLease(seeded);
@@ -349,7 +349,7 @@ describe.skipIf(!PG_AVAILABLE)("signer_audit — SEND production wiring (real PG
         node_id: seeded.nodeId, outcome: "SUCCEEDED", purpose: "STEP_1", lease_epoch: "1",
       });
 
-      const after = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+      const after = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
       expect(after.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(true);
     },
   );
@@ -367,7 +367,7 @@ describe.skipIf(!PG_AVAILABLE)("signer_audit — SEND production wiring (real PG
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ node_id: seeded.nodeId, outcome: "FAILED", purpose: "STEP_1" });
 
-      const after = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+      const after = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
       expect(after.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(true);
     },
   );

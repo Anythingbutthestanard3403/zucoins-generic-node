@@ -475,8 +475,8 @@ describe("admin inventory HTTP (contract)", () => {
     expect(OBSERVED_BALANCE_SQL_FRAGMENT).not.toContain("observation_records");
 
     const captured: { text: string; params: readonly unknown[] | undefined }[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, params) {
+    const sql = {
+      async query(text: string, params?: readonly unknown[]) {
         captured.push({ text, params });
         if (text.includes("gateway_observations")) {
           return { rows: [{ b_amount: "3.50" }] };
@@ -484,7 +484,7 @@ describe("admin inventory HTTP (contract)", () => {
         return { rows: [] };
       },
     };
-    const bal = await loadObservedBalance(sql, WALLET_ID);
+    const bal = await loadObservedBalance(sql as InventorySqlExecutor, WALLET_ID);
     expect(bal).toBe("3.50");
     expect(captured).toHaveLength(1);
     expect(captured[0]!.text).toContain("gateway_observations");
@@ -494,8 +494,8 @@ describe("admin inventory HTTP (contract)", () => {
     expect(captured[0]!.params).toEqual([WALLET_ID]);
 
     // createSqlAdminInventoryStore must surface that balance on wallet reads.
-    const walletSql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const walletSql = {
+      async query(text: string, _params?: readonly unknown[]) {
         if (text.includes("FROM wallets") && text.includes("LIMIT")) {
           return {
             rows: [
@@ -523,7 +523,7 @@ describe("admin inventory HTTP (contract)", () => {
         return { rows: [] };
       },
     };
-    const store = createSqlAdminInventoryStore(walletSql);
+    const store = createSqlAdminInventoryStore(walletSql as InventorySqlExecutor);
     const wallet = await store.getWallet(NODE_ID, WALLET_ID);
     expect(wallet).not.toBeNull();
     expect(wallet!.observed_balance_zkz).toBe("9.01");
@@ -535,14 +535,14 @@ describe("admin inventory HTTP (contract)", () => {
   it("D2: SQL listAudit uses id keyset for after= (timestamptz is created_*)", async () => {
     const texts: string[] = [];
     const paramsLog: unknown[][] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, params) {
+    const sql = {
+      async query(text: string, params?: readonly unknown[]) {
         texts.push(text);
         paramsLog.push([...(params ?? [])]);
         return { rows: [] };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     await store.listAudit(NODE_ID, {
       after: AUDIT_ID,
       created_after: "2026-01-01T00:00:00.000Z",
@@ -566,8 +566,8 @@ describe("admin inventory HTTP (contract)", () => {
     // pins the column in the query text and the value through the row mapper, which is the pair
     // that has to move together for the operator's destination column to show anything.
     const texts: string[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const sql = {
+      async query(text: string, _params?: readonly unknown[]) {
         texts.push(text);
         return {
           rows: [
@@ -601,7 +601,7 @@ describe("admin inventory HTTP (contract)", () => {
         };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     const page = await store.listOperations(NODE_ID, { limit: 10 });
 
     expect(texts).toHaveLength(1);
@@ -625,8 +625,8 @@ describe("admin inventory HTTP (contract)", () => {
 
   it("D3: SQL listWallets projects custody + observed balance path", async () => {
     const texts: string[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const sql = {
+      async query(text: string, _params?: readonly unknown[]) {
         texts.push(text);
         if (text.includes("FROM wallets")) {
           return {
@@ -652,7 +652,7 @@ describe("admin inventory HTTP (contract)", () => {
         return { rows: [] };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     const page = await store.listWallets(NODE_ID, { limit: 10 });
 
     const walletSelect = texts.find((t) => t.includes("FROM wallets"));
@@ -668,8 +668,8 @@ describe("admin inventory HTTP (contract)", () => {
 
   it("D3: SQL listDestinations projects blessing ids (SELECT + mapDestRow)", async () => {
     const texts: string[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const sql = {
+      async query(text: string, _params?: readonly unknown[]) {
         texts.push(text);
         return {
           rows: [
@@ -692,7 +692,7 @@ describe("admin inventory HTTP (contract)", () => {
         };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     const page = await store.listDestinations(NODE_ID, { limit: 10 });
 
     expect(texts).toHaveLength(1);

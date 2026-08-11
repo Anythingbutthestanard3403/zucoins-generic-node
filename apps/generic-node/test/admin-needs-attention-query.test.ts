@@ -46,20 +46,22 @@ async function authedRouter(listNeedsAttention = vi.fn(async () => [])) {
     new InMemoryAdminSessionStore(),
     userStore,
   );
-  const deps = createFailClosedAdminRouteDeps({
-    sessions,
-    userStore,
-    csrf: { allowedOrigins: ["https://node.example"] },
-    totp: { secret: new Uint8Array(32), windowSteps: 1 },
-    nodeId: NODE_ID,
-    destinationService: createFailClosedDestinationService(),
-    newRequestId: () => "req-needs-attention-query",
-  });
-  deps.recoveryStore = {
-    listNeedsAttention,
-    loadRecoveryFacts: async () => null,
-    issueRecoveryNonce: async () => {
-      throw new Error("unused");
+  const deps = {
+    ...createFailClosedAdminRouteDeps({
+      sessions,
+      userStore,
+      csrf: { allowedOrigins: ["https://node.example"] },
+      totp: { secret: new Uint8Array(32), windowSteps: 1 },
+      nodeId: NODE_ID,
+      destinationService: createFailClosedDestinationService(),
+      newRequestId: () => "req-needs-attention-query",
+    }),
+    recoveryStore: {
+      listNeedsAttention,
+      loadRecoveryFacts: async () => null,
+      issueRecoveryNonce: async () => {
+        throw new Error("unused");
+      },
     },
   };
   const router = createAdminRouter(deps);

@@ -1,0 +1,41 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": "../..",
+    "types": [
+      "node"
+    ],
+    "skipLibCheck": true,
+    "paths": {
+      "@zucoins/node-core": [
+        "../../packages/node-core/src/index.ts"
+      ],
+      "@zucoins/node-core/*": [
+        "../../packages/node-core/src/*"
+      ],
+      "@zucoins/generic-node-contracts": [
+        "../../packages/generic-node-contracts/src/index.ts"
+      ],
+      "@zucoins/generic-node-contracts/*": [
+        "../../packages/generic-node-contracts/src/*"
+      ]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "test/types/**/*.d.ts",
+    "../../packages/node-core/test/pg-required-guard.ts",
+    "../../packages/node-core/test/fixtures/**/*.ts",
+    "../../packages/generic-node-contracts/src/pool-policy/sizing.ts",
+    "../../packages/node-core/src/push/http-ece.d.ts"
+  ],
+  "exclude": [
+    "admin/**"
+  ]
+}

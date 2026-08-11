@@ -248,7 +248,6 @@ async function login(
   const password = "correct-horse-battery-staple";
   const user: AdminUser = {
     id: randomUUID(),
-    nodeId: NODE_ID,
     username: "admin",
     passwordHash: await hashPassword(password),
     role: "admin",

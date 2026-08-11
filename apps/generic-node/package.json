@@ -17,7 +17,9 @@
     "build:ui": "pnpm --filter @zucoins/generic-node-ui build",
     "build:all": "pnpm run build:ui && pnpm run build",
     "generate-secrets": "node ./scripts/generate-secrets.mjs",
-    "test:generate-secrets": "vitest run scripts/generate-secrets.test.mjs"
+    "test:generate-secrets": "vitest run scripts/generate-secrets.test.mjs",
+    "typecheck": "tsc -b && tsc -p tsconfig.tests.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.tests.json --noEmit"
   },
   "dependencies": {
     "@libpg-query/parser": "^17.6.10",

@@ -952,6 +952,17 @@ const RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN = 10;
 const RECOVERY_SECRET_MAX_CLASS_PAIR_RUN = 6;
 const RECOVERY_SECRET_MAX_KEYBOARD_RUN = 5;
 const RECOVERY_SECRET_MAX_STRIDED_MONOTONE_RUN = 6;
+/** Mirrors node RECOVERY_PACK_* human-pattern class floor (ZTR-1220 r5). */
+const RECOVERY_SECRET_MAX_DIGIT_RUN = 8;
+const RECOVERY_SECRET_MAX_LATIN_VOWEL_FRAC = 0.4;
+const RECOVERY_SECRET_MIN_LETTERS_FOR_VOWEL_GUARD = 18;
+const RECOVERY_SECRET_MAX_ENGLISH_BIGRAM_HITS = 10;
+const RECOVERY_SECRET_MAX_ENGLISH_TRIGRAM_HITS = 3;
+const RECOVERY_SECRET_MIN_ENGLISH_COVER_LETTERS = 8;
+const RECOVERY_SECRET_MIN_ENGLISH_COVER_WITH_VOWEL = 6;
+const RECOVERY_SECRET_MIN_VOWEL_FRAC_WITH_COVER = 0.34;
+const RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTERS = 14;
+const RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTER_FRAC = 0.55;
 /** Hard redraw ceiling — throw rather than emit a structure-failing secret. */
 const RECOVERY_SECRET_MAX_DRAW_ATTEMPTS = 64;
 
@@ -1211,6 +1222,228 @@ const RECOVERY_SECRET_LEET_FOLD: Readonly<Record<string, string>> = {
  * Keep byte-identical rejection class so the SPA never posts a secret the node
  * would answer 400 weak_recovery_secret for.
  */
+/** Classic English bigrams — mirror of node OPEN_ENGLISH_BIGRAMS. */
+const RECOVERY_SECRET_OPEN_BIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "TH HE IN ER AN RE ON EN AT ND ED ES NT HA TO OU EA NG AS OR TI IS ET IT AR TE SE HI OF " +
+    "DE RO LE SA ME NE CE RA IC NS RI IO WE VE WA TA CA MA BE PE KE YE ST CK WH GH SH CH " +
+    "BR CR DR FR GR PR TR WR BL CL FL GL PL SL SM SN SP SW TW SC SK QU"
+  ).split(/\s+/),
+);
+
+const RECOVERY_SECRET_OPEN_TRIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "THE AND ING HER HAT HIS THA ERE FOR ENT ION HAS NTH TIO ALL VER TER EST THI CON RES " +
+    "PRO ARE OUT PER ECT ONE OUR ITH FRO MEN TED ERS ATH EVE OME COM ATE IVE RED"
+  ).split(/\s+/),
+);
+
+const RECOVERY_SECRET_OPEN_WORDS_RAW: readonly string[] = (
+  "THAT WITH HAVE THIS WILL YOUR FROM THEY KNOW WANT BEEN GOOD MUCH SOME TIME VERY WHEN COME HERE JUST LIKE LONG MAKE MANY MORE ONLY OVER SUCH TAKE THAN THEM WELL WERE " +
+  "ABOUT AFTER AGAIN BEING EVERY FIRST GREAT HOUSE LARGE NEVER OTHER PLACE POINT RIGHT SMALL SOUND STILL THEIR THESE THING THINK THREE UNDER WATER WHERE WHICH WORLD WOULD WRITE " +
+  "PEOPLE SCHOOL MOTHER FATHER FAMILY FRIEND SECOND NUMBER ALWAYS AROUND BECAUSE BEFORE CHANGE DURING FOLLOW HAPPEN LETTER NATURE PICTURE SHOULD ANIMAL BROTHER SISTER " +
+  "APPLE ORANGE BANANA TABLE CHAIR HOUSE WATER CRYSTAL RIVER OCEAN BEACH MOUNTAIN FOREST STORM CLOUD NIGHT LIGHT DREAM " +
+  "NORTH SOUTH EAST WEST CENTER KING QUEEN PRINCE KNIGHT CASTLE DRAGON SWORD MAGIC SPELL WIZARD " +
+  "MUSIC DANCE SONG MOVIE BOOK STORY POEM PLAY GAME SPORT TEAM BALL GOAL SCORE " +
+  "PHONE EMAIL MESSAGE MEDIA VIDEO PHOTO CAMERA SCREEN COMPUTER " +
+  "MONEY POWER TRUTH JUSTICE PEACE FREEDOM ACCESS TOKEN SECRET MASTER PASSWORD PRIVATE PUBLIC " +
+  "NETWORK SERVER SYSTEM BACKUP RECOVERY CORRECT HORSE BATTERY STAPLE PLEASE WINTER SUMMER " +
+  "LONDON PARIS TOKYO BERLIN YORK CITY TOWN COUNTRY EARTH SPACE PLANET " +
+  "BLACK WHITE GREEN YELLOW PURPLE BROWN ORANGE ANSWER QUICK BROWN JUMPS OVER LAZY " +
+  "EXPRESS TRAIN PLANE CAKE PORTAL STYLE WAND WARS STAR PEPPER SALT SUGAR BREAD " +
+  "SPHINX QUARTZ VORTEX CYBER SECURITY RAIN SPAIN FALLS BACK FRONT LEFT RIGHT " +
+  "HUMAN HEART SPEAK FORCE NEVER THING HEAVEN " +
+  "PART PRESS PORT HAND LAND HARD FIRE WIRE BALL CALL FALL BELL CELL BILL FILL " +
+  "BEST REST WEST CASE BASE DARK MARK PARK DATE FATE GATE HATE LATE RATE " +
+  "DEAL REAL SEAL DEAR FEAR HEAR NEAR YEAR DEEP KEEP FEED NEED SEED " +
+  "FILE MILE TIME FINE LINE MINE NINE FIND KIND MIND FIRM FISH LIST " +
+  "FLAG FLAT FLOW SLOW SHOW FOLD GOLD HOLD FOOD GOOD WOOD FOOL POOL FOOT ROOT " +
+  "FORM FORT FOUR YOUR FREE TREE FROM FULL GAIN MAIN PAIN RAIN GAME NAME SAME " +
+  "GATE GAVE GIFT GIRL GIVE GLAD GLOW GOAL GOLD GONE GOOD GRAB GRAY GREW GROW " +
+  "HARD HARM HATE HAVE HEAD LEAD READ HEAL HEAR HEAT MEAT HELD HELP HERE HERO " +
+  "HIDE RIDE SIDE WIDE HIGH HIKE LIKE HILL HINT HOLD HOLE HOME HOPE HORN HOST MOST " +
+  "HOUR YOUR HUGE HUNT HURT IRON ITEM JOIN JUMP JUST KEEP KIND KING RING SING " +
+  "LACK PACK LAKE MAKE TAKE LAND LANE LAST LATE LAZY LEAD LEAF LEAK PEAK WEAK " +
+  "LEFT LEND SEND LESS LIFE WIFE LIFT LIKE LIME TIME LINE LINK LIST LIVE LOAD ROAD " +
+  "LOCK LONG SONG LOOK TOOK LORD LOSE LOSS LOST LOUD LOVE LUCK MADE MAIL MAIN MAKE " +
+  "MALE MANY MARK MASS MATE MATH MEAL MEAN MEAT MEET MELT MENU MESS MILE MILK MILL " +
+  "MIND MINE MINT MISS MIST MODE MOOD MOON SOON MORE MOST MOVE MUCH MUST NAME NAVY " +
+  "NEAR NEAT NECK NEED NEST NEWS NEXT NICE NINE NODE NONE NOSE ROSE NOTE VOTE ONCE " +
+  "ONLY OPEN OVER PACE PACK PAGE PAID PAIN PAIR PALE PARK PART PASS PAST PATH PEAK " +
+  "PICK PILE PINE PINK PIPE PLAN PLAY PLOT PLUS POEM POET POLE POND POOL POOR PORT " +
+  "POSE POST PRAY PULL PUMP PURE PUSH RACE RACK RAGE RAID RAIL RAIN RANK RARE RATE " +
+  "READ REAL REAR REED REEL RENT REST RICE RICH RIDE RING RISE RISK ROAD ROCK ROLE " +
+  "ROLL ROOF ROOM ROOT ROPE ROSE RULE RUSH RUST SAFE SAID SAIL SALE SALT SAME SAND " +
+  "SAVE SEAL SEAM SEAT SEED SEEK SEEM SEEN SELF SELL SEND SENT SHIP SHOP SHOT SHOW " +
+  "SHUT SICK SIDE SIGN SILK SING SINK SITE SIZE SKIN SKIP SLIP SLOW SNOW SOAP SOFT " +
+  "SOIL SOLD SOLE SOME SONG SOON SORE SORT SOUL SOUP SOUR SPAN STAR STAY STEM STEP " +
+  "STOP SUCH SUIT SURE SURF SWIM TACK TAIL TAKE TALE TALK TALL TAME TANK TAPE TASK " +
+  "TEAM TEAR TELL TEND TENT TERM TEST TEXT THAN THAT THEM THEN THEY THIN THIS TICK " +
+  "TIDE TILE TILL TIME TIRE TOLD TOLL TONE TOOK TOOL TORN TOSS TOUR TOWN TRAP TRAY " +
+  "TREE TRIM TRIP TRUE TUBE TUNE TURN TYPE UNIT UPON URGE USED USER VAIN VARY VASE " +
+  "VAST VERY VEST VETO VIEW VINE VOID VOTE WAGE WAIT WAKE WALK WALL WAND WANT WARD " +
+  "WARM WARN WASH WAVE WEAK WEAR WEEK WELL WENT WERE WEST WHAT WHEN WHIP WIDE WIFE " +
+  "WILD WILL WIND WINE WING WIPE WIRE WISE WISH WITH WOOD WORD WORE WORK WORN WRAP " +
+  "YEAR YELL YOUR ZERO ZONE WART PRESS GANG"
+).split(/\s+/);
+
+function buildRecoverySecretOpenTokens(): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const raw of RECOVERY_SECRET_OPEN_WORDS_RAW) {
+    const w = raw.toUpperCase();
+    if (w.length >= 4) out.add(w);
+    const crock = w.replace(/O/g, "0").replace(/[IL]/g, "1").replace(/U/g, "V");
+    let letters = "";
+    for (const c of crock) {
+      if (c >= "A" && c <= "Z") letters += c;
+    }
+    if (letters.length >= 4) out.add(letters);
+  }
+  return out;
+}
+
+const RECOVERY_SECRET_OPEN_TOKENS: ReadonlySet<string> = buildRecoverySecretOpenTokens();
+
+const RECOVERY_SECRET_MATH_CONST_DIGITS: readonly string[] = [
+  "31415926535897932384626433832795",
+  "27182818284590452353602874713526",
+  "14142135623730950488016887242096",
+];
+
+const RECOVERY_SECRET_ENGLISH_LEET: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "2": "Z",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "6": "G",
+  "7": "T",
+  "8": "B",
+  "9": "G",
+};
+
+function recoverySecretLatinSkeleton(secret: string): string {
+  let out = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") out += c;
+    else {
+      const folded = RECOVERY_SECRET_ENGLISH_LEET[c];
+      if (folded !== undefined) out += folded;
+    }
+  }
+  return out;
+}
+
+function recoverySecretEnglishCover(skel: string): number {
+  const n = skel.length;
+  if (n < 4) return 0;
+  const dp = new Array<number>(n + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    if (dp[i]! > dp[i + 1]!) dp[i + 1] = dp[i]!;
+    for (let len = 4; len <= Math.min(12, n - i); len++) {
+      if (RECOVERY_SECRET_OPEN_TOKENS.has(skel.slice(i, i + len))) {
+        const next = dp[i]! + len;
+        if (next > dp[i + len]!) dp[i + len] = next;
+      }
+    }
+  }
+  return dp[n]!;
+}
+
+function recoverySecretHumanPatternFail(secret: string): boolean {
+  // Digit-constant / long digit-run structure.
+  {
+    let maxD = 0;
+    let run = 0;
+    let head = 0;
+    for (let i = 0; i < secret.length; i++) {
+      const c = secret[i]!;
+      if (c >= "0" && c <= "9") {
+        run += 1;
+        if (run > maxD) maxD = run;
+        if (i === head) head += 1;
+      } else {
+        run = 0;
+      }
+    }
+    if (maxD >= RECOVERY_SECRET_MAX_DIGIT_RUN || head >= RECOVERY_SECRET_MAX_DIGIT_RUN) {
+      return true;
+    }
+    const digits = [...secret].filter((c) => c >= "0" && c <= "9").join("");
+    if (digits.length >= 8) {
+      for (const prefix of RECOVERY_SECRET_MATH_CONST_DIGITS) {
+        for (let len = 8; len <= Math.min(digits.length, prefix.length); len++) {
+          for (let i = 0; i <= digits.length - len; i++) {
+            if (prefix.includes(digits.slice(i, i + len))) return true;
+          }
+        }
+      }
+    }
+  }
+
+  const letterSk = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
+  const latinSk = recoverySecretLatinSkeleton(secret);
+  const skeletons = [letterSk, latinSk];
+  if (letterSk.length > 0) skeletons.push([...letterSk].reverse().join(""));
+  if (latinSk.length > 0) skeletons.push([...latinSk].reverse().join(""));
+
+  let cover = 0;
+  let bigrams = 0;
+  let trigrams = 0;
+  for (const sk of skeletons) {
+    const c = recoverySecretEnglishCover(sk);
+    if (c > cover) cover = c;
+    let b = 0;
+    let t = 0;
+    for (let i = 0; i < sk.length - 1; i++) {
+      if (RECOVERY_SECRET_OPEN_BIGRAMS.has(sk.slice(i, i + 2))) b += 1;
+    }
+    for (let i = 0; i < sk.length - 2; i++) {
+      if (RECOVERY_SECRET_OPEN_TRIGRAMS.has(sk.slice(i, i + 3))) t += 1;
+    }
+    if (b > bigrams) bigrams = b;
+    if (t > trigrams) trigrams = t;
+  }
+
+  const letters = letterSk.length;
+  const letterFrac = secret.length === 0 ? 0 : letters / secret.length;
+  const vowelOf = (sk: string): number => {
+    if (sk.length === 0) return 0;
+    let v = 0;
+    for (const c of sk) {
+      if (c === "A" || c === "E" || c === "I" || c === "O" || c === "U" || c === "Y") v += 1;
+    }
+    return v / sk.length;
+  };
+  const vowelFrac = Math.max(vowelOf(letterSk), vowelOf(latinSk));
+
+  if (
+    /20[0-2]\d/.test(secret) &&
+    /(?:KEY|ABC)/.test(secret) &&
+    letters >= RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTERS &&
+    letterFrac >= RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTER_FRAC
+  ) {
+    return true;
+  }
+  if (
+    vowelFrac >= RECOVERY_SECRET_MAX_LATIN_VOWEL_FRAC &&
+    letters >= RECOVERY_SECRET_MIN_LETTERS_FOR_VOWEL_GUARD
+  ) {
+    return true;
+  }
+  if (trigrams >= RECOVERY_SECRET_MAX_ENGLISH_TRIGRAM_HITS) return true;
+  if (bigrams >= RECOVERY_SECRET_MAX_ENGLISH_BIGRAM_HITS) return true;
+  if (cover >= RECOVERY_SECRET_MIN_ENGLISH_COVER_LETTERS) return true;
+  if (
+    cover >= RECOVERY_SECRET_MIN_ENGLISH_COVER_WITH_VOWEL &&
+    vowelFrac >= RECOVERY_SECRET_MIN_VOWEL_FRAC_WITH_COVER
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** @internal exported for parity tests with node recoverySecretWeakness. */
 export function recoveryPackSecretStructureOk(secret: string): boolean {
   if (secret.length !== RECOVERY_SECRET_CHARS) return false;
@@ -1453,6 +1686,9 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
       }
     }
   }
+
+  // Non-list human-pattern class (ZTR-1220 r5) — mirror of node hasHumanPatternClass.
+  if (recoverySecretHumanPatternFail(secret)) return false;
 
   return true;
 }

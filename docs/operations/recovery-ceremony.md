@@ -122,10 +122,13 @@ key. Creation accepts only that shape: exactly 26 Crockford-base32 characters
 (0-9 A-Z except I/L/O/U), with structure guards against exact and near-period tiles,
 same-character / paired-double blocks, constant-step and strided / broken sequential
 runs (including Fibonacci digit prefixes), long letter-only runs, digit/letter
-alternation and pair sequences, keyboard row/column/diagonal walks, and digit-broken
-or reversed dictionary / media / passphrase skeletons (ZTR-1220). A free-form
-passphrase — including Crockford-mapped, digit-broken, or reversed dictionary phrases
-— is refused at create; do not invent one.
+alternation and pair sequences, keyboard row/column/diagonal walks, digit-broken
+or reversed dictionary / media / passphrase skeletons, and the non-list human-pattern
+class (math digit constants such as π, ceremony year+KEY/ABC mnemonic pads, high
+Latin-vowel letter skeletons, open English n-gram density, open-lexicon cover)
+(ZTR-1220). A free-form passphrase — including Crockford-mapped, digit-broken,
+reversed dictionary phrases, or off-list English/media/geo mnemonics — is refused
+at create; do not invent one.
 
 Store the pack the way you would store a wallet backup, and store the vault root KDF salt
 with it — see [`restore.md`](restore.md).

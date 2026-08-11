@@ -247,6 +247,40 @@ describe("recovery secret entropy floor", () => {
     }
   });
 
+  it("refuses Review B r4 residual off-list English/media/geo/π human-pattern class", () => {
+    // Opposed bar from tasks/ztr-1220-review-B-r4.md — finite dict arms race residual.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character|human pattern/;
+    const residuals = [
+      "THECAKE1SA11EP0RTA12024XXA",
+      "H0GWARTSEXPRESS2024KEYABXA",
+      "GANGNAMSTY1E2024KEYABCDEXA",
+      "HARRYP0TTERWAND2024KEYABXA",
+      "STARWARSJED1K1GHT2024ABXAB",
+      "GAME0FTHR0NES2024KEYABCXXA",
+      "314159265358979323846ABCDA",
+      "TAB1ECHA1RH0VSEWATER2024XA",
+      "NEWY0RKC1TY2024KEYABCDEXAB",
+      "SPH1NX0FB1ACKQVARTZ2024XXA",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      const weakness = recoverySecretWeakness(secret);
+      expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
+      expect(weakness).toMatch(residualWant);
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r4 residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
   it("accepts the generated secret", () => {
     expect(recoverySecretWeakness(SECRET)).toBeNull();
     for (let i = 0; i < 25; i++) {

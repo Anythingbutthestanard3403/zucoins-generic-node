@@ -800,6 +800,293 @@ function hasFibonacciDigitRun(secret: string): boolean {
 }
 
 /**
+ * Non-list human-pattern class floor (ZTR-1220 r5 / Review B r4).
+ * Finite dictionary / media allowlists alone leave an arms race: the next
+ * English/media/geo/song mnemonic still seals. These guards are class-level:
+ * digit-constant heads (π/e/√2), ceremony mnemonic pad shape, high Latin-vowel
+ * letter skeletons, open English n-gram density, and open-lexicon cover — not a
+ * ticket-by-ticket phrase list.
+ */
+/** Long digit run (head or internal) that is not a CSPRNG shape. */
+export const RECOVERY_PACK_MAX_DIGIT_RUN = 8;
+/** Latin-vowel fraction (A E I O U Y on leet-folded skeleton) above which a letter-heavy secret is English-like. */
+export const RECOVERY_PACK_MAX_LATIN_VOWEL_FRAC = 0.4;
+/** Minimum letter-skeleton length paired with the vowel-fraction guard. */
+export const RECOVERY_PACK_MIN_LETTERS_FOR_VOWEL_GUARD = 18;
+/** Open English bigram hits on a skeleton at/above this density → reject. */
+export const RECOVERY_PACK_MAX_ENGLISH_BIGRAM_HITS = 10;
+/** Open English trigram hits on a skeleton at/above this density → reject. */
+export const RECOVERY_PACK_MAX_ENGLISH_TRIGRAM_HITS = 3;
+/** Letters covered by non-overlapping open-lexicon tokens → reject. */
+export const RECOVERY_PACK_MIN_ENGLISH_COVER_LETTERS = 8;
+/** Cover + elevated vowel fraction (compound nouns without year pad). */
+export const RECOVERY_PACK_MIN_ENGLISH_COVER_WITH_VOWEL = 6;
+export const RECOVERY_PACK_MIN_VOWEL_FRAC_WITH_COVER = 0.34;
+/** Letter count / fraction for year+KEY/ABC ceremony mnemonic pad. */
+export const RECOVERY_PACK_MIN_MNEMONIC_PAD_LETTERS = 14;
+export const RECOVERY_PACK_MIN_MNEMONIC_PAD_LETTER_FRAC = 0.55;
+
+/** Classic English bigrams (open model; Crockford-safe matching uses letter/leet skeletons). */
+const OPEN_ENGLISH_BIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "TH HE IN ER AN RE ON EN AT ND ED ES NT HA TO OU EA NG AS OR TI IS ET IT AR TE SE HI OF " +
+    "DE RO LE SA ME NE CE RA IC NS RI IO WE VE WA TA CA MA BE PE KE YE ST CK WH GH SH CH " +
+    "BR CR DR FR GR PR TR WR BL CL FL GL PL SL SM SN SP SW TW SC SK QU"
+  ).split(/\s+/),
+);
+
+/** Classic English trigrams (open model). */
+const OPEN_ENGLISH_TRIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "THE AND ING HER HAT HIS THA ERE FOR ENT ION HAS NTH TIO ALL VER TER EST THI CON RES " +
+    "PRO ARE OUT PER ECT ONE OUR ITH FRO MEN TED ERS ATH EVE OME COM ATE IVE RED"
+  ).split(/\s+/),
+);
+
+/**
+ * Compact open English lexicon (≥4 letters). General vocabulary + household /
+ * nature / geo stems — maintained as a class model, not a Review-ticket FA list.
+ * Crockford letter-only forms are derived at module load.
+ */
+const OPEN_ENGLISH_WORDS_RAW: readonly string[] = (
+  "THAT WITH HAVE THIS WILL YOUR FROM THEY KNOW WANT BEEN GOOD MUCH SOME TIME VERY WHEN COME HERE JUST LIKE LONG MAKE MANY MORE ONLY OVER SUCH TAKE THAN THEM WELL WERE " +
+  "ABOUT AFTER AGAIN BEING EVERY FIRST GREAT HOUSE LARGE NEVER OTHER PLACE POINT RIGHT SMALL SOUND STILL THEIR THESE THING THINK THREE UNDER WATER WHERE WHICH WORLD WOULD WRITE " +
+  "PEOPLE SCHOOL MOTHER FATHER FAMILY FRIEND SECOND NUMBER ALWAYS AROUND BECAUSE BEFORE CHANGE DURING FOLLOW HAPPEN LETTER NATURE PICTURE SHOULD ANIMAL BROTHER SISTER " +
+  "APPLE ORANGE BANANA TABLE CHAIR HOUSE WATER CRYSTAL RIVER OCEAN BEACH MOUNTAIN FOREST STORM CLOUD NIGHT LIGHT DREAM " +
+  "NORTH SOUTH EAST WEST CENTER KING QUEEN PRINCE KNIGHT CASTLE DRAGON SWORD MAGIC SPELL WIZARD " +
+  "MUSIC DANCE SONG MOVIE BOOK STORY POEM PLAY GAME SPORT TEAM BALL GOAL SCORE " +
+  "PHONE EMAIL MESSAGE MEDIA VIDEO PHOTO CAMERA SCREEN COMPUTER " +
+  "MONEY POWER TRUTH JUSTICE PEACE FREEDOM ACCESS TOKEN SECRET MASTER PASSWORD PRIVATE PUBLIC " +
+  "NETWORK SERVER SYSTEM BACKUP RECOVERY CORRECT HORSE BATTERY STAPLE PLEASE WINTER SUMMER " +
+  "LONDON PARIS TOKYO BERLIN YORK CITY TOWN COUNTRY EARTH SPACE PLANET " +
+  "BLACK WHITE GREEN YELLOW PURPLE BROWN ORANGE ANSWER QUICK BROWN JUMPS OVER LAZY " +
+  "EXPRESS TRAIN PLANE CAKE PORTAL STYLE WAND WARS STAR PEPPER SALT SUGAR BREAD " +
+  "SPHINX QUARTZ VORTEX CYBER SECURITY RAIN SPAIN FALLS BACK FRONT LEFT RIGHT " +
+  "HUMAN HEART SPEAK FORCE NEVER THING HEAVEN " +
+  "PART PRESS PORT HAND LAND HARD FIRE WIRE BALL CALL FALL BELL CELL BILL FILL " +
+  "BEST REST WEST CASE BASE DARK MARK PARK DATE FATE GATE HATE LATE RATE " +
+  "DEAL REAL SEAL DEAR FEAR HEAR NEAR YEAR DEEP KEEP FEED NEED SEED " +
+  "FILE MILE TIME FINE LINE MINE NINE FIND KIND MIND FIRM FISH LIST " +
+  "FLAG FLAT FLOW SLOW SHOW FOLD GOLD HOLD FOOD GOOD WOOD FOOL POOL FOOT ROOT " +
+  "FORM FORT FOUR YOUR FREE TREE FROM FULL GAIN MAIN PAIN RAIN GAME NAME SAME " +
+  "GATE GAVE GIFT GIRL GIVE GLAD GLOW GOAL GOLD GONE GOOD GRAB GRAY GREW GROW " +
+  "HARD HARM HATE HAVE HEAD LEAD READ HEAL HEAR HEAT MEAT HELD HELP HERE HERO " +
+  "HIDE RIDE SIDE WIDE HIGH HIKE LIKE HILL HINT HOLD HOLE HOME HOPE HORN HOST MOST " +
+  "HOUR YOUR HUGE HUNT HURT IRON ITEM JOIN JUMP JUST KEEP KIND KING RING SING " +
+  "LACK PACK LAKE MAKE TAKE LAND LANE LAST LATE LAZY LEAD LEAF LEAK PEAK WEAK " +
+  "LEFT LEND SEND LESS LIFE WIFE LIFT LIKE LIME TIME LINE LINK LIST LIVE LOAD ROAD " +
+  "LOCK LONG SONG LOOK TOOK LORD LOSE LOSS LOST LOUD LOVE LUCK MADE MAIL MAIN MAKE " +
+  "MALE MANY MARK MASS MATE MATH MEAL MEAN MEAT MEET MELT MENU MESS MILE MILK MILL " +
+  "MIND MINE MINT MISS MIST MODE MOOD MOON SOON MORE MOST MOVE MUCH MUST NAME NAVY " +
+  "NEAR NEAT NECK NEED NEST NEWS NEXT NICE NINE NODE NONE NOSE ROSE NOTE VOTE ONCE " +
+  "ONLY OPEN OVER PACE PACK PAGE PAID PAIN PAIR PALE PARK PART PASS PAST PATH PEAK " +
+  "PICK PILE PINE PINK PIPE PLAN PLAY PLOT PLUS POEM POET POLE POND POOL POOR PORT " +
+  "POSE POST PRAY PULL PUMP PURE PUSH RACE RACK RAGE RAID RAIL RAIN RANK RARE RATE " +
+  "READ REAL REAR REED REEL RENT REST RICE RICH RIDE RING RISE RISK ROAD ROCK ROLE " +
+  "ROLL ROOF ROOM ROOT ROPE ROSE RULE RUSH RUST SAFE SAID SAIL SALE SALT SAME SAND " +
+  "SAVE SEAL SEAM SEAT SEED SEEK SEEM SEEN SELF SELL SEND SENT SHIP SHOP SHOT SHOW " +
+  "SHUT SICK SIDE SIGN SILK SING SINK SITE SIZE SKIN SKIP SLIP SLOW SNOW SOAP SOFT " +
+  "SOIL SOLD SOLE SOME SONG SOON SORE SORT SOUL SOUP SOUR SPAN STAR STAY STEM STEP " +
+  "STOP SUCH SUIT SURE SURF SWIM TACK TAIL TAKE TALE TALK TALL TAME TANK TAPE TASK " +
+  "TEAM TEAR TELL TEND TENT TERM TEST TEXT THAN THAT THEM THEN THEY THIN THIS TICK " +
+  "TIDE TILE TILL TIME TIRE TOLD TOLL TONE TOOK TOOL TORN TOSS TOUR TOWN TRAP TRAY " +
+  "TREE TRIM TRIP TRUE TUBE TUNE TURN TYPE UNIT UPON URGE USED USER VAIN VARY VASE " +
+  "VAST VERY VEST VETO VIEW VINE VOID VOTE WAGE WAIT WAKE WALK WALL WAND WANT WARD " +
+  "WARM WARN WASH WAVE WEAK WEAR WEEK WELL WENT WERE WEST WHAT WHEN WHIP WIDE WIFE " +
+  "WILD WILL WIND WINE WING WIPE WIRE WISE WISH WITH WOOD WORD WORE WORK WORN WRAP " +
+  "YEAR YELL YOUR ZERO ZONE WART PRESS GANG"
+).split(/\s+/);
+
+function buildOpenEnglishTokens(): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const raw of OPEN_ENGLISH_WORDS_RAW) {
+    const w = raw.toUpperCase();
+    if (w.length >= 4) out.add(w);
+    // Crockford letter-only form (O→0/I,L→1/U→V then drop digits).
+    const crock = w.replace(/O/g, "0").replace(/[IL]/g, "1").replace(/U/g, "V");
+    let letters = "";
+    for (const c of crock) {
+      if (c >= "A" && c <= "Z") letters += c;
+    }
+    if (letters.length >= 4) out.add(letters);
+  }
+  return out;
+}
+
+const OPEN_ENGLISH_TOKENS: ReadonlySet<string> = buildOpenEnglishTokens();
+
+/** Digit prefixes of well-known constants (π, e, √2) — not fib (already gated). */
+const MATH_CONST_DIGIT_PREFIXES: readonly string[] = [
+  "31415926535897932384626433832795",
+  "27182818284590452353602874713526",
+  "14142135623730950488016887242096",
+];
+
+/** Broader leet fold for open English / vowel analysis (Latin reconstruction). */
+const ENGLISH_LEET_FOLD: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "2": "Z",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "6": "G",
+  "7": "T",
+  "8": "B",
+  "9": "G",
+};
+
+function latinLetterSkeleton(secret: string): string {
+  let out = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") out += c;
+    else {
+      const folded = ENGLISH_LEET_FOLD[c];
+      if (folded !== undefined) out += folded;
+    }
+  }
+  return out;
+}
+
+function maxDigitRun(secret: string): number {
+  let max = 0;
+  let run = 0;
+  for (const c of secret) {
+    if (c >= "0" && c <= "9") {
+      run += 1;
+      if (run > max) max = run;
+    } else {
+      run = 0;
+    }
+  }
+  return max;
+}
+
+function digitHeadLength(secret: string): number {
+  let n = 0;
+  for (const c of secret) {
+    if (c >= "0" && c <= "9") n += 1;
+    else break;
+  }
+  return n;
+}
+
+/**
+ * True when digits form a long run or embed a well-known math-constant prefix
+ * (π / e / √2). Catches 314159265358979… that fib/step-k miss.
+ */
+function hasStructuredDigitConstant(secret: string): boolean {
+  if (maxDigitRun(secret) >= RECOVERY_PACK_MAX_DIGIT_RUN) return true;
+  if (digitHeadLength(secret) >= RECOVERY_PACK_MAX_DIGIT_RUN) return true;
+  const digits = [...secret].filter((c) => c >= "0" && c <= "9").join("");
+  if (digits.length < 8) return false;
+  for (const prefix of MATH_CONST_DIGIT_PREFIXES) {
+    for (let len = 8; len <= Math.min(digits.length, prefix.length); len++) {
+      for (let i = 0; i <= digits.length - len; i++) {
+        if (prefix.includes(digits.slice(i, i + len))) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function englishCoverLetters(skel: string): number {
+  const n = skel.length;
+  if (n < 4) return 0;
+  const dp = new Array<number>(n + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    if (dp[i]! > dp[i + 1]!) dp[i + 1] = dp[i]!;
+    for (let len = 4; len <= Math.min(12, n - i); len++) {
+      if (OPEN_ENGLISH_TOKENS.has(skel.slice(i, i + len))) {
+        const next = dp[i]! + len;
+        if (next > dp[i + len]!) dp[i + len] = next;
+      }
+    }
+  }
+  return dp[n]!;
+}
+
+function englishNgramHits(skel: string): { bigrams: number; trigrams: number } {
+  let bigrams = 0;
+  let trigrams = 0;
+  for (let i = 0; i < skel.length - 1; i++) {
+    if (OPEN_ENGLISH_BIGRAMS.has(skel.slice(i, i + 2))) bigrams += 1;
+  }
+  for (let i = 0; i < skel.length - 2; i++) {
+    if (OPEN_ENGLISH_TRIGRAMS.has(skel.slice(i, i + 3))) trigrams += 1;
+  }
+  return { bigrams, trigrams };
+}
+
+function latinVowelFraction(skel: string): number {
+  if (skel.length === 0) return 0;
+  let v = 0;
+  for (const c of skel) {
+    if (c === "A" || c === "E" || c === "I" || c === "O" || c === "U" || c === "Y") v += 1;
+  }
+  return v / skel.length;
+}
+
+/** Year + KEY/ABC pad — the dominant hand-rolled ceremony mnemonic shape. */
+function hasCeremonyMnemonicPad(secret: string): boolean {
+  return /20[0-2]\d/.test(secret) && /(?:KEY|ABC)/.test(secret);
+}
+
+/**
+ * True when the secret matches the residual human-pattern class beyond finite
+ * dictionary lists: math digit constants, ceremony mnemonic pads, high-vowel
+ * English-like letter skeletons, open n-gram density, or open-lexicon cover.
+ */
+function hasHumanPatternClass(secret: string): boolean {
+  if (hasStructuredDigitConstant(secret)) return true;
+
+  const letterSk = letterSkeleton(secret, false);
+  const latinSk = latinLetterSkeleton(secret);
+  const skeletons = [letterSk, latinSk];
+  if (letterSk.length > 0) skeletons.push([...letterSk].reverse().join(""));
+  if (latinSk.length > 0) skeletons.push([...latinSk].reverse().join(""));
+
+  let cover = 0;
+  let bigrams = 0;
+  let trigrams = 0;
+  for (const sk of skeletons) {
+    const c = englishCoverLetters(sk);
+    if (c > cover) cover = c;
+    const ng = englishNgramHits(sk);
+    if (ng.bigrams > bigrams) bigrams = ng.bigrams;
+    if (ng.trigrams > trigrams) trigrams = ng.trigrams;
+  }
+
+  const letters = letterSk.length;
+  const letterFrac = secret.length === 0 ? 0 : letters / secret.length;
+  const vowelFrac = Math.max(latinVowelFraction(letterSk), latinVowelFraction(latinSk));
+
+  if (
+    hasCeremonyMnemonicPad(secret) &&
+    letters >= RECOVERY_PACK_MIN_MNEMONIC_PAD_LETTERS &&
+    letterFrac >= RECOVERY_PACK_MIN_MNEMONIC_PAD_LETTER_FRAC
+  ) {
+    return true;
+  }
+  if (
+    vowelFrac >= RECOVERY_PACK_MAX_LATIN_VOWEL_FRAC &&
+    letters >= RECOVERY_PACK_MIN_LETTERS_FOR_VOWEL_GUARD
+  ) {
+    return true;
+  }
+  if (trigrams >= RECOVERY_PACK_MAX_ENGLISH_TRIGRAM_HITS) return true;
+  if (bigrams >= RECOVERY_PACK_MAX_ENGLISH_BIGRAM_HITS) return true;
+  if (cover >= RECOVERY_PACK_MIN_ENGLISH_COVER_LETTERS) return true;
+  if (
+    cover >= RECOVERY_PACK_MIN_ENGLISH_COVER_WITH_VOWEL &&
+    vowelFrac >= RECOVERY_PACK_MIN_VOWEL_FRAC_WITH_COVER
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Named reason the secret is unfit to seal a pack, or null when it passes.
  * The message names the rule that failed — it says nothing about any pack.
  *
@@ -808,8 +1095,9 @@ function hasFibonacciDigitRun(secret: string): boolean {
  * phrases is not an accept path. Structure guards cover near-period tiles,
  * same-symbol / paired-double blocks, step-k and strided monotone runs, long
  * letter runs, class alternation / pair sequences, keyboard rows/columns/
- * diagonals, and digit-broken + reversed dictionary skeletons — not only
- * exact divisor tilings and ±1 sequences.
+ * diagonals, digit-broken + reversed dictionary skeletons, and the non-list
+ * human-pattern class (math digit constants, ceremony mnemonic pads, high
+ * Latin-vowel letter skeletons, open English n-grams, open-lexicon cover).
  */
 export function recoverySecretWeakness(secret: string): string | null {
   if (secret.length === 0) return "recovery secret is required";
@@ -851,6 +1139,9 @@ export function recoverySecretWeakness(secret: string): string | null {
   }
   if (hasDictionarySkeleton(secret)) {
     return "recovery secret must not embed a dictionary or passphrase skeleton";
+  }
+  if (hasHumanPatternClass(secret)) {
+    return "recovery secret must not be a low-entropy human pattern";
   }
   // Non-vacuous floor: i.i.d. Crockford×26 is 130 bits. Reject if the named
   // constants ever shrink the theoretical maximum below the floor — this is a

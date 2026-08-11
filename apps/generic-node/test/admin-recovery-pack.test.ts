@@ -411,6 +411,17 @@ describe("admin recovery-pack create", () => {
       "TCERR0CESR0HYRETTABE1PATS2",
       "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
       "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
+      // Review B r4 residual: off-list English/media/geo/π human-pattern class.
+      "THECAKE1SA11EP0RTA12024XXA",
+      "H0GWARTSEXPRESS2024KEYABXA",
+      "GANGNAMSTY1E2024KEYABCDEXA",
+      "HARRYP0TTERWAND2024KEYABXA",
+      "STARWARSJED1K1GHT2024ABXAB",
+      "GAME0FTHR0NES2024KEYABCXXA",
+      "314159265358979323846ABCDA",
+      "TAB1ECHA1RH0VSEWATER2024XA",
+      "NEWY0RKC1TY2024KEYABCDEXAB",
+      "SPH1NX0FB1ACKQVARTZ2024XXA",
     ];
     for (let i = 0; i < residuals.length; i++) {
       const resR = await router(

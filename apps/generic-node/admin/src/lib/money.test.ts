@@ -768,6 +768,27 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
     }
     expect(recoveryPackSecretStructureOk("9F3KQ2XW7HB4TMZ0RCJ8PNVA5D")).toBe(true);
   });
+
+  it("SPA structure floor rejects Review B r4 residual human-pattern class (parity with node)", async () => {
+    const { recoveryPackSecretStructureOk } = await import("./money.js");
+    const residuals = [
+      "THECAKE1SA11EP0RTA12024XXA",
+      "H0GWARTSEXPRESS2024KEYABXA",
+      "GANGNAMSTY1E2024KEYABCDEXA",
+      "HARRYP0TTERWAND2024KEYABXA",
+      "STARWARSJED1K1GHT2024ABXAB",
+      "GAME0FTHR0NES2024KEYABCXXA",
+      "314159265358979323846ABCDA",
+      "TAB1ECHA1RH0VSEWATER2024XA",
+      "NEWY0RKC1TY2024KEYABCDEXAB",
+      "SPH1NX0FB1ACKQVARTZ2024XXA",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(recoveryPackSecretStructureOk(secret)).toBe(false);
+    }
+    expect(recoveryPackSecretStructureOk("9F3KQ2XW7HB4TMZ0RCJ8PNVA5D")).toBe(true);
+  });
 });
 
 describe("newIdempotencyKey (ZTR-1168)", () => {

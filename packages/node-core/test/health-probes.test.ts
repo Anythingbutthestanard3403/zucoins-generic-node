@@ -54,15 +54,32 @@ describe("readiness — EVENT_SIGNING availability (money-only, outside the froz
     expect(verdict.checks.map((c) => c.name)).not.toContain("event_signer_available");
   });
 
-  it("NodeCoreReadinessState defaults open and stamps through setEventSignerAvailable", () => {
+  it("NodeCoreReadinessState defaults closed and stamps through setEventSignerAvailable (ZTR-1221)", () => {
     const state = new NodeCoreReadinessState({ observationFailureBudget: 3 });
-    // Open by default: only a composition that installs an EVENT_SIGNING
-    // authority closes it (the custody shell stamps false at construction).
-    expect(state.snapshot().eventSignerAvailable).toBe(true);
-    state.setEventSignerAvailable(false);
+    // Fail-closed by default: createNodeCore / bare state refuse money until arm.
     expect(state.snapshot().eventSignerAvailable).toBe(false);
     state.setEventSignerAvailable(true);
     expect(state.snapshot().eventSignerAvailable).toBe(true);
+    state.setEventSignerAvailable(false);
+    expect(state.snapshot().eventSignerAvailable).toBe(false);
+  });
+
+  it("createNodeCore readiness defaults eventSignerAvailable false (money not ready without ensure)", () => {
+    const response: GatewayResponse = {
+      statusCode: 200,
+      bodyBytes: Uint8Array.from([1]),
+    };
+    const runtime = createNodeCore({
+      database: {
+        connectionString: "opaque-test-connection",
+        adapter: createOfflineDatabaseAdapter(),
+      },
+      gateway: {
+        gatewayUrls: "https://gateway-a.invalid/rpc",
+        readTransport: createOfflineReadTransport(createGatewayReadCredentials(), [response]),
+      },
+    });
+    expect(runtime.readiness.snapshot().eventSignerAvailable).toBe(false);
   });
 });
 

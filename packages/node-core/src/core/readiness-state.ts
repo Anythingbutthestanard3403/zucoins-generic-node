@@ -42,10 +42,9 @@ export interface ReadinessStateInputs {
    * refuses new money work (ZTR-1179). Deliberately NON-gating on
    * `/health/ready` — ensure runs only after leadership is held, so a ready
    * gate here re-couples deploy health to the leadership lock (ZPAY-252 /
-   * D8.102 class). Defaults open — a deployment with no event-signing
-   * authority never stamps it; a composition that installs one
-   * (apps/generic-node boot/event-signer-authority.ts) stamps false at
-   * construction and re-opens only via arm.
+   * D8.102 class). Defaults **closed** (ZTR-1221): `createNodeCore` and any
+   * bare `NodeCoreReadinessState` refuse money until an authority arms via
+   * `setEventSignerAvailable(true)`. Deploy-ready stays independent of arm.
    */
   readonly eventSignerAvailable: boolean;
   /** Operator halt engaged. Reported only; non-gating. */
@@ -78,9 +77,9 @@ export class NodeCoreReadinessState {
   private leadershipLockHeld = false;
   // Open by default: only a held restore stamps false (ZTR-1172).
   private restoreHoldClear = true;
-  // Open by default: only an installed EVENT_SIGNING authority closes it
-  // (see ReadinessStateInputs.eventSignerAvailable).
-  private eventSignerAvailable = true;
+  // Closed by default (ZTR-1221): money admission refuses until an authority
+  // arms via setEventSignerAvailable(true). Deploy /health/ready ignores this.
+  private eventSignerAvailable = false;
   private observationReadEverSucceeded = false;
   private observationFailureCount = 0;
   private halted = false;
@@ -130,9 +129,10 @@ export class NodeCoreReadinessState {
   }
 
   /**
-   * EVENT_SIGNING authority availability. Fail-closed once an authority
-   * exists: the shell stamps false at construction, arm stamps true only on a
-   * signer that has proven it can sign, and runtime loss stamps false again.
+   * EVENT_SIGNING authority availability. Fail-closed by default (ZTR-1221):
+   * arm stamps true only on a signer that has proven it can sign; runtime
+   * loss stamps false again. Compositions that install EVENT_SIGNING may also
+   * re-stamp false at construction (belt-and-suspenders with the default).
    */
   setEventSignerAvailable(available: boolean): void {
     this.eventSignerAvailable = available;

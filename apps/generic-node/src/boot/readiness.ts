@@ -59,9 +59,9 @@ export class NodeReadiness {
     this.inner = new NodeCoreReadinessState({
       observationFailureBudget: gatewayFailureBudget,
     });
-    // This shell installs an EVENT_SIGNING authority, so the conjunct starts
-    // closed: arm (event-signer-authority.ts) is the only thing that opens it.
-    // Node-core's default is open only for deployments with no such authority.
+    // Belt-and-suspenders with node-core's fail-closed default (ZTR-1221):
+    // this shell installs EVENT_SIGNING, and arm (event-signer-authority.ts)
+    // is the only path that opens the money conjunct.
     this.inner.setEventSignerAvailable(false);
   }
 

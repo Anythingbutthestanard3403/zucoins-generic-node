@@ -66,6 +66,7 @@ function harness(
   readiness.markSchemaMigrated();
   readiness.setVaultAvailable(true);
   readiness.recordObservationReadSuccess();
+  readiness.setEventSignerAvailable(true);
   const probe = new CachedDbProbe(
     () =>
       new Promise<void>((resolve, reject) => {

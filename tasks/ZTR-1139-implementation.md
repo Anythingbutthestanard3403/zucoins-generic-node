@@ -1,0 +1,13 @@
+# ZTR-1139 implementation
+- Recovered the exact seven-file dirty write set from shared checkout and checkpointed it before isolation.
+- Backup refs: `refs/backup/ztr-1139-pre-recovery-ee41375b` and `refs/backup/ztr-1139-write-set-ee41375b`.
+- Shared `/home/aiboi/zucoins-generic-node` restored to clean `main == origin/main`.
+- Added append-only `lease-operation-foreign-keys` after all source/target tables exist.
+- Upgrade preflights all six lease ownership edges and raises `23503` before adding any FK.
+- Added explicit `ON DELETE NO ACTION` constraints and idempotent catalog guards.
+- Production-pack PG acceptance: 3/3 pass (catalog, enforcement, atomic refusal).
+- Boot-recovery compatibility: 17/17 pass; impossible post-upgrade orphan fixture now asserts `23503`.
+- Schema census: 59 SQL files, 39/39 nouns, 193 FKs, 18 access patterns, 0 failures.
+- Focused ESLint and root TypeScript build pass.
+- Current-main baseline caveat: `migration-integrity` already omits ZTR-1138 `transaction-material-byte-immutability.sql`.
+- Current-main baseline caveat: node-core package lint already fails `src/workers/leadership.ts` `no-useless-catch`.

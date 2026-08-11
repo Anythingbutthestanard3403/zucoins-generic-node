@@ -191,6 +191,13 @@ const SCHEMA_FILES = [
   "destinations-label.sql",
   // lease_role → wallet_lease_role enum. ALTER-only (no CREATE TABLE).
   "lease-role-enum.sql",
+  // Byte-immutability triggers on the three transaction-material tables (ZTR-1138).
+  // CREATE FUNCTION + CREATE TRIGGER only (no CREATE TABLE); attaches after
+  // transaction-material.sql owns the base tables.
+  "transaction-material-byte-immutability.sql",
+  // ZTR-1139 fix-forward: preflight dangling lease ownership rows, then add the six
+  // deferred NO ACTION FKs after operations + lease foundation exist. ALTER/DO only.
+  "lease-operation-foreign-keys.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -209,6 +216,8 @@ const NO_TABLE_SCHEMA_FILES = [
   "operations-indexes.sql",
   "destinations-label.sql",
   "lease-role-enum.sql",
+  "transaction-material-byte-immutability.sql",
+  "lease-operation-foreign-keys.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -333,6 +342,11 @@ const GREENFIELD: Record<
   "receive-expiry-release.sql": { applies: false, missingRelation: "operations" },
   "submit-attempts.sql": { applies: false, missingRelation: "operations" },
   "transaction-material.sql": { applies: false, missingRelation: "operations" },
+  // Trigger slice on transaction-material tables; first CREATE TRIGGER needs the base relation.
+  "transaction-material-byte-immutability.sql": {
+    applies: false,
+    missingRelation: "external_send_sign_intents",
+  },
   // self-contained by construction. It re-declares the three data-model domains its
   // columns use and carries every out-of-slice reference (operations, node_signing_keys,
   // gateway_observations) as a bare uuid — the deferred FKs are inventoried in
@@ -378,9 +392,14 @@ const GREENFIELD: Record<
     applies: false,
     missingRelation: "move_observation_evidence",
   },
-  // Eligibility function is typed against wallets%ROWTYPE, so greenfield-alone
-  // fails when wallets is absent (custody-eligibility supplies it in assembled schemas).
-  "lease-foundation.sql": { applies: false, missingRelation: "wallets" },
+  // Bare psql -f hits wallet_lease_role (base-enums-domains / lease-role-enum) before
+  // any wallets dependency: membership CREATE uses the enum, and operations FKs stay
+  // deferred bare uuid so standalone migrateLeaseFoundation does not require operations
+  // (ZTR-1139). The migrator installs the custody eligibility guard separately.
+  "lease-foundation.sql": {
+    applies: false,
+    missingFragment: 'type "wallet_lease_role" does not exist',
+  },
   // CREATE TABLE blocks are self-contained (bare uuid ids; local domains). The
   // closing ALTER TABLE destinations FK fails greenfield-alone on missing destinations.
   "signer-support.sql": { applies: false, missingRelation: "destinations" },
@@ -458,7 +477,8 @@ const GREENFIELD: Record<
   },
   "observation-relationship-adjudications.sql": {
     applies: false,
-    missingRelation: "gateway_observations",
+    // Column type resolves before the gateway_observations FK when base-enums are absent.
+    missingFragment: 'type "observation_relationship" does not exist',
   },
   "destinations-label.sql": {
     applies: false,
@@ -468,6 +488,12 @@ const GREENFIELD: Record<
     // DO block is a no-op when tables/columns are absent (IF EXISTS guards).
     // Not greenfield-alone materialising; no CREATE TABLE.
     applies: true,
+  },
+  // Fix-forward DO block starts by auditing wallet_active_leases; every target is owned by
+  // earlier production-pack slices, so standalone application must fail on that first target.
+  "lease-operation-foreign-keys.sql": {
+    applies: false,
+    missingRelation: "wallet_active_leases",
   },
 };
 
@@ -612,7 +638,7 @@ describe("greenfield migration integrity — frozen schema contracts", () => {
           expect(Object.keys(tables).length, `${file} must declare no tables`).toBe(0);
           const active = sqlText(file).replace(/--[^\n]*/g, "");
           expect(active, file).toMatch(
-            /ALTER\s+TABLE\b|CREATE\s+INDEX\b|CREATE\s+CONSTRAINT\s+TRIGGER\b/i,
+            /ALTER\s+TABLE\b|CREATE\s+INDEX\b|CREATE\s+CONSTRAINT\s+TRIGGER\b|CREATE\s+TRIGGER\b|CREATE\s+FUNCTION\b/i,
           );
           expect(active, `${file} must not dual-CREATE`).not.toMatch(
             /CREATE\s+TABLE\s+move_observation_evidence\b/i,

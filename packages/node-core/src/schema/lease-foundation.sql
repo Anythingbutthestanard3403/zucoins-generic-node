@@ -163,8 +163,10 @@ CREATE TABLE lease_schema_fence (
 
 -- Full exclusive projection. wallet_id is the structural one-active-row authority.
 -- When the money pack already applied custody-eligibility.sql, CREATE TABLE is stripped
--- and only the membership/group FKs are wired via money-schema-pack ALTER. The
--- eligibility trigger lives solely in custody-eligibility.sql
+-- and only the membership/group FKs are wired via money-schema-pack ALTER. Operation
+-- ownership FKs are deferred to lease-operation-foreign-keys.sql (after operations exists)
+-- so standalone migrateLeaseFoundation stays loadable without operations (ZTR-1139).
+-- The eligibility trigger lives solely in custody-eligibility.sql
 -- (custody_reject_ineligible_lease) - no shadowed second copy here (ZTR-1169).
 -- Standalone lease-foundation migrate (no prior custody table) creates this table and
 -- attaches the custody eligibility function from custody-eligibility.sql.

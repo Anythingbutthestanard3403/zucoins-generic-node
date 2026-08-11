@@ -214,25 +214,54 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(stripped).toMatch(/CREATE TABLE wallets\b/);
   });
 
-  it("lease-foundation emits FK wire-up and never creates orphan eligibility fn", () => {
+  it("keeps the standalone active-lease body explained and appends the deferred FK upgrade", () => {
     const files = loadMoneySchemaMigrations();
     const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
-    const sql = files[leaseIdx].sql;
-    expect(sql).not.toMatch(/CREATE TABLE wallet_active_leases\b/);
-    expect(sql).toMatch(/wallet_active_leases_membership_id_fkey/);
-    expect(sql).toMatch(/REFERENCES wallet_lease_memberships/);
-    expect(sql).toMatch(/wallet_active_leases_lease_group_id_fkey/);
-    expect(sql).toMatch(/REFERENCES lease_groups/);
+    const leaseSql = files[leaseIdx].sql;
+    expect(leaseSql).not.toMatch(/CREATE TABLE wallet_active_leases\b/);
+    // Membership/group FKs only — ops ownership FKs live solely in the fix-forward
+    // slice so foundation remains loadable without operations (ZTR-1139 r2).
+    for (const constraint of [
+      "wallet_active_leases_membership_id_fkey",
+      "wallet_active_leases_lease_group_id_fkey",
+    ]) {
+      expect(leaseSql).toContain(constraint);
+    }
+    for (const constraint of [
+      "wallet_active_leases_root_operation_id_fkey",
+      "wallet_active_leases_operation_id_fkey",
+      "lease_groups_root_operation_id_fkey",
+      "lease_group_operations_operation_id_fkey",
+    ]) {
+      expect(leaseSql).not.toContain(constraint);
+    }
+
+    const upgradeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-operation-foreign-keys");
+    const upgradeSql = files[upgradeIdx].sql;
+    for (const constraint of [
+      "wallet_active_leases_membership_id_fkey",
+      "wallet_active_leases_lease_group_id_fkey",
+      "wallet_active_leases_root_operation_id_fkey",
+      "wallet_active_leases_operation_id_fkey",
+      "lease_groups_root_operation_id_fkey",
+      "lease_group_operations_operation_id_fkey",
+    ]) {
+      expect(upgradeSql).toContain(constraint);
+    }
+    expect(upgradeSql.match(/ON DELETE NO ACTION/g)).toHaveLength(6);
+    expect(upgradeSql).toContain("dangling lease ownership rows require operator disposition");
+
     // ZTR-1169: no shadowed eligibility function/trigger in lease-foundation at all.
-    expect(sql).not.toMatch(
+    expect(leaseSql).not.toMatch(
       /CREATE FUNCTION lease_foundation_reject_ineligible_lease\b/,
     );
-    expect(sql).not.toMatch(/CREATE FUNCTION custody_reject_ineligible_lease\b/);
-    expect(sql).not.toMatch(/CREATE TRIGGER wallet_active_leases_eligibility_guard\b/);
+    expect(leaseSql).not.toMatch(/CREATE FUNCTION custody_reject_ineligible_lease\b/);
+    expect(leaseSql).not.toMatch(/CREATE TRIGGER wallet_active_leases_eligibility_guard\b/);
     const rawLease = readFileSync(
       join(MONEY_SCHEMA_DIR, "lease-foundation.sql"),
       "utf8",
     );
+    expect(rawLease).toMatch(/CREATE TABLE wallet_active_leases\b/);
     expect(rawLease).not.toMatch(
       /CREATE FUNCTION lease_foundation_reject_ineligible_lease\b/,
     );
@@ -349,7 +378,7 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(block(shipped)).toBe(block(frozen));
   });
 
-  it("AUDIT: multi-slice tables are body-equal OR later owns FK wire-up / first is FK-superset", () => {
+  it("fails on every unexplained duplicate table declaration across pack slices", () => {
     const byTable = new Map<string, { slice: string; full: string }[]>();
     for (const slice of MONEY_SCHEMA_PACK_ORDER) {
       const raw = readFileSync(join(MONEY_SCHEMA_DIR, `${slice}.sql`), "utf8");
@@ -360,10 +389,14 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
       }
     }
     const multi = [...byTable.entries()].filter(([, v]) => v.length > 1);
+    // Closed allow-list: each surviving overlap has a named compatibility owner below.
+    // Any newly duplicated table changes this exact set and fails the gate.
     expect(multi.map(([n]) => n).sort()).toEqual(
       [
         "operation_expected_artifacts",
         "operator_device_keys",
+        // Production owner is custody-eligibility; lease-foundation retains a target body
+        // solely for its standalone empty-legacy expansion migrator.
         "wallet_active_leases",
       ].sort(),
     );

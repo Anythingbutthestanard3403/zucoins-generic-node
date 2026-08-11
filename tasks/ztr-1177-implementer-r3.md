@@ -4,6 +4,7 @@
 - **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/53
 - **Branch:** `ztr-1177-vault-unlock-canary`
 - **Prior FAIL head:** `cfa1af3a907c38182edd6a5d99cb0769ee27fb88`
+- **New head:** `b1692668efc1ec062fce6249915788faf5c6b6f3`
 - **Worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1177-r3/wt`
 - **Blocker (Review A r2):** canary rewrap old-only + finalize/resume used pre-rotation census → ROTATING/D-B5 brick
 - **Released to:** QA Review (dual custody A+B)

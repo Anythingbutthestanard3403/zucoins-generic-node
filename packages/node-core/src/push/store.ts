@@ -17,6 +17,12 @@ export interface PushSubscriptionRow {
   /** Sealed 16-byte `auth` secret. */
   readonly receiverAuthSecretSealed: string;
   readonly status: PushSubscriptionStatus;
+  /**
+   * SplitChain app-server VAPID public key captured at last successful subscribe
+   * (RFC 8292 trust root). Null on rows provisioned before the key was selected,
+   * or while still FAILED before the first ACTIVE mark.
+   */
+  readonly appServerPublicKey: string | null;
 }
 
 export interface PushSubscriptionStore {

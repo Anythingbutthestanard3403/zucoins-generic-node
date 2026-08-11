@@ -306,9 +306,18 @@ function memoryStore(seed: PushSubscriptionRow[] = []): PushSubscriptionStore & 
         };
       }
     },
-    async markStatus(walletId, status) {
+    async markStatus(walletId, status, appServerPublicKey) {
       const i = rows.findIndex((r) => r.walletId === walletId);
-      if (i >= 0) rows[i] = { ...rows[i]!, status };
+      if (i >= 0) {
+        rows[i] = {
+          ...rows[i]!,
+          status,
+          appServerPublicKey:
+            appServerPublicKey !== null && appServerPublicKey !== undefined
+              ? appServerPublicKey
+              : rows[i]!.appServerPublicKey,
+        };
+      }
     },
     async listSubscribableWallets() {
       return rows.map((r) => ({ walletId: r.walletId, publicKey: r.walletPublicKey }));
@@ -499,6 +508,7 @@ describe("self-heal for unopenable sealed material", () => {
       ),
       receiverAuthSecretSealed: await stranger.seal(generateAuthSecret(), "AUTH_SECRET"),
       status: "ACTIVE",
+      appServerPublicKey: "app-key",
     };
   };
 

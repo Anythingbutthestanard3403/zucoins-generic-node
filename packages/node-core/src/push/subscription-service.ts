@@ -120,6 +120,7 @@ export function createPushSubscriptionService(
         receiverAuthSecretSealed: authSealed,
         // Pessimistic until the gateway acknowledges — see the module header.
         status: "FAILED",
+        appServerPublicKey: null,
       },
       ecdhPrivate: keypair.privateKeyBytes,
       authSecret,

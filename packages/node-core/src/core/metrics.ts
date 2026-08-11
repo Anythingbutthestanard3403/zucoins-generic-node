@@ -270,6 +270,21 @@ export const METRIC_CANDIDATE_INTAKE_REFUSALS = [
 ] as const;
 export type MetricCandidateIntakeRefusal = (typeof METRIC_CANDIDATE_INTAKE_REFUSALS)[number];
 
+/**
+ * Inbound Web Push VAPID gate outcomes (ZTR-1161).
+ * `verified` — RFC 8292 ES256 ok against stored app-server key.
+ * `rejected` — header present but failed verify.
+ * `absent` — no Authorization header.
+ * `no_key` — row has no stored app_server_public_key (or node origin unset).
+ */
+export const METRIC_PUSH_VAPID_OUTCOMES = [
+  "verified",
+  "rejected",
+  "absent",
+  "no_key",
+] as const;
+export type MetricPushVapidOutcome = (typeof METRIC_PUSH_VAPID_OUTCOMES)[number];
+
 /** Observation anomaly classification (closed; relationship/parse kinds). */
 export const METRIC_ANOMALY_KINDS = [
   "REGRESSION",
@@ -419,6 +434,8 @@ export interface NodeMetrics {
   readonly authTotal: CounterMetric;
   readonly idempotencyTotal: CounterMetric;
   readonly candidateIntakeRefused: CounterMetric;
+  /** Inbound Web Push VAPID gate outcomes (ZTR-1161). */
+  readonly pushVapid: CounterMetric;
 
   // --- per-scrape gauges (filled from snapshot on render) ---
   readonly availableWallets: GaugeMetric;
@@ -514,6 +531,11 @@ export function createNodeMetrics(): NodeMetrics {
     "gn_candidate_intake_refused_total",
     "Candidate-intake deposits refused before enqueue, by producer lane and reason.",
     ["source", "reason"],
+  );
+  const pushVapid = createCounter(
+    "gn_push_vapid_total",
+    "Inbound Web Push VAPID verification outcomes (verified|rejected|absent|no_key).",
+    ["outcome"],
   );
 
   const availableWallets = createGauge(
@@ -663,6 +685,7 @@ export function createNodeMetrics(): NodeMetrics {
     authTotal,
     idempotencyTotal,
     candidateIntakeRefused,
+    pushVapid,
     availableWallets,
     totalWallets,
     walletsByState,
@@ -766,6 +789,7 @@ export function createNodeMetrics(): NodeMetrics {
       authTotal.reset();
       idempotencyTotal.reset();
       candidateIntakeRefused.reset();
+      pushVapid.reset();
       availableWallets.reset();
       totalWallets.reset();
       walletsByState.reset();
@@ -888,6 +912,7 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderCounter(metrics.authTotal),
     renderCounter(metrics.idempotencyTotal),
     renderCounter(metrics.candidateIntakeRefused),
+    renderCounter(metrics.pushVapid),
     renderGauge(metrics.availableWallets),
     renderGauge(metrics.totalWallets),
     renderGauge(metrics.walletsByState),
@@ -943,6 +968,8 @@ export interface MetricsHooks {
     source: MetricCandidateIntakeSource,
     reason: MetricCandidateIntakeRefusal,
   ): void;
+  /** Inbound push VAPID gate outcome (ZTR-1161). */
+  onPushVapid(outcome: MetricPushVapidOutcome): void;
   /**
    * Observe a gateway call duration. `rpc` is a closed action name;
    * `outcome` is ok on any non-throwing response (including app-level reject).
@@ -990,6 +1017,9 @@ export function createMetricsHooks(metrics: NodeMetrics): MetricsHooks {
     },
     onCandidateIntakeRefused(source, reason) {
       metrics.candidateIntakeRefused.inc({ source, reason });
+    },
+    onPushVapid(outcome) {
+      metrics.pushVapid.inc({ outcome });
     },
     observeGateway(rpc, outcome, durationSeconds) {
       metrics.gatewayRequestDuration.observe({ rpc, outcome }, durationSeconds);

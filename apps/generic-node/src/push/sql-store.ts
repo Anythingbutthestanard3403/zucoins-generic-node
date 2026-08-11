@@ -20,6 +20,7 @@ interface Row {
   readonly receiver_ecdh_private_sealed: string;
   readonly receiver_auth_secret_sealed: string;
   readonly status: string;
+  readonly app_server_public_key: string | null;
 }
 
 function toRow(r: Row): PushSubscriptionRow {
@@ -31,6 +32,7 @@ function toRow(r: Row): PushSubscriptionRow {
     receiverEcdhPrivateSealed: r.receiver_ecdh_private_sealed,
     receiverAuthSecretSealed: r.receiver_auth_secret_sealed,
     status: r.status === "ACTIVE" ? "ACTIVE" : "FAILED",
+    appServerPublicKey: r.app_server_public_key,
   };
 }
 
@@ -40,7 +42,8 @@ const SELECT_COLS = `wallet_id::text AS wallet_id,
        receiver_ecdh_public,
        receiver_ecdh_private_sealed,
        receiver_auth_secret_sealed,
-       status::text AS status`;
+       status::text AS status,
+       app_server_public_key`;
 
 export function createSqlPushSubscriptionStore(
   pool: Pool,

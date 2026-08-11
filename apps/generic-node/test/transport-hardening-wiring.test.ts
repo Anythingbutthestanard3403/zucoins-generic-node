@@ -266,6 +266,75 @@ describe("surfaces the intake guards must not touch", () => {
     expect([...delivered[0]!]).toEqual([...binary]);
   });
 
+  it("forwards a single Authorization header into onPushDelivery (ZTR-1161 VAPID)", async () => {
+    const seen: Array<string | null | undefined> = [];
+    const binary = new Uint8Array([0x01]);
+    const res = await invoke(
+      baseDeps({
+        onPushDelivery: async (_endpointId, _payload, authorizationHeader) => {
+          seen.push(authorizationHeader);
+        },
+      }),
+      "POST",
+      `${PUSH_RECEIVER_PATH_PREFIX}/endpoint-id-abc`,
+      {
+        "content-type": "application/octet-stream",
+        "content-length": String(binary.length),
+        authorization: "vapid t=a.b.c, k=key",
+      },
+      binary,
+    );
+    expect(res.status).toBe(204);
+    expect(seen).toEqual(["vapid t=a.b.c, k=key"]);
+  });
+
+  it("treats duplicate Authorization headers as absent for push delivery (ZTR-1161)", async () => {
+    const seen: Array<string | null | undefined> = [];
+    const binary = new Uint8Array([0x01]);
+    // rawHeaders with two Authorization entries: mockRequest flattens a map, so build manually.
+    const listener = createNodeRuntimeListener(
+      baseDeps({
+        onPushDelivery: async (_endpointId, _payload, authorizationHeader) => {
+          seen.push(authorizationHeader);
+        },
+      }),
+    );
+    const body = binary;
+    const request = {
+      method: "POST",
+      url: `${PUSH_RECEIVER_PATH_PREFIX}/endpoint-id-abc`,
+      httpVersion: "1.1",
+      headers: { "content-type": "application/octet-stream", "content-length": "1" },
+      rawHeaders: [
+        "content-type",
+        "application/octet-stream",
+        "content-length",
+        "1",
+        "Authorization",
+        "vapid t=one",
+        "Authorization",
+        "vapid t=two",
+      ],
+      async *[Symbol.asyncIterator]() {
+        yield body;
+      },
+    } as unknown as IncomingMessage;
+    const captured = { status: 0 };
+    await new Promise<void>((resolve) => {
+      const response = {
+        writeHead(status: number) {
+          captured.status = status;
+        },
+        end() {
+          resolve();
+        },
+      } as unknown as ServerResponse;
+      listener(request, response);
+    });
+    expect(captured.status).toBe(204);
+    expect(seen).toEqual([null]);
+  });
+
   it("the origin-relay deposit still answers 204 whatever its Content-Type", async () => {
     const deposits: unknown[] = [];
     const body = new TextEncoder().encode(JSON.stringify({ action_name: "x" }));

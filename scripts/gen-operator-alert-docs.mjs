@@ -49,6 +49,10 @@ export const SIGNAL_WIRING = {
   queue_caps: { bound: true, note: "queue depth, pool-cap utilization and pinned ratio; the 503 rate input is hardcoded 0 (ZTR-1144)" },
   signer_loss: { bound: true, note: "`gn_signer_leadership_held`; the ambiguity input that raises P0 is hardcoded 0 (ZTR-1144)" },
   backup_age: { bound: true, note: "`gn_backup_last_success_age_seconds`, suppressed while `gn_backup_last_success_available` is 0; threshold only exists when `backupMaxAgeMs` is passed" },
+  push_no_transfer_code_streak: {
+    bound: true,
+    note: "`gn_push_no_transfer_code_streak` process-local gauge; in-process SAFETY_ALERT_SIGNALS fire on threshold via composePush + custodyAlertEvaluator",
+  },
 };
 
 /**

@@ -128,8 +128,11 @@ export function createPushReceiveMetricsPort(input: {
 }): PushReceiveMetrics {
   return {
     onOutcome(outcome, shape) {
-      input.sink?.onOutcome(outcome, shape);
+      // Observe streak first so any sink that publishes the streak gauge
+      // (compose sets gn_push_no_transfer_code_streak from tracker.streak())
+      // sees the post-observation value — never the pre-increment reading.
       input.streak?.observe(outcome);
+      input.sink?.onOutcome(outcome, shape);
     },
   };
 }

@@ -230,6 +230,7 @@ looks healthy from outside.
 | `gn_push_receive_total{outcome,shape}` | `createPushReceiver` via injected metrics port | Per-outcome counter. `enqueued` carries `shape` ∈ {`aps`,`data`,`send_side_fallback`}; misses use `shape="none"`. |
 | `gn_push_no_transfer_code_streak` | process-local gauge | Consecutive `no_transfer_code` since the last `enqueued`. |
 | log `push: ALERT push_no_transfer_code_streak` | `composePush` streak tracker | Fires once when the streak first reaches the threshold. |
+| `SAFETY_ALERT_SIGNALS` `push_no_transfer_code_streak` | `composePush` → `safetyAlertEvaluator` + Prom rule | Pageable P1 (log+webhook escalation); same threshold 20. |
 
 **Threshold:** `DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD = 20` consecutive
 `no_transfer_code` with no intervening `enqueued`.

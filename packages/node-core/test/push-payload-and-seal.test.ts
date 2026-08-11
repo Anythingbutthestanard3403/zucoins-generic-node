@@ -102,7 +102,7 @@ const PUSH_GOLDEN_DIR = join(
 const PUSH_ENVELOPE_GOLDEN_NAME = "delivered-envelope.data.v1.json.txt";
 /** SHA-256 of the exact golden bytes. Update only with a reviewed golden change. */
 const PUSH_ENVELOPE_DATA_V1_SHA256 =
-  "936d81f42de6beebd93493565bceca995aa67514aea6e23205bfb74657a220b5";
+  "5528e5a101730d3766d4af96ea8cbc7998fb63575fe0b5d5d93a76400df02f42";
 
 describe("delivered envelope golden (ZTR-1154)", () => {
   const raw = readFileSync(join(PUSH_GOLDEN_DIR, PUSH_ENVELOPE_GOLDEN_NAME));
@@ -161,6 +161,25 @@ describe("push receive outcome metrics + no_transfer_code streak (ZTR-1154)", ()
     tracker.observe("no_transfer_code");
     tracker.observe("no_transfer_code");
     expect(alerts).toEqual([3, 3]);
+  });
+
+  it("publishes streak gauge after observe so threshold event sees the post-increment value", () => {
+    // Review B: sink that set the gauge from tracker.streak() must not see streak-1.
+    const published: number[] = [];
+    const tracker = createPushNoTransferCodeStreakTracker({ threshold: 3 });
+    const port = createPushReceiveMetricsPort({
+      streak: tracker,
+      sink: {
+        onOutcome() {
+          published.push(tracker.streak());
+        },
+      },
+    });
+    port.onOutcome("no_transfer_code", "none");
+    port.onOutcome("no_transfer_code", "none");
+    port.onOutcome("no_transfer_code", "none");
+    expect(published).toEqual([1, 2, 3]);
+    expect(tracker.streak()).toBe(3);
   });
 
   it("createPushReceiver emits outcome metrics with shape on enqueued", async () => {

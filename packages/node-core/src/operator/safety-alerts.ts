@@ -1,6 +1,7 @@
 // Safety alerts / SLO rule set for the generic node.
 //
-// Ships the ten named signal classes bound to metrics.
+// Ships the named signal classes bound to metrics (ten original OPS signals
+// plus push_no_transfer_code_streak from ZTR-1154).
 // Each rule carries a P0/P1/P2 severity and a documented playbook posture.
 // Alerting is advisory only: a fire never
 // advances a cursor, infers chain truth, releases a lease, or changes money
@@ -18,12 +19,12 @@ import {
 } from "./storage-backpressure.js";
 
 // ---------------------------------------------------------------------------
-// Ten signal classes (exact names)
+// Signal classes (exact names)
 // ---------------------------------------------------------------------------
 
 /**
- * The ten OPS-cited signal classes. Identifiers are snake_case closed
- * vocabulary suitable for Prometheus-style labels (no secrets).
+ * Closed signal vocabulary (snake_case Prometheus-style labels; no secrets).
+ * Ten original OPS-cited classes plus push_no_transfer_code_streak (ZTR-1154).
  */
 export type SafetyAlertSignal =
   | "invariant_breach"
@@ -35,7 +36,8 @@ export type SafetyAlertSignal =
   | "storage_pressure"
   | "queue_caps"
   | "signer_loss"
-  | "backup_age";
+  | "backup_age"
+  | "push_no_transfer_code_streak";
 
 export const SAFETY_ALERT_SIGNALS: readonly SafetyAlertSignal[] = [
   "invariant_breach",
@@ -48,6 +50,7 @@ export const SAFETY_ALERT_SIGNALS: readonly SafetyAlertSignal[] = [
   "queue_caps",
   "signer_loss",
   "backup_age",
+  "push_no_transfer_code_streak",
 ] as const;
 
 /** @deprecated Use SafetyAlertSignal — kept as an alias for call-site clarity. */
@@ -180,6 +183,15 @@ export const SAFETY_ALERT_RULES: readonly SafetyAlertRuleDefinition[] = [
       "Key rotation and backup; the threshold value comes from the injected backup cadence (not invented here)",
     posture:
       "Operator escalation; renew backup before retention/recovery risk. Threshold ms is injected by the caller — never hard-coded independently in this module.",
+    diagnosticOnly: false,
+  },
+  {
+    signal: "push_no_transfer_code_streak",
+    severity: "P1",
+    citation:
+      "ZTR-1154 — consecutive no_transfer_code push receives with no intervening enqueued (delivered-envelope shape-break detector). Default threshold DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD (20)",
+    posture:
+      "Page operator. Compare a freshly decrypted live cleartext against goldens/push/delivered-envelope.data.v1; if the nest moved, update payload.ts precedence and refresh the golden in the same reviewed commit. Do not change the 204 discard response. Do not treat silence of other signals as an all-clear on the push channel.",
     diagnosticOnly: false,
   },
 ] as const;
@@ -419,6 +431,10 @@ export const DEFAULT_ALERT_THRESHOLDS: readonly AlertThreshold[] = [
   // 9. Signer loss: 1 = leadership lost (P1); 2 = lost + in-flight signing ambiguous (P0)
   { signal: "signer_loss", severity: "P1", value: 1, direction: "above" },
   { signal: "signer_loss", severity: "P0", value: 2, direction: "above" },
+  // 10. Push delivered-envelope shape break — consecutive no_transfer_code streak (ZTR-1154).
+  // Value is the process-local streak count; default band matches
+  // DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD in packages/node-core/src/push/outcome-metrics.ts.
+  { signal: "push_no_transfer_code_streak", severity: "P1", value: 20, direction: "above" },
 ];
 
 /** Default escalation: P2 logs; P1/P0 add webhook so the operator is paged. */
@@ -520,6 +536,11 @@ export interface SafetyAlertMetricInput {
   readonly signerInFlightAmbiguous: 0 | 1;
   /** Age of the newest successful backup in ms (compared to max age). */
   readonly backupAgeMs: number;
+  /**
+   * Consecutive inbound push receives that returned no_transfer_code with no
+   * intervening enqueued (ZTR-1154). Process-local; 0 after enqueue or restart.
+   */
+  readonly pushNoTransferCodeStreak: number;
 }
 
 export function emptySafetyAlertMetricInput(): SafetyAlertMetricInput {
@@ -538,6 +559,7 @@ export function emptySafetyAlertMetricInput(): SafetyAlertMetricInput {
     signerLeadershipHeld: 1,
     signerInFlightAmbiguous: 0,
     backupAgeMs: 0,
+    pushNoTransferCodeStreak: 0,
   };
 }
 
@@ -575,6 +597,7 @@ export function deriveSafetyAlertReadings(
     queue_caps: queueCapsReading,
     signer_loss: signerLossLevel,
     backup_age: input.backupAgeMs,
+    push_no_transfer_code_streak: input.pushNoTransferCodeStreak,
   };
 }
 
@@ -605,7 +628,7 @@ export interface SafetyAlertEvaluator {
     readings: Readonly<Partial<Record<SafetyAlertSignal, number>>>,
     nowMs?: number,
   ): AlertNotification[];
-  /** Evaluate from a full metric input (all ten signals). */
+  /** Evaluate from a full metric input (all catalogue signals). */
   evaluateInput(input: SafetyAlertMetricInput, nowMs?: number): AlertNotification[];
   dispatch(notification: AlertNotification): Promise<void>;
   evaluateAndDispatch(

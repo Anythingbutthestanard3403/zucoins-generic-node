@@ -31,6 +31,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 | [`queue_caps`](#queue_caps) | P1 | no | live |
 | [`signer_loss`](#signer_loss) | P1 | no | live |
 | [`backup_age`](#backup_age) | P1 | no | live |
+| [`push_no_transfer_code_streak`](#push_no_transfer_code_streak) | P1 | no | live |
 
 ## invariant_breach
 
@@ -181,6 +182,21 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 **Required posture.**
 
 > Operator escalation; renew backup before retention/recovery risk. Threshold ms is injected by the caller — never hard-coded independently in this module.
+
+## push_no_transfer_code_streak
+
+- **Severity:** P1
+- **Thresholds:** P1 when reading ≥ 20
+- **Diagnostic only:** no
+- **Feeds:** live — `gn_push_no_transfer_code_streak` process-local gauge; in-process SAFETY_ALERT_SIGNALS fire on threshold via composePush + custodyAlertEvaluator
+
+**Rule.**
+
+> ZTR-1154 — consecutive no_transfer_code push receives with no intervening enqueued (delivered-envelope shape-break detector). Default threshold DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD (20)
+
+**Required posture.**
+
+> Page operator. Compare a freshly decrypted live cleartext against goldens/push/delivered-envelope.data.v1; if the nest moved, update payload.ts precedence and refresh the golden in the same reviewed commit. Do not change the 204 discard response. Do not treat silence of other signals as an all-clear on the push channel.
 
 ## Invariants asserted by the source module
 

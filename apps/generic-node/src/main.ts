@@ -901,6 +901,8 @@ async function main(): Promise<void> {
         }),
       logger,
       metricsHooks,
+      // ZTR-1154: pageable streak alert via SAFETY_ALERT_SIGNALS (not log-only).
+      safetyAlertEvaluator: custodyAlertEvaluator,
     });
     logger.info(`push: VAPID mode=${vapidMode} (observe counts without blocking; enforce fails closed)`);
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);

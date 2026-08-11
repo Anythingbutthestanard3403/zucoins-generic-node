@@ -98,7 +98,10 @@ function wireAfterLandingBody(
 }
 
 /** Exact key insertion sequence for stringified storage (the byte-exact signing rule). */
-function buildReceiveAcceptedBody(operation: ReceiveOperation): ReceiveResponse {
+function buildReceiveAcceptedBody(
+  operation: ReceiveOperation,
+  subscriptionHandle: string,
+): ReceiveResponse {
   const createdAt = new Date(operation.createdAt).toISOString();
   return {
     operation: {
@@ -122,13 +125,17 @@ function buildReceiveAcceptedBody(operation: ReceiveOperation): ReceiveResponse 
     transfer_code: null,
     expected_artifact: null,
     t0: null,
-    subscription_handle: null,
+    // Plaintext returned once on create (and exact idempotent replay of stored body).
+    // Point GET strips this field. Only the hash is durable.
+    subscription_handle: subscriptionHandle,
   };
 }
 
 function receiveFromStored(row: StoredReceiveOperation): ReceiveResponse {
   // Prefer live status when the op has advanced past create-time frozen body
   // (workers overwrite response_body on READY; still guard status !== CREATED).
+  // Point GET strips subscription_handle regardless; fall back uses empty string
+  // only when no stored body exists (should not happen post-create completion).
   let body: ReceiveResponse;
   if (row.responseBody !== null && row.status === "CREATED") {
     body = JSON.parse(row.responseBody) as ReceiveResponse;
@@ -138,13 +145,13 @@ function receiveFromStored(row: StoredReceiveOperation): ReceiveResponse {
       if (parsed.operation?.state === row.status || row.liveStatus !== undefined) {
         body = parsed;
       } else {
-        body = buildReceiveAcceptedBody(row);
+        body = buildReceiveAcceptedBody(row, parsed.subscription_handle ?? "");
       }
     } catch {
-      body = buildReceiveAcceptedBody(row);
+      body = buildReceiveAcceptedBody(row, "");
     }
   } else {
-    body = buildReceiveAcceptedBody(row);
+    body = buildReceiveAcceptedBody(row, "");
   }
 
   // overlay live operations facts. Frozen READY response_body keeps
@@ -254,11 +261,43 @@ export function createSqlOperationRouteStore(
         throwReceiveRejection(admission.code, admission.detail, admission.retryAfterSeconds);
       }
 
-      const body = buildReceiveAcceptedBody(admission.operation);
+      // Mint happened inside the admission TX; plaintext is returned exactly once here
+      // and embedded in the stored response_body so idempotent replay is byte-identical
+      // (never a second mint — the never-blind-retry rule).
+      const body = buildReceiveAcceptedBody(
+        admission.operation,
+        admission.subscriptionHandlePlaintext,
+      );
       const bodyText = JSON.stringify(body);
       // Store the first completed status+body so a concurrent retry gets exact replay
       // (or idempotency_in_progress) — never a fabricated second admit (the never-blind-retry rule).
-      await config.receive.completeOperation(admission.operation.operationId, 202, bodyText);
+      // Honour the boolean: if another writer already completed (or the row vanished),
+      // do not pretend durable complete — surface in-progress so the client retries
+      // and the READY worker cannot race a missing create body (ZTR-1142).
+      const completed = await config.receive.completeOperation(
+        admission.operation.operationId,
+        202,
+        bodyText,
+      );
+      if (!completed) {
+        // Winner's body may already be durable (exact replay) or still racing.
+        const existing = await config.receive.findByOperationId(
+          admission.operation.operationId,
+          input.implementerId,
+        );
+        if (
+          existing !== null &&
+          existing.responseBody !== null &&
+          existing.responseStatus !== null
+        ) {
+          return {
+            status: (existing.responseStatus === 201 ? 201 : 202) as 201 | 202,
+            body: JSON.parse(existing.responseBody) as ReceiveResponse,
+            idempotentReplay: true,
+          };
+        }
+        throw new IdempotencyInProgressError(1);
+      }
       return { status: 202 as const, body };
     },
 

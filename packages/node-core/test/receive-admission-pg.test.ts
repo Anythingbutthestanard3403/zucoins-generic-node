@@ -145,6 +145,16 @@ const prerequisiteDdl = ((): string => {
 
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
 const RECEIVE_DDL = readSchema("receive-admission.sql");
+/** subscription_handles only (sha256_hex already from base-enums-domains). */
+const SUBSCRIPTION_HANDLES_DDL = ((): string => {
+  const raw = readSchema("session-subscription-stores.sql");
+  const start = raw.indexOf("CREATE TABLE subscription_handles");
+  const end = raw.indexOf("CREATE TABLE admin_sessions");
+  if (start < 0 || end < 0) {
+    throw new Error("session-subscription-stores.sql: subscription_handles block not found");
+  }
+  return raw.slice(start, end);
+})();
 
 /* ─── fixtures ────────────────────────────────────────────────────── */
 
@@ -268,10 +278,12 @@ describeIfPg("receive admission — real frozen DDL against real PostgreSQL", ()
 
   beforeAll(() => {
     psqlMust(MAINTENANCE_DB, `CREATE DATABASE ${scratchDb}`);
-    // Prerequisite first: base enums/domains + nodes, then custody, then receive-admission.
+    // Prerequisite first: base enums/domains + nodes, then custody, then receive-admission
+    // + subscription_handles (minted in the same admit TX — ZTR-1142).
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
     applyDdl(scratchDb, RECEIVE_DDL);
+    applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     psqlMust(scratchDb, seedNode());
     psqlMust(scratchDb, seedVerifiedWallet(DEST_WALLET, RECOVERY_ID, pubkey("DEST")));
     psqlMust(scratchDb, seedVerifiedWallet(RECEIVER_WALLET, RECOVERY_ID_2, pubkey("RCVR")));

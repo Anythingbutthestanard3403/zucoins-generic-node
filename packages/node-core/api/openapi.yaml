@@ -1521,7 +1521,7 @@ components:
           additionalProperties: true
         subscription_handle:
           type: string
-          nullable: true
+          minLength: 1
     InternalMoveResponse:
       type: object
       additionalProperties: false

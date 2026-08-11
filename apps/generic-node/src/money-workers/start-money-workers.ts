@@ -466,18 +466,54 @@ async function loadAssignedPendingFormation(pool: Pool): Promise<readonly Assign
   }));
 }
 
+/**
+ * Mirror READY onto receive_operations after a successful operations READY commit.
+ *
+ * Never overwrite a durable create-time body that already carries a non-empty
+ * `subscription_handle` with a body that lacks one (or carries null/empty).
+ * Prefer merge-preserve of the create handle when the READY body is missing it;
+ * refuse the sync entirely when neither side has a usable handle (should not
+ * reach here — commitReceiveReady already fails closed).
+ */
 async function syncReceiveOperationsAfterReady(
   pool: Pool,
   params: { readonly operationId: string; readonly walletId: string; readonly responseBody: string },
 ): Promise<void> {
+  let readyHandle: string | null = null;
+  try {
+    const parsed = JSON.parse(params.responseBody) as { subscription_handle?: unknown };
+    if (typeof parsed.subscription_handle === "string" && parsed.subscription_handle.length > 0) {
+      readyHandle = parsed.subscription_handle;
+    }
+  } catch {
+    // Malformed READY body — do not clobber a good create body.
+    return;
+  }
+  if (readyHandle === null) {
+    // Schema-illegal READY body; leave receive_operations untouched.
+    return;
+  }
+
+  // Only overwrite response_body when the READY payload carries the same non-empty
+  // handle already durable on create (or create body still lacks a handle). Never
+  // replace a good create handle with a different/empty value.
   await pool.query(
     `UPDATE receive_operations
         SET status = 'READY',
             wallet_id = $2::uuid,
             completed_at = COALESCE(completed_at, now()),
-            response_status = 200,
-            response_body = $3
-      WHERE operation_id = $1::uuid AND status IN ('CREATED', 'READY')`,
+            response_status = 201,
+            response_body = CASE
+              WHEN response_body IS NULL THEN $3::text
+              WHEN COALESCE(response_body::jsonb->>'subscription_handle', '') = '' THEN $3::text
+              WHEN (response_body::jsonb->>'subscription_handle')
+                     IS NOT DISTINCT FROM ($3::jsonb->>'subscription_handle')
+                THEN $3::text
+              ELSE response_body
+            END
+      WHERE operation_id = $1::uuid
+        AND status IN ('CREATED', 'READY')
+        AND COALESCE($3::jsonb->>'subscription_handle', '') <> ''`,
     [params.operationId, params.walletId, params.responseBody],
   );
 }
@@ -572,6 +608,41 @@ async function advanceAssignedReceive(deps: {
     return;
   }
 
+  // Fail closed before formation: READY requires the create-time `sh_…` plaintext
+  // already durable on receive_operations.response_body. If create has not completed
+  // (or the body is corrupt), skip this tick — never invent null and never form a
+  // code that cannot be READY'd under the frozen schema (ZTR-1142 READY/null race).
+  let priorSubscriptionHandle: string;
+  try {
+    const prior = await deps.pool.query<{ response_body: string | null }>(
+      `SELECT response_body FROM receive_operations WHERE operation_id = $1::uuid`,
+      [deps.row.operationId],
+    );
+    const raw = prior.rows[0]?.response_body;
+    if (typeof raw !== "string" || raw.length === 0) {
+      deps.logger.info(
+        `money-workers: defer READY op=${deps.row.operationId} — create response_body not durable yet`,
+      );
+      return;
+    }
+    const parsed = JSON.parse(raw) as { subscription_handle?: unknown };
+    if (typeof parsed.subscription_handle !== "string" || parsed.subscription_handle.length === 0) {
+      deps.logger.info(
+        `money-workers: defer READY op=${deps.row.operationId} — create body lacks non-empty subscription_handle`,
+      );
+      return;
+    }
+    priorSubscriptionHandle = parsed.subscription_handle;
+  } catch (err) {
+    // Soft-fail read/parse must NOT fail open to null and overwrite the body.
+    deps.logger.info(
+      `money-workers: defer READY op=${deps.row.operationId} — prior handle load failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return;
+  }
+
   const afterLanding =
     deps.row.afterLandingKind === "INTERNAL_MOVE" && deps.row.destinationId !== null
       ? { kind: "INTERNAL_MOVE" as const, destination_id: deps.row.destinationId }
@@ -622,6 +693,7 @@ async function advanceAssignedReceive(deps: {
         destinationId: afterLanding.kind === "INTERNAL_MOVE" ? afterLanding.destination_id : null,
         sql: tx,
         events: deps.events(tx),
+        subscriptionHandle: priorSubscriptionHandle,
       }),
     deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
   );

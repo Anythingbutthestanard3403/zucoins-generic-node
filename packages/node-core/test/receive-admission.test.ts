@@ -37,6 +37,7 @@ import {
   type SqlExecutor,
   type SqlQueryResult,
 } from "../src/receive/sql-store.js";
+import { hashSubscriptionHandle } from "../src/api/subscription-handle.js";
 
 const DEST_ID = "11111111-1111-4111-8111-111111111111";
 const DEST_WALLET = "22222222-2222-4222-8222-222222222222";
@@ -55,6 +56,7 @@ const NON_TERMINAL = new Set(["CREATED", "READY"]);
 
 class InProcessSqlExecutor implements SqlExecutor {
   readonly rows: Record<string, unknown>[] = [];
+  readonly subscriptionHandles: Record<string, unknown>[] = [];
   readonly destinations = new Map<string, Record<string, unknown>>();
 
   addDestination(record: Record<string, unknown>): void {
@@ -71,6 +73,24 @@ class InProcessSqlExecutor implements SqlExecutor {
       return found === undefined ? [] : [found];
     }
     if (text === STATEMENTS.INSERT_IN_PROGRESS) return this.insert(params);
+    if (text === STATEMENTS.INSERT_SUBSCRIPTION_HANDLE) {
+      const handleHash = params[3] as string;
+      if (this.subscriptionHandles.some((h) => h.handle_hash === handleHash)) {
+        throw uniqueViolation("subscription_handles_handle_hash_key");
+      }
+      if (this.subscriptionHandles.some((h) => h.operation_id === params[2])) {
+        throw uniqueViolation("subscription_handles_operation_id_key");
+      }
+      // Only the hash is durable — plaintext is never a bind parameter.
+      this.subscriptionHandles.push({
+        id: params[0],
+        node_id: params[1],
+        operation_id: params[2],
+        handle_hash: handleHash,
+        expires_at: params[4],
+      });
+      return [{ id: params[0] }];
+    }
     if (text === STATEMENTS.LOCK_ADMISSION_QUEUE) {
       // Advisory lock is a no-op in-process; real serialisation is proven on live PG.
       return [{ locked: true }];
@@ -157,6 +177,74 @@ function newStore(): { sql: InProcessSqlExecutor; store: SqlReceiveAdmissionStor
   // Identity TX factory: single-threaded in-process fake cannot race; live PG stress uses
   // a real BEGIN/COMMIT factory (receive-admission-pg.test.ts).
   return { sql, store: new SqlReceiveAdmissionStore(sql, { withTransaction: (fn) => fn(sql) }) };
+}
+
+/**
+ * Models withPgTransaction (main.ts): BEGIN → fn(tx) → COMMIT on normal return;
+ * ROLLBACK only when fn throws. A unique_violation aborts the session — subsequent
+ * queries and COMMIT fail with "current transaction is aborted" unless ROLLBACK runs.
+ * Proves insertOn must not swallow 23505 inside the open TX (ZTR-1142 Review B D1).
+ */
+function newStoreWithBeginCommitTx(): {
+  sql: InProcessSqlExecutor;
+  store: SqlReceiveAdmissionStore;
+  commits: number;
+  rollbacks: number;
+  commitErrors: number;
+} {
+  const sql = new InProcessSqlExecutor();
+  let commits = 0;
+  let rollbacks = 0;
+  let commitErrors = 0;
+  const store = new SqlReceiveAdmissionStore(sql, {
+    withTransaction: async <T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> => {
+      let aborted = false;
+      const tx: SqlExecutor = {
+        query: async <R>(text: string, params: readonly unknown[]): Promise<SqlQueryResult<R>> => {
+          if (aborted) {
+            throw Object.assign(new Error("current transaction is aborted, commands ignored until end of transaction block"), {
+              code: "25P02",
+            });
+          }
+          try {
+            return await sql.query<R>(text, params);
+          } catch (error) {
+            // PG marks the TX aborted on any error (including 23505).
+            aborted = true;
+            throw error;
+          }
+        },
+      };
+      try {
+        const out = await fn(tx);
+        if (aborted) {
+          commitErrors += 1;
+          throw Object.assign(
+            new Error("current transaction is aborted, commands ignored until end of transaction block"),
+            { code: "25P02" },
+          );
+        }
+        commits += 1;
+        return out;
+      } catch (error) {
+        rollbacks += 1;
+        throw error;
+      }
+    },
+  });
+  return {
+    sql,
+    store,
+    get commits() {
+      return commits;
+    },
+    get rollbacks() {
+      return rollbacks;
+    },
+    get commitErrors() {
+      return commitErrors;
+    },
+  };
 }
 
 const blessedDestinationRow = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -363,6 +451,17 @@ describe("admitReceiveExternal", () => {
     expect(result.operation.route).toBe(RECEIVE_CANONICAL_ROUTE);
     expect(sql.rows).toHaveLength(1);
     expect(sql.rows[0].request_sha256).toBe(canonicalRequestSha256(validRequest()));
+    // ZTR-1142: mint in the same TX; only the hash is durable.
+    expect(result.subscriptionHandlePlaintext.startsWith("sh_")).toBe(true);
+    expect(sql.subscriptionHandles).toHaveLength(1);
+    expect(sql.subscriptionHandles[0].handle_hash).toBe(
+      hashSubscriptionHandle(result.subscriptionHandlePlaintext),
+    );
+    expect(sql.subscriptionHandles[0].operation_id).toBe("op-001");
+    // Plaintext must never appear as a bind / durable field.
+    expect(JSON.stringify(sql.subscriptionHandles)).not.toContain(
+      result.subscriptionHandlePlaintext,
+    );
   });
 
   it("replays the first completed execution byte-identically for same key + same hash", async () => {
@@ -512,6 +611,62 @@ describe("admitReceiveExternal", () => {
     // — implementers never see the internal wallet UUID in the rejection.
     expect(second.detail).toBeUndefined();
     expect(sql.rows).toHaveLength(1);
+  });
+
+  it("BEGIN/COMMIT factory: second INTERNAL_MOVE admit returns WALLET_IN_FLIGHT without COMMIT error", async () => {
+    // Review B D1: insertOn must not catch unique_violation inside an open PG TX and return
+    // WALLET_IN_FLIGHT — that leaves the session aborted and COMMIT fails (500). With a real
+    // BEGIN/COMMIT factory, 23505 must throw out for ROLLBACK; outer catch maps the constraint.
+    const fixture = newStoreWithBeginCommitTx();
+    fixture.sql.addDestination(blessedDestinationRow());
+    const { sql, store } = fixture;
+
+    const first = await store.insertInProgress({
+      operationId: "op-001",
+      implementerId: "impl-1",
+      nodeId: "node-1",
+      kind: "RECEIVE_EXTERNAL",
+      status: "CREATED",
+      httpMethod: RECEIVE_HTTP_METHOD,
+      route: RECEIVE_CANONICAL_ROUTE,
+      amountZkz: "1.5",
+      anchor: "anchor_abc-123",
+      ttlMs: 60_000,
+      afterLanding: { kind: "INTERNAL_MOVE", destinationId: DEST_ID },
+      idempotencyKey: "abcdef1234567890",
+      requestSha256: "a".repeat(64),
+      destinationWalletId: DEST_WALLET,
+      walletId: null,
+      createdAt: 1700000000000,
+    });
+    expect(first.kind).toBe("INSERTED");
+    expect(fixture.commits).toBe(1);
+    expect(fixture.commitErrors).toBe(0);
+
+    const second = await store.insertInProgress({
+      operationId: "op-002",
+      implementerId: "impl-1",
+      nodeId: "node-1",
+      kind: "RECEIVE_EXTERNAL",
+      status: "CREATED",
+      httpMethod: RECEIVE_HTTP_METHOD,
+      route: RECEIVE_CANONICAL_ROUTE,
+      amountZkz: "2.5",
+      anchor: "anchor_def-456",
+      ttlMs: 60_000,
+      afterLanding: { kind: "INTERNAL_MOVE", destinationId: DEST_ID },
+      idempotencyKey: "zzzzzzzzzzzzzzzz",
+      requestSha256: "b".repeat(64),
+      destinationWalletId: DEST_WALLET,
+      walletId: null,
+      createdAt: 1700000000001,
+    });
+    expect(second).toEqual({ kind: "WALLET_IN_FLIGHT", walletId: DEST_WALLET });
+    expect(fixture.commitErrors).toBe(0);
+    expect(fixture.rollbacks).toBe(1);
+    expect(fixture.commits).toBe(1);
+    expect(sql.rows).toHaveLength(1);
+    expect(sql.subscriptionHandles).toHaveLength(1);
   });
 
   it("The one-in-flight-per-wallet rule: a TERMINAL predecessor does not block a fresh receive for the same wallet", async () => {

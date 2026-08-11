@@ -95,6 +95,16 @@ const prerequisiteDdl = ((): string => {
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
 const RECEIVE_DDL = readSchema("receive-admission.sql");
 const SEND_DDL = readSchema("send-external-create.sql");
+/** subscription_handles only (sha256_hex already from base-enums-domains). */
+const SUBSCRIPTION_HANDLES_DDL = ((): string => {
+  const raw = readSchema("session-subscription-stores.sql");
+  const start = raw.indexOf("CREATE TABLE subscription_handles");
+  const end = raw.indexOf("CREATE TABLE admin_sessions");
+  if (start < 0 || end < 0) {
+    throw new Error("session-subscription-stores.sql: subscription_handles block not found");
+  }
+  return raw.slice(start, end);
+})();
 const operationsDdl = ((): string => {
   const raw = readSchema("operations.sql");
   const start = raw.indexOf("CREATE TABLE operations");
@@ -356,6 +366,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
     applyDdl(scratchDb, RECEIVE_DDL);
+    applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
@@ -448,11 +459,16 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     expect(created.status).toBe(202);
     expect(created.body.operation.operation_type).toBe("RECEIVE_EXTERNAL");
     expect(created.body.operation.state).toBe("CREATED");
+    // ZTR-1142: non-empty subscription_handle on create; hash-only at rest.
+    expect(created.body.subscription_handle.startsWith("sh_")).toBe(true);
     const id = created.body.operation.operation_id;
+    const handlePlain = created.body.subscription_handle;
 
     const got = await ops.getReceive(id, IMPLEMENTER_A);
     expect(got).not.toBeNull();
     expect(got!.operation.operation_id).toBe(id);
+    // Point-read body still carries the field at the store layer; the route handler strips it.
+    expect(got!.subscription_handle).toBe(handlePlain);
     // Cross-tenant point read is null — never leaks.
     expect(await ops.getReceive(id, IMPLEMENTER_B)).toBeNull();
 
@@ -466,6 +482,8 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     });
     expect(replay.idempotentReplay).toBe(true);
     expect(replay.body.operation.operation_id).toBe(id);
+    // Same handle on replay — never a second mint.
+    expect(replay.body.subscription_handle).toBe(handlePlain);
     drillsCompleted += 1;
   });
 

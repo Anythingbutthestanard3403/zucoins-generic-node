@@ -140,7 +140,12 @@ export type ReceiveRejectionCode =
   | "receive_queue_full";
 
 export type ReceiveAdmissionOutcome =
-  | { readonly outcome: "ADMITTED"; readonly operation: ReceiveOperation }
+  | {
+      readonly outcome: "ADMITTED";
+      readonly operation: ReceiveOperation;
+      /** One-time plaintext `sh_…` — return on create response; never persist or log. */
+      readonly subscriptionHandlePlaintext: string;
+    }
   | {
       readonly outcome: "IDEMPOTENT_REPLAY";
       readonly operation: StoredReceiveOperation;
@@ -157,8 +162,15 @@ export type ReceiveAdmissionOutcome =
 // Outcome of the arbiter insert. Every branch is decided by the database, not by a prior
 // read: INSERTED means this caller won the idempotency constraint, and WALLET_IN_FLIGHT
 // means the one-in-flight-per-wallet partial unique index rejected the row.
+//
+// On INSERTED the store also mints a subscription handle in the same TX and returns the
+// plaintext once. Only the hash is durable (subscription_handles.handle_hash).
 export type ReceiveInsertOutcome =
-  | { readonly kind: "INSERTED" }
+  | {
+      readonly kind: "INSERTED";
+      /** One-time plaintext `sh_…` handle. Never logged; never re-readable from storage. */
+      readonly subscriptionHandlePlaintext: string;
+    }
   | { readonly kind: "IDEMPOTENCY_CONFLICT" }
   | { readonly kind: "WALLET_IN_FLIGHT"; readonly walletId: string };
 
@@ -368,7 +380,11 @@ export async function admitReceiveExternal(
   // is never told the queue is full.
   const insert = await store.insertQueuedIfCapAllows(operation, config.queueCap);
   if (insert.kind === "INSERTED") {
-    return { outcome: "ADMITTED", operation };
+    return {
+      outcome: "ADMITTED",
+      operation,
+      subscriptionHandlePlaintext: insert.subscriptionHandlePlaintext,
+    };
   }
   if (insert.kind === "QUEUE_FULL") {
     const existing = await store.findByIdempotency(

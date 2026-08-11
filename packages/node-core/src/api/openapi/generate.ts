@@ -583,7 +583,9 @@ function componentsBlock(
             ],
           },
           t0: { type: "object", nullable: true, additionalProperties: true },
-          subscription_handle: { type: "string", nullable: true },
+          // Non-null on create 201/202 (and exact idempotent replay). Point GET
+          // strips the field entirely — it is never re-issued as null.
+          subscription_handle: { type: "string", minLength: 1 },
         },
       },
       InternalMoveResponse: {

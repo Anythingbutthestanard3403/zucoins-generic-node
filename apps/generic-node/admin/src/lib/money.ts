@@ -3,8 +3,10 @@
 // Reads may use inventory GETs when mounted; absent routes surface as live:false.
 
 import type {
+  DestinationInventoryItem,
   OperationInventoryDetail,
   OperationInventoryListItem,
+  WalletInventoryItem,
 } from "@zucoins/generic-node-contracts/admin-inventory";
 import {
   OPERATOR_RECOVERY_ACTIONS,
@@ -12,6 +14,11 @@ import {
 } from "@zucoins/generic-node-contracts/operator-halt";
 import { api, apiOrDemo, ApiError, type ApiFailureDetail, toApiFailureDetail } from "./api.js";
 import { useAuth } from "../store/auth.js";
+
+/** Same shared declaration the node projection compiles against (ZTR-1217). */
+export type { WalletInventoryItem };
+/** Call-site alias — wire shape is DestinationInventoryItem in contracts. */
+export type DestinationItem = DestinationInventoryItem;
 
 export interface ApprovalChallenge {
   operation_id: string;
@@ -84,28 +91,6 @@ export interface RecoveryActionSuccess {
   status: string;
   row_version: number;
   [key: string]: unknown;
-}
-
-/**
- * FOLLOW-UP (ZTR-1202): still hand-transcribed, and already known to disagree with the node's
- * `DestinationInventoryItem` (missing `blessed_by_device_key_id` / `blessing_artifact_id`, and
- * marking server-mandatory fields optional). Move it onto the shared
- * `@zucoins/generic-node-contracts` declaration the way the operations shapes above already are
- * — the compiler cannot see the disagreement until it is shared. Same for
- * {@link WalletInventoryItem}.
- */
-export interface DestinationItem {
-  destination_id: string;
-  node_id?: string;
-  wallet_id: string;
-  wallet_public_key: string;
-  state: string;
-  label: string;
-  blessed_at: string | null;
-  retired_at: string | null;
-  created_at?: string;
-  move_eligible?: boolean;
-  ineligibility_reason?: string | null;
 }
 
 export interface InventoryListPage<T> {
@@ -491,23 +476,6 @@ export async function listDestinationsInventory(
   filters: { readonly state?: string; readonly limit?: number } = {},
 ): Promise<CompleteInventoryResult<DestinationItem>> {
   return loadCompleteInventory<DestinationItem>("/destinations", filters);
-}
-
-/** Wallet inventory row. observed_balance_zkz is gateway-observed, null if never seen. */
-/**
- * FOLLOW-UP (ZTR-1202): hand-transcribed and known-drifted against the node's
- * `WalletInventoryItem` (which carries the full `WalletCustodyView` — `node_id`, `retired_at`,
- * `quarantine_reason`, `recovery_verified_at`, `recovery_verification_id`). Share the
- * declaration, as {@link OperationListItem} now does, rather than widening it by hand.
- */
-export interface WalletInventoryItem {
-  readonly wallet_id: string;
-  readonly public_key: string;
-  readonly state: string;
-  readonly key_origin: string;
-  readonly recovery_verified: boolean;
-  readonly observed_balance_zkz: string | null;
-  readonly created_at?: string;
 }
 
 /** Audit rows exposed by the session-gated inventory GET. */

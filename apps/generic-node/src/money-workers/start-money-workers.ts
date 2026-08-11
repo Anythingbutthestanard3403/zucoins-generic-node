@@ -898,7 +898,7 @@ async function runReceiveExpiryReleaseStep(deps: {
         receiver_wallet_id: string | null;
       }>(
         `SELECT implementer_id::text AS implementer_id,
-                receiver_wallet_id::text AS receiver_wallet_id
+                wallet_id::text AS receiver_wallet_id
            FROM receive_operations
           WHERE operation_id = $1::uuid`,
         [event.operationId],
@@ -1310,7 +1310,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             receiver_wallet_id: string | null;
           }>(
             `SELECT implementer_id::text AS implementer_id,
-                    receiver_wallet_id::text AS receiver_wallet_id
+                    wallet_id::text AS receiver_wallet_id
                FROM receive_operations
               WHERE operation_id = $1::uuid`,
             [p.operationId],

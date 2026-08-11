@@ -18,6 +18,7 @@ import {
   InMemoryAdminUserStore,
   LOGIN_RATE_MAX_REQUESTS,
   LOGIN_RATE_WINDOW_MS,
+  consumeLoginAttempt,
   _resetLoginRateLimitForTests,
   type AdminUser,
 } from "@zucoins/node-core";
@@ -168,11 +169,15 @@ describe("admin error envelope (ZTR-1196)", () => {
     const remote = "203.0.113.50";
     const body = Buffer.from(JSON.stringify({ username: "admin", password: "wrong-password" }));
     const headers = { "content-type": "application/json" };
+    // Pre-spend the IP budget via the same limiter handleAdminLogin uses so the
+    // suite does not need 30 sequential bcrypt-bound 401s (flake under full-suite load).
+    // Must use wall-clock now: handleAdminLogin calls consumeLoginAttempt(ip) without
+    // an atMs override, so a synthetic epoch opens a different fixed window.
+    const now = Date.now();
     for (let i = 0; i < LOGIN_RATE_MAX_REQUESTS; i++) {
-      const admitted = await router("POST", "/admin/v1/login", body, headers, remote);
-      // admitted attempts are auth failures (401), not rate-limited yet
-      expect(admitted.status).not.toBe(429);
+      expect(consumeLoginAttempt(remote, now)).toBe(true);
     }
+    expect(consumeLoginAttempt(remote, now)).toBe(false);
     const shed = await router("POST", "/admin/v1/login", body, headers, remote);
     expect(shed.status).toBe(429);
     const raw = JSON.parse(shed.body) as unknown;

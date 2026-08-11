@@ -98,7 +98,7 @@ describe("recovery secret entropy floor", () => {
       {
         // Crockford-mapped "correct horse battery staple".
         secret: "C0RRECTH0RSEBATTERYSTAP1E0",
-        want: /letter-only run|repeated substring|sequential run|same-character/,
+        want: /letter-only run|repeated substring|sequential run|same-character|dictionary/,
       },
       {
         // Near-tile "letmein" ×3 + pad — period 7 does not divide 26.
@@ -111,7 +111,7 @@ describe("recovery secret entropy floor", () => {
       },
       {
         secret: "PACKSECRETPACKSECRETPACK01",
-        want: /repeated substring|letter-only run/,
+        want: /repeated substring|letter-only run|dictionary/,
       },
       {
         // Triple-letter blocks — same-symbol structure, not ±1 monotone.
@@ -126,7 +126,7 @@ describe("recovery secret entropy floor", () => {
       {
         // Human mnemonic-ish letter run.
         secret: "MYVAV1TMASTERKEYBACKP20240",
-        want: /letter-only run|repeated substring/,
+        want: /letter-only run|repeated substring|dictionary/,
       },
     ];
     for (const { secret, want } of residuals) {
@@ -139,6 +139,49 @@ describe("recovery secret entropy floor", () => {
       try {
         createRecoveryPack({ vaultMasterKey: MASTER, secret });
         expect.unreachable(`residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
+  it("refuses Review B r2 residual digit-broken dictionary / keyboard / alternation", () => {
+    // Named residuals that still sealed under the r2 letter-run / near-tile floor.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character/;
+    const residuals = [
+      // Digit-broken "correct horse battery staple" variants.
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C0RRECTH0RSEBATT3RYSTAP1EX",
+      // CORRECT with a digit after every letter.
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      // Digit-broken English mnemonics.
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "W1NTER1SC0M1NGN0RTHKEY2024",
+      "MAYTHEF0RCEBEW1THY0V2024XX",
+      "NEVERG0NNAG1VEY0VVP2024KEY",
+      // Keyboard rows + digit break.
+      "QWERTYASD1FGHZXCVBN12345AB",
+      // Strict alternating digit×letter / pair sequences.
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      // Multi short-token English markov (CODE/PIN/PASS/NODE).
+      "MANC0DE7P1NGETP1NPASS4N0DE",
+      // Alt-digit MASTERKEY / PASSWORD skeletons.
+      "M0A1S2T3E4R5K6E7Y8B9A0C1K2",
+      "P0A1S2S3W4R5D6H7N8T9R0X1Y2",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      expect(recoverySecretWeakness(secret)).toMatch(residualWant);
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r2 residual must not seal: ${secret}`);
       } catch (e) {
         expect((e as RecoveryPackError).code).toBe("weak_secret");
       }
@@ -204,6 +247,15 @@ describe("entropy floor is enforced at creation", () => {
       "AAABBBCCCDDDEEEFFFGGGHHHJK",
       "02468ACEGJMPRTWY02468ACEGJ",
       "PACKSECRETPACKSECRETPACK01",
+      // Review B r2 residual class (digit-broken dict / keyboard / alternation).
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "QWERTYASD1FGHZXCVBN12345AB",
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      "MANC0DE7P1NGETP1NPASS4N0DE",
     ];
     for (const secret of falseAccepts) {
       expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(

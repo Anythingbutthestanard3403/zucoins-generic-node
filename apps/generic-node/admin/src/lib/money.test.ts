@@ -715,6 +715,28 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
       Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
     }
   });
+
+  it("SPA structure floor rejects Review B r2 residual class (parity with node)", async () => {
+    const { recoveryPackSecretStructureOk } = await import("./money.js");
+    const residuals = [
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "QWERTYASD1FGHZXCVBN12345AB",
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      "MANC0DE7P1NGETP1NPASS4N0DE",
+      "M0A1S2T3E4R5K6E7Y8B9A0C1K2",
+      "P0A1S2S3W4R5D6H7N8T9R0X1Y2",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(recoveryPackSecretStructureOk(secret)).toBe(false);
+    }
+    // Known-good still passes the SPA mirror.
+    expect(recoveryPackSecretStructureOk("9F3KQ2XW7HB4TMZ0RCJ8PNVA5D")).toBe(true);
+  });
 });
 
 describe("newIdempotencyKey (ZTR-1168)", () => {

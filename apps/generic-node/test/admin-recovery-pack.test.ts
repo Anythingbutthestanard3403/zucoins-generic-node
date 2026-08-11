@@ -393,6 +393,15 @@ describe("admin recovery-pack create", () => {
       "AAABBBCCCDDDEEEFFFGGGHHHJK",
       "02468ACEGJMPRTWY02468ACEGJ",
       "PACKSECRETPACKSECRETPACK01",
+      // Review B r2 residual: digit-broken dict / keyboard / alternation.
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "QWERTYASD1FGHZXCVBN12345AB",
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      "MANC0DE7P1NGETP1NPASS4N0DE",
     ];
     for (let i = 0; i < residuals.length; i++) {
       const resR = await router(

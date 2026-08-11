@@ -89,6 +89,20 @@ export const RECOVERY_PACK_MAX_LAG_MATCH_FRAC = 0.4;
  * near-tiles and short-cycle pads the exact-tiling check misses).
  */
 export const RECOVERY_PACK_MAX_REPEATED_SUBSTRING = 4;
+/**
+ * Reject strict digit↔letter alternation runs (0A1B2C… / A1B2C3…). CSPRNG p99
+ * is ~9 at n=26; threshold 10 keeps redraw rate ~0.8%.
+ */
+export const RECOVERY_PACK_MAX_CLASS_ALTERNATION_RUN = 10;
+/**
+ * Reject long letter+digit (or digit+letter) pair sequences (A1B2C3… /
+ * 0A1B2C…). Distinct from class-alternation: counts complete pairs.
+ */
+export const RECOVERY_PACK_MAX_CLASS_PAIR_RUN = 6;
+/**
+ * Keyboard-row substring length that is not an i.i.d. draw (QWERTY / 12345 / …).
+ */
+export const RECOVERY_PACK_MAX_KEYBOARD_RUN = 5;
 /** Bound on secret length accepted on the *open* path (create is fixed-length). */
 export const RECOVERY_PACK_SECRET_MAX_CHARS = 1024;
 
@@ -283,14 +297,262 @@ function hasLongLetterRun(secret: string): boolean {
 }
 
 /**
+ * True when ≥ RECOVERY_PACK_MAX_CLASS_ALTERNATION_RUN consecutive symbols
+ * alternate digit↔letter class (0A1B2C…, A1B2C3…). Catches patterned
+ * skeletons that step-k monotone misses because alphabet deltas are not
+ * constant.
+ */
+function hasClassAlternationRun(secret: string): boolean {
+  let run = 1;
+  for (let i = 1; i < secret.length; i++) {
+    const prevDigit = secret[i - 1]! >= "0" && secret[i - 1]! <= "9";
+    const curDigit = secret[i]! >= "0" && secret[i]! <= "9";
+    if (prevDigit !== curDigit) {
+      run += 1;
+      if (run >= RECOVERY_PACK_MAX_CLASS_ALTERNATION_RUN) return true;
+    } else {
+      run = 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when ≥ RECOVERY_PACK_MAX_CLASS_PAIR_RUN consecutive letter+digit or
+ * digit+letter pairs appear (A1B2C3… / 0A1B2C…). Complements class-alternation
+ * by counting complete pairs from either alignment.
+ */
+function hasClassPairRun(secret: string): boolean {
+  const isDigit = (c: string): boolean => c >= "0" && c <= "9";
+  const isLetter = (c: string): boolean => c >= "A" && c <= "Z";
+  for (const offset of [0, 1] as const) {
+    for (const kind of ["LD", "DL"] as const) {
+      let run = 0;
+      let i = offset;
+      while (i + 1 < secret.length) {
+        const a = secret[i]!;
+        const b = secret[i + 1]!;
+        const ok =
+          (kind === "LD" && isLetter(a) && isDigit(b)) ||
+          (kind === "DL" && isDigit(a) && isLetter(b));
+        if (ok) {
+          run += 1;
+          if (run >= RECOVERY_PACK_MAX_CLASS_PAIR_RUN) return true;
+          i += 2;
+        } else {
+          run = 0;
+          i += 1;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Keyboard rows (and reverse) restricted to the Crockford alphabet. A
+ * contiguous substring of length ≥ MAX_KEYBOARD_RUN is not an i.i.d. draw.
+ */
+const KEYBOARD_ROWS_CROCKFORD: readonly string[] = [
+  "0123456789",
+  "9876543210",
+  "QWERTYUIOP",
+  "POIUYTREWQ",
+  "ASDFGHJKL",
+  "LKJHGFDSA",
+  "ZXCVBNM",
+  "MNBVCXZ",
+  // Row-stitch patterns operators type across the home block.
+  "QWERTYASDFGHZXCVBN",
+  "NBVCXZHGFDSAYTREWQ",
+].map((row) =>
+  [...row].filter((c) => RECOVERY_PACK_SECRET_ALPHABET.includes(c)).join(""),
+);
+
+function hasKeyboardRowRun(secret: string): boolean {
+  const letterSkeleton = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
+  for (const row of KEYBOARD_ROWS_CROCKFORD) {
+    if (row.length < RECOVERY_PACK_MAX_KEYBOARD_RUN) continue;
+    for (let len = RECOVERY_PACK_MAX_KEYBOARD_RUN; len <= row.length; len++) {
+      for (let i = 0; i <= row.length - len; i++) {
+        const sub = row.slice(i, i + len);
+        if (secret.includes(sub)) return true;
+        // Digit-broken keyboard rows: match on the letter-only skeleton too.
+        if (/^[A-Z]+$/.test(sub) && letterSkeleton.includes(sub)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Common English / password-corpus tokens ≥5 letters, Crockford-legal only
+ * (no I/L/O/U). Matched against the letter skeleton and a leet-folded skeleton
+ * so digit-broken dictionary phrases ("C0RRECT…", "P1EASE…") still hit.
+ */
+const DICTIONARY_TOKENS_MIN5: readonly string[] = [
+  "CORRECT",
+  "HORSE",
+  "BATTERY",
+  "STAPLE",
+  "PLEASE",
+  "LETME",
+  "WINTER",
+  "COMING",
+  "NORTH",
+  "FORCE",
+  "NEVER",
+  "GONNA",
+  "MASTER",
+  "PASSWORD",
+  "HUNTER",
+  "QWERTY",
+  "MAYTHE",
+  "SECRET",
+  "BACKUP",
+  "ADMIN",
+  "LOGIN",
+  "WELCOME",
+  "MONKEY",
+  "DRAGON",
+  "SHADOW",
+  "PRINCESS",
+  "FOOTBALL",
+  "BASEBALL",
+  "SUPPLY",
+  "CHAIN",
+  "PHRASE",
+  "ORANGE",
+  "BANANA",
+  "COFFEE",
+  "TIGER",
+  "EAGLE",
+  "RIVER",
+  "MOUNTAIN",
+  "SUNSET",
+  "SUMMER",
+  "SPRING",
+  "AUTUMN",
+  "MONEY",
+  "TRUST",
+  "VAULT",
+  "WALLET",
+  "CRYPTO",
+  "BITCOIN",
+  "RECOVERY",
+  "CEREMONY",
+  "OPERATOR",
+  "APPLE",
+  "LETMIN",
+];
+
+/**
+ * Short custody / password tokens (exactly 4). A single hit is too common in
+ * CSPRNG letter skeletons; ≥2 distinct hits marks a wordy constructed secret.
+ */
+const DICTIONARY_TOKENS_LEN4: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "THEN",
+  "THIS",
+  "THAT",
+  "HAVE",
+  "YOUR",
+  "INTO",
+  "FROM",
+  "LOVE",
+  "ROOT",
+  "WITH",
+  "BACK",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "USER",
+  "HOME",
+  "WORK",
+  "PLAY",
+  "WORD",
+  "FISH",
+  "BIRD",
+  "DARK",
+  "BLUE",
+  "GOLD",
+  "FIRE",
+  "WIND",
+  "SNOW",
+  "RAIN",
+  "STAR",
+  "MOON",
+  "LIFE",
+  "TIME",
+  "YEAR",
+  "WEEK",
+  "HAND",
+  "HEAD",
+  "MIND",
+  "SOUL",
+];
+
+/** Leet fold used only for dictionary skeleton matching (1→I, 0→O, …). */
+const LEET_FOLD: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "7": "T",
+};
+
+function letterSkeleton(secret: string, leet: boolean): string {
+  let out = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") {
+      out += c;
+      continue;
+    }
+    if (leet) {
+      const folded = LEET_FOLD[c];
+      if (folded !== undefined) out += folded;
+    }
+  }
+  return out;
+}
+
+/**
+ * True when the letter skeleton (raw or leet-folded) embeds a ≥5-letter
+ * dictionary token, or ≥2 distinct 4-letter tokens. Catches digit-broken
+ * dictionary phrases the letter-run threshold alone misses.
+ */
+function hasDictionarySkeleton(secret: string): boolean {
+  for (const sk of [letterSkeleton(secret, false), letterSkeleton(secret, true)]) {
+    for (const token of DICTIONARY_TOKENS_MIN5) {
+      if (sk.includes(token)) return true;
+    }
+    let shortHits = 0;
+    for (const token of DICTIONARY_TOKENS_LEN4) {
+      if (sk.includes(token)) {
+        shortHits += 1;
+        if (shortHits >= 2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Named reason the secret is unfit to seal a pack, or null when it passes.
  * The message names the rule that failed — it says nothing about any pack.
  *
  * Creation accepts only the generateRecoverySecret() shape (ZTR-1220): the
  * charset×length proxy that previously cleared long patterned / dictionary
  * phrases is not an accept path. Structure guards cover near-period tiles,
- * same-symbol blocks, step-k monotone runs, and long letter runs — not only
- * exact divisor tilings and ±1 sequences.
+ * same-symbol blocks, step-k monotone runs, long letter runs, class
+ * alternation / pair sequences, keyboard rows, and digit-broken dictionary
+ * skeletons — not only exact divisor tilings and ±1 sequences.
  */
 export function recoverySecretWeakness(secret: string): string | null {
   if (secret.length === 0) return "recovery secret is required";
@@ -317,6 +579,18 @@ export function recoverySecretWeakness(secret: string): string | null {
   }
   if (hasLongLetterRun(secret)) {
     return "recovery secret must not contain a long letter-only run";
+  }
+  if (hasClassAlternationRun(secret)) {
+    return "recovery secret must not contain a long digit/letter alternation";
+  }
+  if (hasClassPairRun(secret)) {
+    return "recovery secret must not contain a long digit/letter pair sequence";
+  }
+  if (hasKeyboardRowRun(secret)) {
+    return "recovery secret must not contain a keyboard-row sequence";
+  }
+  if (hasDictionarySkeleton(secret)) {
+    return "recovery secret must not embed a dictionary or passphrase skeleton";
   }
   // Non-vacuous floor: i.i.d. Crockford×26 is 130 bits. Reject if the named
   // constants ever shrink the theoretical maximum below the floor — this is a

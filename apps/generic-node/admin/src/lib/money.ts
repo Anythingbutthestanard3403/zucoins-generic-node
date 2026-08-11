@@ -939,22 +939,151 @@ const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const RECOVERY_SECRET_CHARS = 26;
 /** Mirror of node RECOVERY_PACK_MIN_DISTINCT_CHARS — redraw if a draw lands under. */
 const RECOVERY_SECRET_MIN_DISTINCT = 10;
-/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B). */
+/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B/r3). */
 const RECOVERY_SECRET_MAX_MONOTONE_RUN = 6;
 const RECOVERY_SECRET_MAX_SAME_RUN = 4;
 const RECOVERY_SECRET_MAX_LETTER_RUN = 14;
 const RECOVERY_SECRET_MAX_LAG_MATCH_RUN = 6;
 const RECOVERY_SECRET_MAX_LAG_MATCH_FRAC = 0.4;
 const RECOVERY_SECRET_MAX_REPEATED_SUBSTRING = 4;
+const RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN = 10;
+const RECOVERY_SECRET_MAX_CLASS_PAIR_RUN = 6;
+const RECOVERY_SECRET_MAX_KEYBOARD_RUN = 5;
 /** Hard redraw ceiling — throw rather than emit a structure-failing secret. */
 const RECOVERY_SECRET_MAX_DRAW_ATTEMPTS = 64;
+
+const RECOVERY_SECRET_KEYBOARD_ROWS: readonly string[] = [
+  "0123456789",
+  "9876543210",
+  "QWERTYUIOP",
+  "POIUYTREWQ",
+  "ASDFGHJKL",
+  "LKJHGFDSA",
+  "ZXCVBNM",
+  "MNBVCXZ",
+  "QWERTYASDFGHZXCVBN",
+  "NBVCXZHGFDSAYTREWQ",
+].map((row) => [...row].filter((c) => RECOVERY_SECRET_ALPHABET.includes(c)).join(""));
+
+const RECOVERY_SECRET_DICT_MIN5: readonly string[] = [
+  "CORRECT",
+  "HORSE",
+  "BATTERY",
+  "STAPLE",
+  "PLEASE",
+  "LETME",
+  "WINTER",
+  "COMING",
+  "NORTH",
+  "FORCE",
+  "NEVER",
+  "GONNA",
+  "MASTER",
+  "PASSWORD",
+  "HUNTER",
+  "QWERTY",
+  "MAYTHE",
+  "SECRET",
+  "BACKUP",
+  "ADMIN",
+  "LOGIN",
+  "WELCOME",
+  "MONKEY",
+  "DRAGON",
+  "SHADOW",
+  "PRINCESS",
+  "FOOTBALL",
+  "BASEBALL",
+  "SUPPLY",
+  "CHAIN",
+  "PHRASE",
+  "ORANGE",
+  "BANANA",
+  "COFFEE",
+  "TIGER",
+  "EAGLE",
+  "RIVER",
+  "MOUNTAIN",
+  "SUNSET",
+  "SUMMER",
+  "SPRING",
+  "AUTUMN",
+  "MONEY",
+  "TRUST",
+  "VAULT",
+  "WALLET",
+  "CRYPTO",
+  "BITCOIN",
+  "RECOVERY",
+  "CEREMONY",
+  "OPERATOR",
+  "APPLE",
+  "LETMIN",
+];
+
+const RECOVERY_SECRET_DICT_LEN4: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "THEN",
+  "THIS",
+  "THAT",
+  "HAVE",
+  "YOUR",
+  "INTO",
+  "FROM",
+  "LOVE",
+  "ROOT",
+  "WITH",
+  "BACK",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "USER",
+  "HOME",
+  "WORK",
+  "PLAY",
+  "WORD",
+  "FISH",
+  "BIRD",
+  "DARK",
+  "BLUE",
+  "GOLD",
+  "FIRE",
+  "WIND",
+  "SNOW",
+  "RAIN",
+  "STAR",
+  "MOON",
+  "LIFE",
+  "TIME",
+  "YEAR",
+  "WEEK",
+  "HAND",
+  "HEAD",
+  "MIND",
+  "SOUL",
+];
+
+const RECOVERY_SECRET_LEET_FOLD: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "7": "T",
+};
 
 /**
  * Mirror of node `recoverySecretWeakness` structure floor (post-alphabet).
  * Keep byte-identical rejection class so the SPA never posts a secret the node
  * would answer 400 weak_recovery_secret for.
  */
-function recoveryPackSecretStructureOk(secret: string): boolean {
+/** @internal exported for parity tests with node recoverySecretWeakness. */
+export function recoveryPackSecretStructureOk(secret: string): boolean {
   if (secret.length !== RECOVERY_SECRET_CHARS) return false;
   for (const c of secret) {
     if (!RECOVERY_SECRET_ALPHABET.includes(c)) return false;
@@ -1027,7 +1156,7 @@ function recoveryPackSecretStructureOk(secret: string): boolean {
     }
   }
 
-  // Long letter-only run (digits break it) — dictionary-phrase class.
+  // Long letter-only run (digits break it) — unbroken dictionary-phrase class.
   let letterRun = 0;
   for (const c of secret) {
     if (c >= "A" && c <= "Z") {
@@ -1037,6 +1166,82 @@ function recoveryPackSecretStructureOk(secret: string): boolean {
       letterRun = 0;
     }
   }
+
+  // Digit↔letter class alternation (0A1B2C… / A1B2C3…).
+  let altRun = 1;
+  for (let i = 1; i < n; i++) {
+    const prevDigit = secret[i - 1]! >= "0" && secret[i - 1]! <= "9";
+    const curDigit = secret[i]! >= "0" && secret[i]! <= "9";
+    if (prevDigit !== curDigit) {
+      altRun += 1;
+      if (altRun >= RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN) return false;
+    } else {
+      altRun = 1;
+    }
+  }
+
+  // Letter+digit / digit+letter pair sequences.
+  const isDigit = (c: string): boolean => c >= "0" && c <= "9";
+  const isLetter = (c: string): boolean => c >= "A" && c <= "Z";
+  for (const offset of [0, 1] as const) {
+    for (const kind of ["LD", "DL"] as const) {
+      let pairRun = 0;
+      let i = offset;
+      while (i + 1 < n) {
+        const a = secret[i]!;
+        const b = secret[i + 1]!;
+        const ok =
+          (kind === "LD" && isLetter(a) && isDigit(b)) ||
+          (kind === "DL" && isDigit(a) && isLetter(b));
+        if (ok) {
+          pairRun += 1;
+          if (pairRun >= RECOVERY_SECRET_MAX_CLASS_PAIR_RUN) return false;
+          i += 2;
+        } else {
+          pairRun = 0;
+          i += 1;
+        }
+      }
+    }
+  }
+
+  // Keyboard-row substrings (raw + letter skeleton).
+  const letterSk = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
+  for (const row of RECOVERY_SECRET_KEYBOARD_ROWS) {
+    if (row.length < RECOVERY_SECRET_MAX_KEYBOARD_RUN) continue;
+    for (let len = RECOVERY_SECRET_MAX_KEYBOARD_RUN; len <= row.length; len++) {
+      for (let i = 0; i <= row.length - len; i++) {
+        const sub = row.slice(i, i + len);
+        if (secret.includes(sub)) return false;
+        if (/^[A-Z]+$/.test(sub) && letterSk.includes(sub)) return false;
+      }
+    }
+  }
+
+  // Dictionary / digit-broken passphrase skeleton (leet fold + multi short tokens).
+  const skeletons: string[] = [letterSk];
+  let leetSk = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") leetSk += c;
+    else {
+      const folded = RECOVERY_SECRET_LEET_FOLD[c];
+      if (folded !== undefined) leetSk += folded;
+    }
+  }
+  skeletons.push(leetSk);
+  for (const sk of skeletons) {
+    for (const token of RECOVERY_SECRET_DICT_MIN5) {
+      if (sk.includes(token)) return false;
+    }
+    let shortHits = 0;
+    for (const token of RECOVERY_SECRET_DICT_LEN4) {
+      if (sk.includes(token)) {
+        shortHits += 1;
+        if (shortHits >= 2) return false;
+      }
+    }
+  }
+
   return true;
 }
 

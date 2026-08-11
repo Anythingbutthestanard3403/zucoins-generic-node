@@ -120,9 +120,11 @@ The pack is designed to leave the host, so it must survive hostile hands. Two th
 Use `generateRecoverySecret()` — the sanctioned path. The operator never chooses the seal
 key. Creation accepts only that shape: exactly 26 Crockford-base32 characters
 (0-9 A-Z except I/L/O/U), with structure guards against exact and near-period tiles,
-same-character blocks, constant-step (any k) sequential runs, and long letter-only runs
-(ZTR-1220). A free-form passphrase — including Crockford-mapped dictionary phrases — is
-refused at create; do not invent one.
+same-character blocks, constant-step (any k) sequential runs, long letter-only runs,
+digit/letter alternation and pair sequences, keyboard-row runs, and digit-broken
+dictionary / passphrase skeletons (ZTR-1220). A free-form passphrase — including
+Crockford-mapped or digit-broken dictionary phrases — is refused at create; do not
+invent one.
 
 Store the pack the way you would store a wallet backup, and store the vault root KDF salt
 with it — see [`restore.md`](restore.md).

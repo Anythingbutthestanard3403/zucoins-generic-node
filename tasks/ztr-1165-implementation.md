@@ -1,6 +1,6 @@
 # ZTR-1165 implementation
 
-**Head SHA:** `3c590d5158b9ae9bf41698f9de0d23b809bb3d28`
+**Head SHA:** `938bba18eabf4419dcd816f66f3d50d30b93d595`
 **Branch:** `ztr-1165-approve-recovery-catalog`
 **Base:** `origin/main` @ `a4bb21e3fc3144cf2d8de0d42a1ffeb873d7fabe`
 

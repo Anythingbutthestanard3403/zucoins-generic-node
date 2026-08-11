@@ -1,7 +1,7 @@
 # ZTR-1165 implementer
 
 - PR: https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/60
-- Head: `3c590d5158b9ae9bf41698f9de0d23b809bb3d28`
+- Head: `938bba18eabf4419dcd816f66f3d50d30b93d595`
 - Deleted `IMPLEMENTED_RECOVERY_ACTIONS`; inbox uses `partitionRecoveryActions` / `isLiveRecoveryAction`.
 - LIVE derived from `OPERATOR_RECOVERY_ACTIONS − RESERVED`; store kinds from contract.
 - New `@zucoins/generic-node-contracts/operator-halt` subpath + vitest aliases.

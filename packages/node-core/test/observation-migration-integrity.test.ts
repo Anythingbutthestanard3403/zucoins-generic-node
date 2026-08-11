@@ -19,6 +19,9 @@ import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:c
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// DB-TEST-12: consecutive byte-identical A,A stores one observation; EQUIVALENT_STATE_DIFFERENT_ENVELOPE
+// DB-TEST-13: malformed and unverifiable responses always append with raw bytes
+
 
 import {
   GOLDEN_SEQUENCES,

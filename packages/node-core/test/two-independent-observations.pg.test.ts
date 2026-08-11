@@ -55,6 +55,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// DB-TEST-14: node and platform use different observer rows and cannot import one another's cursor
+
 
 import type { SequenceCapture } from "@zucoins/generic-node-contracts/observation";
 

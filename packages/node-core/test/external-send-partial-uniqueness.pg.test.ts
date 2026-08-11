@@ -1,4 +1,10 @@
+// DB-TEST-11: node code cannot create any submit attempt for SEND_EXTERNAL
 /**
+ * Governing (mandatory database test 11 / DB-TEST-11): node code cannot create any
+ * submit attempt for SEND_EXTERNAL — the SEND path has no node submit function; this
+ * suite proves the schema side of that rule (one partial / no second attempt under the
+ * same approval) against live PostgreSQL.
+ *
  * external-send-partial-uniqueness.pg.test.ts
  *
  * "no second external partial", proven against a REAL PostgreSQL database

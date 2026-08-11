@@ -42,6 +42,10 @@
 //
 // Connectivity: TEST_DATABASE_URL or PG_REQUIRED fail-closed. Teardown drops only
 // databases this file created (proof_access_verdict_ prefix).
+// DB-TEST-16: verification-complete conflicting replay fails and cannot release the wallet
+// DB-TEST-18: gap cycle duplicate body cannot create landed verdict or relationship adjudication
+// DB-TEST-19: UNEXPLAINED_JUMP observation remains immutable; COMPLETE_PATH_SUCCESSOR only via adjudication
+
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";

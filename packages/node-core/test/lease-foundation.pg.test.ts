@@ -26,6 +26,8 @@
 //     and sign ∥ release on one group take locks in one order, never deadlock
 //
 // Connectivity: TEST_DATABASE_URL (vitest.global-setup) or PG_REQUIRED fail-closed.
+// DB-TEST-04: two-wallet acquisition is all-or-nothing and sorted
+
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";

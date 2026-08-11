@@ -6,6 +6,8 @@
 //     reporting table (0 private/seed columns);
 //   * list() surfaces the public identity + derived status and never the seed;
 //   * a second issue finds the credential already ACTIVE and fails closed (409-mapped code).
+// DB-TEST-28: exact raw target request preimage/digest/signature exact-body digest survive round-trip
+
 
 import { execFileSync } from "node:child_process";
 import {

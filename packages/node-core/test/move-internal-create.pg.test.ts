@@ -23,6 +23,8 @@
  */
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync } from "node:fs";
+// DB-TEST-06: one idempotency key with different request hash is conflict never replay success
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

@@ -21,6 +21,10 @@
 //
 // psql runs as a child process (node:child_process), which keeps the in-process
 // network-containment guard intact.
+// DB-TEST-07: exact artifact approval preimage transaction partial observation event bytes round-trip
+// DB-TEST-08: JSONB is absent from all authoritative-byte columns
+// DB-TEST-09: persisted external partial cannot be replaced even after expiry or crash
+
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";

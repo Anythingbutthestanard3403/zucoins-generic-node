@@ -13,6 +13,9 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// DB-TEST-27: missing trusted restore source/markers remain hard-held; equal local markers never release
+// DB-TEST-35: missing or unequal local/trusted lifecycle epoch nonce-burn high-water retains restore_hold
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";

@@ -21,6 +21,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// DB-TEST-17: zero-depth and arbitrary-depth path bodies/manifests round-trip exactly
+// DB-TEST-20: retention jobs revoke proof access without deleting any permanent row
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";

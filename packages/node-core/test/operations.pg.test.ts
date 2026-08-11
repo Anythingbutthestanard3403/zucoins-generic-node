@@ -23,6 +23,8 @@ import { execFile } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+// DB-TEST-05: every operation-kind/status/nullable-field invalid combination fails CHECK
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

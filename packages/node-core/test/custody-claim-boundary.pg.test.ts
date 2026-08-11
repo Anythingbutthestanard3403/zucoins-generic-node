@@ -14,6 +14,8 @@
 // root vitest project.
 import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+// DB-TEST-01: imported wallet cannot become a destination
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 

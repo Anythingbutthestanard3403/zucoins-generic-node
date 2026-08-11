@@ -39,6 +39,8 @@
 // run through the ROOT vitest project. Under PG_REQUIRED=1 an unreachable server is a broken
 // harness, not "no Postgres here" — the fail-closed guard at the bottom turns a silent skip
 // into a failure.
+// DB-TEST-02: blessed but recovery-unverified destination excluded from automatic-sink query
+
 
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";

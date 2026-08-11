@@ -20,6 +20,8 @@
 // mutation evidence in the PR body shows each typed assertion going red when its lock is removed.
 //
 // Connectivity: TEST_DATABASE_URL (root vitest.global-setup) or PG_REQUIRED fail-closed.
+// DB-TEST-03: second active lease fails including cross-operation-kind races
+
 
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

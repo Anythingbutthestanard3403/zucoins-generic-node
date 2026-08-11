@@ -1,7 +1,7 @@
 # ZTR-1209 implementer
 
-**PR:** (filled after open)  
-**HEAD:** `c32cfff845cd5536316925cb1121cc1034aa3789`
+**PR:** #92  
+**HEAD:** `2a0ff882d226f8dc8cdc22488877203628d8ade1`
 
 ## Approach
 
@@ -32,7 +32,7 @@ Also:
 4. Targeted suites remain lane bar — **yes** (docs).
 5. Two consecutive stable passes on ticket-listed flaky files — **yes** (see evidence).
 
-## Evidence (at `c32cfff845cd5536316925cb1121cc1034aa3789` after rebase on origin/main)
+## Evidence (at `2a0ff882d226f8dc8cdc22488877203628d8ade1` after rebase on origin/main)
 
 | Batch | Files | Result |
 | --- | --- | --- |

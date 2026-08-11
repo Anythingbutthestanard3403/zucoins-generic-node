@@ -1,9 +1,10 @@
 name: CI
 
-# Repo is public so Free-plan hosted runners schedule jobs. While private, every
-# workflow (including minimal probes) failed at startup with path=BuildFailed,
-# jobs=0 — no runner was ever assigned. Do not flip visibility without a paid
-# Actions plan or a durable self-hosted fleet.
+# Hosted ubuntu-latest on this account creates jobs that never assign a runner
+# (empty steps, runner_name="", ~2–8s failure) — observed on both private
+# BuildFailed startups and public canary ubuntu jobs. Self-hosted macOS runner
+# (label ztr1137) is the operative delivery path. Repo is public so Actions
+# schedules; keep it public or re-prove private+billing before flipping back.
 on:
   push:
     branches: [main]
@@ -23,22 +24,8 @@ env:
 jobs:
   quality-and-tests:
     name: Build, lint, contracts, full tests, and structural gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
     env:
       PG_REQUIRED: "1"
       PGHOST: 127.0.0.1
@@ -56,11 +43,21 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
-          cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Resolve PostgreSQL credentials
+        run: |
+          command -v psql
+          command -v pg_isready
+          if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres; then
+            echo "Using PGUSER=$PGUSER"
+          elif pg_isready -h "$PGHOST" -p "$PGPORT" -U "$USER" -d postgres; then
+            echo "PGUSER=$USER" >> "$GITHUB_ENV"
+            echo "PGPASSWORD=" >> "$GITHUB_ENV"
+          else
+            echo "PostgreSQL not reachable under PG_REQUIRED=1" >&2
+            exit 1
+          fi
       - name: Verify PostgreSQL is reachable
         run: pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres
       - name: Build
@@ -80,8 +77,8 @@ jobs:
 
   admin-playwright:
     name: Admin Playwright (Chromium)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -93,12 +90,11 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
-          cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build contracts consumed by the admin bundle
         run: pnpm --filter @zucoins/generic-node-contracts build
       - name: Install Chromium
-        run: pnpm --filter @zucoins/generic-node-ui exec playwright install --with-deps chromium
+        run: pnpm --filter @zucoins/generic-node-ui exec playwright install chromium
       - name: Run Playwright
         run: pnpm --filter @zucoins/generic-node-ui test:e2e

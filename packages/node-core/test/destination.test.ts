@@ -427,7 +427,7 @@ describe("destination blessing", () => {
       deviceSignature: "device-signature",
       deviceKeyId: DEVICE_KEY_ID,
     });
-    expect(outcome.status).toBe("wallet_not_node_generated");
+    expect(outcome.status).toBe("authorization_rejected");
   });
 
   it("rejects empty deviceSignature without calling authorizer or mutating (TOTP alone cannot bless)", async () => {

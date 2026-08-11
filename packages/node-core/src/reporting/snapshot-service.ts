@@ -15,14 +15,21 @@ export interface SnapshotOperation {
   readonly operationId: string;
   readonly operationType: OperationKind;
   readonly state: string;
+  readonly amountZkz: string;
   readonly rowVersion: number;
   readonly attentionRequired: boolean;
+  readonly attentionReason: string | null;
+  readonly createdAt: string;
   readonly updatedAt: string;
+  readonly terminalAt: string | null;
+  readonly verificationMaterialAvailableUntil: string | null;
 }
 
 export interface SnapshotDestination {
   readonly destinationId: string;
   readonly state: "PENDING" | "BLESSED" | "RETIRED";
+  /** Live §7.2 eligibility — same predicate as GET /v1/destinations. */
+  readonly moveEligible: boolean;
 }
 
 export interface SnapshotAttentionItem {
@@ -66,7 +73,11 @@ export function deriveActiveCounts(operations: readonly SnapshotOperation[]): Sn
   return counts;
 }
 
-/** Wire body for GET /v1/state/snapshot — field insertion sequence is frozen here. */
+/** Wire body for GET /v1/state/snapshot — field insertion sequence is frozen here.
+ * Operations use the §3 common operation representation (same fields as point reads).
+ * Destinations include move_eligible (§7.2). active_counts / captured_at retained as
+ * bootstrap conveniences alongside the contract fields (ZTR-1170).
+ */
 export function renderSnapshotBody(snapshot: ImplementerStateSnapshot): string {
   const activeCounts = deriveActiveCounts(snapshot.operations);
   return JSON.stringify({
@@ -75,13 +86,19 @@ export function renderSnapshotBody(snapshot: ImplementerStateSnapshot): string {
       operation_id: op.operationId,
       operation_type: op.operationType,
       state: op.state,
+      amount_zkz: op.amountZkz,
       row_version: op.rowVersion,
       attention_required: op.attentionRequired,
+      attention_reason: op.attentionReason,
+      created_at: op.createdAt,
       updated_at: op.updatedAt,
+      terminal_at: op.terminalAt,
+      verification_material_available_until: op.verificationMaterialAvailableUntil,
     })),
     destinations: snapshot.destinations.map((d) => ({
       destination_id: d.destinationId,
       state: d.state,
+      move_eligible: d.moveEligible,
     })),
     attention_items: snapshot.attentionItems.map((a) => ({
       operation_id: a.operationId,

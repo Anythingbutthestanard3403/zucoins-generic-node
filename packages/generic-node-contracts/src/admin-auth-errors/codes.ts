@@ -47,6 +47,8 @@ export const ADMIN_ERROR_CODES = [
   // Approvals / money mutations.
   { code: "approval_rejected", http: 401 },
   { code: "same_operator_both_sides", http: 401 },
+  { code: "operation_version_conflict", http: 409 },
+  // Alias retained only if any internal path still emits the old name — prefer version_conflict on wire (ZTR-1170).
   { code: "operation_conflict", http: 409 },
   { code: "authorizer_unknown", http: 404 },
   { code: "signature_invalid", http: 400 },

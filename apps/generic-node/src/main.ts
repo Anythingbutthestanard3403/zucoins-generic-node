@@ -546,6 +546,8 @@ async function main(): Promise<void> {
     sendSigner,
     // GET /v1/external-sends at AWAITING_REDEMPTION returns code fingerprint.
     sendPartials: createSqlSendPartialLoader(pool),
+    // Operator TTL default at create (same knob as money workers) — ZTR-1170.
+    receiveTtlDefaultSecs: config.RECEIVE_TTL_DEFAULT_SECS,
     // late-bound push gate — push is composed below, so the closure captures
     // the mutable `push` ref. EXTERNAL send path calls this before committing.
     // Fail closed when push was not composed (PUBLIC_BASE_URL unset) — matches

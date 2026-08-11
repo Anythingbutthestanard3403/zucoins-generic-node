@@ -193,7 +193,6 @@ export type BlessDestinationOutcome =
   | { readonly status: "already_blessed"; readonly destination: DestinationRecord }
   | { readonly status: "not_found"; readonly destinationId: Uuid }
   | { readonly status: "invalid_transition"; readonly destinationId: Uuid; readonly from: DestinationState }
-  | { readonly status: "wallet_not_node_generated"; readonly walletId: Uuid }
   | { readonly status: "authorization_rejected"; readonly destinationId: Uuid };
 
 export type RetireDestinationOutcome =
@@ -309,9 +308,11 @@ export function createDestinationService(deps: {
       }
 
       // Predicate 2 recheck: only a node-generated wallet may be blessed into custody.
+      // Collapse to authorization_rejected so the wire does not confirm wallet existence
+      // or key_origin (ZTR-1170 / dual-control opacity precedent in send/approve).
       const keyOrigin = await store.walletKeyOrigin(destination.walletId);
       if (keyOrigin !== "node_generated") {
-        return { status: "wallet_not_node_generated", walletId: destination.walletId };
+        return { status: "authorization_rejected", destinationId: request.destinationId };
       }
 
       const authorized = await blessingAuthorizer.authorize({

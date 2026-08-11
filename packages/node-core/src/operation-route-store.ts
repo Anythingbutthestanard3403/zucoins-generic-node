@@ -75,6 +75,12 @@ export interface SqlOperationRouteStoreConfig {
    * store). MOVE_INTERNAL must NOT inject this port.
    */
   readonly requireActiveSubscription?: (walletId: string) => Promise<void>;
+  /**
+   * Operator-configured default receive TTL in seconds (RECEIVE_TTL_DEFAULT_SECS).
+   * When omitted, falls back to DEFAULT_EXPIRES_IN_SECONDS (300) for unit tests.
+   * Composition root must thread the live config value (ZTR-1170).
+   */
+  readonly receiveTtlDefaultSecs?: number;
 }
 
 function wireAfterLanding(
@@ -230,12 +236,14 @@ export function createSqlOperationRouteStore(
 ): OperationRouteStore {
   const generateId = config.generateId;
   const now = config.now;
+  const receiveTtlDefaultSecs =
+    config.receiveTtlDefaultSecs ?? DEFAULT_EXPIRES_IN_SECONDS;
 
   return {
     async createReceive(input: CreateReceiveInput) {
       const afterLanding = wireAfterLanding(input.after_landing);
       const ttlMs =
-        (input.expires_in_seconds ?? DEFAULT_EXPIRES_IN_SECONDS) * 1000;
+        (input.expires_in_seconds ?? receiveTtlDefaultSecs) * 1000;
       const admission = await admitReceiveExternal(
         config.receive,
         {

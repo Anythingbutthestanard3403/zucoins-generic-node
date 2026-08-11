@@ -72,6 +72,8 @@ import {
   type TotpBurnStore,
   type TotpConfig,
   ipForDb,
+  resolveClientIp,
+  trustProxyOptionsFromEnv,
   extractSessionIdFromCookie,
   requireSessionCsrf,
   // Second-device enrol, dual-control policy, operator push
@@ -1435,6 +1437,50 @@ function labTotpOrNull(totp: TotpConfig): TotpConfig | null {
   return nonzero ? totp : null;
 }
 
+/**
+ * Client IP for admin lockout + session provenance on login / confirm-TOTP.
+ *
+ * Default (no TRUST_PROXY_HOPS): socket peer only — never X-Forwarded-For.
+ * A client-settable header would let an attacker rotate the per-(IP, username)
+ * lockout key per request. This is the ZTR-1192 login rule, applied to both
+ * routes so they share one pair identity (ZTR-1210).
+ *
+ * Proxied deployments: set TRUST_PROXY_HOPS (non-empty). Then
+ * trustProxyOptionsFromEnv + resolveClientIp peel the rightmost trusted hop
+ * from X-Forwarded-For; socket peer remains the fallback (directExposure) so a
+ * missing/short XFF still keys on the connecting peer rather than "unknown".
+ */
+export function resolveAdminLockoutIp(
+  headers: Record<string, string | undefined>,
+  remoteAddress: string | null | undefined,
+  env: {
+    readonly TRUST_PROXY_HOPS?: string;
+    readonly TRUST_PROXY_DIRECT_EXPOSURE?: string;
+  } = process.env,
+): string | null {
+  const rawHops = env.TRUST_PROXY_HOPS;
+  const proxyTrustEnabled = typeof rawHops === "string" && rawHops.trim() !== "";
+  if (!proxyTrustEnabled) {
+    return ipForDb(remoteAddress ?? null);
+  }
+  const { trustedHops } = trustProxyOptionsFromEnv({
+    TRUST_PROXY_HOPS: rawHops,
+    TRUST_PROXY_DIRECT_EXPOSURE: env.TRUST_PROXY_DIRECT_EXPOSURE,
+  });
+  // Lockout always wants a stable identity: peel XFF when present, else socket.
+  // TRUST_PROXY_DIRECT_EXPOSURE is accepted for parity with the net helper but
+  // does not gate the socket fallback here — a lockout keyed on "unknown" for
+  // every client behind a mis-set hop count is worse than collapsing onto the
+  // proxy address (the same ceiling ZTR-1192 documented for unwired proxy).
+  return ipForDb(
+    resolveClientIp(headers["x-forwarded-for"] ?? null, {
+      trustedHops,
+      directExposure: true,
+      socketPeer: remoteAddress ?? null,
+    }),
+  );
+}
+
 export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
   const sessions = deps.sessions;
   const csrf = deps.csrf;
@@ -1593,18 +1639,13 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     if (verb === "POST" && pathname === "/admin/v1/login") {
       try {
         const body = decodeBody(rawBody) as { username?: string; password?: string };
-        // IP source is the socket peer, never X-Forwarded-For. Login is the one
-        // unauthenticated write on this surface, so a client-settable header
-        // would let an attacker rotate the lockout key at will. TRUST_PROXY_HOPS
-        // and node-core's resolveClientIp are the upgrade path for a
-        // reverse-proxied deployment; until that is wired, a proxied node
-        // collapses every client onto the proxy address, which locks per
-        // username rather than per attacker.
+        // Shared lockout IP (login + confirm-TOTP). Default = socket peer;
+        // TRUST_PROXY_HOPS enables resolveClientIp — see resolveAdminLockoutIp.
         const result = await handleAdminLogin(
           {
             userStore: deps.userStore,
             sessions,
-            ip: ipForDb(remoteAddress ?? null),
+            ip: resolveAdminLockoutIp(headers, remoteAddress),
             userAgent: headers["user-agent"] ?? null,
           },
           { username: body.username ?? "", password: body.password ?? "" },
@@ -1676,7 +1717,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             nodeId,
             csrf,
             audit: deps.audit,
-            ip: ipForDb(headers["x-forwarded-for"] ?? headers["x-real-ip"] ?? null),
+            ip: resolveAdminLockoutIp(headers, remoteAddress),
             userAgent: headers["user-agent"] ?? null,
             nowMs,
           },

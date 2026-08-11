@@ -23,6 +23,8 @@ type WorkflowStep = {
   readonly uses?: string;
   readonly run?: string;
   readonly continueOnError: boolean;
+  /** Raw `if:` expression when present (after unquote); undefined = always runs. */
+  readonly ifExpr?: string;
   /** Absolute start line (1-based) of this step mapping in the source file. */
   readonly startLine: number;
 };
@@ -30,6 +32,8 @@ type WorkflowStep = {
 type WorkflowJob = {
   readonly id: string;
   readonly continueOnError: boolean;
+  /** Raw job-level `if:` expression when present. */
+  readonly ifExpr?: string;
   readonly steps: WorkflowStep[];
 };
 
@@ -83,6 +87,43 @@ function indentOf(line: string): number {
   return m ? m[0].length : 0;
 }
 
+function unquote(val: string): string {
+  const t = val.trim();
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    return t.slice(1, -1);
+  }
+  return t;
+}
+
+/**
+ * YAML / GHA truthy scalars that enable continue-on-error.
+ * GHA coerces these; matching only bare `true` left yes/"true"/True/1 green while
+ * the step still continues on failure.
+ */
+export function isYamlTruthy(raw: string): boolean {
+  const t = unquote(raw).trim().toLowerCase();
+  return t === "true" || t === "yes" || t === "on" || t === "y" || t === "1";
+}
+
+/**
+ * Expressions that always evaluate true under GHA (or are absent).
+ * Anything else on a required gate job/step is treated as a skip-neuter.
+ */
+export function isAlwaysTrueIf(expr: string | undefined): boolean {
+  if (expr === undefined) return true;
+  const t = expr.trim().toLowerCase();
+  if (t === "") return true;
+  if (t === "true" || t === "${{ true }}" || t === "${{true}}") return true;
+  // Bare always-true literals only — any actor/ref/event condition is a skip risk.
+  return false;
+}
+
+/** Soft-exit / success-masking anywhere in a run body (not first line only). */
+const SUCCESS_MASK =
+  /(?:\|\||&&)\s*(?:true|:)\b|^\s*(?:true|:)\s*$|;\s*(?:true|:)\s*$|set\s+\+e\b|set\s+-[a-zA-Z]*e[a-zA-Z]*\s+\+e|exit\s+0\b/m;
 
 /**
  * Parse jobs.*.steps from workflow YAML with line-oriented structure.
@@ -120,6 +161,7 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
     const jobIndent = 2;
     i++;
     let jobContinue = false;
+    let jobIf: string | undefined;
     const steps: WorkflowStep[] = [];
 
     while (i < lines.length) {
@@ -131,8 +173,16 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
       const ji = indentOf(jl);
       if (ji <= jobIndent && jl.trim() !== "") break;
 
-      if (/^ {4}continue-on-error:\s*true\s*$/.test(jl)) {
-        jobContinue = true;
+      // Job-level keys at indent 4 (before or around steps)
+      const jobKey = /^ {4}([A-Za-z0-9_-]+):\s*(.*)$/.exec(jl);
+      if (jobKey && jobKey[1] !== "steps") {
+        const key = jobKey[1]!;
+        const val = jobKey[2]!;
+        if (key === "continue-on-error") {
+          jobContinue = isYamlTruthy(val);
+        } else if (key === "if") {
+          jobIf = unquote(val);
+        }
         i++;
         continue;
       }
@@ -164,15 +214,10 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
         let uses: string | undefined;
         let run: string | undefined;
         let continueOnError = false;
+        let ifExpr: string | undefined;
 
-        // First line may hold inline key after `- `
-        const firstRest = stepStart[2]!;
-        // Use a cleaner block collector
-        // Reset and parse properly:
-        name = undefined;
-        uses = undefined;
-        run = undefined;
-        continueOnError = false;
+        type BlockState = { pendingBlock?: string[]; pendingBlockIndent?: number };
+        const blockState: BlockState = {};
 
         const consumeKey = (rawKeyLine: string): void => {
           const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(rawKeyLine);
@@ -188,35 +233,33 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
             return;
           }
           if (key === "continue-on-error") {
-            continueOnError = /^true\s*$/.test(val.trim());
+            continueOnError = isYamlTruthy(val);
+            return;
+          }
+          if (key === "if") {
+            ifExpr = unquote(val);
             return;
           }
           if (key === "run") {
             const t = val.trim();
             if (t === "|" || t === "|-" || t === ">" || t === ">-" || t === "") {
-              // block or empty then block — collect subsequent lines indented deeper than key
               const block: string[] = [];
-              // keys under step are indent 8
-              const keyIndent = 8;
-              // advance happens in outer loop — we'll use a side channel
-              (consumeKey as { pendingBlock?: string[] }).pendingBlock = block;
-              (consumeKey as { pendingBlockIndent?: number }).pendingBlockIndent = keyIndent;
-              run = ""; // filled after
+              blockState.pendingBlock = block;
+              blockState.pendingBlockIndent = 8;
+              run = "";
             } else {
               run = unquote(val);
             }
           }
         };
 
-        consumeKey(firstRest);
+        consumeKey(stepStart[2]!);
         i++;
         while (i < lines.length) {
           const bl = lines[i]!;
           if (bl.trim() === "") {
-            // blank inside step — keep if collecting block
-            const pending = (consumeKey as { pendingBlock?: string[] }).pendingBlock;
-            if (pending) {
-              pending.push("");
+            if (blockState.pendingBlock) {
+              blockState.pendingBlock.push("");
               i++;
               continue;
             }
@@ -227,24 +270,21 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
           // next step or leave steps
           if (bi <= stepIndent) break;
           // content under step at indent >= 8
-          const pending = (consumeKey as { pendingBlock?: string[] }).pendingBlock;
-          if (pending && bi > 8) {
-            pending.push(bl.slice(8)); // dedent one step-key level
+          if (blockState.pendingBlock && bi > 8) {
+            blockState.pendingBlock.push(bl.slice(8));
             i++;
             continue;
           }
-          if (pending && bi <= 8) {
+          if (blockState.pendingBlock && bi <= 8) {
             // close block
-            run = pending.join("\n").replace(/^\n+|\n+$/g, "");
-            delete (consumeKey as { pendingBlock?: string[] }).pendingBlock;
+            run = blockState.pendingBlock.join("\n").replace(/^\n+|\n+$/g, "");
+            delete blockState.pendingBlock;
             // fall through to parse this line as key if still in step
           }
           if (bi === 8) {
             const content = bl.slice(8);
-            // If this starts a new key
             if (/^[A-Za-z0-9_-]+:/.test(content)) {
               consumeKey(content);
-              // if consumeKey opened a new block, continue
               i++;
               continue;
             }
@@ -253,35 +293,63 @@ export function parseWorkflowJobs(source: string): ParsedWorkflow {
           i++;
         }
         // close any open block
-        const pending = (consumeKey as { pendingBlock?: string[] }).pendingBlock;
-        if (pending) {
-          run = pending.join("\n").replace(/^\n+|\n+$/g, "");
-          delete (consumeKey as { pendingBlock?: string[] }).pendingBlock;
+        if (blockState.pendingBlock) {
+          run = blockState.pendingBlock.join("\n").replace(/^\n+|\n+$/g, "");
+          delete blockState.pendingBlock;
         }
 
-        steps.push({ name, uses, run, continueOnError, startLine });
+        steps.push({ name, uses, run, continueOnError, ifExpr, startLine });
       }
     }
 
-    jobs.push({ id: jobId, continueOnError: jobContinue, steps });
+    jobs.push({ id: jobId, continueOnError: jobContinue, ifExpr: jobIf, steps });
   }
 
   return { raw: source, activeSource, jobs };
 }
 
-function unquote(val: string): string {
-  const t = val.trim();
-  if (
-    (t.startsWith('"') && t.endsWith('"')) ||
-    (t.startsWith("'") && t.endsWith("'"))
-  ) {
-    return t.slice(1, -1);
+/** Shell success-masking that would keep a step green when the command fails. */
+export function hasSuccessMask(runBody: string): boolean {
+  // Evaluate per non-empty line AND whole body so multi-line soft-exits are caught.
+  if (SUCCESS_MASK.test(runBody)) return true;
+  for (const line of runBody.split(/\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    if (SUCCESS_MASK.test(t)) return true;
   }
-  return t;
+  return false;
 }
 
-/** Shell success-masking that would keep a step green when the command fails. */
-const SUCCESS_MASK = /(?:\|\||&&)\s*(?:true|:)\b|set\s+\+e\b|set\s+-[a-zA-Z]*e[a-zA-Z]*\s+\+e/;
+/**
+ * A gate is "active" only when the entire run body is exactly the command
+ * (single-line or multi-line with only that command after trim). First-line-only
+ * matching allowed `run: |\n  pnpm build\n  exit 0` to count as the build gate.
+ */
+function runBodyIsExactCommand(run: string, command: string): boolean {
+  const trimmed = run.replace(/^\n+|\n+$/g, "").trimEnd();
+  if (trimmed === command) return true;
+  // Multi-line: every non-empty line must equal the command (no trailing soft-exit).
+  const nonEmpty = trimmed
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  return nonEmpty.length === 1 && nonEmpty[0] === command;
+}
+
+function findActiveGate(
+  wf: ParsedWorkflow,
+  command: string,
+): { job: WorkflowJob; step: WorkflowStep } | undefined {
+  for (const job of wf.jobs) {
+    for (const step of job.steps) {
+      if (typeof step.run !== "string") continue;
+      if (runBodyIsExactCommand(step.run, command)) {
+        return { job, step };
+      }
+    }
+  }
+  return undefined;
+}
 
 function activeRunCommands(wf: ParsedWorkflow): string[] {
   const out: string[] = [];
@@ -293,28 +361,6 @@ function activeRunCommands(wf: ParsedWorkflow): string[] {
     }
   }
   return out;
-}
-
-function findActiveGate(
-  wf: ParsedWorkflow,
-  command: string,
-): { job: WorkflowJob; step: WorkflowStep } | undefined {
-  for (const job of wf.jobs) {
-    for (const step of job.steps) {
-      if (typeof step.run !== "string") continue;
-      // Exact match or first line / whole script equals command.
-      const run = step.run.trim();
-      const firstLine = run.split(/\n/)[0]!.trim();
-      if (run === command || firstLine === command) {
-        return { job, step };
-      }
-      // Allow trailing args only when command is a strict prefix as a whole argv[0..] —
-      // not substring smuggling inside a larger script. Require the run body to be exactly
-      // the command, or the command alone on the first non-empty line of a block with no
-      // masking operators on that line.
-    }
-  }
-  return undefined;
 }
 
 describe("required CI gates", () => {
@@ -337,25 +383,46 @@ describe("required CI gates", () => {
       const { job, step } = hit!;
       expect(
         job.continueOnError,
-        `job ${job.id} must not set continue-on-error: true`,
+        `job ${job.id} must not set continue-on-error`,
       ).toBe(false);
       expect(
         step.continueOnError,
-        `step for ${command} must not set continue-on-error: true`,
+        `step for ${command} must not set continue-on-error`,
       ).toBe(false);
       expect(
-        SUCCESS_MASK.test(step.run ?? ""),
-        `${command} must not mask failures (|| true / set +e)`,
+        isAlwaysTrueIf(job.ifExpr),
+        `job ${job.id} must not set a skippable if: (got ${JSON.stringify(job.ifExpr)})`,
+      ).toBe(true);
+      expect(
+        isAlwaysTrueIf(step.ifExpr),
+        `step for ${command} must not set a skippable if: (got ${JSON.stringify(step.ifExpr)})`,
+      ).toBe(true);
+      expect(
+        hasSuccessMask(step.run ?? ""),
+        `${command} must not mask failures (|| true / exit 0 / bare true / set +e)`,
       ).toBe(false);
+      // Whole body must be exactly the gate command — no trailing soft-exit lines.
+      expect(
+        runBodyIsExactCommand(step.run ?? "", command),
+        `${command} run body must be exactly the command (full body, not first line only)`,
+      ).toBe(true);
     }
 
-    // No job/step anywhere may enable continue-on-error (delivery gates are fail-closed).
+    // No job/step anywhere may enable continue-on-error or skippable if (delivery fail-closed).
     for (const job of wf.jobs) {
-      expect(job.continueOnError, `job ${job.id}`).toBe(false);
+      expect(job.continueOnError, `job ${job.id} continue-on-error`).toBe(false);
+      expect(
+        isAlwaysTrueIf(job.ifExpr),
+        `job ${job.id} if: ${JSON.stringify(job.ifExpr)}`,
+      ).toBe(true);
       for (const step of job.steps) {
-        expect(step.continueOnError, `step@${step.startLine}`).toBe(false);
+        expect(step.continueOnError, `step@${step.startLine} continue-on-error`).toBe(false);
+        expect(
+          isAlwaysTrueIf(step.ifExpr),
+          `step@${step.startLine} if: ${JSON.stringify(step.ifExpr)}`,
+        ).toBe(true);
         if (step.run) {
-          expect(SUCCESS_MASK.test(step.run), `run@${step.startLine}`).toBe(false);
+          expect(hasSuccessMask(step.run), `run@${step.startLine} success-mask`).toBe(false);
         }
       }
     }
@@ -364,8 +431,8 @@ describe("required CI gates", () => {
     const runs = activeRunCommands(wf);
     for (const command of REQUIRED_RUN_COMMANDS) {
       expect(
-        runs.some((r) => r.trim() === command || r.trim().split(/\n/)[0]!.trim() === command),
-        `${command} missing from active run list: ${JSON.stringify(runs)}`,
+        runs.some((r) => runBodyIsExactCommand(r, command)),
+        `${command} missing from active exact-command run list: ${JSON.stringify(runs)}`,
       ).toBe(true);
     }
   });

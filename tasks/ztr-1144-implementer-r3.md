@@ -50,4 +50,5 @@ No regen required once in-process matches the claimed split.
 
 ## HEAD
 
-`bee5b9fd81accc1f890eca90ba0341225ee504d7`
+- Code fix: `310afe374e68d717329631029067f29eece5233a`
+- Tip (this evidence pin): `3e0ede3fb11d006bc3ce656a1d3f53acf097ddad`

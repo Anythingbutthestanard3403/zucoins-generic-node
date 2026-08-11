@@ -107,6 +107,7 @@ function makeRouter(deviceStore: InMemoryDeviceKeyStore) {
         windowSteps: 1,
       },
       totpLog: new TotpConsumptionLog(),
+      nodeId: NODE_ID,
       challengeStore: {
         findIssuedByOperation: async () => null,
         findByNonce: async () => null,
@@ -147,7 +148,7 @@ function makeRouter(deviceStore: InMemoryDeviceKeyStore) {
         store: createInMemoryOperatorHaltStore(RUNNING),
         evidence: createInMemoryHaltEvidenceRecorder(),
       },
-    } as never),
+    }),
   };
 }
 
@@ -222,7 +223,7 @@ function makeRouterWithEnrol(
         store: createInMemoryOperatorHaltStore(RUNNING),
         evidence: createInMemoryHaltEvidenceRecorder(),
       },
-    } as never),
+    }),
   };
 }
 

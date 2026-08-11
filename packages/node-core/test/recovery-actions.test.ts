@@ -561,6 +561,11 @@ describe("fresh evaluation under locks", () => {
         hasMatchingExactByteRecord: true,
       },
     });
+    // ZTR-1226: bounded oracle true → CLOSE is permitted and executable (not RESERVED).
+    expect(derivePermittedActions(proven).classification).toBe("PROVEN_NOT_LANDED");
+    expect(derivePermittedActions(proven).permittedActions).toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
     const store = new MemoryRecoveryStore(proven);
     const out = await executeRecoveryAction(
       store,
@@ -599,12 +604,10 @@ describe("fresh evaluation under locks", () => {
   });
 
   it("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED stays unreachable while both oracle facts are withheld", async () => {
-    // The RESERVED posture the SQL store holds today (ZTR-1129 freeze boundary): the
-    // non-landing exclusion oracle runs and records what it read, but neither positive is
-    // admitted to these two predicates while the action is RESERVED (halt.contract
-    // RESERVED_RECOVERY_ACTIONS; D9.6 — no generic PROVEN_NOT_LANDED oracle; D10.21(1) — no
-    // PROVEN_NOT_LANDED member in the determination space). With both false the action is
-    // neither offered nor admitted, however expired the send is.
+    // ZTR-1226 authorizes CLOSE under the bounded oracle, but both arms false still withholds
+    // the action (not timer-only; D9.6 — no generic PROVEN_NOT_LANDED without path/head
+    // evidence). With both predicates false the action is neither offered nor admitted,
+    // however expired the send is.
     const withheld = baseSend({
       send: {
         hasSignIntent: true,

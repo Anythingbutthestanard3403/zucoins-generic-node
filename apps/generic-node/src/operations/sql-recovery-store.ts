@@ -95,24 +95,21 @@ export const RECOVERY_ACTION_LABELS: Readonly<Record<RecoveryActionEffect["kind"
 export const LAUNCH_RESERVED_RECOVERY_ACTIONS = RESERVED_RECOVERY_ACTIONS;
 
 /**
- * The single switch that would make CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED reachable at
- * runtime — and it is deliberately off.
+ * Runtime activation for CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED (ZTR-1226 option b — Riley lock).
  *
- * The non-landing exclusion oracle below is live: it reads the source head through the
- * observation service, walks the retained T0→head path, and records what it found on every
- * operation's evidence manifest. What it may NOT do yet is set the two close predicates,
- * because the action it feeds is RESERVED in the frozen contract
- * (`generic-node-contracts/operator-halt/halt.contract.ts` RESERVED_RECOVERY_ACTIONS: "they
- * cannot be granted at runtime"), and the decision register does not grant it: D9.6 ("There
- * is no generic PROVEN_NOT_LANDED oracle"), D10.21(1) (the closed determination space has no
- * PROVEN_NOT_LANDED member), and D9.15 (folding a non-landing into a release "reopens
- * landed-into-released-wallet loss"). 09-operations-recovery.md §"Allowed action values" and
- * Appendix B §5.3.1's RESERVED note both defer to D9.6.
+ * AUTHORIZED under the bounded non-landing oracle only:
+ *   protocol expired + SEND_PARTIAL_AGING_MARGIN_SECS
+ *   AND (freshHeadEqualsSourceT0 OR completePathExclusionProved)
  *
- * Flipping this to true is the whole of runtime activation, and it belongs to the reviewed
- * freeze decision that authorizes it — not to a reading of the oracle's own correctness.
+ * Not timer-only. D9.6 still forbids a *generic* PROVEN_NOT_LANDED oracle — path/head
+ * evidence is mandatory. The exclusion oracle reads the source head, walks the retained
+ * T0→head path, and records every outcome on the evidence manifest; positives are admitted
+ * to the two close predicates only when this flag is true. Faults, thrown reads, absent Ts0
+ * bindings, or a send found ON the source path leave both predicates false (fail-closed).
+ *
+ * REBUILD_INTERNAL_MOVE remains RESERVED (halt.contract RESERVED_RECOVERY_ACTIONS).
  */
-const SEND_NON_LANDING_CLOSE_ACTIVATED = false;
+const SEND_NON_LANDING_CLOSE_ACTIVATED = true;
 
 const SQL_LOOKUP_IDEMPOTENCY = `
   SELECT body FROM recovery_action_idempotency
@@ -1261,11 +1258,11 @@ async function loadRecoveryFactsFromRow(
       });
     }
 
-    // F1.2's two live inputs. The exclusion oracle runs for real — the outcome of every read
-    // is recorded on the evidence manifest — but its positives are admitted to the close
-    // predicates only through SEND_NON_LANDING_CLOSE_ACTIVATED, which is false while the
-    // action is RESERVED. A fault, a thrown read, an absent Ts0 binding, or a send found ON
-    // the source path all leave both predicates false regardless (fail-closed).
+    // F1.2's two live inputs (ZTR-1226). The exclusion oracle runs for real — every read
+    // outcome is on the evidence manifest — and positives are admitted to the close
+    // predicates through SEND_NON_LANDING_CLOSE_ACTIVATED (now true under the bounded
+    // oracle). A fault, thrown read, absent Ts0 binding, or a send found ON the source
+    // path all leave both predicates false regardless (fail-closed).
     //
     // Two gates decide whether it is asked at all, and BOTH are needed. Past T2 + the aging
     // margin with a durable partial is the sole window in which a terminal close may even be

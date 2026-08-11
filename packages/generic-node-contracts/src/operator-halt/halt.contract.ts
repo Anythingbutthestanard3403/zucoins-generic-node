@@ -84,17 +84,21 @@ export const OPERATOR_RECOVERY_ACTIONS = [
 export type OperatorRecoveryAction = (typeof OPERATOR_RECOVERY_ACTIONS)[number];
 
 /**
- * RESERVED (note under "Allowed action values"): both
- * actions are RESERVED pending a future reviewed freeze; the landing-proof complete-path rule governs at launch (no generic
- * PROVEN_NOT_LANDED oracle), and INDETERMINATE authorizes no non-landing, retry/rebuild, or
- * lease/reuse release. They remain members of the operator-action catalog census above — being RESERVED is a
- * launch-grantability status, not a removal from the catalog — but they cannot be granted at
- * runtime. Same reserved-capacity semantics as the non-landing precondition in
- * states.contract.ts. Modeled as its own named const (cf. OUT_OF_SCOPE_HALT_MECHANISMS) so the
+ * RESERVED (note under "Allowed action values"): launch-grantability status, not a removal
+ * from the catalog. Modeled as its own named const (cf. OUT_OF_SCOPE_HALT_MECHANISMS) so the
  * doc's RESERVED note is machine-readable, not only a prose aside.
+ *
+ * CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED — AUTHORIZED (ZTR-1226 option b / Riley lock). Granted
+ * only under the bounded non-landing oracle: protocol expired + aging margin AND
+ * (freshHeadEqualsSourceT0 OR completePathExclusionProved). Not timer-only. D9.6's ban on a
+ * *generic* PROVEN_NOT_LANDED oracle remains intact — path/head evidence is mandatory.
+ * Runtime switch: SEND_NON_LANDING_CLOSE_ACTIVATED in sql-recovery-store.ts.
+ *
+ * REBUILD_INTERNAL_MOVE — still RESERVED pending a future reviewed freeze. INDETERMINATE
+ * authorizes no rebuild or lease/reuse release. Same reserved-capacity semantics as the
+ * non-landing precondition in states.contract.ts for rebuild.
  */
 export const RESERVED_RECOVERY_ACTIONS = [
-  "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
   "REBUILD_INTERNAL_MOVE",
 ] as const;
 

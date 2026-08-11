@@ -103,9 +103,9 @@ describe("ApproveInboxPage", () => {
     expect(isLiveRecoveryAction("REDELIVER_EXACT_PARTIAL")).toBe(true);
     expect(isLiveRecoveryAction("CONTINUE_EXTERNAL_WAIT")).toBe(true);
     expect(isLiveRecoveryAction("CLOSE_NEVER_STARTED_EXTERNAL_SEND")).toBe(true);
-    expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(false);
+    expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(true);
     expect(isLiveRecoveryAction("REBUILD_INTERNAL_MOVE")).toBe(false);
-    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(7);
+    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(8);
   });
 
   it("never paints pending fetch as clear or unavailable", () => {
@@ -308,6 +308,7 @@ describe("ApproveInboxPage", () => {
                     "REDELIVER_EXACT_PARTIAL",
                     "CONTINUE_EXTERNAL_WAIT",
                     "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+                    "REBUILD_INTERNAL_MOVE",
                     "FORCE_LANDED",
                   ],
                   row_version: 5,
@@ -326,17 +327,18 @@ describe("ApproveInboxPage", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByTestId("approve-recovery-card")).toBeInTheDocument());
-    // Live kinds (including the three previously hidden) are clickable.
+    // Live kinds (including CLOSE under ZTR-1226) are clickable.
     expect(screen.getByRole("button", { name: "Retry observation" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Close never-started send" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Re-send exact transfer code" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Continue waiting for redemption" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Close send (proven not landed)" })).toBeEnabled();
     // Reserved + unknown stay disabled with honest reasons; never POSTable as enabled.
     const unavailable = screen.getByTestId("approve-recovery-unimplemented");
-    expect(unavailable.textContent).toMatch(/Close send \(proven not landed\)/);
-    expect(unavailable.textContent).toMatch(/Reserved until positive non-landing proof/);
+    expect(unavailable.textContent).toMatch(/Rebuild internal transfer/);
+    expect(unavailable.textContent).toMatch(/Reserved — REBUILD_INTERNAL_MOVE is not grantable/);
     expect(unavailable.textContent).toMatch(/FORCE_LANDED|Not implemented on this node/);
-    expect(screen.getByRole("button", { name: "Close send (proven not landed)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rebuild internal transfer" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "FORCE_LANDED" })).toBeDisabled();
   });
 });

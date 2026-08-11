@@ -627,7 +627,7 @@ describe("recovery action UI honesty", () => {
     ]);
     expect(unavailable[0]!.reason).toMatch(/Reserved/);
     expect(unavailable[1]!.reason).toMatch(/Not implemented|fail closed/i);
-    expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(false);
+    expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(true);
     expect(recoveryActionLabel("CONTINUE_EXTERNAL_WAIT")).toBe(
       "Continue waiting for redemption",
     );

@@ -563,6 +563,46 @@ describe("valid request acceptance", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts POST /v1/internal-moves with optional client_reference", () => {
+    const result = CreateInternalMoveBody.safeParse({
+      source_wallet_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+      destination_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec5",
+      amount_zkz: "10.25",
+      client_reference: "order-42",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts verification-complete REJECTED without landing_proof", () => {
+    const result = VerificationCompleteBody.safeParse({
+      expected_row_version: 7,
+      consumed_cursor: "1051",
+      verdict: "REJECTED",
+      wallet_evidence: [{
+        wallet_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+        role: "RECEIVER",
+        t0: { observation_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4", projection: { s: "", p: "", b_zkz: "0" } },
+        terminal: { observation_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4", projection: { s: "sig", p: "", b_zkz: "5.5" } },
+      }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects verification-complete VERIFIED without landing_proof", () => {
+    const result = VerificationCompleteBody.safeParse({
+      expected_row_version: 7,
+      consumed_cursor: "1051",
+      verdict: "VERIFIED",
+      wallet_evidence: [{
+        wallet_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+        role: "RECEIVER",
+        t0: { observation_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4", projection: { s: "", p: "", b_zkz: "0" } },
+        terminal: { observation_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4", projection: { s: "sig", p: "", b_zkz: "5.5" } },
+      }],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("accepts a valid POST /v1/destinations body", () => {
     const result = CreateDestinationBody.safeParse({
       label: "Primary internal sink",

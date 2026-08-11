@@ -66,6 +66,8 @@ export interface MoveCreateRequest {
   readonly sourceWalletId: string;
   readonly destinationId: string;
   readonly amountZkz: string;
+  /** Advisory product correlation — unsigned; null when omitted on the wire. */
+  readonly clientReference?: string | null;
   readonly idempotencyKey: string;
   /**
    * Receive-spawned child path only (step 4). Callers of POST /v1/internal-moves
@@ -89,6 +91,7 @@ export interface MoveOperation {
   readonly destinationId: string;
   readonly destinationWalletId: string;
   readonly amountZkz: string;
+  readonly clientReference: string | null;
   readonly spawnedFromOperationId: string | null;
   readonly leaseGroupId: string;
   readonly idempotencyKey: string;
@@ -108,6 +111,7 @@ export interface StoredMoveOperation {
   readonly destinationId: string;
   readonly destinationWalletId: string;
   readonly amountZkz: string;
+  readonly clientReference: string | null;
   readonly spawnedFromOperationId: string | null;
   readonly leaseGroupId: string | null;
   readonly idempotencyKey: string;
@@ -337,25 +341,50 @@ export function validateMoveCreateRequest(
 // IS the preimage — never sorted, rearranged, or normalized. spawned_from is omitted from the
 // public-path fingerprint (callers cannot set it); the child path includes it so a public
 // retry cannot collide with an internal spawn under the same key.
+//
+// client_reference is wire-optional (Zod .optional()). Include it in the preimage only when
+// non-null so omitted-on-wire ≡ the pre-upgrade five-field (public) / six-field (child)
+// fingerprint — otherwise a post-deploy retry of a pre-deploy admit returns
+// idempotency_key_reused (Review B D1).
 export function canonicalMoveRequestSha256(request: MoveCreateRequest): string {
   const spawned = request.spawnedFromOperationId ?? null;
+  const clientReference = request.clientReference ?? null;
   const canonical =
     spawned === null
-      ? JSON.stringify({
-          implementer_id: request.implementerId,
-          node_id: request.nodeId,
-          source_wallet_id: request.sourceWalletId,
-          destination_id: request.destinationId,
-          amount_zkz: request.amountZkz,
-        })
-      : JSON.stringify({
-          implementer_id: request.implementerId,
-          node_id: request.nodeId,
-          source_wallet_id: request.sourceWalletId,
-          destination_id: request.destinationId,
-          amount_zkz: request.amountZkz,
-          spawned_from_operation_id: spawned,
-        });
+      ? clientReference === null
+        ? JSON.stringify({
+            implementer_id: request.implementerId,
+            node_id: request.nodeId,
+            source_wallet_id: request.sourceWalletId,
+            destination_id: request.destinationId,
+            amount_zkz: request.amountZkz,
+          })
+        : JSON.stringify({
+            implementer_id: request.implementerId,
+            node_id: request.nodeId,
+            source_wallet_id: request.sourceWalletId,
+            destination_id: request.destinationId,
+            amount_zkz: request.amountZkz,
+            client_reference: clientReference,
+          })
+      : clientReference === null
+        ? JSON.stringify({
+            implementer_id: request.implementerId,
+            node_id: request.nodeId,
+            source_wallet_id: request.sourceWalletId,
+            destination_id: request.destinationId,
+            amount_zkz: request.amountZkz,
+            spawned_from_operation_id: spawned,
+          })
+        : JSON.stringify({
+            implementer_id: request.implementerId,
+            node_id: request.nodeId,
+            source_wallet_id: request.sourceWalletId,
+            destination_id: request.destinationId,
+            amount_zkz: request.amountZkz,
+            client_reference: clientReference,
+            spawned_from_operation_id: spawned,
+          });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
@@ -467,6 +496,7 @@ export async function createInternalMove(
     destinationId: request.destinationId,
     destinationWalletId: destination.walletId,
     amountZkz: request.amountZkz,
+    clientReference: request.clientReference ?? null,
     spawnedFromOperationId,
     leaseGroupId: provisionalLeaseGroupId,
     idempotencyKey: request.idempotencyKey,

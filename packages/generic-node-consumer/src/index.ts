@@ -1,9 +1,10 @@
 /**
- * @zucoins/generic-node-consumer — installable consumer SDK for a self-hosted generic
+ * @zucoins/generic-node-consumer — consumer SDK surface for a self-hosted generic
  * SplitChain treasury node.
  *
  * Wraps:
- *   - RECEIVE_EXTERNAL initiation (`POST`/`GET /v1/receives`, implementer bearer);
+ *   - RECEIVE_EXTERNAL / MOVE_INTERNAL / SEND_EXTERNAL initiation (implementer bearer);
+ *   - arm (`POST /v1/operations/:id/armed`, signed reporting);
  *   - the browser-facing operation subscribe stream (`GET /v1/operations/:id/subscribe`,
  *     subscription handle);
  *   - the signed-reporting event/verification-material/verification-complete routes
@@ -111,6 +112,26 @@ export {
 } from "./instruction-origin.js";
 
 // ---------------------------------------------------------------------------
+// Changed-response ledger + node-state vocabulary
+// ---------------------------------------------------------------------------
+
+export {
+  createInMemoryChangedResponseLedger,
+  type ChangedResponseAppendInput,
+  type ChangedResponseAppendResult,
+  type ChangedResponseLedger,
+  type ChangedResponseRecord,
+  type ChangedResponseRecordKind,
+} from "./changed-response-ledger.js";
+export {
+  KNOWN_NODE_CLAIM_STATES,
+  NodeStateDriftError,
+  isKnownNodeClaimState,
+  parseNodeClaimState,
+  type KnownNodeClaimState,
+} from "./node-state.js";
+
+// ---------------------------------------------------------------------------
 // HTTP transport
 // ---------------------------------------------------------------------------
 
@@ -158,3 +179,25 @@ export {
   type GetVerificationMaterialInput,
   type PostVerificationCompleteInput,
 } from "./http/verification.js";
+export {
+  armOperation,
+  type ArmOperationInput,
+  type ArmRequest,
+  type ArmSuccessResponse,
+} from "./http/arm.js";
+export {
+  createInternalMove,
+  getInternalMove,
+  type CreateInternalMoveInput,
+  type CreateInternalMoveRequest,
+  type GetInternalMoveInput,
+  type InternalMoveOperationView,
+} from "./http/moves.js";
+export {
+  createExternalSend,
+  getExternalSend,
+  type CreateExternalSendInput,
+  type CreateExternalSendRequest,
+  type ExternalSendOperationView,
+  type GetExternalSendInput,
+} from "./http/sends.js";

@@ -4,12 +4,30 @@
   "version": 2,
   "governing": {
     "spec": "api-contract; data-model enum vocabulary; state-event reference",
-    "decisions": ["three-generic-operations", "launch-deferral", "api-schema-freeze"]
+    "decisions": [
+      "three-generic-operations",
+      "launch-deferral",
+      "api-schema-freeze"
+    ]
   },
   "errorVocabulary": {
     "httpStatusCount": 8,
-    "httpStatusCodes": [400, 401, 404, 409, 410, 422, 429, 503],
-    "envelopeFields": ["code", "message", "request_id", "details"],
+    "httpStatusCodes": [
+      400,
+      401,
+      404,
+      409,
+      410,
+      422,
+      429,
+      503
+    ],
+    "envelopeFields": [
+      "code",
+      "message",
+      "request_id",
+      "details"
+    ],
     "citedErrorCodes": [
       "wallet_busy",
       "unknown_field",
@@ -77,7 +95,11 @@
       "reporting_request_class"
     ],
     "values": {
-      "operation_kind": ["RECEIVE_EXTERNAL", "MOVE_INTERNAL", "SEND_EXTERNAL"],
+      "operation_kind": [
+        "RECEIVE_EXTERNAL",
+        "MOVE_INTERNAL",
+        "SEND_EXTERNAL"
+      ],
       "operation_status": [
         "CREATED",
         "READY",
@@ -90,9 +112,21 @@
         "REJECTED",
         "NEEDS_ATTENTION"
       ],
-      "wallet_key_origin": ["node_generated", "imported"],
-      "wallet_state": ["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"],
-      "destination_state": ["PENDING", "BLESSED", "RETIRED"],
+      "wallet_key_origin": [
+        "node_generated",
+        "imported"
+      ],
+      "wallet_state": [
+        "AVAILABLE",
+        "PINNED",
+        "QUARANTINED",
+        "RETIRED"
+      ],
+      "destination_state": [
+        "PENDING",
+        "BLESSED",
+        "RETIRED"
+      ],
       "wallet_lease_role": [
         "RECEIVE_WINDOW",
         "MOVE_SOURCE",
@@ -100,8 +134,16 @@
         "SEND_SOURCE",
         "RECONCILIATION"
       ],
-      "approval_method": ["TOTP_ONLY", "TOTP_AND_DEVICE"],
-      "approval_challenge_status": ["ISSUED", "CONSUMED", "SUPERSEDED", "EXPIRED"],
+      "approval_method": [
+        "TOTP_ONLY",
+        "TOTP_AND_DEVICE"
+      ],
+      "approval_challenge_status": [
+        "ISSUED",
+        "CONSUMED",
+        "SUPERSEDED",
+        "EXPIRED"
+      ],
       "external_formation_state": [
         "NOT_REQUIRED",
         "APPROVAL_PENDING",
@@ -110,7 +152,10 @@
         "PARTIAL_PERSISTED",
         "PARTIAL_DELIVERED"
       ],
-      "observer_domain": ["NODE", "PLATFORM"],
+      "observer_domain": [
+        "NODE",
+        "PLATFORM"
+      ],
       "observation_parse_result": [
         "VERIFIED_GENESIS",
         "VERIFIED_HEAD",
@@ -132,14 +177,24 @@
         "SIGNATURE_COLLISION",
         "NOT_APPLICABLE"
       ],
-      "verification_verdict": ["PENDING", "VERIFIED", "REJECTED", "INDETERMINATE"],
+      "verification_verdict": [
+        "PENDING",
+        "VERIFIED",
+        "REJECTED",
+        "INDETERMINATE"
+      ],
       "lineage_proof_verdict": [
         "LANDED_EXACT",
         "LANDED_COMPLETE_PATH",
         "INDETERMINATE",
         "INVARIANT_BREACH"
       ],
-      "reporting_key_state": ["PENDING", "ACTIVE", "RETIRED", "REVOKED"],
+      "reporting_key_state": [
+        "PENDING",
+        "ACTIVE",
+        "RETIRED",
+        "REVOKED"
+      ],
       "reporting_key_lifecycle_event_type": [
         "FIRST_KEY_ACTIVATED",
         "KEY_ROTATED",
@@ -148,7 +203,10 @@
         "AUTH_HOLD_SET",
         "AUTH_HOLD_RELEASED"
       ],
-      "reporting_request_class": ["READ", "MUTATION"]
+      "reporting_request_class": [
+        "READ",
+        "MUTATION"
+      ]
     }
   },
   "discovery": {
@@ -192,8 +250,16 @@
         "path": "/v1/receives",
         "requestSchema": "ReceiveExternalRequestSchema",
         "responseSchema": "ReceiveExternalResponseSchema",
-        "requestFields": ["amount_zkz", "anchor", "expires_in_seconds", "after_landing"],
-        "responseStatuses": [201, 202],
+        "requestFields": [
+          "amount_zkz",
+          "anchor",
+          "expires_in_seconds",
+          "after_landing"
+        ],
+        "responseStatuses": [
+          201,
+          202
+        ],
         "responseFields": [
           "operation",
           "receiver_pubkey",
@@ -213,8 +279,15 @@
         "path": "/v1/internal-moves",
         "requestSchema": "MoveInternalRequestSchema",
         "responseSchema": "MoveInternalResponseSchema",
-        "requestFields": ["source_wallet_id", "destination_id", "amount_zkz"],
-        "responseStatuses": [201],
+        "requestFields": [
+          "source_wallet_id",
+          "destination_id",
+          "amount_zkz",
+          "client_reference"
+        ],
+        "responseStatuses": [
+          201
+        ],
         "responseFields": [
           "operation",
           "source_wallet_id",
@@ -238,7 +311,9 @@
           "client_reference",
           "description"
         ],
-        "responseStatuses": [201],
+        "responseStatuses": [
+          201
+        ],
         "responseFields": [
           "operation",
           "source_wallet_id",

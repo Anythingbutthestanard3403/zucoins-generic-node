@@ -59,6 +59,8 @@ export const CreateInternalMoveBody = z.object({
   source_wallet_id: UuidSchema,
   destination_id: UuidSchema,
   amount_zkz: PositiveZkzAmountSchema,
+  // Advisory product correlation only — unsigned, same posture as SEND_EXTERNAL.client_reference.
+  client_reference: z.string().max(256).optional(),
 }).strict();
 
 // --- SEND_EXTERNAL --
@@ -122,20 +124,36 @@ const LandingProof = z.object({
   path_manifest_sha256: Sha256HexSchema,
 }).strict();
 
-const WalletEvidence = z.object({
+// landing_proof is required only for VERIFIED (DB CHECK: verdict <> VERIFIED OR landing_proof_id IS NOT NULL).
+// Non-VERIFIED acknowledgements carry wallet_evidence without economic landing authority.
+const WalletEvidenceBase = z.object({
   wallet_id: UuidSchema,
   role: z.enum(["RECEIVER", "SOURCE", "DESTINATION"]),
   t0: T0Evidence,
   terminal: T0Evidence,
-  landing_proof: LandingProof,
+  landing_proof: LandingProof.optional(),
 }).strict();
 
-export const VerificationCompleteBody = z.object({
-  expected_row_version: z.number().int().min(1),
-  consumed_cursor: DecimalSeqStringSchema,
-  verdict: z.enum(["VERIFIED", "REJECTED", "INDETERMINATE"]),
-  wallet_evidence: z.array(WalletEvidence).min(1),
-}).strict();
+export const VerificationCompleteBody = z
+  .object({
+    expected_row_version: z.number().int().min(1),
+    consumed_cursor: DecimalSeqStringSchema,
+    verdict: z.enum(["VERIFIED", "REJECTED", "INDETERMINATE"]),
+    wallet_evidence: z.array(WalletEvidenceBase).min(1),
+  })
+  .strict()
+  .superRefine((body, ctx) => {
+    if (body.verdict !== "VERIFIED") return;
+    for (let i = 0; i < body.wallet_evidence.length; i += 1) {
+      if (body.wallet_evidence[i]!.landing_proof === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "landing_proof is required when verdict is VERIFIED",
+          path: ["wallet_evidence", i, "landing_proof"],
+        });
+      }
+    }
+  });
 
 // --- Operator endpoints --
 

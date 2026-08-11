@@ -145,6 +145,7 @@ class ConstraintStore implements MoveCreateStore {
       destinationId: op.destinationId,
       destinationWalletId: op.destinationWalletId,
       amountZkz: op.amountZkz,
+      clientReference: op.clientReference,
       spawnedFromOperationId: op.spawnedFromOperationId,
       leaseGroupId,
       idempotencyKey: op.idempotencyKey,
@@ -308,6 +309,41 @@ describe("canonicalMoveRequestSha256", () => {
       }),
     );
     expect(publicHash).not.toBe(childHash);
+  });
+
+  // Review B D1 — pre-upgrade public preimage omitted client_reference; always embedding
+  // null broke post-deploy same-key replay (idempotency_key_reused).
+  it("omitted/null client_reference matches pre-upgrade public hash; present value changes it", () => {
+    const PRE_UPGRADE_PUBLIC =
+      "7fde88d642b82d6274c3cf214a2ed6ac25824a061a0c53c4ef4cebc881aa99da";
+    expect(canonicalMoveRequestSha256(request())).toBe(PRE_UPGRADE_PUBLIC);
+    expect(canonicalMoveRequestSha256(request({ clientReference: null }))).toBe(
+      PRE_UPGRADE_PUBLIC,
+    );
+    expect(canonicalMoveRequestSha256(request({ clientReference: undefined }))).toBe(
+      PRE_UPGRADE_PUBLIC,
+    );
+    const withRef = canonicalMoveRequestSha256(request({ clientReference: "ord_1" }));
+    expect(withRef).not.toBe(PRE_UPGRADE_PUBLIC);
+    expect(withRef).toBe(
+      "ec7d57de52bdc8e6af98672612ae5536643823252a80263f4d75e89f808561d3",
+    );
+  });
+
+  it("omitted/null client_reference matches pre-upgrade child hash", () => {
+    const PRE_UPGRADE_CHILD =
+      "2981f8fdfdf51d3834feb7ffa44d4387dbefd64ad188989cddb6a3d388caa76e";
+    const child = {
+      spawnedFromOperationId: PARENT_OP_ID,
+      parentLeaseGroupId: PARENT_GROUP_ID,
+    } as const;
+    expect(canonicalMoveRequestSha256(request(child))).toBe(PRE_UPGRADE_CHILD);
+    expect(
+      canonicalMoveRequestSha256(request({ ...child, clientReference: null })),
+    ).toBe(PRE_UPGRADE_CHILD);
+    expect(
+      canonicalMoveRequestSha256(request({ ...child, clientReference: "ord_1" })),
+    ).not.toBe(PRE_UPGRADE_CHILD);
   });
 });
 

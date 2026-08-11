@@ -324,6 +324,7 @@ export function createSqlOperationRouteStore(
           sourceWalletId: input.source_wallet_id,
           destinationId: input.destination_id,
           amountZkz: input.amount_zkz,
+          clientReference: input.client_reference ?? null,
           idempotencyKey: input.idempotencyKey,
         },
         { generateId, now },

@@ -33,6 +33,7 @@ function operation(overrides: Partial<StoredMoveOperation> = {}): StoredMoveOper
     destinationId: DESTINATION,
     destinationWalletId: DESTINATION_WALLET,
     amountZkz: "1.25",
+    clientReference: null,
     spawnedFromOperationId: null,
     leaseGroupId: OP_ID,
     idempotencyKey: "internal-move-live-read",

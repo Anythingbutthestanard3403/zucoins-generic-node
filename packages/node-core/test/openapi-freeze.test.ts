@@ -83,8 +83,12 @@ function zodObjectKeys(schema: z.ZodType | undefined): string[] | null {
   if (!schema) return null;
   // unwrap optional/default
   let s: z.ZodTypeAny = schema as z.ZodTypeAny;
-  while (s instanceof z.ZodOptional || s instanceof z.ZodDefault) {
-    s = s._def.innerType as z.ZodTypeAny;
+  while (
+    s instanceof z.ZodOptional ||
+    s instanceof z.ZodDefault ||
+    s instanceof z.ZodEffects
+  ) {
+    s = (s instanceof z.ZodEffects ? s._def.schema : s._def.innerType) as z.ZodTypeAny;
   }
   if (s instanceof z.ZodObject) {
     return Object.keys(s.shape).sort();

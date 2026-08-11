@@ -1,5 +1,5 @@
 /**
- * Product-neutral independent verification pipeline for the installable SDK (originally
+ * Product-neutral independent verification pipeline for the consumer SDK surface (originally
  * shipped in @zucoins/consumer-example).
  *
  * Steps implemented:
@@ -60,6 +60,7 @@ import type {
   VerificationCompleteResponse,
   VerificationMaterialWire,
 } from "./types.js";
+import { parseNodeClaimState } from "./node-state.js";
 import { COMPOSITION_TO_KIND } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -130,8 +131,11 @@ export function ingestEventWake(
     wake.artifact as ArtifactEnvelope,
     nodeEventKey,
   );
+  // Fail closed on unknown / forbidden node vocabulary before any claim is stored.
+  const claimState = parseNodeClaimState(wake.node_claim_state);
+
   const nodeClaim: NodeClaimRecord = {
-    state: wake.node_claim_state,
+    state: claimState,
     eventType: wake.event_type,
     authenticated: auth.authenticated,
     source,
@@ -178,8 +182,9 @@ export function ingestSubscribeProjection(
   if (projection.operation_id !== operation.operationId) {
     return operation;
   }
+  const claimState = parseNodeClaimState(projection.state);
   const nodeClaim: NodeClaimRecord = {
-    state: projection.state,
+    state: claimState,
     eventType: "subscribe.lifecycle",
     authenticated: false, // the subscribe stream is not a signed proof channel
     source: "subscribe_handle",
@@ -334,7 +339,26 @@ export function verifyOperationIndependently(input: VerifyOperationInput): Verif
     baselines,
   } = input;
 
-  const kind = kindFromMaterial(material) ?? operation.kind;
+  const materialKind = kindFromMaterial(material);
+  if (materialKind === null) {
+    const verdict = indeterminate(
+      operation.kind,
+      "artifact",
+      `unknown_operation_type: ${String((material as { operation_type?: string }).operation_type)}; refusing rather than storing node vocabulary`,
+    );
+    return {
+      operation: {
+        ...operation,
+        status: "INDETERMINATE",
+        operationVerified: verdict,
+      },
+      verdict,
+      pinOk: true,
+      endpointDisagreement: false,
+      anomalyBlocked: false,
+    };
+  }
+  const kind = materialKind;
 
   // --- Endpoint pin + independent head presence ---
   let endpointDisagreement = false;
@@ -569,6 +593,7 @@ export function buildVerificationCompleteRequest(input: {
   }
 
   const wallet_evidence: VerificationCompleteRequest["wallet_evidence"][number][] = [];
+  const isVerified = proofVerdict.verdict === "VERIFIED";
   for (const ev of material.observation_evidence) {
     const role = ev.evidence_role;
     // wallet_evidence[].role is the 3-value node-controlled-wallet vocabulary —
@@ -579,6 +604,26 @@ export function buildVerificationCompleteRequest(input: {
     if (role !== "RECEIVER" && role !== "SOURCE" && role !== "DESTINATION") continue;
     if (ev.wallet_id === null) {
       return { error: `observation_evidence role ${role} has a null wallet_id; cannot build wallet_evidence` };
+    }
+
+    const terminal = ev.terminal ?? ev.t0;
+    const base = {
+      wallet_id: ev.wallet_id,
+      role,
+      t0: {
+        observation_id: ev.t0.observation_id,
+        projection: { ...ev.t0.projection },
+      },
+      terminal: {
+        observation_id: terminal.observation_id,
+        projection: { ...terminal.projection },
+      },
+    } as const;
+
+    if (!isVerified) {
+      // REJECTED / INDETERMINATE: acknowledge without landing_proof. Never fabricate one.
+      wallet_evidence.push({ ...base });
+      continue;
     }
 
     const ancestorProof = material.ancestor_proofs?.find((a) => a.evidence_role === role);
@@ -592,18 +637,8 @@ export function buildVerificationCompleteRequest(input: {
       };
     }
 
-    const terminal = ev.terminal ?? ev.t0;
     wallet_evidence.push({
-      wallet_id: ev.wallet_id,
-      role,
-      t0: {
-        observation_id: ev.t0.observation_id,
-        projection: { ...ev.t0.projection },
-      },
-      terminal: {
-        observation_id: terminal.observation_id,
-        projection: { ...terminal.projection },
-      },
+      ...base,
       landing_proof: landingProofResult.landingProof,
     });
   }
@@ -621,14 +656,9 @@ export function buildVerificationCompleteRequest(input: {
 }
 
 /**
- * Apply a successful verification-complete response.
- *
- * Current frozen-wire limitation: `buildVerificationCompleteRequest` can only construct a
- * request for a VERIFIED verdict because the server requires `landing_proof` unconditionally,
- * while a REJECTED / INDETERMINATE verdict has no independently verified head from which to
- * derive one. Until the protocol defines a distinct non-VERIFIED acknowledgement shape, the
- * builder fails closed rather than fabricating landing authority. This function therefore
- * applies only a response to a request the builder was actually able to construct.
+ * Apply a successful verification-complete response (VERIFIED, REJECTED, or INDETERMINATE).
+ * Non-VERIFIED acknowledgements omit landing_proof on the wire; the server pins rather than
+ * releases on those verdicts.
  */
 export function applyVerificationComplete(
   operation: ConsumerOperation,

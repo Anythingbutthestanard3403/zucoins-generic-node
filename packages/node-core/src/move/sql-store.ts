@@ -85,12 +85,12 @@ export const STATEMENTS = {
     `INSERT INTO operations (` +
     `id, node_id, implementer_id, kind, status, amount_zkz, ` +
     `source_wallet_id, destination_id, spawned_from_operation_id, ` +
-    `idempotency_key, request_sha256, formation_state` +
+    `client_reference, idempotency_key, request_sha256, formation_state` +
     `) VALUES (` +
     `$1::uuid, $2::uuid, $3::uuid, 'MOVE_INTERNAL'::operation_kind, ` +
     `'CREATED'::operation_status, $4, ` +
     `$5::uuid, $6::uuid, $7::uuid, ` +
-    `$8, $9, 'NOT_REQUIRED'::external_formation_state` +
+    `$8, $9, $10, 'NOT_REQUIRED'::external_formation_state` +
     `) ON CONFLICT (implementer_id, kind, idempotency_key) DO NOTHING ` +
     `RETURNING id`,
 
@@ -120,7 +120,7 @@ export const STATEMENTS = {
   SELECT_BY_IDEMPOTENCY:
     `SELECT o.id, o.implementer_id, o.node_id, o.kind::text AS kind, o.status::text AS status, ` +
     `o.row_version, o.attention_required, o.source_wallet_id, o.destination_id, ` +
-    `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.spawned_from_operation_id, ` +
+    `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.client_reference, o.spawned_from_operation_id, ` +
     `lgo.lease_group_id, o.idempotency_key, o.request_sha256, ` +
     `EXTRACT(EPOCH FROM o.created_at) * 1000 AS created_at_ms, ` +
     `EXTRACT(EPOCH FROM o.updated_at) * 1000 AS updated_at_ms ` +
@@ -133,7 +133,7 @@ export const STATEMENTS = {
   SELECT_BY_OPERATION_ID:
     `SELECT o.id, o.implementer_id, o.node_id, o.kind::text AS kind, o.status::text AS status, ` +
     `o.row_version, o.attention_required, o.source_wallet_id, o.destination_id, ` +
-    `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.spawned_from_operation_id, ` +
+    `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.client_reference, o.spawned_from_operation_id, ` +
     `lgo.lease_group_id, o.idempotency_key, o.request_sha256, ` +
     `EXTRACT(EPOCH FROM o.created_at) * 1000 AS created_at_ms, ` +
     `EXTRACT(EPOCH FROM o.updated_at) * 1000 AS updated_at_ms ` +
@@ -214,6 +214,7 @@ interface OperationRow {
   readonly destination_id: string;
   readonly destination_wallet_id: string;
   readonly amount_zkz: string;
+  readonly client_reference: string | null;
   readonly spawned_from_operation_id: string | null;
   readonly lease_group_id: string | null;
   readonly idempotency_key: string;
@@ -282,6 +283,7 @@ function toStored(row: OperationRow): StoredMoveOperation {
     destinationId: row.destination_id,
     destinationWalletId: row.destination_wallet_id,
     amountZkz: row.amount_zkz,
+    clientReference: row.client_reference,
     spawnedFromOperationId: row.spawned_from_operation_id,
     leaseGroupId: row.lease_group_id,
     idempotencyKey: row.idempotency_key,
@@ -426,6 +428,7 @@ export class SqlMoveCreateStore implements MoveCreateStore {
         op.sourceWalletId,
         op.destinationId,
         op.spawnedFromOperationId,
+        op.clientReference,
         op.idempotencyKey,
         op.requestSha256,
       ]);

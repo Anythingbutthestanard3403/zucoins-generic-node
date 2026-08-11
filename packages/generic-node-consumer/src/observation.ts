@@ -1,7 +1,7 @@
 /**
  * Consumer-side direct gateway observation helpers (verification step 3: the
  * consumer's own gateway reads).
- * Part of the installable SDK (originally shipped in @zucoins/consumer-example).
+ * Part of the consumer SDK surface (originally shipped in @zucoins/consumer-example).
  *
  * Classifies successive independent head reads with the frozen relationship
  * classifier. REGRESSION / UNEXPLAINED_JUMP never become action authority.

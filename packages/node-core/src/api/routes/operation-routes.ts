@@ -107,6 +107,8 @@ export interface CreateInternalMoveInput {
   readonly source_wallet_id: string;
   readonly destination_id: string;
   readonly amount_zkz: string;
+  /** Advisory product correlation only — unsigned, never a settlement match key. */
+  readonly client_reference?: string;
   readonly idempotencyKey: string;
   /** Credential-bound tenant — never accepted from the request body. */
   readonly implementerId: string;

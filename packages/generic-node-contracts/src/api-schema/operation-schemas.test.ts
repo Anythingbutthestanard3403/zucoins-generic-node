@@ -239,6 +239,9 @@ describe("the named concern RECEIVE_EXTERNAL strict schemas", () => {
 describe("the named concern MOVE_INTERNAL strict schemas", () => {
   it("accepts the documented request and response", () => {
     expect(MoveInternalRequestSchema.safeParse(MOVE_REQUEST).success).toBe(true);
+    expect(
+      MoveInternalRequestSchema.safeParse({ ...MOVE_REQUEST, client_reference: "order-42" }).success,
+    ).toBe(true);
     expect(MoveInternalResponseSchema.safeParse(MOVE_RESPONSE).success).toBe(true);
   });
 

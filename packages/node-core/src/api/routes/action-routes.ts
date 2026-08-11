@@ -84,7 +84,8 @@ export interface WalletEvidenceWire {
   readonly role: "RECEIVER" | "SOURCE" | "DESTINATION";
   readonly t0: T0EvidenceWire;
   readonly terminal: T0EvidenceWire;
-  readonly landing_proof: LandingProofWire;
+  /** Required when verdict is VERIFIED; omitted for REJECTED / INDETERMINATE. */
+  readonly landing_proof?: LandingProofWire;
 }
 
 export interface VerificationCompleteInput {

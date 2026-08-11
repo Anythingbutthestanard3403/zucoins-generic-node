@@ -105,7 +105,7 @@ export function ApiKeysPage() {
         This list shows prefixes only — the full <code>ik_…</code> secret is returned once when
         you issue a key. A key already present after first boot was seeded at genesis for the
         node process; if you never copied a raw secret, issue a new key (or rotate by issuing
-        then revoking the old one) and store that secret in your merchant backend.
+        then revoking the old one) and store that secret in your implementer backend.
       </p>
 
       {demoMode ? (
@@ -135,7 +135,7 @@ export function ApiKeysPage() {
         <div className="card" data-testid="api-key-once" style={{ marginTop: 12 }}>
           <h2>New API key — copy it now</h2>
           <p className="muted">
-            This is shown once and never stored in plaintext. Paste it into your merchant
+            This is shown once and never stored in plaintext. Paste it into your implementer
             website backend env — never customer browser JS.
           </p>
           <code

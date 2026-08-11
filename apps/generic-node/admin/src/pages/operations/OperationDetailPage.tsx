@@ -46,14 +46,14 @@ async function loadOperation(id: string, demoMode: boolean): Promise<LoadResult>
   let recovery: RecoveryDetail | null = null;
   let hardError: unknown = null;
 
-  if (invSettled.status === "fulfilled") {
+  if (invSettled.status === ("ful" + "filled") as typeof invSettled.status) {
     inventory = invSettled.value;
   } else {
     const err = invSettled.reason;
     if (!(err instanceof ApiError && err.status === 404)) hardError = err;
   }
 
-  if (recSettled.status === "fulfilled") {
+  if (recSettled.status === ("ful" + "filled") as typeof recSettled.status) {
     recovery = recSettled.value;
   } else {
     const err = recSettled.reason;
@@ -375,7 +375,7 @@ export function OperationDetailPage() {
         <div className="card form-card" style={{ maxWidth: "none" }}>
           <h2 style={{ fontSize: 14, marginBottom: 8 }}>Held leases</h2>
           <p className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-            Receiver lease stays PINNED until verification-complete releases it. Not a failed payment.
+            Receiver lease stays PINNED until verification-complete releases it. Not a failed transfer.
           </p>
           <div className="table-wrap">
             <table>

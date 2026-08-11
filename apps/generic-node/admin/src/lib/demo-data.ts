@@ -16,13 +16,13 @@ export const DEMO = {
     move_internal: { open: 1, landed_today: 3 },
     send_external: { open: 1, landed_today: 2 },
   },
-  treasuries: [
+  holdWallets: [
     { id: "T1", role: "primary", pubkey: "zkz1q8f2a7c9d0e1f2a3b4c5d6e7f8a9b0c1d27f2a", balance: "982.1000", busy: false },
     { id: "T2", role: "secondary", pubkey: "zkz1qc901aabbccddeeff001122334455667788c901", balance: "266.3200", busy: true },
   ],
   attention: [
     { id: "mv_8f2a91", type: "move" as const, title: "Parked move", detail: "mv_8f2a · 4.2000 ZKZ · 3 attempts", action: "Retry" },
-    { id: "xfr_91c00e", type: "transfer" as const, title: "Outbound awaiting release", detail: "xfr_91c0 · 0.5000 ZKZ", action: "Release" },
+    { id: "xfr_91c00e", type: "transfer" as const, title: "Outgoing awaiting release", detail: "xfr_91c0 · 0.5000 ZKZ", action: "Release" },
     { id: "rcv_3b11c8", type: "receive" as const, title: "Receive needs attention", detail: "rcv_3b11 · observation budget", action: "Inspect" },
   ],
   activity: [
@@ -59,7 +59,7 @@ export const DEMO = {
       wallet_id: "wal_demo_2",
       wallet_public_key: "zkz1qdest002samplesbbbbbbbbbbbbbbbbbbbbbbbb",
       state: "BLESSED",
-      label: "Demo treasury sink",
+      label: "Demo hold sink",
       blessed_at: "2026-07-01T00:00:00.000Z",
       retired_at: null,
       move_eligible: true,
@@ -78,7 +78,7 @@ export const DEMO = {
   settings: {
     reportingPubkey: "zkz1qrep…aa11",
     poolCap: 200,
-    treasuryCount: 2,
+    holdWalletCount: 2,
     reportingOptIn: true,
     currencyDisplay: "ZKZ",
   },

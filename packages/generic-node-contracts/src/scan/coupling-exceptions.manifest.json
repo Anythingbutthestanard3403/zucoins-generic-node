@@ -3,367 +3,202 @@
   "description": "Published coupling-exceptions manifest. Enumerates every deliberate exemption from the generic-core product-coupling gates: inline contract-allow markers (drift-gate scanner, forbidden-terms.ts) and D99_ALLOWLIST compatibility literals (allowlist.d99.ts). coupling-exceptions.manifest.test.ts asserts this manifest's per-file and total counts match the live scan and the frozen constants; it is an audit artifact and does not modify scan logic. v2 drops the per-entry line number v1 carried: the gate never verified it, so it rotted silently as the exempted files grew. The exempted file is the durable locator; the exact lines are recovered live with `grep -n contract-allow: <file>`.",
   "inlineMarkers": {
     "markerPrefix": "contract-allow:",
-    "frozenCount": 207,
+    "frozenCount": 239,
     "entries": [
       {
-        "file": "apps/generic-node/src/admin-inventory/store.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/manifest.freeze.test.ts",
+        "reason": "product-route-negative-fixture",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/admin-inventory/store.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/manifest.freeze.test.ts",
+        "reason": "product-route-negative-fixture",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/admin-inventory/store.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/manifest.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/admin-inventory/store.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/admin-inventory/store.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/admin-inventory/types.ts",
-        "reason": "checkout,sweep:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/bootstrap/genesis.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/db/overlap-guard.ts",
-        "reason": "drain: runbook path is a real committed file name, not rewordable here",
+        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
+        "reason": "frozen-manifest-field-name (gen/route-policy.json pipeline[].order)",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/db/overlap-guard.ts",
-        "reason": "drain: the drain decision names this env var verbatim \u2014 an operator contract, not prose",
+        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
+        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
+        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
+        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
+        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
+        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
+        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
+        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
+        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
+        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
+        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/receive-expiry/fault-injection.test.ts",
+        "reason": "ordering-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/db/session-endpoint.ts",
-        "reason": "drain: runbook path is a real committed file name, not rewordable here",
+        "file": "packages/generic-node-contracts/src/receive-expiry/index.ts",
+        "reason": "ordering-manifest-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/drill.ts",
-        "reason": "order:frozen-sql-text",
+        "file": "packages/generic-node-contracts/src/receive-expiry/index.ts",
+        "reason": "ordering-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/markers.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/schedule.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
+        "reason": "frozen-golden-path-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/schedule.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
+        "reason": "ordering-manifest-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/schedule.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
+        "reason": "ordering-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/dr/schedule.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/main.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.ts",
+        "reason": "ordering-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/main.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/receive-expiry/ordering.test.ts",
+        "reason": "ordering-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/main.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/index.ts",
+        "reason": "reservation-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/main.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/pressure.test.ts",
+        "reason": "reservation-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/main.ts",
-        "reason": "sweep:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/reservation.test.ts",
+        "reason": "reservation-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/move-internal-worker.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/retirement.test.ts",
+        "reason": "reservation-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/receive-child-handoff-step.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/scenarios.ts",
+        "reason": "frozen-scenario-invariant",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/receive-landing-step.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/selection.test.ts",
+        "reason": "frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/receiver-channel-producer.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/selection.ts",
+        "reason": "frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/send-completion-lander.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.test.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/send-completion-tick.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.test.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/send-sql-ports.ts",
-        "reason": "order:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
+        "reason": "frozen-contract-field-name",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
+        "reason": "reservation-module-path",
         "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/operations/sql-recovery-store.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/ops/export-live-backup-archive.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/compose.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/sql-store.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/push/sql-store.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/reporting-credential-service.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/reporting-credential-service.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/reporting/live-reporting-reads.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/stage1-shutdown.ts",
-        "reason": "drain:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/stage1-shutdown.ts",
-        "reason": "drain:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/stage1-shutdown.ts",
-        "reason": "drain:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/stage1-shutdown.ts",
-        "reason": "drain:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/vault/root-kdf-salt.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "apps/generic-node/src/vault/root-kdf-salt.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/compat-literals/CONTRACT.md",
-        "reason": "allowlist-justification-citation",
-        "decision": "compatibility-literals"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/credential-matrix/matrix.ts",
-        "reason": "frozen-manifest-field-name (reads pipeline.ts's frozen PipelineStage.order)",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
-        "reason": "frozen-field-order-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
-        "reason": "frozen-field-order-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
-        "reason": "frozen-field-order-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
-        "reason": "frozen-field-order-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
-        "reason": "frozen-field-order-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.census.test.ts",
-        "reason": "launch-deferral-citation",
-        "decision": "launch-deferral (launch-deferral concern)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.census.test.ts",
-        "reason": "launch-deferral-citation",
-        "decision": "launch-deferral (launch-deferral concern)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.contract.ts",
-        "reason": "launch-deferral-citation",
-        "decision": "launch-deferral (launch-deferral concern)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.contract.ts",
-        "reason": "launch-deferral-citation",
-        "decision": "launch-deferral (launch-deferral concern)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/no-callback/CONTRACT.md",
-        "reason": "frozen-spec-section-title",
-        "decision": "no-network-egress (callbacks retitle)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/no-callback/attack-surface.ts",
-        "reason": "frozen-attack-surface-example-host",
-        "decision": "no-network-egress (attack-surface census)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/no-callback/rejected-surfaces.ts",
-        "reason": "frozen-rejected-surface-ground-text",
-        "decision": "no-network-egress (rejected-surface census)"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/no-callback/rejected-surfaces.ts",
-        "reason": "frozen-rejected-surface-ground-text",
-        "decision": "no-network-egress (rejected-surface census)"
       },
       {
         "file": "packages/generic-node-contracts/src/operations/capabilities.contract.ts",
@@ -506,6 +341,51 @@
         "decision": "state-event reference reject-list (compatibility-literals)"
       },
       {
+        "file": "packages/generic-node-contracts/src/no-callback/attack-surface.ts",
+        "reason": "frozen-attack-surface-example-host",
+        "decision": "no-network-egress (attack-surface census)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/no-callback/rejected-surfaces.ts",
+        "reason": "frozen-rejected-surface-ground-text",
+        "decision": "no-network-egress (rejected-surface census)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/no-callback/rejected-surfaces.ts",
+        "reason": "frozen-rejected-surface-ground-text",
+        "decision": "no-network-egress (rejected-surface census)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.census.test.ts",
+        "reason": "launch-deferral-citation",
+        "decision": "launch-deferral (launch-deferral concern)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.census.test.ts",
+        "reason": "launch-deferral-citation",
+        "decision": "launch-deferral (launch-deferral concern)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.contract.ts",
+        "reason": "launch-deferral-citation",
+        "decision": "launch-deferral (launch-deferral concern)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/launch-deferral/deferral.contract.ts",
+        "reason": "launch-deferral-citation",
+        "decision": "launch-deferral (launch-deferral concern)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/credential-matrix/matrix.ts",
+        "reason": "frozen-manifest-field-name (reads pipeline.ts's frozen PipelineStage.order)",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/receive-expiry/CONTRACT.md",
+        "reason": "frozen-module-path-and-const-citation --> (`ordering.ts` `EXPIRY_RECONCILE_RELEASE_ORDER`): `hold_lease -> retain_evidence ->",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
         "file": "packages/generic-node-contracts/src/pool-policy/CONTRACT.md",
         "reason": "frozen-concern-vocabulary",
         "decision": "pool-policy decisions (pool-policy CONTRACT.md)"
@@ -526,338 +406,163 @@
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/index.ts",
-        "reason": "reservation-module-path",
+        "file": "packages/generic-node-contracts/src/no-callback/CONTRACT.md",
+        "reason": "frozen-spec-section-title",
+        "decision": "no-network-egress (callbacks retitle)"
+      },
+      {
+        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
+        "reason": "frozen-field-order-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/pressure.test.ts",
-        "reason": "reservation-module-path",
+        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
+        "reason": "frozen-field-order-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/reservation.test.ts",
-        "reason": "reservation-module-path",
+        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
+        "reason": "frozen-field-order-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/retirement.test.ts",
-        "reason": "reservation-module-path",
+        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
+        "reason": "frozen-field-order-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/scenarios.ts",
-        "reason": "frozen-scenario-invariant",
+        "file": "packages/generic-node-contracts/src/implementer-events/CONTRACT.md",
+        "reason": "frozen-field-order-citation",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/selection.test.ts",
-        "reason": "frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
+        "file": "packages/generic-node-contracts/src/compat-literals/CONTRACT.md",
+        "reason": "allowlist-justification-citation",
+        "decision": "compatibility-literals"
       },
       {
-        "file": "packages/generic-node-contracts/src/pool-policy/selection.ts",
-        "reason": "frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.test.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.test.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/pool-policy/transactions-manifest.ts",
-        "reason": "reservation-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/CONTRACT.md",
-        "reason": "frozen-module-path-and-const-citation --> (`ordering.ts` `EXPIRY_RECONCILE_RELEASE_ORDER`): `hold_lease -> retain_evidence ->",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/fault-injection.test.ts",
-        "reason": "ordering-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/index.ts",
-        "reason": "ordering-manifest-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/index.ts",
-        "reason": "ordering-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
-        "reason": "frozen-golden-path-citation",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
-        "reason": "ordering-manifest-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.test.ts",
-        "reason": "ordering-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.ts",
-        "reason": "frozen-contract-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering-manifest.ts",
-        "reason": "ordering-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/receive-expiry/ordering.test.ts",
-        "reason": "ordering-module-path",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/manifest.freeze.test.ts",
-        "reason": "product-route-negative-fixture",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/manifest.freeze.test.ts",
-        "reason": "product-route-negative-fixture",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/manifest.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/pipeline.ts",
-        "reason": "frozen-manifest-field-name (gen/route-policy.json pipeline[].order)",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
-        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
-        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
-        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
-        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
-        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
-        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
-        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
-        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
-      },
-      {
-        "file": "packages/generic-node-contracts/src/route-policy/routes.ts",
-        "reason": "frozen-forbidden-route-denylist-entry-per-05-api-contract-s13",
-        "decision": "api-contract observation feed (observation-dedup); drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/api/discovery.ts",
+        "file": "packages/node-core/src/workers/move-internal-money-worker.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/api/sql-destination-store.ts",
+        "file": "packages/node-core/src/workers/move-internal-money-worker.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/core/lineage-path-writer.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/credential/sql-store.ts",
-        "reason": "frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/event-log/pg-event-store.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/http/admin-auth-handlers.ts",
+        "file": "packages/node-core/src/signing-keys/ensure.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/http/security-headers.ts",
-        "reason": "checkout,merchant:frozen structural vocabulary",
+        "file": "packages/node-core/src/signing-keys/registry-store.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/http/security-headers.ts",
-        "reason": "checkout,merchant:frozen structural vocabulary",
+        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/http/security-headers.ts",
-        "reason": "checkout:frozen structural vocabulary",
+        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/http/security-headers.ts",
-        "reason": "checkout:frozen structural vocabulary",
+        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/leases/statements.ts",
+        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/reporting/pg-implementer-event-log.ts",
         "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/leases/statements.ts",
+        "file": "packages/node-core/src/reporting/pg-implementer-event-log.ts",
         "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/leases/statements.ts",
+        "file": "packages/node-core/src/reporting/pg-snapshot-state-reader.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/reporting/pg-snapshot-state-reader.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/receive/candidate-intake.test.ts",
+        "reason": "fulfilled:Promise.allSettled status literal (ECMAScript), not settlement vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/receive/candidate-intake.ts",
+        "reason": "payment:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/receive/expiry-release.ts",
         "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/pinned-send.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/node-core/src/receive/pool-allocator.ts",
+        "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/pinned-send.ts",
-        "reason": "drain:frozen structural vocabulary",
+        "file": "packages/node-core/src/receive/pool-scaler.ts",
+        "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/pinned-send.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/id-proof.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/pinned-send.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/id-proof.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/store.ts",
+        "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/store.ts",
+        "reason": "sweep:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/subscription-service.ts",
+        "reason": "sweep:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/subscription-service.ts",
+        "reason": "sweep:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/push/subscription-service.ts",
+        "reason": "treasury:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/net/ssrf-guard.ts",
-        "reason": "outbound:frozen structural vocabulary",
+        "file": "packages/node-core/src/proof-body/sql-store.ts",
+        "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
@@ -911,87 +616,137 @@
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/proof-body/sql-store.ts",
+        "file": "packages/node-core/src/net/pinned-send.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/pinned-send.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/pinned-send.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/pinned-send.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/net/ssrf-guard.ts",
+        "reason": "outbound:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/leases/statements.ts",
         "reason": "order:frozen-sql-text",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/push/id-proof.ts",
+        "file": "packages/node-core/src/leases/statements.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/leases/statements.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/http/admin-auth-handlers.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/push/id-proof.ts",
+        "file": "packages/node-core/src/http/security-headers.ts",
+        "reason": "checkout,merchant:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/http/security-headers.ts",
+        "reason": "checkout,merchant:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/http/security-headers.ts",
+        "reason": "checkout:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/http/security-headers.ts",
+        "reason": "checkout:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/event-log/pg-event-store.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/credential/sql-store.ts",
+        "reason": "frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/core/lineage-path-writer.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/core/wallet-settled-ledger-writer.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "packages/node-core/src/api/discovery.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/push/store.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/push/store.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/push/subscription-service.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/push/subscription-service.ts",
-        "reason": "sweep:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/push/subscription-service.ts",
-        "reason": "treasury:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/receive/candidate-intake.test.ts",
-        "reason": "fulfilled:Promise.allSettled status literal (ECMAScript), not settlement vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/receive/candidate-intake.ts",
-        "reason": "payment:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/receive/expiry-release.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/receive/pool-allocator.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/receive/pool-scaler.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/reporting/pg-implementer-event-log.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/reporting/pg-implementer-event-log.ts",
-        "reason": "order:frozen-sql-text",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/reporting/pg-snapshot-state-reader.ts",
-        "reason": "order:frozen structural vocabulary",
-        "decision": "three-generic-operations; drift-gate-scanner"
-      },
-      {
-        "file": "packages/node-core/src/reporting/pg-snapshot-state-reader.ts",
+        "file": "packages/node-core/src/api/sql-destination-store.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
@@ -1001,44 +756,449 @@
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "file": "apps/generic-node/src/main.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/main.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/main.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/main.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/main.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/reporting-credential-service.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/reporting-credential-service.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/stage1-shutdown.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/stage1-shutdown.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/stage1-shutdown.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/stage1-shutdown.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/vault/root-kdf-salt.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "file": "apps/generic-node/src/vault/root-kdf-salt.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "file": "apps/generic-node/src/reporting/live-reporting-reads.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/schema/money-schema-pack.ts",
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/compose.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/push/sql-store.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/signing-keys/ensure.ts",
+        "file": "apps/generic-node/src/push/sql-store.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/ops/export-live-backup-archive.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/signing-keys/registry-store.ts",
+        "file": "apps/generic-node/src/operations/sql-recovery-store.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/workers/move-internal-money-worker.ts",
+        "file": "apps/generic-node/src/money-workers/move-internal-worker.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
       },
       {
-        "file": "packages/node-core/src/workers/move-internal-money-worker.ts",
+        "file": "apps/generic-node/src/money-workers/receive-child-handoff-step.ts",
         "reason": "order:frozen structural vocabulary",
         "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/receive-landing-step.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/receiver-channel-producer.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/send-completion-lander.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/send-completion-tick.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/send-sql-ports.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/money-workers/start-money-workers.ts",
+        "reason": "sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/drill.ts",
+        "reason": "order:frozen-sql-text",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/markers.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/schedule.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/schedule.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/schedule.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/dr/schedule.ts",
+        "reason": "drain:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/db/overlap-guard.ts",
+        "reason": "drain: runbook path is a real committed file name, not rewordable here",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/db/overlap-guard.ts",
+        "reason": "drain: the drain decision names this env var verbatim — an operator contract, not prose",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/db/session-endpoint.ts",
+        "reason": "drain: runbook path is a real committed file name, not rewordable here",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/bootstrap/genesis.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/boot/sql-boot-recovery.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/store.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/store.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/store.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/store.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/store.ts",
+        "reason": "order:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/src/admin-inventory/types.ts",
+        "reason": "checkout,sweep:frozen structural vocabulary",
+        "decision": "three-generic-operations; drift-gate-scanner"
+      },
+      {
+        "file": "apps/generic-node/admin/src/nav.ts",
+        "reason": "sweep:retired-nav-label-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/nav.ts",
+        "reason": "sweep:retired-nav-path-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/labels.test.ts",
+        "reason": "refund:negative-fourth-verb-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/labels.test.ts",
+        "reason": "checkout:negative-fourth-verb-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-pack-id",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "sweep:negative-copy",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "sweep:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "checkout:negative-copy",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-copy",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "checkout,order:negative-copy",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-path-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.test.ts",
+        "reason": "order:negative-path-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.ts",
+        "reason": "sweep,order:retired-nav-label-guard",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.ts",
+        "reason": "order:retired-nav-label-guard",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.ts",
+        "reason": "sweep:retired-nav-path-guard",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.ts",
+        "reason": "order:retired-nav-path-guard",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/lib/packs.ts",
+        "reason": "order:retired-nav-path-guard",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "order:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "sweep:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "sweep:negative-page-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "sweep:negative-path-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "sweep:negative-module-path",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/App.test.tsx",
+        "reason": "sweep:negative-module-path",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/integration/IntegrationPage.test.tsx",
+        "reason": "ZUC:negative-currency-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/integration/IntegrationPage.test.tsx",
+        "reason": "order:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/integration/IntegrationPage.test.tsx",
+        "reason": "sweep:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/integration/IntegrationPage.test.tsx",
+        "reason": "order:negative-nav-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/integration/IntegrationPage.tsx",
+        "reason": "merchant:package-name-citation",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/approve/ApproveInboxPage.test.tsx",
+        "reason": "order:negative-copy-assertion",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
+      },
+      {
+        "file": "apps/generic-node/admin/src/pages/approve/ApproveInboxPage.test.tsx",
+        "reason": "payment:negative-copy-assertion",
+        "decision": "three-generic-operations; drift-gate-scanner; ZTR-1167"
       }
     ]
   },

@@ -32,7 +32,7 @@ export function LoginPage() {
     <div className="auth-shell">
       <form className="auth-card" onSubmit={(e) => void onSubmit(e)}>
         <h1>Zu Node</h1>
-        <p className="lead">Operator sign-in for this self-hosted treasury node.</p>
+        <p className="lead">Operator sign-in for this self-hosted custody node.</p>
         <div className="field">
           <label htmlFor="user">Username</label>
           <input id="user" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />

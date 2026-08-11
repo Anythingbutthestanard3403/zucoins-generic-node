@@ -341,35 +341,36 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
    * Insert the admission row and, on win, mint + persist the subscription handle
    * hash in the same executor (same TX when called under withTransaction).
    * Returns the plaintext once; only the hash is durable.
+   *
+   * Do NOT catch unique_violation here. A 23505 aborts the live PG transaction; returning
+   * WALLET_IN_FLIGHT would let withPgTransaction attempt COMMIT on an aborted session
+   * (→ 500). Callers must let the error throw out of withTransaction (ROLLBACK) and map
+   * via mapInsertError in the outer catch only.
    */
   private async insertOn(
     executor: SqlExecutor,
     operation: ReceiveOperation,
   ): Promise<ReceiveInsertOutcome> {
     const params = this.operationInsertParams(operation);
-    try {
-      const result = await executor.query<{ operation_id: string }>(
-        STATEMENTS.INSERT_IN_PROGRESS,
-        params,
-      );
-      // ON CONFLICT DO NOTHING targets the idempotency constraint only, so zero rows means
-      // another caller already holds this key.
-      if (result.rows.length === 0) return { kind: "IDEMPOTENCY_CONFLICT" };
+    const result = await executor.query<{ operation_id: string }>(
+      STATEMENTS.INSERT_IN_PROGRESS,
+      params,
+    );
+    // ON CONFLICT DO NOTHING targets the idempotency constraint only, so zero rows means
+    // another caller already holds this key.
+    if (result.rows.length === 0) return { kind: "IDEMPOTENCY_CONFLICT" };
 
-      const plaintext = mintSubscriptionHandlePlaintext();
-      const handleHash = hashSubscriptionHandle(plaintext);
-      const nowMs = Date.now();
-      await executor.query(STATEMENTS.INSERT_SUBSCRIPTION_HANDLE, [
-        randomUUID(),
-        operation.nodeId,
-        operation.operationId,
-        handleHash,
-        subscriptionHandleExpiresAtIso(operation, nowMs),
-      ]);
-      return { kind: "INSERTED", subscriptionHandlePlaintext: plaintext };
-    } catch (error) {
-      return this.mapInsertError(error, operation);
-    }
+    const plaintext = mintSubscriptionHandlePlaintext();
+    const handleHash = hashSubscriptionHandle(plaintext);
+    const nowMs = Date.now();
+    await executor.query(STATEMENTS.INSERT_SUBSCRIPTION_HANDLE, [
+      randomUUID(),
+      operation.nodeId,
+      operation.operationId,
+      handleHash,
+      subscriptionHandleExpiresAtIso(operation, nowMs),
+    ]);
+    return { kind: "INSERTED", subscriptionHandlePlaintext: plaintext };
   }
 
   async insertInProgress(operation: ReceiveOperation): Promise<ReceiveInsertOutcome> {

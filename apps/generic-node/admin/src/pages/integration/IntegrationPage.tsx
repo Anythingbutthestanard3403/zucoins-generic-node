@@ -45,7 +45,7 @@ function jsString(value: string): string {
  * Build the downloadable Connect kit.
  *
  * Secrets: only the one-time implementer bearer (`ik_…`) may appear, and only inside the
- * merchant-server receive.mjs section. Reporting private seeds are never accepted as
+ * implementer-server receive.mjs section. Reporting private seeds are never accepted as
  * arguments and must never be serialized here (operators copy them from Reporting once).
  */
 export function buildIntegrationKit(nodeBaseUrl: string, implementerKey: string): string {
@@ -68,10 +68,10 @@ handles.
 WAKE ≠ PROOF (read this twice)
 ------------------------------
 A node lifecycle SSE event, webhook, or status poll is a WAKE-UP SIGNAL only. It is
-NOT proof of payment, NOT permission to fulfil an order, and NOT a substitute for
+NOT settlement proof, NOT permission to fulfil a customer request, and NOT a substitute for
 independent chain observation. Fulfil only after your own verifier reaches a terminal
 verdict, then call verification-complete so the node can unpin the receiver wallet.
-Skip verification-complete and the wallet pool drains (receiver stays PINNED).
+Skip verification-complete and the wallet pool stays exhausted (receiver stays PINNED).
 
 PREREQUISITES (operator UI — do these once before coding)
 ---------------------------------------------------------
@@ -111,11 +111,11 @@ IN-REPO PACKAGES (do not reinvent signing or verification)
     observation pipeline helpers (verify independently, then ack)
 - @zucoins/consumer-example
     worked end-to-end composition + lying-node fixtures
-    verifyReceiveInstructionOrigin (merchant-controlled instruction surface)
-- @zucoins/merchant-adapter
-    merchant-facing adapter patterns over the same contracts
+    verifyReceiveInstructionOrigin (implementer-controlled instruction surface)
+- @zucoins/merchant-adapter // contract-allow:merchant:package-name-citation
+    implementer-facing adapter patterns over the same contracts
 
-MERCHANT SERVER FILE — receive.mjs (Node 22+)
+IMPLEMENTER SERVER FILE — receive.mjs (Node 22+)
 ---------------------------------------------
 // STEP 1 — POST /v1/receives must run on your server, never in customer browser code.
 const NODE_BASE_URL = ${jsString(base)};
@@ -146,7 +146,7 @@ export async function createReceive({
   const created = await response.json(); // 201 ready-ish or 202 queued
   const operationId = created.operation.operation_id;
 
-  // Persist encrypted/server-side and bind lookup to this merchant order/customer.
+  // Persist encrypted/server-side and bind lookup to this implementer request/customer.
   await saveSubscriptionHandle(operationId, created.subscription_handle);
   return { operationId }; // the browser never receives the sh_ handle
 }
@@ -182,7 +182,7 @@ export async function waitUntilArmable(operationId, { pollMs = 1000, maxMs = 120
   }
 }
 
-MERCHANT SERVER FILE — arm-and-code.mjs (Node 22+)
+IMPLEMENTER SERVER FILE — arm-and-code.mjs (Node 22+)
 -------------------------------------------------
 // STEP 3 — ARM is REPORTING-SIGNED (not the implementer bearer).
 // Use @zucoins/generic-node-consumer buildSignedReportingHeaders so zp-report-request-v1
@@ -275,12 +275,12 @@ export async function presentPayInstruction({ armed, armable, customerSession })
   };
 }
 
-MERCHANT SERVER FILE — status-proxy.mjs (Node 22+)
+IMPLEMENTER SERVER FILE — status-proxy.mjs (Node 22+)
 -------------------------------------------------
 // STEP 6 — Optional UX wake. WAKE ≠ PROOF.
 const NODE_BASE_URL = ${jsString(base)};
 
-// Mount this handler at GET /api/receive-status/:operationId on the merchant origin.
+// Mount this handler at GET /api/receive-status/:operationId on the implementer origin.
 // Authenticate the customer and authorize access to the operation before calling it.
 export async function proxyReceiveStatus({
   request,
@@ -346,7 +346,7 @@ export function subscribeToReceiveStatus({ operationId, onStatus, onError }) {
   });
   source.addEventListener("error", (event) => onError?.(event));
 
-  // EventSource reconnects automatically and sends Last-Event-ID to this merchant endpoint.
+  // EventSource reconnects automatically and sends Last-Event-ID to this implementer endpoint.
   // Section 8.4 has no durable cursor: the proxy intentionally opens a fresh node stream,
   // whose fresh upstream stream replays current state. Duplicate row_version is harmless.
   return () => source.close();
@@ -391,7 +391,7 @@ Flow:
          "wallet_evidence": [ /* proof-backed rows from material + your observation */ ]
        }
      + reporting five headers + Idempotency-Key.
-  f. Success unpins the receiver wallet. Skip this and the pool drains.
+  f. Success unpins the receiver wallet. Skip this and the pool stays exhausted.
 
 Failure modes (do not invent success):
   - 401 unknown_reporting_key / missing headers → enrol ACTIVE reporting key first.
@@ -416,7 +416,7 @@ SECURITY HANDOFF CHECKLIST
 8. Pin the node identity independently of the hosted platform before trusting artifacts.
 9. Treat node lifecycle status as a wake-up signal; verify settlement independently.
 10. Always call verification-complete after a terminal independent verdict so wallets unpin.
-11. Currency is ZKZ only — never "ZUC".
+11. Currency is ZKZ only — never the retired three-letter product label.
 12. Never blind-retry a money or ack submit; reconcile first (get_transaction / point read).
 `;
 }

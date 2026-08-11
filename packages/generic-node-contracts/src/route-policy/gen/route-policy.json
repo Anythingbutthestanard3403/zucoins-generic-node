@@ -299,7 +299,7 @@
       "order": 5,
       "name": "resolve_object_with_tenant_predicate",
       "failsWith": "not_found",
-      "deferredTo": null
+      "deferredTo": "tenant-object-resolution-contract"
     },
     {
       "order": 6,

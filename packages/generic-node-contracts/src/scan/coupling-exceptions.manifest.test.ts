@@ -17,6 +17,8 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..",
 const scannedFiles = SCAN_SCOPE.flatMap((scopePath) => [
   ...globSync(join(repoRoot, scopePath, "**", "*.ts")),
   ...globSync(join(repoRoot, scopePath, "**", "*.md")),
+    ...globSync(join(repoRoot, scopePath, "**", "*.tsx")),
+
 ]).filter((file) => !file.includes(`${join("src", "scan")}/`));
 
 const liveMarkerCount = scannedFiles.reduce(

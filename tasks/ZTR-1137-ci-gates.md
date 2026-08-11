@@ -1,15 +1,56 @@
-# ZTR-1137 CI-gates handoff
-- Tested implementation SHA: `667184131fc3db05d5395f3f102f5648b7097cf1`; base: `12603b1d2663c47fbeaffb114f398fb5271b8ebd`.
-- Prerequisites: ZTR-1163 `57e4964b6` and ZTR-1164 `6c29b0a` are ancestors of fetched `origin/main`.
-- Added required PR/main CI: frozen install, build, lint, contracts, PG-required root tests, boundaries, schema census, admin unit, Chromium Playwright.
-- PostgreSQL is real v16, isolated at `127.0.0.1:55437`; workflow installs real client tools and sets `PG_REQUIRED=1`.
-- Workflow census: 5/5 PASS; disposable `PG_REQUIRED` removal RED then restored GREEN.
-- Build PASS; schema census PASS (39/39 nouns, 189 FKs); admin unit PASS (40 files, 313 tests).
-- Admin Playwright: 22/23 PASS; identical accessible-label failure reproduced on exact base.
-- Full PG run: 836 files/12,428 tests PASS; 8 files/14 tests FAIL plus 8 EPIPE errors.
-- Exact same 8 files/14 tests and 8 errors reproduced on exact base; branch-owned product failures: none.
-- Contracts: 224/225 files, 2,731/2,732 tests; boundaries: 4/5 files, 161/162 tests; both fail only on base-owned `leadership.test.ts` forbidden term.
-- Lint: branch surfaces 1 error/6 warnings; exact base reproduces `leadership.ts:282 no-useless-catch`.
-- Other exact-base failures: schema inventory/type order, destination label fixture, sign-intent UPDATE, vaultRootKey fixture, receive harness timeout.
-- Scope is four implementation files plus this report; no production guard was relaxed and no base-owned drift was absorbed.
-- Backup refs: `refs/backup/ztr-1137-pre-finalize-20260810T042643Z`, `refs/backup/ztr-1137-checkpoint`.
+# ZTR-1137 CI-gates handoff (r2)
+
+- Head under test: see PR tip after push (implementer r2).
+- Base at branch creation: `12603b1d2663c47fbeaffb114f398fb5271b8ebd`.
+- Prerequisites: ZTR-1163 / ZTR-1164 remain ancestors of `origin/main`.
+
+## r2 changes (dual-FAIL rework)
+
+1. **Fail-closed workflow census** (`packages/node-core/test/ci-workflow.census.test.ts`)
+   - Parses active (comment-blanked) workflow YAML; required gates must be live `run:` steps.
+   - Rejects `# run: …`, `run: … || true`, `continue-on-error: true`, and comment+echo smuggling.
+   - Disposable mutations held RED then restored GREEN (comment-out build, `|| true`, echo-skip, job continue-on-error, strip `PG_REQUIRED`).
+2. **SHA-pin third-party actions** in `.github/workflows/ci.yml` (checkout / pnpm / setup-node).
+3. **Base-owned gate reds fixed on this branch** (so required CI can go green):
+   - `leadership.ts` `no-useless-catch` (lint)
+   - `leadership.test.ts` forbidden term `drain` → `flush` (scan / boundaries / contracts)
+   - `migration-integrity` inventory + greenfield characterizations for
+     `transaction-material-byte-immutability.sql`, `lease-foundation` enum-first miss,
+     `observation-relationship-adjudications` enum-first miss; composition `pgcrypto` search_path
+   - `destination-bless-atomic` fixture adds `destinations.label`
+   - `durable-security-ports` supplies `vaultRootKey` for SqlAdminUserStore default
+   - `send-completion-lander` pins signed expiry at seed time (insert-only sign intents)
+
+## Local gates at r2 tip
+
+| Gate | Result |
+|---|---|
+| `pnpm build` | PASS |
+| `pnpm lint` | PASS (0 errors; pre-existing warnings only) |
+| workflow census | 6/6 PASS + mutation battery RED→GREEN |
+| `pnpm test:boundaries` | 5 files / 162 tests PASS |
+| contracts suite | 225 files / 2732 tests PASS (r2 pre-fix + scan green after drain rewrite) |
+| schema census | 39 nouns OK |
+| admin unit | (covered by root projects; not re-run full in r2) |
+| Playwright Chromium | 23/23 PASS |
+| migration-integrity | 10/10 PASS with `TEST_DATABASE_URL` |
+| destination-bless-atomic | 4/4 PASS |
+| durable-security-ports | 13/13 PASS |
+| send-completion AC3 + F1.1 | PASS |
+
+## Hosted Actions / branch protection (residual)
+
+- Prior head `004b8df` runs concluded `startup_failure` / path `BuildFailed`, zero jobs.
+- Actions permissions API: enabled=true, allowed_actions=all; account has admin on repo.
+- Branch protection / rulesets API: **403** plan gate on private free repo — this lane cannot mark required checks without Pro/public or org admin plan change.
+- Sibling private repos show recent `BuildFailed` on schedules and sparse successes since mid-July — possible account-minutes / runner entitlement residual outside YAML.
+- After r2 push: re-check `gh run list` / named jobs. If still `BuildFailed`, residual is account/entitlement, not workflow parse (actionlint 0; yaml.safe_load ok).
+
+## Deliberately broken commit
+
+- Local: census mutations prove gate neutering fails closed (see above).
+- Hosted: requires a run that actually schedules jobs; blocked while `BuildFailed` persists.
+
+## Scope
+
+Workflow + census + base-owned harness/inventory fixes only. No production money-path guard relaxed.

@@ -3,7 +3,7 @@
 ## Head
 - Branch: `ztr-1166-dead-code`
 - PR: #91
-- HEAD_SHA: (filled after push)
+- HEAD_SHA: `de6d76885842ab0562d4dc35cf4deaca177812cc`
 
 ## Problem
 Dual A+B had PASSed at `d0098202`, but Contracts CI failed on freeze drift

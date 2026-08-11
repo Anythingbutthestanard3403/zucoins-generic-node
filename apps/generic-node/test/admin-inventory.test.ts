@@ -613,6 +613,103 @@ describe("admin inventory HTTP (contract)", () => {
     expect(page.data[1]!.destination_address).toBeNull();
   });
 
+  it("D3: wallet inventory allowlist is custody view + observed_balance (shared contracts)", () => {
+    // ZTR-1217: SPA + node both import WalletInventoryItem / WALLET_INVENTORY_FIELDS from
+    // @zucoins/generic-node-contracts/admin-inventory. Dropping a custody key from the shared
+    // allowlist must redden this census the same way D3 pins operations.destination_address.
+    expect([...WALLET_INVENTORY_FIELDS]).toEqual([
+      ...WALLET_CUSTODY_VIEW_FIELDS,
+      "observed_balance_zkz",
+    ]);
+  });
+
+  it("D3: SQL listWallets projects custody + observed balance path", async () => {
+    const texts: string[] = [];
+    const sql: InventorySqlExecutor = {
+      async query(text, _params) {
+        texts.push(text);
+        if (text.includes("FROM wallets")) {
+          return {
+            rows: [
+              {
+                id: WALLET_ID,
+                node_id: NODE_ID,
+                public_key: PUBKEY,
+                key_origin: "node_generated",
+                state: "AVAILABLE",
+                created_at: "2026-07-01T00:00:00.000Z",
+                retired_at: null,
+                quarantine_reason: null,
+                recovery_verified_at: "2026-07-02T00:00:00.000Z",
+                recovery_verification_id: null,
+              },
+            ],
+          };
+        }
+        if (text.includes(OBSERVED_BALANCE_SQL_FRAGMENT) || text.includes("b_amount")) {
+          return { rows: [{ b_amount: "3.50" }] };
+        }
+        return { rows: [] };
+      },
+    };
+    const store = createSqlAdminInventoryStore(sql);
+    const page = await store.listWallets(NODE_ID, { limit: 10 });
+
+    const walletSelect = texts.find((t) => t.includes("FROM wallets"));
+    expect(walletSelect).toBeDefined();
+    expect(walletSelect!).toContain("w.node_id");
+    expect(walletSelect!).toContain("w.quarantine_reason");
+    expect(walletSelect!).toContain("w.recovery_verified_at");
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]!.node_id).toBe(NODE_ID);
+    expect(page.data[0]!.wallet_id).toBe(WALLET_ID);
+    expect(page.data[0]!.observed_balance_zkz).toBe("3.50");
+  });
+
+  it("D3: SQL listDestinations projects blessing ids (SELECT + mapDestRow)", async () => {
+    const texts: string[] = [];
+    const sql: InventorySqlExecutor = {
+      async query(text, _params) {
+        texts.push(text);
+        return {
+          rows: [
+            {
+              id: DEST_ID,
+              node_id: NODE_ID,
+              wallet_id: WALLET_ID,
+              wallet_public_key: PUBKEY,
+              state: "BLESSED",
+              blessed_at: "2026-07-02T00:00:00.000Z",
+              blessed_by_device_key_id: "77777777-7777-4777-8777-777777777777",
+              blessing_artifact_id: "88888888-8888-4888-8888-888888888888",
+              retired_at: null,
+              created_at: "2026-07-01T00:00:00.000Z",
+              key_origin: "node_generated",
+              wallet_state: "AVAILABLE",
+              recovery_verified_at: "2026-07-02T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+    };
+    const store = createSqlAdminInventoryStore(sql);
+    const page = await store.listDestinations(NODE_ID, { limit: 10 });
+
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!).toContain("d.blessed_by_device_key_id");
+    expect(texts[0]!).toContain("d.blessing_artifact_id");
+    expect(texts[0]!).toContain("d.node_id");
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]!.blessed_by_device_key_id).toBe(
+      "77777777-7777-4777-8777-777777777777",
+    );
+    expect(page.data[0]!.blessing_artifact_id).toBe("88888888-8888-4888-8888-888888888888");
+    expect(page.data[0]!.node_id).toBe(NODE_ID);
+    for (const key of DESTINATION_INVENTORY_FIELDS) {
+      expect(page.data[0]!, key).toHaveProperty(key);
+    }
+  });
+
   it("empty inventory store still returns 200 list envelopes (fail-soft SPA)", async () => {
     const userStore = new InMemoryAdminUserStore();
     await seedAdmin(userStore, "inventory-secret-e");

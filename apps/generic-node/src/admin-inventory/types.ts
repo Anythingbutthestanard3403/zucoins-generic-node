@@ -7,24 +7,37 @@
 import type { AuditActorKind } from "@zucoins/node-core";
 import {
   WALLET_CUSTODY_VIEW_FIELDS,
-  WALLET_RECOVERY_EVIDENCE_FIELDS,
   type DestinationState,
   type WalletCustodyView,
 } from "@zucoins/node-core";
 
-// The operations list/detail shapes are shared with the operator SPA rather than declared
-// twice: `@zucoins/generic-node-contracts/admin-inventory` is the single wire definition both
-// sides compile against, so a projection that drops a field the console renders fails the build.
+// Operations / wallets / destinations wire shapes are shared with the operator SPA rather
+// than declared twice: `@zucoins/generic-node-contracts/admin-inventory` is the single wire
+// definition both sides compile against, so a projection that drops a field the console
+// renders fails the build.
+import type {
+  DestinationInventoryItem as SharedDestinationInventoryItem,
+  OperationInventoryDetail as SharedOperationInventoryDetail,
+  OperationInventoryListItem as SharedOperationInventoryListItem,
+  WalletInventoryItem as SharedWalletInventoryItem,
+  WalletRecoveryEvidenceView as SharedWalletRecoveryEvidenceView,
+} from "@zucoins/generic-node-contracts/admin-inventory";
 export {
+  DESTINATION_INVENTORY_FIELDS,
   OPERATION_INVENTORY_DETAIL_FIELDS,
   OPERATION_INVENTORY_LIST_FIELDS,
-  type OperationInventoryDetail,
-  type OperationInventoryListItem,
+  WALLET_INVENTORY_FIELDS,
+  WALLET_RECOVERY_EVIDENCE_FIELDS,
 } from "@zucoins/generic-node-contracts/admin-inventory";
+
+export type DestinationInventoryItem = SharedDestinationInventoryItem;
+export type OperationInventoryDetail = SharedOperationInventoryDetail;
+export type OperationInventoryListItem = SharedOperationInventoryListItem;
+export type WalletInventoryItem = SharedWalletInventoryItem;
+export type WalletRecoveryEvidenceView = SharedWalletRecoveryEvidenceView;
 
 export {
   WALLET_CUSTODY_VIEW_FIELDS,
-  WALLET_RECOVERY_EVIDENCE_FIELDS,
   type WalletCustodyView,
 };
 
@@ -48,11 +61,6 @@ export interface InventoryListPage<T> {
   readonly next_cursor: string | null;
 }
 
-export interface WalletInventoryItem extends WalletCustodyView {
-  /** Observed balance when known (settled-ledger / observation); never a private key. */
-  readonly observed_balance_zkz: string | null;
-}
-
 export type WalletInventoryDetail = WalletInventoryItem;
 
 export interface WalletInventoryFilter {
@@ -69,23 +77,6 @@ export interface OperationInventoryFilter {
   readonly attention_required?: boolean;
   readonly limit?: number;
   readonly after?: string;
-}
-
-/** Admin session mirror of the destinations list (bless/retire state + eligibility). */
-export interface DestinationInventoryItem {
-  readonly destination_id: string;
-  readonly node_id: string;
-  readonly wallet_id: string;
-  readonly wallet_public_key: string;
-  readonly state: DestinationState;
-  readonly label: string;
-  readonly blessed_at: string | null;
-  readonly blessed_by_device_key_id: string | null;
-  readonly blessing_artifact_id: string | null;
-  readonly retired_at: string | null;
-  readonly created_at: string;
-  readonly move_eligible: boolean;
-  readonly ineligibility_reason: string | null;
 }
 
 export interface DestinationInventoryFilter {
@@ -121,28 +112,6 @@ export interface AuditInventoryFilter {
 
 export const DEFAULT_INVENTORY_LIMIT = 20;
 export const MAX_INVENTORY_LIMIT = 100;
-
-/** Response field allowlist — never private keys or secret-class tokens. */
-export const WALLET_INVENTORY_FIELDS = [
-  ...WALLET_CUSTODY_VIEW_FIELDS,
-  "observed_balance_zkz",
-] as const;
-
-export const DESTINATION_INVENTORY_FIELDS = [
-  "destination_id",
-  "node_id",
-  "wallet_id",
-  "wallet_public_key",
-  "state",
-  "label",
-  "blessed_at",
-  "blessed_by_device_key_id",
-  "blessing_artifact_id",
-  "retired_at",
-  "created_at",
-  "move_eligible",
-  "ineligibility_reason",
-] as const;
 
 export const AUDIT_INVENTORY_FIELDS = [
   "id",

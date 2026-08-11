@@ -15,28 +15,43 @@
 # `SAFETY_ALERT_SIGNALS`. Thresholds are the module's own defaults
 # (`DEFAULT_ALERT_THRESHOLDS`) — change them there first, then here.
 #
-# Two groups:
-#   generic-node-safety-signals  — the five safety signals whose readings are live.
-#   generic-node-direct-metrics  — exposed metrics that no in-process signal consumes.
-#                                  These exist because five catalogue signals are unbound
-#                                  (ZTR-1144); scraping is currently the only way to see
-#                                  the underlying conditions at all.
-#
-# Every alert here is advisory. Nothing in this file is permitted to trigger automation
-# that releases a lease, retries a submit, or changes money state.
+# In-process SAFETY_ALERT_SIGNALS and these rules must agree on thresholds
+# (ZTR-1144). Every alert here is advisory. Nothing in this file is permitted to
+# trigger automation that releases a lease, retries a submit, or changes money state.
 
 groups:
   - name: generic-node-safety-signals
     interval: 30s
     rules:
+      # --- invariant_breach (P0) -------------------------------------------------
+      - alert: GenericNodeInvariantBreach
+        expr: increase(gn_invariant_breach_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P0
+          signal: invariant_breach
+        annotations:
+          summary: "INVARIANT_BREACH classification applied ({{ $value }} in 15m)"
+          posture: >-
+            Stop money engines, quarantine affected wallets, preserve evidence, operator
+            escalation. Do not un-quarantine, do not rebuild, do not retry a submit.
+          runbook: docs/operations/incidents.md#invariant_breach
+
+      # --- duplicate_submit_attempt (P0) ----------------------------------------
+      - alert: GenericNodeDuplicateSubmitAttempt
+        expr: increase(gn_duplicate_submit_rejection_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P0
+          signal: duplicate_submit_attempt
+        annotations:
+          summary: "submit_decision_id uniqueness rejection ({{ $value }} in 15m)"
+          posture: >-
+            Stop money engines, quarantine affected wallets, preserve evidence, operator
+            escalation. Alert on uniqueness-constraint rejection only — never on raw retry count.
+          runbook: docs/operations/incidents.md#duplicate_submit_attempt
+
       # --- lease_age (P1, diagnostic only) ---------------------------------------
-      # DEFAULT_ALERT_THRESHOLDS: P1 at >= 300000 ms.
-      # `gn_database_truth_available == 1` mirrors custody-alerts.ts: when the DB-truth
-      # probe fails the gauge reads 0 for "unknown", not "no lease". Evaluating it would
-      # silently clear a real stuck-lease alert during exactly the instability that makes
-      # a stuck lease most likely.
-      # `and on(instance)` — not a bare `and`: a filtering comparison keeps `__name__`,
-      # so an unqualified `and` between two differently-named metrics matches nothing.
       - alert: GenericNodeLeaseAge
         expr: gn_oldest_lease_age_seconds >= 300 and on(instance) gn_database_truth_available == 1
         for: 5m
@@ -52,10 +67,52 @@ groups:
             lease, do not restart the node to "free" it.
           runbook: docs/operations/incidents.md#lease_age
 
+      # --- path_gap (P1) ---------------------------------------------------------
+      - alert: GenericNodePathGap
+        expr: increase(gn_proof_budget_exhaustion_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P1
+          signal: path_gap
+        annotations:
+          summary: "Any-depth verification exhausted its path depth or proof budget"
+          posture: >-
+            Stop affected wallet/operation, keep other isolated lanes operating if
+            invariants hold, operator escalation. An exhausted budget is INDETERMINATE:
+            it authorizes no landing, no non-landing, and no retry.
+          runbook: docs/operations/incidents.md#path_gap
+
+      # --- regression (P1) -------------------------------------------------------
+      - alert: GenericNodeRegression
+        expr: increase(gn_observation_anomalies_total{kind="REGRESSION"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P1
+          signal: regression
+        annotations:
+          summary: "REGRESSION observation anomalies in the last 15m"
+          posture: >-
+            Park affected operations; page operator; never release or rebuild.
+          runbook: docs/operations/incidents.md#regression
+
+      # --- endpoint_disagreement (P1) --------------------------------------------
+      - alert: GenericNodeEndpointDisagreement
+        expr: increase(gn_observation_anomalies_total{kind="ENDPOINT_DISAGREEMENT"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P1
+          signal: endpoint_disagreement
+        annotations:
+          summary: "GATEWAY_ENDPOINT_DISAGREEMENT recorded"
+          posture: >-
+            Fail closed for money decisions until the configured authority policy resolves
+            disagreement; operator escalation. Switching gateways starts a new observation
+            stream and does not erase disagreement.
+          runbook: docs/operations/incidents.md#endpoint_disagreement
+
       # --- queue_caps (P1) ------------------------------------------------------
-      # Reading is max(queue utilization, pool-cap utilization, pinned ratio); threshold 0.9.
-      # pinned ratio is required: a consumer-less node never releases via
-      # verification-complete, so the pinned share climbs while cap utilization looks low.
+      # Depth / pool / pinned need DB gauges; 503 is a process counter and must
+      # still fire during DB outage (mirrors in-process custody-alerts — ZTR-1144 D3).
       - alert: GenericNodeQueueCaps
         expr: >-
           (
@@ -69,17 +126,28 @@ groups:
           severity: P1
           signal: queue_caps
         annotations:
-          summary: "Receive queue / pool cap / pinned ratio at {{ $value | humanizePercentage }}"
+          summary: "Receive queue / pool cap / pinned ratio pressure"
           posture: >-
             Stop affected admission/mint path; keep other isolated lanes operating if
             invariants hold; operator escalation.
           runbook: docs/operations/incidents.md#queue_caps
 
-      # --- signer_loss (P1; P0 when an in-flight signing outcome is ambiguous) ----
-      # The P0 band needs `signerInFlightAmbiguous`, which is hardcoded 0 (ZTR-1144);
-      # only the P1 band is expressible from exposed metrics today.
+      - alert: GenericNodeReceiveQueueFull503
+        expr: increase(gn_receive_queue_full_503_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P1
+          signal: queue_caps
+        annotations:
+          summary: "Receive admission returned 503 queue-full (process counter)"
+          posture: >-
+            Process-local 503 counter — not DB-gated. Stop affected admission/mint path;
+            operator escalation. Mirrors in-process queue_caps 503 arm.
+          runbook: docs/operations/incidents.md#queue_caps
+
+      # --- signer_loss (P1; P0 when ambiguous in-flight) --------------------------
       - alert: GenericNodeSignerLeadershipLost
-        expr: gn_signer_leadership_held == 0
+        expr: gn_signer_leadership_held == 0 and on(instance) gn_signer_in_flight_ambiguous == 0
         for: 2m
         labels:
           severity: P1
@@ -89,14 +157,23 @@ groups:
           posture: >-
             P1 readiness-degraded when leadership is lost or cannot be re-acquired.
             Unsigned operations stay in their existing public state; no alternate
-            instance signs without leadership. Raise to P0 by hand if a signing attempt
-            was in flight when leadership was lost — that outcome is ambiguous and must
-            never be retried.
+            instance signs without leadership.
           runbook: docs/operations/incidents.md#signer_loss
 
-      # --- storage_pressure (P1, escalating to P0) -------------------------------
-      # gn_storage_pressure is a 0/1 band flag, not a fraction: engaging the band crosses
-      # both the 0.9 and 0.95 default bands at once, so it reports P0.
+      - alert: GenericNodeSignerInFlightAmbiguous
+        expr: gn_signer_leadership_held == 0 and on(instance) gn_signer_in_flight_ambiguous == 1
+        for: 0m
+        labels:
+          severity: P0
+          signal: signer_loss
+        annotations:
+          summary: "Leadership lost with in-flight signing still tracked"
+          posture: >-
+            P0 — in-flight signing outcome is ambiguous. Never retry the sign. Preserve
+            evidence; operator escalation.
+          runbook: docs/operations/incidents.md#signer_loss
+
+      # --- storage_pressure (P0 band via 0/1 flag) -------------------------------
       - alert: GenericNodeStoragePressure
         expr: gn_storage_pressure == 1
         for: 5m
@@ -113,10 +190,6 @@ groups:
           runbook: docs/operations/incidents.md#storage_pressure
 
       # --- backup_age (P1) -------------------------------------------------------
-      # The threshold is injected from the configured cadence, never invented here.
-      # 24h is the shipped RPO target (BACKUP_RPO_TARGET_MS, apps/generic-node/src/dr/policy.ts).
-      # gn_backup_last_success_available == 1 suppresses the rule when no successful
-      # backup timestamp exists — see GenericNodeBackupNeverSucceeded for that case.
       - alert: GenericNodeBackupAge
         expr: gn_backup_last_success_age_seconds >= 86400 and on(instance) gn_backup_last_success_available == 1
         for: 15m
@@ -152,12 +225,7 @@ groups:
           summary: "Configured backup RPO is breached"
           runbook: docs/operations/restore.md#backup-cadence
 
-
       # --- push_no_transfer_code_streak (P1, ZTR-1154) ---------------------------
-      # DEFAULT_ALERT_THRESHOLDS / DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD: >= 20.
-      # Process-local gauge published on every push receive outcome. A single miss is
-      # normal; a sustained run with no intervening enqueued is a delivered-envelope
-      # shape break (wallet reshape) while the route still answers 204.
       - alert: GenericNodePushNoTransferCodeStreak
         expr: gn_push_no_transfer_code_streak >= 20
         for: 0m
@@ -173,69 +241,66 @@ groups:
             Do not change the 204 discard response.
           runbook: docs/operations/incidents.md#push_no_transfer_code_streak
 
-  - name: generic-node-direct-metrics
-    interval: 30s
-    rules:
-      # Closest live proxy for `invariant_breach`, which has no metric of its own.
-      # A wallet quarantined for GENESIS_AFTER_HISTORY or REGRESSION maps to
-      # LEASE_INVARIANT_VIOLATION (packages/node-core/src/protocol/reconcile/types.ts).
-      # This is a proxy, NOT the signal: a clean reading here does not mean no breach.
-      - alert: GenericNodeWalletQuarantinedUnexpectedHead
-        expr: gn_wallets_quarantined_unexpected_head > 0
-        for: 0m
+      # --- attention_backlog (P1) ------------------------------------------------
+      - alert: GenericNodeAttentionBacklog
+        expr: gn_operations_attention_required >= 1 and on(instance) gn_database_truth_available == 1
+        for: 5m
         labels:
-          severity: P0
-          signal: invariant_breach
-          proxy: "true"
+          severity: P1
+          signal: attention_backlog
         annotations:
-          summary: "{{ $value }} wallet(s) quarantined for unexpected head movement"
+          summary: "{{ $value }} operation(s) require operator attention"
           posture: >-
-            Stop money engines, quarantine affected wallets, preserve evidence, operator
-            escalation. Do not un-quarantine, do not rebuild, do not retry a submit.
-          runbook: docs/operations/incidents.md#invariant_breach
+            Page operator. Drain attention via admin recovery actions; do not release
+            leases or rebuild.
+          runbook: docs/operations/attention-triage.md
 
-      - alert: GenericNodeObservationAnomalies
-        expr: increase(gn_observation_anomalies_total[15m]) > 0
+      # --- gateway_read_failure (P1) ---------------------------------------------
+      - alert: GenericNodeGatewayReadFailure
+        expr: increase(gn_t0_read_failures_total[15m]) >= 1
         for: 0m
         labels:
           severity: P1
-          signal: regression
-          proxy: "true"
+          signal: gateway_read_failure
         annotations:
-          summary: "Observation anomalies of kind {{ $labels.kind }} in the last 15m"
+          summary: "Gateway/T0 read failures in the last 15m"
           posture: >-
-            Park affected operations; page operator; never release or rebuild.
-          runbook: docs/operations/incidents.md#regression
+            Fail closed for money decisions until gateway reads recover. Do not switch
+            endpoints to erase disagreement.
+          runbook: docs/operations/incidents.md#gateway_read_failure
 
+      # --- queue_oldest_age (P1) ------------------------------------------------
+      # Default band 30s matches RECEIVE_QUEUE_MAX_WAIT default; override in deploy if
+      # the node config differs.
+      - alert: GenericNodeQueueOldestAge
+        expr: gn_receive_queue_oldest_age_seconds >= 30 and on(instance) gn_database_truth_available == 1
+        for: 5m
+        labels:
+          severity: P1
+          signal: queue_oldest_age
+        annotations:
+          summary: "Oldest queued receive is {{ $value | humanizeDuration }} old"
+          posture: >-
+            Stop affected admission path; keep other isolated lanes operating if
+            invariants hold; operator escalation.
+          runbook: docs/operations/incidents.md#queue_oldest_age
+
+  - name: generic-node-direct-metrics
+    interval: 30s
+    rules:
       - alert: GenericNodeObservationDegraded
         expr: gn_observation_degraded == 1
         for: 5m
         labels:
           severity: P1
-          signal: endpoint_disagreement
-          proxy: "true"
+          signal: gateway_read_failure
         annotations:
           summary: "Observation degraded — gateway-read failure budget exceeded"
           posture: >-
             Fail closed for money decisions until the configured authority policy resolves
             it. Switching gateways starts a new observation stream and does not erase a
             disagreement already recorded.
-          runbook: docs/operations/incidents.md#endpoint_disagreement
-
-      - alert: GenericNodeProofBudgetExhaustion
-        expr: increase(gn_proof_budget_exhaustion_total[15m]) > 0
-        for: 0m
-        labels:
-          severity: P1
-          signal: path_gap
-          proxy: "true"
-        annotations:
-          summary: "Any-depth verification exhausted its path depth or proof budget"
-          posture: >-
-            Stop affected wallet/operation, keep other isolated lanes operating if
-            invariants hold, operator escalation. An exhausted budget is INDETERMINATE:
-            it authorizes no landing, no non-landing, and no retry.
-          runbook: docs/operations/attention-triage.md#verification_resource_exhausted
+          runbook: docs/operations/incidents.md#gateway_read_failure
 
       - alert: GenericNodeNotReady
         expr: gn_readiness_ready == 0

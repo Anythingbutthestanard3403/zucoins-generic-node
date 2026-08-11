@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
 import {
+  type MetricsHooks,
   applyAnomalyAction,
   createSerializedStreamWriter,
   createSqlAnomalyRecorder,
@@ -242,6 +243,8 @@ export interface PersistSqlObservationInput {
    * consumes boot-hydrated exact bytes.
    */
   readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
+  /** ZTR-1144 — endpoint disagreement / anomaly metric seam. */
+  readonly metricsHooks?: MetricsHooks;
 }
 
 export interface PersistSqlObservationResult {
@@ -319,6 +322,9 @@ export async function persistSqlObservation(
           walletId,
           operationId,
         });
+        if (plan.anomaly === "GATEWAY_ENDPOINT_DISAGREEMENT") {
+          input.metricsHooks?.onObservationAnomaly("ENDPOINT_DISAGREEMENT");
+        }
       },
       takeAdvisoryLock: true,
     });

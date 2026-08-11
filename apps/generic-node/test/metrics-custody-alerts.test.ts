@@ -31,10 +31,10 @@ describe("custodyAlertInputFromSnapshot", () => {
     expect(input.poolCapUtilization).toBeCloseTo(0.9);
     expect(input.pinnedPoolRatio).toBeCloseTo(0.3);
     expect(input.signerLeadershipHeld).toBe(0);
-    // Signals with no truthful counter in this snapshot stay at the empty default —
-    // never a fabricated reading.
+    // Process counters omitted → empty defaults (never fabricated).
     expect(input.invariantBreachCount).toBe(0);
     expect(input.backupAgeMs).toBe(0);
+    expect(input.attentionRequiredCount).toBe(0);
   });
 
   it("does not divide by zero when poolCapTotal is 0 (fresh/greenfield node)", () => {
@@ -140,9 +140,10 @@ describe("evaluateAndDispatchCustodyAlerts", () => {
     expect(delivered).toEqual([]);
   });
 
-  // REVIEW B — custody alerts must not go dark exactly during a DB blip. A stamps-only
-  // fallback snapshot means "unknown", not "no lease/no queue"; lease_age/queue_caps must
-  // never be evaluated from it. signer_loss (process stamps, always live) is unaffected.
+  // REVIEW B / D3 — custody alerts must not go dark exactly during a DB blip. A stamps-only
+  // fallback snapshot means "unknown", not "no lease/no queue"; lease_age and the DB arms of
+  // queue_caps must never be evaluated from it. Process-stamp and counter-backed arms
+  // (signer_loss, queue_caps 503) stay live — mirrors Prom GenericNodeReceiveQueueFull503.
   describe("databaseTruthAvailable=false — DB blip must not fabricate a healthy reading", () => {
     it("does not fire lease_age even when the snapshot carries a stuck-lease reading", async () => {
       const delivered: string[] = [];
@@ -156,7 +157,7 @@ describe("evaluateAndDispatchCustodyAlerts", () => {
       expect(delivered).not.toContain("lease_age");
     });
 
-    it("does not fire queue_caps even when the snapshot carries a full-queue reading", async () => {
+    it("does not fire queue_caps from DB depth/pool/pinned alone during a DB blip", async () => {
       const delivered: string[] = [];
       const evaluator = createSafetyAlertEvaluator({
         channels: {
@@ -168,8 +169,11 @@ describe("evaluateAndDispatchCustodyAlerts", () => {
         queueDepth: 10,
         poolCapTotal: 10,
         capUtilizationPercent: 100,
+        // Leadership held so signer_loss stays silent and isolates queue_caps.
+        signerLeadershipHeld: 1 as const,
       };
-      await evaluateAndDispatchCustodyAlerts(evaluator, snapshot, false);
+      // No process 503 counter — DB arms alone must not page during a blip.
+      await evaluateAndDispatchCustodyAlerts(evaluator, snapshot, false, {});
       expect(delivered).not.toContain("queue_caps");
     });
 
@@ -183,6 +187,36 @@ describe("evaluateAndDispatchCustodyAlerts", () => {
       const snapshot = { ...emptyOperationalSnapshot(), signerLeadershipHeld: 0 as const };
       await evaluateAndDispatchCustodyAlerts(evaluator, snapshot, false);
       expect(delivered).toContain("signer_loss");
+    });
+
+    // ZTR-1144 D3 residual: process 503 arm must page during DB outage (Prom already split).
+    it("fires queue_caps from receiveQueueFull503 during a DB blip", async () => {
+      const delivered: string[] = [];
+      const evaluator = createSafetyAlertEvaluator({
+        channels: {
+          log: {
+            kind: "log",
+            deliver: async (n) => {
+              delivered.push(`${n.signal}:${n.severity}`);
+            },
+          },
+        },
+      });
+      const snapshot = {
+        ...emptyOperationalSnapshot(),
+        // Fallback zeros would look "healthy" if DB arms were trusted — they must not
+        // suppress or fabricate; only the process 503 arm contributes.
+        queueDepth: 0,
+        poolCapTotal: 10,
+        capUtilizationPercent: 0,
+        pinnedWallets: 0,
+        totalWallets: 10,
+        signerLeadershipHeld: 1 as const,
+      };
+      await evaluateAndDispatchCustodyAlerts(evaluator, snapshot, false, {
+        receiveQueueFull503Count: 1,
+      });
+      expect(delivered).toContain("queue_caps:P1");
     });
 
     it("end-to-end: a real stuck lease alerts before the blip, and the blip itself never fabricates a clear", async () => {

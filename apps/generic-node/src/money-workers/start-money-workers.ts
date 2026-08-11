@@ -833,6 +833,7 @@ async function runReceiveExpiryReleaseStep(deps: {
   readonly nodeId: string;
   readonly eventSigner?: () => NodeEventSigner | null;
   readonly eventQuota?: DualChainEventQuota;
+  readonly metricsHooks?: MetricsHooks;
 }): Promise<{
   readonly processed: number;
   readonly released: number;
@@ -975,6 +976,7 @@ async function runReceiveExpiryReleaseStep(deps: {
             `money-workers: receive expiry INVARIANT_BREACH op=${candidate.operationId} ` +
               `wallet=${outcome.walletId}`,
           );
+          deps.metricsHooks?.onInvariantBreach();
           break;
       }
     } catch (err) {
@@ -1566,6 +1568,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           nodeId: deps.config.nodeId,
           eventSigner: deps.eventSigner,
           ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
+          ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
         });
         if (expiryResult.released > 0) {
           deps.logger.info(

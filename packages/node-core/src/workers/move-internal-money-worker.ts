@@ -810,8 +810,10 @@ export function bindExecuteMoveSubmitClaimOnce(deps: {
     operationId: string,
   ) => import("../gateway/submit.js").SubmitAuthorization | Promise<import("../gateway/submit.js").SubmitAuthorization>;
   readonly submitOptions: import("../gateway/submit.js").SubmitGatewayActionOptions;
+  /** ZTR-1144 — mint loser on submit_decisions uniqueness. */
+  readonly onDuplicateSubmitRejection?: () => void;
 }): MoveInternalMoneyWorkerPorts["submitOnce"] {
-  const { claimStore, authorizationFor, submitOptions } = deps;
+  const { claimStore, authorizationFor, submitOptions, onDuplicateSubmitRejection } = deps;
   return async (operationId, signed) => {
     const authorization = await authorizationFor(operationId);
     try {
@@ -820,6 +822,7 @@ export function bindExecuteMoveSubmitClaimOnce(deps: {
         signedTransaction: JSON.parse(signed.signed.completedTransactionText) as unknown,
         claimStore,
         submit: submitOptions,
+        onDuplicateSubmitRejection,
       });
       return { ok: true, submitted: { result } };
     } catch (err) {

@@ -128,6 +128,12 @@ export interface ShutdownRegistry {
   };
   /** Test/inspection: number of unsettled tracked promises. */
   readonly inflightCount: number;
+  /**
+   * Test/inspection + metrics: unsettled promises that entered via the signing
+   * chokepoint (signUnderLease → authority.trackSigningInflight). General drain
+   * work (runUnderLeadership, backup, boot token) is NOT counted here — ZTR-1144 D2.
+   */
+  readonly signingInflightCount: number;
   /** Test/inspection: boot-phase token still open. */
   readonly bootPhaseOpen: boolean;
   /** Test/inspection: post-boot money surface armed (stop registered). */
@@ -147,6 +153,8 @@ export function createShutdownRegistry(): ShutdownRegistry {
   /** Inner DB unlock target — retained until unlock succeeds (Defect B). */
   let innerHandle: SignerLeadershipHandle | undefined;
   const inflight = new Set<Promise<unknown>>();
+  /** Subset of inflight that is real signUnderLease work (P0 ambiguous stamp). */
+  const signingInflight = new Set<Promise<unknown>>();
   const workerStops: Array<() => void> = [];
   const inflightFlushers: Array<() => Promise<void>> = [];
   /** Resolves the boot-phase token; undefined when no open boot phase. */
@@ -341,6 +349,9 @@ export function createShutdownRegistry(): ShutdownRegistry {
     get inflightCount() {
       return inflight.size;
     },
+    get signingInflightCount() {
+      return signingInflight.size;
+    },
     get bootPhaseOpen() {
       return settleBootPhase !== undefined;
     },
@@ -451,9 +462,15 @@ export function createShutdownRegistry(): ShutdownRegistry {
 
   // Non-opt-in flush tracking for the real signing chokepoint: every signUnderLease body
   // that uses this registry's authority latch is observed in the inflight set
-  // without caller runUnderLeadership / trackInflight memory.
+  // without caller runUnderLeadership / trackInflight memory. Also stamps the
+  // signing-only set used by gn_signer_in_flight_ambiguous (ZTR-1144 D2) — general
+  // drain work must not enter this set.
   authority.setSigningInflightTracker((work) => {
-    trackInflightInternal(work);
+    const waitable = trackWaitable(work);
+    signingInflight.add(waitable);
+    void waitable.finally(() => {
+      signingInflight.delete(waitable);
+    });
   });
 
   return registry;

@@ -37,7 +37,10 @@ export type SafetyAlertSignal =
   | "queue_caps"
   | "signer_loss"
   | "backup_age"
-  | "push_no_transfer_code_streak";
+  | "push_no_transfer_code_streak"
+  | "attention_backlog"
+  | "gateway_read_failure"
+  | "queue_oldest_age";
 
 export const SAFETY_ALERT_SIGNALS: readonly SafetyAlertSignal[] = [
   "invariant_breach",
@@ -51,6 +54,9 @@ export const SAFETY_ALERT_SIGNALS: readonly SafetyAlertSignal[] = [
   "signer_loss",
   "backup_age",
   "push_no_transfer_code_streak",
+  "attention_backlog",
+  "gateway_read_failure",
+  "queue_oldest_age",
 ] as const;
 
 /** @deprecated Use SafetyAlertSignal — kept as an alias for call-site clarity. */
@@ -192,6 +198,33 @@ export const SAFETY_ALERT_RULES: readonly SafetyAlertRuleDefinition[] = [
       "ZTR-1154 — consecutive no_transfer_code push receives with no intervening enqueued (delivered-envelope shape-break detector). Default threshold DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD (20)",
     posture:
       "Page operator. Compare a freshly decrypted live cleartext against goldens/push/delivered-envelope.data.v1; if the nest moved, update payload.ts precedence and refresh the golden in the same reviewed commit. Do not change the 204 discard response. Do not treat silence of other signals as an all-clear on the push channel.",
+    diagnosticOnly: false,
+  },
+  {
+    signal: "attention_backlog",
+    severity: "P1",
+    citation:
+      "Doc 09 §9.1 — operations with attention_required accumulating past bound. P1 (operator backlog before wallet-cap exhaustion)",
+    posture:
+      "Page operator. Drain attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.",
+    diagnosticOnly: false,
+  },
+  {
+    signal: "gateway_read_failure",
+    severity: "P1",
+    citation:
+      "Doc 09 §9.1 / ZTR-1162 — gn_t0_read_failures_total at the observation seam. P1 (gateway-read failures that close observation readiness)",
+    posture:
+      "Fail closed for money decisions until gateway reads recover. Do not switch endpoints to erase disagreement; page operator if failures continue past the configured budget.",
+    diagnosticOnly: false,
+  },
+  {
+    signal: "queue_oldest_age",
+    severity: "P1",
+    citation:
+      "Doc 09 §9.1 — gn_receive_queue_oldest_age_seconds. P1 when the oldest unassigned receive exceeds RECEIVE_QUEUE_MAX_WAIT",
+    posture:
+      "Stop affected admission path; keep other isolated lanes operating if invariants hold; operator escalation. Suppress when DB-truth gauges are unavailable.",
     diagnosticOnly: false,
   },
 ] as const;
@@ -435,6 +468,13 @@ export const DEFAULT_ALERT_THRESHOLDS: readonly AlertThreshold[] = [
   // Value is the process-local streak count; default band matches
   // DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD in packages/node-core/src/push/outcome-metrics.ts.
   { signal: "push_no_transfer_code_streak", severity: "P1", value: 20, direction: "above" },
+  // 11. Attention backlog — any attention_required op past bound
+  { signal: "attention_backlog", severity: "P1", value: 1, direction: "above" },
+  // 12. Any T0/gateway-read failure counter increment past bound
+  { signal: "gateway_read_failure", severity: "P1", value: 1, direction: "above" },
+  // 13. Oldest queued receive age (seconds). Default band matches RECEIVE_QUEUE_MAX_WAIT default (30s);
+  // composition root may override via thresholds when config differs.
+  { signal: "queue_oldest_age", severity: "P1", value: 30, direction: "above" },
 ];
 
 /** Default escalation: P2 logs; P1/P0 add webhook so the operator is paged. */
@@ -541,6 +581,12 @@ export interface SafetyAlertMetricInput {
    * intervening enqueued (ZTR-1154). Process-local; 0 after enqueue or restart.
    */
   readonly pushNoTransferCodeStreak: number;
+  /** COUNT(*) WHERE attention_required (DB-truth). */
+  readonly attentionRequiredCount: number;
+  /** Process-local gn_t0_read_failures_total absolute count. */
+  readonly gatewayReadFailureCount: number;
+  /** Oldest unassigned receive age in seconds (DB-truth). */
+  readonly queueOldestAgeSecs: number;
 }
 
 export function emptySafetyAlertMetricInput(): SafetyAlertMetricInput {
@@ -560,6 +606,9 @@ export function emptySafetyAlertMetricInput(): SafetyAlertMetricInput {
     signerInFlightAmbiguous: 0,
     backupAgeMs: 0,
     pushNoTransferCodeStreak: 0,
+    attentionRequiredCount: 0,
+    gatewayReadFailureCount: 0,
+    queueOldestAgeSecs: 0,
   };
 }
 
@@ -598,6 +647,9 @@ export function deriveSafetyAlertReadings(
     signer_loss: signerLossLevel,
     backup_age: input.backupAgeMs,
     push_no_transfer_code_streak: input.pushNoTransferCodeStreak,
+    attention_backlog: input.attentionRequiredCount,
+    gateway_read_failure: input.gatewayReadFailureCount,
+    queue_oldest_age: input.queueOldestAgeSecs,
   };
 }
 

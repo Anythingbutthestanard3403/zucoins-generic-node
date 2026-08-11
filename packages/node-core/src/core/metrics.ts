@@ -321,6 +321,7 @@ export const METRIC_ANOMALY_KINDS = [
   "MALFORMED_TRANSACTION",
   "UNVERIFIED_SIGNATURE",
   "WALLET_ROLE_INVALID",
+  "ENDPOINT_DISAGREEMENT",
   "other",
 ] as const;
 export type MetricAnomalyKind = (typeof METRIC_ANOMALY_KINDS)[number];
@@ -363,6 +364,16 @@ export interface OperationalMetricsSnapshot {
    * that makes a stuck send visible before it is a wall.
    */
   readonly parkedExternalSends: number;
+  /**
+   * Operations with attention_required = true (operator backlog).
+   * DB-truth gauge; suppress when databaseTruthAvailable is 0.
+   */
+  readonly attentionRequiredOps: number;
+  /**
+   * 1 when this process has tracked in-flight signing work while leadership is
+   * absent (raises signer_loss P1 → P0). Process stamp, not DB-truth.
+   */
+  readonly signerInFlightAmbiguous: 0 | 1;
   /** Non-terminal / all ops by status (closed OPERATION_STATUS). */
   readonly operationsByStatus: Readonly<Partial<Record<MetricOperationStatus, number>>>;
   /** Oldest non-terminal operation age by status, seconds (optional series). */
@@ -423,6 +434,8 @@ export function emptyOperationalSnapshot(): OperationalMetricsSnapshot {
     oldestLeaseAgeSecs: 0,
     quarantinedUnexpectedHead: 0,
     parkedExternalSends: 0,
+    attentionRequiredOps: 0,
+    signerInFlightAmbiguous: 0,
     operationsByStatus: {},
     operationsOldestAgeSecsByStatus: {},
     storagePressure: 0,
@@ -455,6 +468,12 @@ export interface NodeMetrics {
   readonly t0ReadFailures: CounterMetric;
   readonly observationAnomalies: CounterMetric;
   readonly proofBudgetExhaustion: CounterMetric;
+  /** INVARIANT_BREACH classifications applied at the quarantine site (ZTR-1144). */
+  readonly invariantBreaches: CounterMetric;
+  /** submit_decision_id uniqueness rejections / mint losers (ZTR-1144). */
+  readonly duplicateSubmitRejections: CounterMetric;
+  /** HTTP 503 receive_queue_full responses (ZTR-1144). */
+  readonly receiveQueueFull503: CounterMetric;
   readonly gatewayRequestDuration: HistogramMetric;
   readonly authTotal: CounterMetric;
   readonly idempotencyTotal: CounterMetric;
@@ -490,6 +509,8 @@ export interface NodeMetrics {
   readonly oldestLeaseAgeSecs: GaugeMetric;
   readonly quarantinedUnexpectedHead: GaugeMetric;
   readonly parkedExternalSends: GaugeMetric;
+  readonly attentionRequiredOps: GaugeMetric;
+  readonly signerInFlightAmbiguous: GaugeMetric;
   readonly operationsByStatus: GaugeMetric;
   readonly operationsOldestAgeSecs: GaugeMetric;
   readonly storagePressure: GaugeMetric;
@@ -557,6 +578,21 @@ export function createNodeMetrics(): NodeMetrics {
   const proofBudgetExhaustion = createCounter(
     "gn_proof_budget_exhaustion_total",
     "Any-depth verification path-depth or proof-budget exhaustion events.",
+    [],
+  );
+  const invariantBreaches = createCounter(
+    "gn_invariant_breach_total",
+    "INVARIANT_BREACH quarantine applications (lease uniqueness / missing exact bytes after signer use).",
+    [],
+  );
+  const duplicateSubmitRejections = createCounter(
+    "gn_duplicate_submit_rejection_total",
+    "submit_decision_id uniqueness rejections (mint loser on submit_decisions).",
+    [],
+  );
+  const receiveQueueFull503 = createCounter(
+    "gn_receive_queue_full_503_total",
+    "receive_queue_full 503 responses returned by admission.",
     [],
   );
   const gatewayRequestDuration = createHistogram(
@@ -653,6 +689,16 @@ export function createNodeMetrics(): NodeMetrics {
     "External-send operations parked at NEEDS_ATTENTION after partial delivery (post-expiry hold or head anomaly), each still holding its source-wallet lease against the pool cap.",
     [],
   );
+  const attentionRequiredOps = createGauge(
+    "gn_operations_attention_required",
+    "Operations currently flagged attention_required (operator backlog).",
+    [],
+  );
+  const signerInFlightAmbiguous = createGauge(
+    "gn_signer_in_flight_ambiguous",
+    "1 when in-flight signing work is tracked while this process does not hold leadership.",
+    [],
+  );
   const operationsByStatus = createGauge(
     "gn_operations",
     "Operation count by closed status.",
@@ -736,6 +782,9 @@ export function createNodeMetrics(): NodeMetrics {
     t0ReadFailures,
     observationAnomalies,
     proofBudgetExhaustion,
+    invariantBreaches,
+    duplicateSubmitRejections,
+    receiveQueueFull503,
     gatewayRequestDuration,
     authTotal,
     idempotencyTotal,
@@ -756,6 +805,8 @@ export function createNodeMetrics(): NodeMetrics {
     oldestLeaseAgeSecs,
     quarantinedUnexpectedHead,
     parkedExternalSends,
+    attentionRequiredOps,
+    signerInFlightAmbiguous,
     operationsByStatus,
     operationsOldestAgeSecs,
     storagePressure,
@@ -799,6 +850,8 @@ export function createNodeMetrics(): NodeMetrics {
       oldestLeaseAgeSecs.set({}, snapshot.oldestLeaseAgeSecs);
       quarantinedUnexpectedHead.set({}, snapshot.quarantinedUnexpectedHead);
       parkedExternalSends.set({}, snapshot.parkedExternalSends);
+      attentionRequiredOps.set({}, snapshot.attentionRequiredOps);
+      signerInFlightAmbiguous.set({}, snapshot.signerInFlightAmbiguous);
       for (const status of METRIC_OPERATION_STATUSES) {
         operationsByStatus.set({ status }, snapshot.operationsByStatus[status] ?? 0);
         operationsOldestAgeSecs.set(
@@ -843,6 +896,9 @@ export function createNodeMetrics(): NodeMetrics {
       t0ReadFailures.reset();
       observationAnomalies.reset();
       proofBudgetExhaustion.reset();
+      invariantBreaches.reset();
+      duplicateSubmitRejections.reset();
+      receiveQueueFull503.reset();
       gatewayRequestDuration.reset();
       authTotal.reset();
       idempotencyTotal.reset();
@@ -863,6 +919,8 @@ export function createNodeMetrics(): NodeMetrics {
       oldestLeaseAgeSecs.reset();
       quarantinedUnexpectedHead.reset();
       parkedExternalSends.reset();
+      attentionRequiredOps.reset();
+      signerInFlightAmbiguous.reset();
       operationsByStatus.reset();
       operationsOldestAgeSecs.reset();
       storagePressure.reset();
@@ -969,6 +1027,9 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderCounter(metrics.t0ReadFailures),
     renderCounter(metrics.observationAnomalies),
     renderCounter(metrics.proofBudgetExhaustion),
+    renderCounter(metrics.invariantBreaches),
+    renderCounter(metrics.duplicateSubmitRejections),
+    renderCounter(metrics.receiveQueueFull503),
     renderHistogram(metrics.gatewayRequestDuration),
     renderCounter(metrics.authTotal),
     renderCounter(metrics.idempotencyTotal),
@@ -989,6 +1050,8 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderGauge(metrics.oldestLeaseAgeSecs),
     renderGauge(metrics.quarantinedUnexpectedHead),
     renderGauge(metrics.parkedExternalSends),
+    renderGauge(metrics.attentionRequiredOps),
+    renderGauge(metrics.signerInFlightAmbiguous),
     renderGauge(metrics.operationsByStatus),
     renderGauge(metrics.operationsOldestAgeSecs),
     renderGauge(metrics.storagePressure),
@@ -1025,6 +1088,9 @@ export interface MetricsHooks {
   onT0ReadFailure(): void;
   onObservationAnomaly(kind: MetricAnomalyKind): void;
   onProofBudgetExhaustion(): void;
+  onInvariantBreach(): void;
+  onDuplicateSubmitRejection(): void;
+  onReceiveQueueFull503(): void;
   onAuth(outcome: MetricAuthOutcome): void;
   onIdempotency(outcome: MetricIdempotencyOutcome): void;
   /** A candidate-intake deposit that never reached the inbox, by producer lane. */
@@ -1081,6 +1147,15 @@ export function createMetricsHooks(metrics: NodeMetrics): MetricsHooks {
     },
     onProofBudgetExhaustion() {
       metrics.proofBudgetExhaustion.inc({});
+    },
+    onInvariantBreach() {
+      metrics.invariantBreaches.inc({});
+    },
+    onDuplicateSubmitRejection() {
+      metrics.duplicateSubmitRejections.inc({});
+    },
+    onReceiveQueueFull503() {
+      metrics.receiveQueueFull503.inc({});
     },
     onAuth(outcome) {
       metrics.authTotal.inc({ outcome });

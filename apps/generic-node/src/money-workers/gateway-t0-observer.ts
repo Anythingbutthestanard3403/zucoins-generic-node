@@ -127,6 +127,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
                 if (!observation.transportAmbiguous) return;
                 await persistSqlObservation({
                   pool: deps.pool,
+            metricsHooks: deps.metricsHooks,
                   nodeId: deps.nodeId,
                   ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
                   walletPublicKey,
@@ -178,6 +179,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
         deps.metricsHooks?.onObservationAnomaly("MALFORMED_ENVELOPE");
         await persistSqlObservation({
           pool: deps.pool,
+            metricsHooks: deps.metricsHooks,
           nodeId: deps.nodeId,
                   ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
           walletPublicKey,
@@ -254,6 +256,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
           deps.metricsHooks?.onObservationAnomaly(verified.verdict);
           await persistSqlObservation({
             pool: deps.pool,
+            metricsHooks: deps.metricsHooks,
             nodeId: deps.nodeId,
                   ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
             walletPublicKey,
@@ -295,6 +298,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
       try {
         const persisted = await persistSqlObservation({
           pool: deps.pool,
+            metricsHooks: deps.metricsHooks,
           nodeId: deps.nodeId,
                   ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
           walletPublicKey,

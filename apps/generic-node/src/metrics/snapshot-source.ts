@@ -108,6 +108,8 @@ export interface ProductionMetricsSnapshotDeps {
     snapshot: OperationalMetricsSnapshot,
     databaseTruthAvailable: boolean,
   ) => void;
+  /** 1 when in-flight signing is tracked while leadership is absent (ZTR-1144). */
+  readonly signerInFlightAmbiguous?: () => boolean;
 }
 
 function stampsFrom(
@@ -115,6 +117,7 @@ function stampsFrom(
   readinessReady: boolean,
   poolCapTotal: number,
   workerHealth: Readonly<Partial<Record<MetricWorkerName, 0 | 1>>>,
+  signerInFlightAmbiguous = false,
 ): MetricsProcessStamps {
   return {
     storagePressure: state.storagePressure,
@@ -124,6 +127,7 @@ function stampsFrom(
     observationDegraded: state.observationDegraded,
     workerHealth,
     poolCapTotal,
+    signerInFlightAmbiguous,
   };
 }
 
@@ -160,7 +164,13 @@ export function createProductionMetricsSnapshotSource(
     const workerHealth = deps.workerHealth?.() ?? {};
     const workerHealthAvailable = deps.workerHealthAvailable?.() ?? {};
     const backup = deps.backupStatus?.() ?? null;
-    const stamps = stampsFrom(state, verdict.ready, deps.poolCapTotal, workerHealth);
+    const stamps = stampsFrom(
+      state,
+      verdict.ready,
+      deps.poolCapTotal,
+      workerHealth,
+      deps.signerInFlightAmbiguous?.() === true,
+    );
 
     let snapshot: OperationalMetricsSnapshot;
     let databaseTruthAvailable: boolean;

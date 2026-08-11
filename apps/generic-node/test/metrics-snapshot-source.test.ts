@@ -56,7 +56,7 @@ describe("createProductionMetricsSnapshotSource — readinessReady transitions",
     vi.restoreAllMocks();
   });
 
-  it("coalesces concurrent scrapes into one seven-query census", async () => {
+  it("coalesces concurrent scrapes into one eight-query census", async () => {
     const dbProbe = new CachedDbProbe(async () => {});
     let queryCalls = 0;
     let releaseFirstQuery!: () => void;
@@ -81,7 +81,7 @@ describe("createProductionMetricsSnapshotSource — readinessReady transitions",
     await Promise.resolve();
     releaseFirstQuery();
     await Promise.all([first, concurrent]);
-    expect(queryCalls).toBe(7);
+    expect(queryCalls).toBe(8);
   });
 
   it("uses monotonic elapsed time so wall-clock rollback cannot extend the scrape budget", async () => {

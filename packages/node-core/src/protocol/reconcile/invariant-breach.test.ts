@@ -521,6 +521,45 @@ describe("anomalyKindForBreachReason", () => {
 // ─── Apply quarantine ────────────────────────────────────────────────────────
 
 describe("applyMoveInvariantBreachQuarantine", () => {
+  it("fires onQuarantineApplied after durable quarantine commits (ZTR-1144)", async () => {
+    const store = seedStore();
+    const outcome = breachOutcome();
+    let fired = 0;
+    await applyMoveInvariantBreachQuarantine(store, {
+      outcome,
+      operationId: OP,
+      sourceWalletId: SOURCE_WALLET,
+      destinationWalletId: DEST_WALLET,
+      nowIso: NOW,
+      newId: sequentialIds(),
+      onQuarantineApplied: () => {
+        fired += 1;
+      },
+    });
+    expect(fired).toBe(1);
+  });
+
+  it("operator QUARANTINE_WALLETS forwards onQuarantineApplied (ZTR-1144)", async () => {
+    const store = seedStore();
+    const outcome = breachOutcome();
+    let fired = 0;
+    const result = await applyMoveBreachOperatorAction(store, {
+      operationId: OP,
+      action: "QUARANTINE_WALLETS",
+      operatorId: "op-test",
+      breachOutcome: outcome,
+      sourceWalletId: SOURCE_WALLET,
+      destinationWalletId: DEST_WALLET,
+      nowIso: NOW,
+      newId: sequentialIds(),
+      onQuarantineApplied: () => {
+        fired += 1;
+      },
+    });
+    expect(result.kind).toBe("QUARANTINED");
+    expect(fired).toBe(1);
+  });
+
   it("quarantines BOTH wallets with quarantine_reason in one atomic unit", async () => {
     const store = seedStore();
     const outcome = breachOutcome();

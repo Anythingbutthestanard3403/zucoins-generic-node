@@ -506,6 +506,9 @@ async function handleJsonRoute(
         // CAS succeeds. Conflicts/auth failures/transport uncertainty never reach this seam.
         metricsHooks.onOperationFailed("SEND_EXTERNAL");
       }
+      if (result.status === 503 && result.body.includes("receive_queue_full")) {
+        metricsHooks.onReceiveQueueFull503();
+      }
     }
     writeJson(response, result.status, result.body, result.headers);
   } catch (cause) {

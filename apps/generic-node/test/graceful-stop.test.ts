@@ -1592,6 +1592,8 @@ describe("main.ts graceful-stop composition", () => {
     // Non-opt-in signing-chokepoint drain bridge
     expect(registrySource).toMatch(/setSigningInflightTracker/);
     expect(registrySource).toMatch(/trackSigningInflight/);
+    expect(registrySource).toMatch(/signingInflightCount/);
+    expect(mainSource).toMatch(/signingInflightCount/);
     expect(registrySource).toMatch(/engines already quiesced/);
     // D1: arm reachable while boot open (no "boot phase still open" throw)
     expect(registrySource).not.toMatch(/armMoneySurface: boot phase still open/);
@@ -1603,7 +1605,45 @@ describe("main.ts graceful-stop composition", () => {
     expect(mainSource).toMatch(/trackSigningInflight/);
   });
 
+  it("ZTR-1144 D2: signingInflightCount tracks only authority.trackSigningInflight", async () => {
+    const registry = createShutdownRegistry();
+    const held = {
+      onLost() {},
+      stopOwnershipWatch() {},
+      async release() {},
+    };
+    registry.stampLeadership(held);
+    registry.completeBootPhase();
+    // General drain work must not stamp signing ambiguity.
+    let resolveGeneral!: () => void;
+    const general = new Promise<void>((r) => {
+      resolveGeneral = r;
+    });
+    registry.trackInflight(general);
+    expect(registry.inflightCount).toBeGreaterThan(0);
+    expect(registry.signingInflightCount).toBe(0);
+
+    let resolveSign!: () => void;
+    const signBody = new Promise<void>((r) => {
+      resolveSign = r;
+    });
+    registry.authority.trackSigningInflight(signBody);
+    expect(registry.signingInflightCount).toBe(1);
+    expect(registry.inflightCount).toBeGreaterThanOrEqual(2);
+
+    resolveSign();
+    await signBody;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(registry.signingInflightCount).toBe(0);
+
+    resolveGeneral();
+    await general;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(registry.inflightCount).toBe(0);
+  });
+
   it("backup scheduler starts only after ready boot + leadership (ZTR-1183)", () => {
+
     // Composition: incomplete-boot dispositions must return before createBackupScheduler.
     // liveness-only used to fall through — the explicit return is the load-bearing fix.
     expect(mainSource).toMatch(

@@ -266,6 +266,9 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
         if (text === METRICS_SNAPSHOT_STATEMENTS.COUNT_PARKED_EXTERNAL_SENDS) {
           return { rows: [{ parked: 3 }] };
         }
+        if (text === METRICS_SNAPSHOT_STATEMENTS.COUNT_ATTENTION_REQUIRED_OPS) {
+          return { rows: [{ attention: 2 }] };
+        }
         throw new Error(`unexpected SQL: ${text}`);
       },
     };
@@ -278,10 +281,13 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
       observationDegraded: true,
       poolCapTotal: 50,
       workerHealth: { reconciler: 1 },
+      signerInFlightAmbiguous: true,
     });
 
     expect(snap.availableWallets).toBe(4);
     expect(snap.parkedExternalSends).toBe(3);
+    expect(snap.attentionRequiredOps).toBe(2);
+    expect(snap.signerInFlightAmbiguous).toBe(1);
     expect(snap.totalWallets).toBe(7);
     expect(snap.pinnedWallets).toBe(2);
     expect(snap.queueDepth).toBe(5);
@@ -296,7 +302,7 @@ describe("collectOperationalMetricsSnapshot — SQL collector", () => {
     expect(snap.signerLeadershipHeld).toBe(0);
     expect(snap.workerHealth.reconciler).toBe(1);
     expect(snap.workerHealth.observation).toBe(0);
-    expect(calls).toHaveLength(7);
+    expect(calls).toHaveLength(8);
   });
 
   it("rejects a non-positive pool cap (fail closed on bad config)", async () => {

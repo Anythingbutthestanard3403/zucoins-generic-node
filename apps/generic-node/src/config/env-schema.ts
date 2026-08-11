@@ -324,6 +324,22 @@ export const CONFIG_FIELD_SCHEMAS = {
     .min(32, "METRICS_SCRAPE_TOKEN must be at least 32 characters when set")
     .optional(),
 
+  // Operator P0/P1 webhook (ZTR-1144). Optional: absent keeps log-only delivery.
+  // https-only (loopback http accepted), no embedded credentials, no silent default.
+  OPERATOR_ALERT_WEBHOOK_URL: z
+    .string()
+    .trim()
+    .url("OPERATOR_ALERT_WEBHOOK_URL must be a well-formed URL")
+    .refine(
+      isHttpsOrLoopbackHttp,
+      "OPERATOR_ALERT_WEBHOOK_URL must be an https URL (http is accepted only for loopback addresses)",
+    )
+    .refine(
+      hasNoUrlCredentials,
+      "OPERATOR_ALERT_WEBHOOK_URL must not contain embedded credentials",
+    )
+    .optional(),
+
   // Worker / reconciliation budgets — bounded retries with a
   // configured maximum interval; short worker-claim leases.
   GATEWAY_READ_RETRY_MAX_ATTEMPTS: z.coerce

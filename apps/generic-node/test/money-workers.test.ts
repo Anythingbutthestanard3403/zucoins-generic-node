@@ -34,7 +34,9 @@ describe("money-workers composition", () => {
     expect(main).not.toMatch(/void shutdownRegistry\.authority\.trackSigningInflight/);
     expect(main).toMatch(/runUnderLeadership:\s*\(work\)\s*=>\s*stamped\.runUnderLeadership\(work\)/);
     expect(main).toMatch(/trackSigningInflight:\s*\(work\)\s*=>/);
-    expect(main).toMatch(/authority\.trackSigningInflight\(work\)/);
+    // ZTR-1144 D2: money-tick drain uses general trackInflight; signUnderLease auto-tracks.
+    expect(main).toMatch(/shutdownRegistry\.trackInflight\(work\)/);
+    expect(main).not.toMatch(/authority\.trackSigningInflight\(work\)/);
     expect(main).not.toMatch(/workers running/);
     expect(main).not.toMatch(/recovery_verified_at\s*=/);
     const workers = readFileSync(

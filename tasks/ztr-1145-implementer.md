@@ -1,6 +1,6 @@
 # ZTR-1145 implementer
 
-**Head SHA:** `29752468e7457c0abf833ee1ed8b7f69d7a66736`
+**Head SHA:** `b1dbd31f012e2d89197bbf3f769124985599b3e3`
 **Branch:** `ztr-1145-implementer-event-verifier`
 **Governing:** doc 10 §7 (event may wake, never establish success); D9.16 (signed pull sole channel); A.6 dual continuity; `implementer-events/CONTRACT.md` byte-freeze; suite verify discipline (purpose before signature, key class).
 

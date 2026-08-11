@@ -25,8 +25,7 @@ CREATE DOMAIN sha256_hex AS text
 
 CREATE TABLE lease_groups (
   id uuid PRIMARY KEY,
-  root_operation_id uuid NOT NULL UNIQUE
-    REFERENCES operations (id) ON DELETE NO ACTION,
+  root_operation_id uuid NOT NULL UNIQUE,
   created_at timestamptz NOT NULL,
   -- Durable child disposition closes the pre-formation unpin window.
   -- NONE  = HOLD / no automatic child (releasable when joined ops are terminal).
@@ -59,8 +58,7 @@ $lease_child_disp$;
 
 CREATE TABLE lease_group_operations (
   lease_group_id uuid NOT NULL REFERENCES lease_groups (id),
-  operation_id uuid NOT NULL UNIQUE
-    REFERENCES operations (id) ON DELETE NO ACTION,
+  operation_id uuid NOT NULL UNIQUE,
   joined_at timestamptz NOT NULL,
   completed_at timestamptz,
   PRIMARY KEY (lease_group_id, operation_id),
@@ -164,21 +162,22 @@ CREATE TABLE lease_schema_fence (
 );
 
 -- Full exclusive projection. wallet_id is the structural one-active-row authority.
--- Production assembly applies custody-eligibility.sql first, strips this duplicate CREATE,
--- and wires its later membership/group FKs. This body remains the standalone fail-closed
--- lease migrator's target schema; the duplicate is explicitly allow-listed and censused.
--- The eligibility trigger lives solely in custody-eligibility.sql: there is
--- no shadowed second copy here (ZTR-1169).
+-- When the money pack already applied custody-eligibility.sql, CREATE TABLE is stripped
+-- and only the membership/group FKs are wired via money-schema-pack ALTER. Operation
+-- ownership FKs are deferred to lease-operation-foreign-keys.sql (after operations exists)
+-- so standalone migrateLeaseFoundation stays loadable without operations (ZTR-1139).
+-- The eligibility trigger lives solely in custody-eligibility.sql
+-- (custody_reject_ineligible_lease) - no shadowed second copy here (ZTR-1169).
+-- Standalone lease-foundation migrate (no prior custody table) creates this table and
+-- attaches the custody eligibility function from custody-eligibility.sql.
 CREATE TABLE wallet_active_leases (
   wallet_id uuid PRIMARY KEY,
   membership_id uuid NOT NULL UNIQUE
     REFERENCES wallet_lease_memberships (id),
   lease_group_id uuid NOT NULL
     REFERENCES lease_groups (id),
-  root_operation_id uuid NOT NULL
-    REFERENCES operations (id) ON DELETE NO ACTION,
-  operation_id uuid NOT NULL
-    REFERENCES operations (id) ON DELETE NO ACTION,
+  root_operation_id uuid NOT NULL,
+  operation_id uuid NOT NULL,
   lease_role wallet_lease_role NOT NULL,
   lease_epoch bigint NOT NULL CHECK (lease_epoch > 0),
   acquired_at timestamptz NOT NULL,

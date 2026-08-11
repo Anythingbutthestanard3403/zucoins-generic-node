@@ -219,13 +219,21 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
     const leaseSql = files[leaseIdx].sql;
     expect(leaseSql).not.toMatch(/CREATE TABLE wallet_active_leases\b/);
+    // Membership/group FKs only — ops ownership FKs live solely in the fix-forward
+    // slice so foundation remains loadable without operations (ZTR-1139 r2).
     for (const constraint of [
       "wallet_active_leases_membership_id_fkey",
       "wallet_active_leases_lease_group_id_fkey",
-      "wallet_active_leases_root_operation_id_fkey",
-      "wallet_active_leases_operation_id_fkey",
     ]) {
       expect(leaseSql).toContain(constraint);
+    }
+    for (const constraint of [
+      "wallet_active_leases_root_operation_id_fkey",
+      "wallet_active_leases_operation_id_fkey",
+      "lease_groups_root_operation_id_fkey",
+      "lease_group_operations_operation_id_fkey",
+    ]) {
+      expect(leaseSql).not.toContain(constraint);
     }
 
     const upgradeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-operation-foreign-keys");

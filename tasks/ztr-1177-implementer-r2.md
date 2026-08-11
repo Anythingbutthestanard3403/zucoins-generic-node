@@ -4,6 +4,7 @@
 - **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/53
 - **Branch:** `ztr-1177-vault-unlock-canary`
 - **Prior FAIL head:** `30a965ed15f1e728512c3106911ebab5cc7f6703`
+- **New head:** `7139b9158d8854ffcb9a94fae19feede7f6ab612`
 - **Worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1177-r2/wt`
 - **Blocker (Review B):** boot canary outside master-key rotation — after rotate, unlock dies on stale canary under the correct new key
 - **Released to:** QA Review

@@ -50,5 +50,5 @@ No regen required once in-process matches the claimed split.
 
 ## HEAD
 
-- Code fix: `310afe374e68d717329631029067f29eece5233a`
-- Tip (this evidence pin): `3e0ede3fb11d006bc3ce656a1d3f53acf097ddad`
+Code + tests: `310afe374e68d717329631029067f29eece5233a`
+PR tip: see `gh pr view 79 --json headRefOid` (docs pin commits may trail).

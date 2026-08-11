@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   createRecoveryPack,
+  createRecoveryPackForTests,
   estimateRecoverySecretEntropyBits,
   generateRecoverySecret,
   openRecoveryPack,
@@ -41,7 +42,7 @@ const LEGACY_V1_MASTER = "legacy-v1-master-key-32chars!!!!!";
  * Argon2id at 64 MiB costs ~2 s per derivation, so this file seals once and
  * re-reads rather than re-sealing per test.
  */
-const V2_PACK = createRecoveryPack({ vaultMasterKey: MASTER, secret: SECRET });
+const V2_PACK = createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: SECRET });
 
 describe("recovery secret entropy floor", () => {
   it("refuses digits only regardless of length", () => {
@@ -53,14 +54,232 @@ describe("recovery secret entropy floor", () => {
     expect(recoverySecretWeakness("0".repeat(40) + "1".repeat(40))).toMatch(/digits only/);
   });
 
-  it("refuses a secret under the floor, and reports the floor not a length", () => {
-    const weak = recoverySecretWeakness("Ab3Kq9ZtWm");
-    expect(weak).toMatch(/at least 128 bits of entropy/);
-    expect(weak).not.toMatch(/character(s)? long|length/);
+  it("refuses a non-alphabet / wrong-length secret (ZTR-1220 shape)", () => {
+    // Former charset×length accept path — dictionary / mixed-case phrases.
+    expect(recoverySecretWeakness("Ab3Kq9ZtWm")).toMatch(/Crockford base32 alphabet/);
+    expect(recoverySecretWeakness("Tr0ub4dor&3")).toMatch(/Crockford base32 alphabet/);
+    expect(recoverySecretWeakness("correct horse battery staple zz")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    expect(recoverySecretWeakness("qwertyuiopasdfghjklzxcvbnm1234")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    // 28-digit PIN + letter — long enough for the old proxy, wrong alphabet.
+    expect(recoverySecretWeakness("1".repeat(28) + "A")).toMatch(/Crockford base32 alphabet/);
+    // Wrong length inside the alphabet.
+    expect(recoverySecretWeakness("9F3KQ2XW7HB4TMZ0RCJ8PNVA5")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    expect(recoverySecretWeakness(SECRET + "0")).toMatch(/Crockford base32 alphabet/);
   });
 
-  it("refuses a long but repetitive secret", () => {
-    expect(recoverySecretWeakness("abab".repeat(20))).toMatch(/distinct characters/);
+  it("refuses a tiled substring even with ≥10 distinct chars (ZTR-1220)", () => {
+    // Period-2 with only 2 distinct — distinct-char guard fires first.
+    expect(recoverySecretWeakness("AB".repeat(13))).toMatch(/distinct characters/);
+    // Exact tiling of a 13-char unit (2×13=26) with ≥10 distinct — the case the
+    // old distinct-char guard alone missed (ticket: "abcdefghij".repeat(3)).
+    const periodTiling = "0123456789ABC".repeat(2);
+    expect(periodTiling).toHaveLength(26);
+    expect(new Set(periodTiling).size).toBeGreaterThanOrEqual(10);
+    expect(recoverySecretWeakness(periodTiling)).toMatch(/repeated substring/);
+    // Ticket lowercase phrase still refused (alphabet), not accepted via proxy.
+    expect(recoverySecretWeakness("abcdefghij".repeat(3))).toMatch(/Crockford base32 alphabet/);
+  });
+
+  it("refuses a long sequential alphabet run", () => {
+    // 26-char monotone run through Crockford — full distinct set, exact length.
+    const run = "0123456789ABCDEFGHJKMNPQRS";
+    expect(run).toHaveLength(26);
+    expect(recoverySecretWeakness(run)).toMatch(/sequential run/);
+  });
+
+  it("refuses Review B residual low-entropy Crockford×26 secrets", () => {
+    // Named residuals that cleared the prior exact-tiling / ±1-only floor.
+    const residuals: Array<{ secret: string; want: RegExp }> = [
+      {
+        // Crockford-mapped "correct horse battery staple".
+        secret: "C0RRECTH0RSEBATTERYSTAP1E0",
+        want: /letter-only run|repeated substring|sequential run|same-character|dictionary/,
+      },
+      {
+        // Near-tile "letmein" ×3 + pad — period 7 does not divide 26.
+        secret: "1ETME1N1ETME1N1ETME1NABCD0",
+        want: /repeated substring/,
+      },
+      {
+        secret: "HVNTER2HVNTER2HVNTER2AB012",
+        want: /repeated substring/,
+      },
+      {
+        secret: "PACKSECRETPACKSECRETPACK01",
+        want: /repeated substring|letter-only run|dictionary/,
+      },
+      {
+        // Triple-letter blocks — same-symbol structure, not ±1 monotone.
+        secret: "AAABBBCCCDDDEEEFFFGGGHHHJK",
+        want: /same-character run|letter-only run|repeated substring/,
+      },
+      {
+        // Arithmetic step-2 through the alphabet (not ±1).
+        secret: "02468ACEGJMPRTWY02468ACEGJ",
+        want: /sequential run|repeated substring/,
+      },
+      {
+        // Human mnemonic-ish letter run.
+        secret: "MYVAV1TMASTERKEYBACKP20240",
+        want: /letter-only run|repeated substring|dictionary/,
+      },
+    ];
+    for (const { secret, want } of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      expect(recoverySecretWeakness(secret)).toMatch(want);
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
+  it("refuses Review B r2 residual digit-broken dictionary / keyboard / alternation", () => {
+    // Named residuals that still sealed under the r2 letter-run / near-tile floor.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character/;
+    const residuals = [
+      // Digit-broken "correct horse battery staple" variants.
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C0RRECTH0RSEBATT3RYSTAP1EX",
+      // CORRECT with a digit after every letter.
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      // Digit-broken English mnemonics.
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "W1NTER1SC0M1NGN0RTHKEY2024",
+      "MAYTHEF0RCEBEW1THY0V2024XX",
+      "NEVERG0NNAG1VEY0VVP2024KEY",
+      // Keyboard rows + digit break.
+      "QWERTYASD1FGHZXCVBN12345AB",
+      // Strict alternating digit×letter / pair sequences.
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      // Multi short-token English markov (CODE/PIN/PASS/NODE).
+      "MANC0DE7P1NGETP1NPASS4N0DE",
+      // Alt-digit MASTERKEY / PASSWORD skeletons.
+      "M0A1S2T3E4R5K6E7Y8B9A0C1K2",
+      "P0A1S2S3W4R5D6H7N8T9R0X1Y2",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      expect(recoverySecretWeakness(secret)).toMatch(residualWant);
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r2 residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
+  it("refuses Review B r3 residual keyboard-column / media / reverse-dict / broken-step class", () => {
+    // Opposed bar from tasks/ztr-1220-review-B-r3.md — class still open at r3 tip.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character/;
+    const residuals = [
+      // Keyboard columns (vertical 1QAZ/2WSX/…) and reverse stitches.
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "1QAZ2WSX3EDC4RFV5TGB6YHN7V",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "P0MJV7NHY6BGT5VFR4CDE3XSW2",
+      // Off-list English / media / song mnemonics (Crockford-mapped).
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "QV1CKBR0WNF0XJVMPS0VER2024",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "BR4K1NGB4DHE1SENBERG2024XX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "JACKD4WSAXEMYFR0ZENV0WABXX",
+      "H0WZVBR0WNDC0WF4RMSXYZ01XX",
+      "A11W0RKANDN0P1AY2024ABCDXX",
+      "0NCEVP0NAT1ME1N20241ANDXXX",
+      "Y0DASH411N0TP4SS2024KEYXXX",
+      "F00BARBAZQVXM0RPH2024KEYXX",
+      "D0NTST0PBE1EV1N2024KEYABCX",
+      "YE110WSVBMAR1NE2024KEYABCX",
+      "STA1RW4YT0HE4VEN2024KEYXXX",
+      "B0HEM1ANRHAPS0DY2024KEYXXX",
+      "10REM1PSVMT0RPH2024KEYABCD",
+      // Reversed dictionary skeleton (CORRECT HORSE BATTERY STAPLE).
+      "TCERR0CESR0HYRETTABE1PATS2",
+      // Ticket / structured-id mnemonic.
+      "ZTR1220ENTR0PYF100R2024AB2",
+      // Broken step-k / high-structure walks.
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "5AFMS49EKRX8DJQW1CHPV05GNT",
+      // Paired doubles + digit noise.
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
+      // Wordy single-LEN4 + media pad.
+      "MANP1NXG3TXKEYN0DE2024ABC2",
+      // Fibonacci digit-prefix walk.
+      "112358DN2QSG9S2VXRND2FH0HH",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      const weakness = recoverySecretWeakness(secret);
+      expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
+      expect(weakness).toMatch(residualWant);
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r3 residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
+  it("refuses Review B r4 residual off-list English/media/geo/π human-pattern class", () => {
+    // Opposed bar from tasks/ztr-1220-review-B-r4.md — finite dict arms race residual.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character|human pattern/;
+    const residuals = [
+      "THECAKE1SA11EP0RTA12024XXA",
+      "H0GWARTSEXPRESS2024KEYABXA",
+      "GANGNAMSTY1E2024KEYABCDEXA",
+      "HARRYP0TTERWAND2024KEYABXA",
+      "STARWARSJED1K1GHT2024ABXAB",
+      "GAME0FTHR0NES2024KEYABCXXA",
+      "314159265358979323846ABCDA",
+      "TAB1ECHA1RH0VSEWATER2024XA",
+      "NEWY0RKC1TY2024KEYABCDEXAB",
+      "SPH1NX0FB1ACKQVARTZ2024XXA",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      const weakness = recoverySecretWeakness(secret);
+      expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
+      expect(weakness).toMatch(residualWant);
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPackForTests({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r4 residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
   });
 
   it("accepts the generated secret", () => {
@@ -84,11 +303,11 @@ describe("entropy floor is enforced at creation", () => {
   // Independent of RECOVERY_PACK_PROVE_FAIL_THRESHOLD: no lockout store, no HTTP,
   // no prove call. A weak secret can never produce an artifact in the first place.
   it("refuses to build a pack under a digit passcode", () => {
-    expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret: "482913" })).toThrow(
+    expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "482913" })).toThrow(
       RecoveryPackError,
     );
     try {
-      createRecoveryPack({ vaultMasterKey: MASTER, secret: "482913" });
+      createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "482913" });
       expect.unreachable("digit passcode must not seal a pack");
     } catch (e) {
       expect((e as RecoveryPackError).code).toBe("weak_secret");
@@ -97,13 +316,95 @@ describe("entropy floor is enforced at creation", () => {
     }
   });
 
-  it("refuses to build a pack under a sub-floor secret", () => {
+  it("refuses to build a pack under a sub-floor / non-shape secret", () => {
     try {
-      createRecoveryPack({ vaultMasterKey: MASTER, secret: "Tr0ub4dor&3" });
+      createRecoveryPackForTests({ vaultMasterKey: MASTER, secret: "Tr0ub4dor&3" });
       expect.unreachable("sub-floor secret must not seal a pack");
     } catch (e) {
       expect((e as RecoveryPackError).code).toBe("weak_secret");
-      expect((e as RecoveryPackError).message).toMatch(/128 bits of entropy/);
+      expect((e as RecoveryPackError).message).toMatch(
+        /Crockford base32 alphabet|128 bits of entropy/,
+      );
+    }
+  });
+
+  it("refuses the ZTR-1220 charset×length false-accept cases at seal time", () => {
+    const falseAccepts = [
+      "abcdefghij".repeat(3),
+      "qwertyuiopasdfghjklzxcvbnm1234",
+      "correct horse battery staple zz",
+      "1".repeat(28) + "A",
+      "0123456789ABC".repeat(2),
+      // Review B residual class (Crockford×26 that previously sealed).
+      "C0RRECTH0RSEBATTERYSTAP1E0",
+      "1ETME1N1ETME1N1ETME1NABCD0",
+      "AAABBBCCCDDDEEEFFFGGGHHHJK",
+      "02468ACEGJMPRTWY02468ACEGJ",
+      "PACKSECRETPACKSECRETPACK01",
+      // Review B r2 residual class (digit-broken dict / keyboard / alternation).
+      "C0RRECTH0RSEBATTERY0STAP1E",
+      "C0RRECTH0RSEBATT3RYSTAP1E0",
+      "C001R2R3E4C5T6H708R9S0E1B2",
+      "P1EASE1ETME1NT0THEN0DE2024",
+      "QWERTYASD1FGHZXCVBN12345AB",
+      "0A1B2C3D4E5F6G7H8J9KMNPRST",
+      "A1B2C3D4E5F6G7H8J9K0M1N2P3",
+      "MANC0DE7P1NGETP1NPASS4N0DE",
+      // Review B r3 residual class (columns / media / reverse-dict / broken-step).
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "TCERR0CESR0HYRETTABE1PATS2",
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
+    ];
+    for (const secret of falseAccepts) {
+      expect(() => createRecoveryPackForTests({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+    }
+  });
+
+  it("refuses caller-supplied secrets on create (generate-only, ZTR-1220 r6)", () => {
+    const residuals = [
+      // Strong Crockford×26 that would clear structure heuristics.
+      "9F3KQ2XW7HB4TMZ0RCJ8PNVA5D",
+      // Review B r5 residual human mnemonics (1999 pad / 2024-no-KEY brands).
+      "HARRYP0TTERWAND1999MNPQRSX",
+      "GAME0FTHR0NES1999MNPQRSXAB",
+      "N4RVT0VZVM4K11999MNPQRSXAB",
+      "0NEP1ECE1VFFY1999MNPQRSXAB",
+      "ATT4CK0NT1T4N1999MNPQRSXAB",
+      "M1NCR4FTD1AM0ND1999MNPQRSX",
+      "F0RTN1TEV1CT0RY1999MNPQRSX",
+      "R0B10X0BG1N1999MNPQRSXAB2C",
+      "T1KT0KD4NCE1999MNPQRSXAB2C",
+      "1NST4GR4MF4ME1999MNPQRSXAB",
+      "Y00TVBEV1R411999MNPQRSXAB2",
+      "1NCEPT10NMATR1X2024MNPQRSX",
+      "MADMAXFVRYR0AD2024MNPQRSXX",
+      "GVARD1ANSGA1AXY2024MNPQRSX",
+      "C0CAC01AC1ASS1C2024MNPQRSX",
+      "AD1DASSVPERSTAR2024MNPQRSX",
+      "S4MSVNGGA1AXYS24V1TRAMNPQX",
+      "H4PPYB1RTHD4YT0Y0V2024MNPX",
+      "SH0ES0CKSH4TB00TC04TXABXXA",
+      "ETHPREVMC0NTRACT2024MNPQRX",
+      "GVTENT4G411EFRE2024MNPQRSX",
+      "H01AMVND0AM1G0S2024MNPQRSX",
+    ];
+    for (const secret of residuals) {
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`caller-supplied must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("caller_supplied_secret");
+      }
     }
   });
 
@@ -208,7 +509,7 @@ describe("createRecoveryPack / openRecoveryPack", () => {
   });
 
   it("refuses short master", () => {
-    expect(() => createRecoveryPack({ vaultMasterKey: "short", secret: SECRET })).toThrow(
+    expect(() => createRecoveryPackForTests({ vaultMasterKey: "short", secret: SECRET })).toThrow(
       RecoveryPackError,
     );
   });
@@ -294,19 +595,18 @@ describe("reissueRecoveryPack", () => {
   });
 
   describe("from a v2 pack", () => {
-    const NEXT_SECRET = "8HZ4PQ2WKX7NRB0MJ5TVDC93FA";
     let reissued: ReturnType<typeof reissueRecoveryPack>;
     beforeAll(() => {
       reissued = reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: SECRET,
-        newSecret: NEXT_SECRET,
       });
     });
 
-    it("re-seals under the caller-supplied secret as a distinct artifact", () => {
+    it("re-seals under a generated secret as a distinct artifact", () => {
       expect(reissued.previousVersion).toBe(2);
-      expect(reissued.secret).toBe(NEXT_SECRET);
+      expect(recoverySecretWeakness(reissued.secret)).toBeNull();
+      expect(reissued.secret).not.toBe(SECRET);
       expect(reissued.envelope.pack_content_sha256).not.toBe(
         V2_PACK.envelope.pack_content_sha256,
       );
@@ -314,7 +614,7 @@ describe("reissueRecoveryPack", () => {
 
     it("opens under the new secret", () => {
       expect(
-        openRecoveryPack({ fileBytes: reissued.fileBytes, secret: NEXT_SECRET })
+        openRecoveryPack({ fileBytes: reissued.fileBytes, secret: reissued.secret })
           .vault_master_key,
       ).toBe(MASTER);
     });
@@ -326,14 +626,24 @@ describe("reissueRecoveryPack", () => {
     ).toThrow(/superseded v1 recovery pack/);
   });
 
-  it("refuses a weak new secret before it decrypts anything", () => {
+  it("refuses a caller-supplied replacement secret (generate-only)", () => {
     expect(() =>
       reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: SECRET,
         newSecret: "123456",
       }),
-    ).toThrow(/digits only/);
+    ).toThrow(/generate-only/);
+    try {
+      reissueRecoveryPack({
+        fileBytes: V2_PACK.fileBytes,
+        secret: SECRET,
+        newSecret: "8HZ4PQ2WKX7NRB0MJ5TVDC93FA",
+      });
+      expect.unreachable("caller-supplied newSecret must not seal");
+    } catch (e) {
+      expect((e as RecoveryPackError).code).toBe("caller_supplied_secret");
+    }
   });
 
   it("refuses when the existing secret is wrong", () => {
@@ -341,7 +651,6 @@ describe("reissueRecoveryPack", () => {
       reissueRecoveryPack({
         fileBytes: V2_PACK.fileBytes,
         secret: WRONG_SECRET,
-        newSecret: "5T7YQ2ZXK4B0NRJ8MHVDC93FA",
       }),
     ).toThrow(RecoveryPackError);
   });

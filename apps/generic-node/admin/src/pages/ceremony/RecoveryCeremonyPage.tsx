@@ -11,7 +11,6 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import {
   formatMoneyError,
-  generateRecoveryPackSecret,
   getRecoveryCeremonyStatus,
   isCancelled,
   listWalletsInventory,
@@ -171,9 +170,8 @@ export function PackStep({
   /** Fired after successful create (day-0 local marker). */
   onCreated?: () => void;
 }) {
-  // Generated once per mounted form, regenerable on demand. Held in component
-  // state only — never SPA storage, never a query string.
-  const [createSecret, setCreateSecret] = useState(generateRecoveryPackSecret);
+  // Server generate-only: secret arrives in the create response (show-once).
+  // Pre-create checkbox is a readiness ack that the operator will write it down.
   const [secretSaved, setSecretSaved] = useState(false);
   const [proveSecret, setProveSecret] = useState("");
   const [proveLegacy, setProveLegacy] = useState(false);
@@ -193,7 +191,6 @@ export function PackStep({
   const createMut = useTotpGatedMutation<
     RecoveryPackCreateResponse,
     {
-      recovery_secret: string;
       vault_master_key?: string;
       from_pack?: string;
       from_pack_secret?: string;
@@ -204,8 +201,8 @@ export function PackStep({
     {
       title: "Create recovery pack",
       detail:
-        "Fresh TOTP required. The generated secret seals the pack; TOTP is not the file key.",
-      onSuccess: (result, body) => {
+        "Fresh TOTP required. The node generates the seal secret and returns it once; TOTP is not the file key.",
+      onSuccess: (result) => {
         setMasterKey("");
         setFromPackText("");
         setFromPackSecret("");
@@ -213,10 +210,10 @@ export function PackStep({
         setError(null);
         setCreateDigest(result.pack_content_sha256);
         setDestroyDigest(result.previous_pack_content_sha256);
-        // Show-once: the node never returns the secret, so this is the only place
-        // it exists after the download. Next pack gets a fresh draw.
-        setShownSecret(body.recovery_secret);
-        setCreateSecret(generateRecoveryPackSecret());
+        // Show-once from the node (generate-only). Absent on idempotent replay.
+        if (typeof result.recovery_secret === "string" && result.recovery_secret.length > 0) {
+          setShownSecret(result.recovery_secret);
+        }
         const blob = recoveryPackFileBlob(result);
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -274,7 +271,6 @@ export function PackStep({
     setMasterKey("");
     setFromPackSecret("");
     createMut.mutate({
-      recovery_secret: createSecret,
       ...(from.length > 0 && fromSecret.length > 0
         ? { from_pack: from, from_pack_secret: fromSecret, allow_legacy_v1: true }
         : mk.length >= 32
@@ -311,10 +307,10 @@ export function PackStep({
       <h3>Recovery pack (happy path)</h3>
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
         Create downloads an encrypted file (<code>zp-node-recovery-pack-v2</code>) sealed under
-        a generated 130-bit secret. Prove uploads that file + the secret; the node decrypts and
-        runs the ceremony engine. Online prove locks after 5 failures for 15 minutes — that
-        limit protects this API only, never a copy of the file someone else is holding, which
-        is why the secret is not yours to choose.
+        a node-generated Crockford×26 secret (generate-only — you never choose it). Prove
+        uploads that file + the secret; the node decrypts and runs the ceremony engine. Online
+        prove locks after 5 failures for 15 minutes — that limit protects this API only, never
+        a copy of the file someone else is holding.
       </p>
       <p className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
         <strong>Holding an old v1 pack?</strong> Packs sealed under a 4–6 digit passcode are
@@ -369,30 +365,10 @@ export function PackStep({
         <form onSubmit={(e) => void onCreate(e)} autoComplete="off" style={{ marginTop: 12 }}>
           <h4 style={{ fontSize: 13 }}>Create pack</h4>
           <div className="field">
-            <label htmlFor="pack-secret-create">
-              Pack secret (generated — write it down before continuing)
-            </label>
-            <input
-              id="pack-secret-create"
-              data-testid="pack-secret-create"
-              type="text"
-              readOnly
-              value={createSecret}
-              style={{ fontFamily: "var(--mono, monospace)", fontSize: 13 }}
-            />
-            <button
-              type="button"
-              className="mini-btn"
-              data-testid="pack-secret-regenerate"
-              style={{ marginTop: 6 }}
-              onClick={() => {
-                setCreateSecret(generateRecoveryPackSecret());
-                setSecretSaved(false);
-              }}
-              disabled={createMut.isPending}
-            >
-              Generate a different secret
-            </button>
+            <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }} data-testid="pack-secret-create-hint">
+              The node generates the pack secret at create time and shows it once with the
+              download. You cannot choose or paste a seal secret.
+            </p>
           </div>
           <div className="field">
             <label htmlFor="pack-secret-saved" style={{ fontWeight: 400 }}>
@@ -404,7 +380,7 @@ export function PackStep({
                 onChange={(e) => setSecretSaved(e.target.checked)}
                 disabled={createMut.isPending}
               />{" "}
-              I have written this secret down somewhere the pack file is not.
+              I am ready to write down the secret the node will show once after create.
             </label>
           </div>
           <div className="field">
@@ -428,8 +404,9 @@ export function PackStep({
               Replace an existing pack (re-issue a v1 or rotate a v2)
             </summary>
             <p className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
-              The node opens the old pack, re-seals the same master under the new secret above,
-              and reports the digest to destroy. The master key never reaches this browser.
+              The node opens the old pack, re-seals the same master under a fresh
+              generate-only secret (shown once with the download), and reports the digest
+              to destroy. The master key never reaches this browser.
             </p>
             <div className="field">
               <label htmlFor="pack-from-file">Existing pack file</label>

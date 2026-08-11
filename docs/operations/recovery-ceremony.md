@@ -104,9 +104,15 @@ wallet backup.
 ## Recovery pack
 
 `POST /admin/v1/recovery-pack/create` produces `zp-node-recovery-pack-v2`: Argon2id →
-AES-256-GCM seal of the vault master key, under a secret with a **128-bit entropy floor**
-enforced at creation. `POST /admin/v1/recovery-pack/prove` opens it and is subject to an
-online lockout.
+AES-256-GCM seal of the vault master key under a **generate-only** secret. The node draws
+the seal key with CSPRNG (`generateRecoverySecret()`: Crockford base32 × 26 symbols) and
+returns it **once** on the live create response; the durable idempotency row never stores
+it. Callers must not supply `recovery_secret` — any body field value is refused
+(`caller_supplied_recovery_secret`), weak or strong. Structure guards on the generator
+reject pathological CSPRNG draws; they are not a measured content-entropy floor and are
+not an accept path for operator-chosen strings (ZTR-1220).
+
+`POST /admin/v1/recovery-pack/prove` opens a pack and is subject to an online lockout.
 
 The pack is designed to leave the host, so it must survive hostile hands. Two things follow:
 
@@ -115,11 +121,8 @@ The pack is designed to leave the host, so it must survive hostile hands. Two th
 - **Every `zp-node-recovery-pack-v1` ever exported is compromised-if-leaked.** v1 sealed under
   a 4–6 digit passcode — a keyspace of at most a million, enumerable offline against the same
   Argon2id. v1 packs still open through an explicit legacy opt-in so you can migrate. Re-issue
-  as v2 and destroy the v1 copy (ZTR-1126).
-
-Use `generateRecoverySecret()` — the sanctioned path — rather than inventing a passphrase. An
-operator-supplied phrase is a documented escape hatch whose true entropy no dependency-free
-estimator can measure (ZTR-1220 tracks the proxy's limits).
+  as v2 and destroy the v1 copy (ZTR-1126). Re-issue is also generate-only for the new seal
+  secret.
 
 Store the pack the way you would store a wallet backup, and store the vault root KDF salt
 with it — see [`restore.md`](restore.md).

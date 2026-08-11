@@ -194,7 +194,6 @@ import {
   isAcceptableRecoverySecretShape,
   openRecoveryPack,
   peekPackContentSha256,
-  recoverySecretWeakness,
   reissueRecoveryPack,
   RecoveryPackError,
   RECOVERY_PACK_FORMAT,
@@ -778,18 +777,16 @@ function haltWire(
  */
 /**
  * POST /admin/v1/recovery-pack/create body.
- * `recovery_secret` seals the pack and must clear the entropy floor at creation —
- * the operator PWA generates it; a digit passcode is refused here, not at prove.
+ * Generate-only seal (ZTR-1220 r6): callers must NOT supply `recovery_secret`.
+ * The node draws a CSPRNG Crockford×26 secret, seals the pack, and returns the
+ * secret once on the live response (stripped from the durable idempotency row).
  * Master source is one of: `vault_master_key`, pending show-once plaintext, or a
  * `from_pack` re-issue (`from_pack` + `from_pack_secret`, which never exposes the
- * master). The secret itself is never persisted: it stays in the request body,
- * whose idempotency fingerprint is a structural sentinel, and never reaches the
- * durable response row.
+ * master). `from_pack_secret` is the *existing* pack open secret, not the seal key.
  */
 function parseRecoveryPackCreateBody(
   raw: unknown,
 ): ParseOk<{
-  readonly recovery_secret: string;
   readonly vault_master_key?: string;
   readonly from_pack?: string;
   readonly from_pack_secret?: string;
@@ -810,18 +807,15 @@ function parseRecoveryPackCreateBody(
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
-  const secret = raw.recovery_secret;
-  if (typeof secret !== "string") {
+  // Generate-only: any caller-supplied recovery_secret is refused (weak or strong).
+  if (raw.recovery_secret !== undefined && raw.recovery_secret !== null) {
     return {
       ok: false,
       status: 400,
-      code: "invalid_scalar",
-      message: "recovery_secret required",
+      code: "caller_supplied_recovery_secret",
+      message:
+        "recovery_secret must not be supplied — create is generate-only; the node seals under a CSPRNG secret and returns it once",
     };
-  }
-  const weakness = recoverySecretWeakness(secret);
-  if (weakness !== null) {
-    return { ok: false, status: 400, code: "weak_recovery_secret", message: weakness };
   }
   let master: string | undefined;
   if (raw.vault_master_key !== undefined && raw.vault_master_key !== null) {
@@ -877,7 +871,6 @@ function parseRecoveryPackCreateBody(
   return {
     ok: true,
     body: {
-      recovery_secret: secret,
       ...(master === undefined ? {} : { vault_master_key: master }),
       ...(fromPack === undefined ? {} : { from_pack: fromPack, from_pack_secret: fromPackSecret }),
       ...(raw.allow_legacy_v1 === true ? { allow_legacy_v1: true } : {}),
@@ -2959,9 +2952,8 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             validateBody: parseRecoveryPackCreateBody,
             nowMs: nowMs(),
             mutate: async ({ body, user }) => {
-              // Re-issue: re-seal an existing pack as v2 without the master ever
-              // being handled by the operator. Refuses a v1 source unless the
-              // caller opted in, so a v1 artifact is never silently carried over.
+              // Generate-only seal: node draws the secret. Re-issue opens an
+              // existing pack server-side so the operator never handles master.
               let built: ReturnType<typeof createRecoveryPack>;
               let previousPackSha: string | null = null;
               if (body.from_pack !== undefined && body.from_pack_secret !== undefined) {
@@ -2969,12 +2961,17 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   const reissued = reissueRecoveryPack({
                     fileBytes: body.from_pack,
                     secret: body.from_pack_secret,
-                    newSecret: body.recovery_secret,
                     allowLegacyV1: body.allow_legacy_v1 === true,
                   });
                   previousPackSha = reissued.previousPackContentSha256;
                   built = reissued;
                 } catch (err) {
+                  if (err instanceof RecoveryPackError && err.code === "caller_supplied_secret") {
+                    throw Object.assign(new Error(err.message), {
+                      code: "caller_supplied_recovery_secret",
+                      status: 400,
+                    });
+                  }
                   const code =
                     err instanceof RecoveryPackError && err.code === "legacy_pack_v1"
                       ? "legacy_pack_v1"
@@ -3004,10 +3001,19 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                     { code: "vault_master_unavailable", status: 422 },
                   );
                 }
-                built = createRecoveryPack({
-                  vaultMasterKey: master,
-                  secret: body.recovery_secret,
-                });
+                try {
+                  built = createRecoveryPack({
+                    vaultMasterKey: master,
+                  });
+                } catch (err) {
+                  if (err instanceof RecoveryPackError && err.code === "caller_supplied_secret") {
+                    throw Object.assign(new Error(err.message), {
+                      code: "caller_supplied_recovery_secret",
+                      status: 400,
+                    });
+                  }
+                  throw err;
+                }
               }
               const at = new Date(nowMs()).toISOString();
               try {
@@ -3023,19 +3029,18 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               } catch {
                 // audit must not block download
               }
-              // Return digests + file as base64 so AdminRouterResponse stays string body.
-              // Content-Disposition signals download; SPA decodes to octet-stream blob.
-              // NEVER put `built.secret` here: this body is the durable idempotency
-              // replay row, so the seal key and the sealed pack would land in one row.
+              // Live response carries recovery_secret once so the SPA can show it.
+              // Durable idempotency row MUST strip it — seal key + pack must never
+              // land together in a replayable store row.
               return {
                 object: "recovery_pack_create",
                 format: RECOVERY_PACK_FORMAT,
                 pack_content_sha256: built.envelope.pack_content_sha256,
                 previous_pack_content_sha256: previousPackSha,
                 filename: `zp-node-recovery-pack-${built.envelope.pack_content_sha256.slice(0, 12)}.json`,
-                // File bytes once — client downloads; server does not retain.
                 pack_file_b64: built.fileBytes.toString("base64"),
                 content_type: "application/octet-stream",
+                recovery_secret: built.secret,
               };
             },
           });
@@ -3057,7 +3062,15 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               response: fail(guarded.status, guarded.code, guarded.message, requestId),
             };
           }
-          return { outcome: "commit", status: 200, responseBody: guarded.result };
+          // Show-once: first response includes recovery_secret; durable row strips it.
+          const live = guarded.result as Record<string, unknown>;
+          const { recovery_secret: _omitSecret, ...durable } = live;
+          return {
+            outcome: "commit",
+            status: 200,
+            responseBody: live,
+            durableResponseBody: durable,
+          };
         },
       });
     }

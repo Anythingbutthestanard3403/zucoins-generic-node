@@ -915,6 +915,11 @@ export interface RecoveryPackCreateResponse {
   readonly filename: string;
   readonly pack_file_b64: string;
   readonly content_type: string;
+  /**
+   * Server-generated seal secret — present on the first create response only.
+   * Idempotent replay omits it (durable row is secret-free). Write it down then.
+   */
+  readonly recovery_secret?: string;
 }
 
 export interface RecoveryPackProveResponse {
@@ -931,32 +936,794 @@ export interface RecoveryPackProveResponse {
 
 /**
  * Crockford base32 — the same 32 symbols the node generates with, chosen so a
- * secret can be transcribed off a screen without I/L/O/U ambiguity.
+ * secret can be transcribed off a screen without I/L/O/U ambiguity. Must stay
+ * byte-identical to RECOVERY_PACK_SECRET_ALPHABET on the node (ZTR-1220).
  */
 const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** 26 × log2(32) = 130 bits, over the node's 128-bit creation floor. */
 const RECOVERY_SECRET_CHARS = 26;
+/** Mirror of node RECOVERY_PACK_MIN_DISTINCT_CHARS — redraw if a draw lands under. */
+const RECOVERY_SECRET_MIN_DISTINCT = 10;
+/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B/r4). */
+const RECOVERY_SECRET_MAX_MONOTONE_RUN = 6;
+const RECOVERY_SECRET_MAX_SAME_DELTA_PAIRS = 10;
+const RECOVERY_SECRET_MAX_SAME_RUN = 4;
+const RECOVERY_SECRET_MAX_PAIRED_DOUBLES = 4;
+const RECOVERY_SECRET_MAX_LETTER_RUN = 14;
+const RECOVERY_SECRET_MAX_LAG_MATCH_RUN = 6;
+const RECOVERY_SECRET_MAX_LAG_MATCH_FRAC = 0.4;
+const RECOVERY_SECRET_MAX_REPEATED_SUBSTRING = 4;
+const RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN = 10;
+const RECOVERY_SECRET_MAX_CLASS_PAIR_RUN = 6;
+const RECOVERY_SECRET_MAX_KEYBOARD_RUN = 5;
+const RECOVERY_SECRET_MAX_STRIDED_MONOTONE_RUN = 6;
+/** Mirrors node RECOVERY_PACK_* human-pattern class floor (ZTR-1220 r5). */
+const RECOVERY_SECRET_MAX_DIGIT_RUN = 8;
+const RECOVERY_SECRET_MAX_LATIN_VOWEL_FRAC = 0.4;
+const RECOVERY_SECRET_MIN_LETTERS_FOR_VOWEL_GUARD = 18;
+const RECOVERY_SECRET_MAX_ENGLISH_BIGRAM_HITS = 10;
+const RECOVERY_SECRET_MAX_ENGLISH_TRIGRAM_HITS = 3;
+const RECOVERY_SECRET_MIN_ENGLISH_COVER_LETTERS = 8;
+const RECOVERY_SECRET_MIN_ENGLISH_COVER_WITH_VOWEL = 6;
+const RECOVERY_SECRET_MIN_VOWEL_FRAC_WITH_COVER = 0.34;
+const RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTERS = 14;
+const RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTER_FRAC = 0.55;
+/** Hard redraw ceiling — throw rather than emit a structure-failing secret. */
+const RECOVERY_SECRET_MAX_DRAW_ATTEMPTS = 64;
+
+const RECOVERY_SECRET_KEYBOARD_LAYOUT: readonly string[] = [
+  "1234567890",
+  "QWERTYUIOP",
+  "ASDFGHJKL",
+  "ZXCVBNM",
+];
+
+function buildRecoverySecretKeyboardWalks(): readonly string[] {
+  const filterCrock = (s: string): string =>
+    [...s].filter((c) => RECOVERY_SECRET_ALPHABET.includes(c)).join("");
+  const walks = new Set<string>();
+  const add = (raw: string): void => {
+    const s = filterCrock(raw);
+    if (s.length >= RECOVERY_SECRET_MAX_KEYBOARD_RUN) {
+      walks.add(s);
+      walks.add([...s].reverse().join(""));
+    }
+  };
+  for (const row of RECOVERY_SECRET_KEYBOARD_LAYOUT) add(row);
+  add("QWERTYASDFGHZXCVBN");
+  add("0123456789");
+  const maxCol = Math.max(...RECOVERY_SECRET_KEYBOARD_LAYOUT.map((r) => r.length));
+  const columns: string[] = [];
+  for (let c = 0; c < maxCol; c++) {
+    let col = "";
+    for (const row of RECOVERY_SECRET_KEYBOARD_LAYOUT) {
+      if (c < row.length) col += row[c]!;
+    }
+    columns.push(col);
+    add(col);
+  }
+  const colVariants: readonly (readonly string[])[] = [
+    columns,
+    columns.map((col) => [...col].reverse().join("")),
+  ];
+  for (const cols of colVariants) {
+    for (let start = 0; start < cols.length; start++) {
+      let acc = "";
+      for (let end = start; end < cols.length; end++) {
+        acc += cols[end]!;
+        add(acc);
+      }
+      let racc = "";
+      for (let end = start; end >= 0; end--) {
+        racc += cols[end]!;
+        add(racc);
+      }
+    }
+  }
+  for (let r0 = 0; r0 < RECOVERY_SECRET_KEYBOARD_LAYOUT.length; r0++) {
+    for (let c0 = 0; c0 < maxCol; c0++) {
+      let dr = "";
+      let dl = "";
+      for (
+        let r = r0, c = c0;
+        r < RECOVERY_SECRET_KEYBOARD_LAYOUT.length &&
+        c < RECOVERY_SECRET_KEYBOARD_LAYOUT[r]!.length;
+        r++, c++
+      ) {
+        dr += RECOVERY_SECRET_KEYBOARD_LAYOUT[r]![c]!;
+      }
+      for (
+        let r = r0, c = c0;
+        r < RECOVERY_SECRET_KEYBOARD_LAYOUT.length &&
+        c >= 0 &&
+        c < RECOVERY_SECRET_KEYBOARD_LAYOUT[r]!.length;
+        r++, c--
+      ) {
+        dl += RECOVERY_SECRET_KEYBOARD_LAYOUT[r]![c]!;
+      }
+      add(dr);
+      add(dl);
+    }
+  }
+  return [...walks];
+}
+
+const RECOVERY_SECRET_KEYBOARD_WALKS: readonly string[] = buildRecoverySecretKeyboardWalks();
+
+const RECOVERY_SECRET_DICT_MIN5: readonly string[] = [
+  "CORRECT",
+  "HORSE",
+  "BATTERY",
+  "STAPLE",
+  "PLEASE",
+  "LETME",
+  "WINTER",
+  "COMING",
+  "NORTH",
+  "FORCE",
+  "NEVER",
+  "GONNA",
+  "MASTER",
+  "PASSWORD",
+  "HUNTER",
+  "QWERTY",
+  "MAYTHE",
+  "SECRET",
+  "BACKUP",
+  "ADMIN",
+  "LOGIN",
+  "WELCOME",
+  "MONKEY",
+  "DRAGON",
+  "SHADOW",
+  "PRINCESS",
+  "FOOTBALL",
+  "BASEBALL",
+  "SUPPLY",
+  "CHAIN",
+  "PHRASE",
+  "ORANGE",
+  "BANANA",
+  "COFFEE",
+  "TIGER",
+  "EAGLE",
+  "RIVER",
+  "MOUNTAIN",
+  "SUNSET",
+  "SUMMER",
+  "SPRING",
+  "AUTUMN",
+  "MONEY",
+  "TRUST",
+  "VAULT",
+  "WALLET",
+  "CRYPTO",
+  "BITCOIN",
+  "RECOVERY",
+  "CEREMONY",
+  "OPERATOR",
+  "APPLE",
+  "LETMIN",
+  "QVICK",
+  "BROWN",
+  "JUMPS",
+  "STRANGER",
+  "STRANGE",
+  "THINGS",
+  "PLANET",
+  "HACKTHE",
+  "JACKDAW",
+  "FROZEN",
+  "HEISENBERG",
+  "BREAKING",
+  "YELLOW",
+  "MARINE",
+  "SVBMARINE",
+  "HEAVEN",
+  "STAIRWAY",
+  "BOHEMIAN",
+  "RHAPSODY",
+  "FOOBAR",
+  "BELIEVE",
+  "BELIEVIN",
+  "SHALL",
+  "ENTROPY",
+  "FLOOR",
+  "WORKAND",
+  "NOPLAY",
+  "LOREM",
+  "IPSVM",
+  "MORPH",
+  "ONCEVPON",
+  "VPONATIME",
+  "YODASHALL",
+  "DONTSTOP",
+  "HOWNOW",
+  "COWFARM",
+];
+
+const RECOVERY_SECRET_DICT_LEN4_CUSTODY: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "ROOT",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "KEYS",
+  "KEYX",
+  "PINX",
+];
+const RECOVERY_SECRET_DICT_LEN4: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "THEN",
+  "THIS",
+  "THAT",
+  "HAVE",
+  "YOUR",
+  "INTO",
+  "FROM",
+  "LOVE",
+  "ROOT",
+  "WITH",
+  "BACK",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "USER",
+  "HOME",
+  "WORK",
+  "PLAY",
+  "WORD",
+  "FISH",
+  "BIRD",
+  "DARK",
+  "BLUE",
+  "GOLD",
+  "FIRE",
+  "WIND",
+  "SNOW",
+  "RAIN",
+  "STAR",
+  "MOON",
+  "LIFE",
+  "TIME",
+  "YEAR",
+  "WEEK",
+  "HAND",
+  "HEAD",
+  "MIND",
+  "SOUL",
+  "ONCE",
+  "VPON",
+  "YODA",
+  "DONT",
+  "STOP",
+  "HACK",
+  "JACK",
+  "FARM",
+  "KEYS",
+];
+
+const RECOVERY_SECRET_LEET_FOLD: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "7": "T",
+};
+
+/**
+ * Mirror of node `recoverySecretWeakness` structure floor (post-alphabet).
+ * Keep byte-identical rejection class so the SPA never posts a secret the node
+ * would answer 400 weak_recovery_secret for.
+ */
+/** Classic English bigrams — mirror of node OPEN_ENGLISH_BIGRAMS. */
+const RECOVERY_SECRET_OPEN_BIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "TH HE IN ER AN RE ON EN AT ND ED ES NT HA TO OU EA NG AS OR TI IS ET IT AR TE SE HI OF " +
+    "DE RO LE SA ME NE CE RA IC NS RI IO WE VE WA TA CA MA BE PE KE YE ST CK WH GH SH CH " +
+    "BR CR DR FR GR PR TR WR BL CL FL GL PL SL SM SN SP SW TW SC SK QU"
+  ).split(/\s+/),
+);
+
+const RECOVERY_SECRET_OPEN_TRIGRAMS: ReadonlySet<string> = new Set(
+  (
+    "THE AND ING HER HAT HIS THA ERE FOR ENT ION HAS NTH TIO ALL VER TER EST THI CON RES " +
+    "PRO ARE OUT PER ECT ONE OUR ITH FRO MEN TED ERS ATH EVE OME COM ATE IVE RED"
+  ).split(/\s+/),
+);
+
+const RECOVERY_SECRET_OPEN_WORDS_RAW: readonly string[] = (
+  "THAT WITH HAVE THIS WILL YOUR FROM THEY KNOW WANT BEEN GOOD MUCH SOME TIME VERY WHEN COME HERE JUST LIKE LONG MAKE MANY MORE ONLY OVER SUCH TAKE THAN THEM WELL WERE " +
+  "ABOUT AFTER AGAIN BEING EVERY FIRST GREAT HOUSE LARGE NEVER OTHER PLACE POINT RIGHT SMALL SOUND STILL THEIR THESE THING THINK THREE UNDER WATER WHERE WHICH WORLD WOULD WRITE " +
+  "PEOPLE SCHOOL MOTHER FATHER FAMILY FRIEND SECOND NUMBER ALWAYS AROUND BECAUSE BEFORE CHANGE DURING FOLLOW HAPPEN LETTER NATURE PICTURE SHOULD ANIMAL BROTHER SISTER " +
+  "APPLE ORANGE BANANA TABLE CHAIR HOUSE WATER CRYSTAL RIVER OCEAN BEACH MOUNTAIN FOREST STORM CLOUD NIGHT LIGHT DREAM " +
+  "NORTH SOUTH EAST WEST CENTER KING QUEEN PRINCE KNIGHT CASTLE DRAGON SWORD MAGIC SPELL WIZARD " +
+  "MUSIC DANCE SONG MOVIE BOOK STORY POEM PLAY GAME SPORT TEAM BALL GOAL SCORE " +
+  "PHONE EMAIL MESSAGE MEDIA VIDEO PHOTO CAMERA SCREEN COMPUTER " +
+  "MONEY POWER TRUTH JUSTICE PEACE FREEDOM ACCESS TOKEN SECRET MASTER PASSWORD PRIVATE PUBLIC " +
+  "NETWORK SERVER SYSTEM BACKUP RECOVERY CORRECT HORSE BATTERY STAPLE PLEASE WINTER SUMMER " +
+  "LONDON PARIS TOKYO BERLIN YORK CITY TOWN COUNTRY EARTH SPACE PLANET " +
+  "BLACK WHITE GREEN YELLOW PURPLE BROWN ORANGE ANSWER QUICK BROWN JUMPS OVER LAZY " +
+  "EXPRESS TRAIN PLANE CAKE PORTAL STYLE WAND WARS STAR PEPPER SALT SUGAR BREAD " +
+  "SPHINX QUARTZ VORTEX CYBER SECURITY RAIN SPAIN FALLS BACK FRONT LEFT RIGHT " +
+  "HUMAN HEART SPEAK FORCE NEVER THING HEAVEN " +
+  "PART PRESS PORT HAND LAND HARD FIRE WIRE BALL CALL FALL BELL CELL BILL FILL " +
+  "BEST REST WEST CASE BASE DARK MARK PARK DATE FATE GATE HATE LATE RATE " +
+  "DEAL REAL SEAL DEAR FEAR HEAR NEAR YEAR DEEP KEEP FEED NEED SEED " +
+  "FILE MILE TIME FINE LINE MINE NINE FIND KIND MIND FIRM FISH LIST " +
+  "FLAG FLAT FLOW SLOW SHOW FOLD GOLD HOLD FOOD GOOD WOOD FOOL POOL FOOT ROOT " +
+  "FORM FORT FOUR YOUR FREE TREE FROM FULL GAIN MAIN PAIN RAIN GAME NAME SAME " +
+  "GATE GAVE GIFT GIRL GIVE GLAD GLOW GOAL GOLD GONE GOOD GRAB GRAY GREW GROW " +
+  "HARD HARM HATE HAVE HEAD LEAD READ HEAL HEAR HEAT MEAT HELD HELP HERE HERO " +
+  "HIDE RIDE SIDE WIDE HIGH HIKE LIKE HILL HINT HOLD HOLE HOME HOPE HORN HOST MOST " +
+  "HOUR YOUR HUGE HUNT HURT IRON ITEM JOIN JUMP JUST KEEP KIND KING RING SING " +
+  "LACK PACK LAKE MAKE TAKE LAND LANE LAST LATE LAZY LEAD LEAF LEAK PEAK WEAK " +
+  "LEFT LEND SEND LESS LIFE WIFE LIFT LIKE LIME TIME LINE LINK LIST LIVE LOAD ROAD " +
+  "LOCK LONG SONG LOOK TOOK LORD LOSE LOSS LOST LOUD LOVE LUCK MADE MAIL MAIN MAKE " +
+  "MALE MANY MARK MASS MATE MATH MEAL MEAN MEAT MEET MELT MENU MESS MILE MILK MILL " +
+  "MIND MINE MINT MISS MIST MODE MOOD MOON SOON MORE MOST MOVE MUCH MUST NAME NAVY " +
+  "NEAR NEAT NECK NEED NEST NEWS NEXT NICE NINE NODE NONE NOSE ROSE NOTE VOTE ONCE " +
+  "ONLY OPEN OVER PACE PACK PAGE PAID PAIN PAIR PALE PARK PART PASS PAST PATH PEAK " +
+  "PICK PILE PINE PINK PIPE PLAN PLAY PLOT PLUS POEM POET POLE POND POOL POOR PORT " +
+  "POSE POST PRAY PULL PUMP PURE PUSH RACE RACK RAGE RAID RAIL RAIN RANK RARE RATE " +
+  "READ REAL REAR REED REEL RENT REST RICE RICH RIDE RING RISE RISK ROAD ROCK ROLE " +
+  "ROLL ROOF ROOM ROOT ROPE ROSE RULE RUSH RUST SAFE SAID SAIL SALE SALT SAME SAND " +
+  "SAVE SEAL SEAM SEAT SEED SEEK SEEM SEEN SELF SELL SEND SENT SHIP SHOP SHOT SHOW " +
+  "SHUT SICK SIDE SIGN SILK SING SINK SITE SIZE SKIN SKIP SLIP SLOW SNOW SOAP SOFT " +
+  "SOIL SOLD SOLE SOME SONG SOON SORE SORT SOUL SOUP SOUR SPAN STAR STAY STEM STEP " +
+  "STOP SUCH SUIT SURE SURF SWIM TACK TAIL TAKE TALE TALK TALL TAME TANK TAPE TASK " +
+  "TEAM TEAR TELL TEND TENT TERM TEST TEXT THAN THAT THEM THEN THEY THIN THIS TICK " +
+  "TIDE TILE TILL TIME TIRE TOLD TOLL TONE TOOK TOOL TORN TOSS TOUR TOWN TRAP TRAY " +
+  "TREE TRIM TRIP TRUE TUBE TUNE TURN TYPE UNIT UPON URGE USED USER VAIN VARY VASE " +
+  "VAST VERY VEST VETO VIEW VINE VOID VOTE WAGE WAIT WAKE WALK WALL WAND WANT WARD " +
+  "WARM WARN WASH WAVE WEAK WEAR WEEK WELL WENT WERE WEST WHAT WHEN WHIP WIDE WIFE " +
+  "WILD WILL WIND WINE WING WIPE WIRE WISE WISH WITH WOOD WORD WORE WORK WORN WRAP " +
+  "YEAR YELL YOUR ZERO ZONE WART PRESS GANG"
+).split(/\s+/);
+
+function buildRecoverySecretOpenTokens(): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const raw of RECOVERY_SECRET_OPEN_WORDS_RAW) {
+    const w = raw.toUpperCase();
+    if (w.length >= 4) out.add(w);
+    const crock = w.replace(/O/g, "0").replace(/[IL]/g, "1").replace(/U/g, "V");
+    let letters = "";
+    for (const c of crock) {
+      if (c >= "A" && c <= "Z") letters += c;
+    }
+    if (letters.length >= 4) out.add(letters);
+  }
+  return out;
+}
+
+const RECOVERY_SECRET_OPEN_TOKENS: ReadonlySet<string> = buildRecoverySecretOpenTokens();
+
+const RECOVERY_SECRET_MATH_CONST_DIGITS: readonly string[] = [
+  "31415926535897932384626433832795",
+  "27182818284590452353602874713526",
+  "14142135623730950488016887242096",
+];
+
+const RECOVERY_SECRET_ENGLISH_LEET: Readonly<Record<string, string>> = {
+  "0": "O",
+  "1": "I",
+  "2": "Z",
+  "3": "E",
+  "4": "A",
+  "5": "S",
+  "6": "G",
+  "7": "T",
+  "8": "B",
+  "9": "G",
+};
+
+function recoverySecretLatinSkeleton(secret: string): string {
+  let out = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") out += c;
+    else {
+      const folded = RECOVERY_SECRET_ENGLISH_LEET[c];
+      if (folded !== undefined) out += folded;
+    }
+  }
+  return out;
+}
+
+function recoverySecretEnglishCover(skel: string): number {
+  const n = skel.length;
+  if (n < 4) return 0;
+  const dp = new Array<number>(n + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    if (dp[i]! > dp[i + 1]!) dp[i + 1] = dp[i]!;
+    for (let len = 4; len <= Math.min(12, n - i); len++) {
+      if (RECOVERY_SECRET_OPEN_TOKENS.has(skel.slice(i, i + len))) {
+        const next = dp[i]! + len;
+        if (next > dp[i + len]!) dp[i + len] = next;
+      }
+    }
+  }
+  return dp[n]!;
+}
+
+function recoverySecretHumanPatternFail(secret: string): boolean {
+  // Digit-constant / long digit-run structure.
+  {
+    let maxD = 0;
+    let run = 0;
+    let head = 0;
+    for (let i = 0; i < secret.length; i++) {
+      const c = secret[i]!;
+      if (c >= "0" && c <= "9") {
+        run += 1;
+        if (run > maxD) maxD = run;
+        if (i === head) head += 1;
+      } else {
+        run = 0;
+      }
+    }
+    if (maxD >= RECOVERY_SECRET_MAX_DIGIT_RUN || head >= RECOVERY_SECRET_MAX_DIGIT_RUN) {
+      return true;
+    }
+    const digits = [...secret].filter((c) => c >= "0" && c <= "9").join("");
+    if (digits.length >= 8) {
+      for (const prefix of RECOVERY_SECRET_MATH_CONST_DIGITS) {
+        for (let len = 8; len <= Math.min(digits.length, prefix.length); len++) {
+          for (let i = 0; i <= digits.length - len; i++) {
+            if (prefix.includes(digits.slice(i, i + len))) return true;
+          }
+        }
+      }
+    }
+  }
+
+  const letterSk = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
+  const latinSk = recoverySecretLatinSkeleton(secret);
+  const skeletons = [letterSk, latinSk];
+  if (letterSk.length > 0) skeletons.push([...letterSk].reverse().join(""));
+  if (latinSk.length > 0) skeletons.push([...latinSk].reverse().join(""));
+
+  let cover = 0;
+  let bigrams = 0;
+  let trigrams = 0;
+  for (const sk of skeletons) {
+    const c = recoverySecretEnglishCover(sk);
+    if (c > cover) cover = c;
+    let b = 0;
+    let t = 0;
+    for (let i = 0; i < sk.length - 1; i++) {
+      if (RECOVERY_SECRET_OPEN_BIGRAMS.has(sk.slice(i, i + 2))) b += 1;
+    }
+    for (let i = 0; i < sk.length - 2; i++) {
+      if (RECOVERY_SECRET_OPEN_TRIGRAMS.has(sk.slice(i, i + 3))) t += 1;
+    }
+    if (b > bigrams) bigrams = b;
+    if (t > trigrams) trigrams = t;
+  }
+
+  const letters = letterSk.length;
+  const letterFrac = secret.length === 0 ? 0 : letters / secret.length;
+  const vowelOf = (sk: string): number => {
+    if (sk.length === 0) return 0;
+    let v = 0;
+    for (const c of sk) {
+      if (c === "A" || c === "E" || c === "I" || c === "O" || c === "U" || c === "Y") v += 1;
+    }
+    return v / sk.length;
+  };
+  const vowelFrac = Math.max(vowelOf(letterSk), vowelOf(latinSk));
+
+  if (
+    /20[0-2]\d/.test(secret) &&
+    /(?:KEY|ABC)/.test(secret) &&
+    letters >= RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTERS &&
+    letterFrac >= RECOVERY_SECRET_MIN_MNEMONIC_PAD_LETTER_FRAC
+  ) {
+    return true;
+  }
+  if (
+    vowelFrac >= RECOVERY_SECRET_MAX_LATIN_VOWEL_FRAC &&
+    letters >= RECOVERY_SECRET_MIN_LETTERS_FOR_VOWEL_GUARD
+  ) {
+    return true;
+  }
+  if (trigrams >= RECOVERY_SECRET_MAX_ENGLISH_TRIGRAM_HITS) return true;
+  if (bigrams >= RECOVERY_SECRET_MAX_ENGLISH_BIGRAM_HITS) return true;
+  if (cover >= RECOVERY_SECRET_MIN_ENGLISH_COVER_LETTERS) return true;
+  if (
+    cover >= RECOVERY_SECRET_MIN_ENGLISH_COVER_WITH_VOWEL &&
+    vowelFrac >= RECOVERY_SECRET_MIN_VOWEL_FRAC_WITH_COVER
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** @internal exported for parity tests with node recoverySecretWeakness. */
+export function recoveryPackSecretStructureOk(secret: string): boolean {
+  if (secret.length !== RECOVERY_SECRET_CHARS) return false;
+  for (const c of secret) {
+    if (!RECOVERY_SECRET_ALPHABET.includes(c)) return false;
+  }
+  if (new Set(secret).size < RECOVERY_SECRET_MIN_DISTINCT) return false;
+
+  const n = secret.length;
+  // Exact tilings + near-period lag runs / match fraction + repeated substring.
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    if (n % period === 0 && secret.slice(0, period).repeat(n / period) === secret) {
+      return false;
+    }
+  }
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    let match = 0;
+    let run = 0;
+    let maxRun = 0;
+    for (let i = period; i < n; i++) {
+      if (secret[i] === secret[i - period]) {
+        match += 1;
+        run += 1;
+        if (run > maxRun) maxRun = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (maxRun >= RECOVERY_SECRET_MAX_LAG_MATCH_RUN) return false;
+    if (match / (n - period) >= RECOVERY_SECRET_MAX_LAG_MATCH_FRAC) return false;
+  }
+  const maxLen = Math.min(RECOVERY_SECRET_MAX_REPEATED_SUBSTRING + 9, Math.floor(n / 2));
+  for (let len = RECOVERY_SECRET_MAX_REPEATED_SUBSTRING; len <= maxLen; len++) {
+    const seen = new Set<string>();
+    for (let i = 0; i <= n - len; i++) {
+      const sub = secret.slice(i, i + len);
+      if (seen.has(sub)) return false;
+      seen.add(sub);
+    }
+  }
+
+  // Same-symbol run + multi-triple blocks + paired doubles.
+  let sameRun = 1;
+  let tripleBlocks = 0;
+  let blockRun = 1;
+  for (let i = 1; i <= n; i++) {
+    if (i < n && secret[i] === secret[i - 1]) {
+      sameRun += 1;
+      blockRun += 1;
+      if (sameRun >= RECOVERY_SECRET_MAX_SAME_RUN) return false;
+    } else {
+      if (blockRun >= 3) tripleBlocks += 1;
+      sameRun = 1;
+      blockRun = 1;
+    }
+  }
+  if (tripleBlocks >= 2) return false;
+  let doubles = 0;
+  for (let i = 0; i < n - 1; ) {
+    if (secret[i] === secret[i + 1]) {
+      doubles += 1;
+      if (doubles >= RECOVERY_SECRET_MAX_PAIRED_DOUBLES) return false;
+      i += 2;
+    } else {
+      i += 1;
+    }
+  }
+
+  // Constant-step (any k ≠ 0) monotone + broken same-delta + strided monotone.
+  let stepRun = 1;
+  let prevDelta: number | null = null;
+  const deltaPairCounts = new Map<number, number>();
+  for (let i = 1; i < n; i++) {
+    const delta =
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!) -
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i - 1]!);
+    if (delta !== 0) {
+      deltaPairCounts.set(delta, (deltaPairCounts.get(delta) ?? 0) + 1);
+    }
+    if (delta !== 0 && delta === prevDelta) {
+      stepRun += 1;
+      if (stepRun >= RECOVERY_SECRET_MAX_MONOTONE_RUN) return false;
+    } else {
+      stepRun = 1;
+      prevDelta = delta === 0 ? null : delta;
+    }
+  }
+  for (const count of deltaPairCounts.values()) {
+    if (count >= RECOVERY_SECRET_MAX_SAME_DELTA_PAIRS) return false;
+  }
+  for (let stride = 2; stride <= 4; stride++) {
+    for (let offset = 0; offset < stride; offset++) {
+      let strideRun = 1;
+      let stridePrev: number | null = null;
+      let prevIdx: number | null = null;
+      for (let i = offset; i < n; i += stride) {
+        const idx = RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!);
+        if (prevIdx !== null) {
+          const delta = idx - prevIdx;
+          if (delta !== 0 && delta === stridePrev) {
+            strideRun += 1;
+            if (strideRun >= RECOVERY_SECRET_MAX_STRIDED_MONOTONE_RUN) return false;
+          } else {
+            strideRun = 1;
+            stridePrev = delta === 0 ? null : delta;
+          }
+        }
+        prevIdx = idx;
+      }
+    }
+  }
+
+  // Fibonacci digit runs (112358…) — exact or mod-10 recurrence.
+  {
+    const isFib = (digits: readonly number[]): boolean => {
+      if (digits.length < 5) return false;
+      let exact = true;
+      let mod = true;
+      for (let i = 2; i < digits.length; i++) {
+        const sum = digits[i - 1]! + digits[i - 2]!;
+        if (digits[i] !== sum) exact = false;
+        if (digits[i] !== sum % 10) mod = false;
+        if (!exact && !mod) return false;
+      }
+      return exact || mod;
+    };
+    let run: number[] = [];
+    const flush = (): boolean => {
+      for (let s = 0; s < run.length; s++) {
+        for (let e = s + 5; e <= run.length; e++) {
+          if (isFib(run.slice(s, e))) return true;
+        }
+      }
+      run = [];
+      return false;
+    };
+    for (let i = 0; i <= n; i++) {
+      const c = secret[i];
+      if (c !== undefined && c >= "0" && c <= "9") {
+        run.push(c.charCodeAt(0) - 48);  // digit 0-9 (avoid Number() — amounts-admin/no-float-amount)
+      } else if (flush()) {
+        return false;
+      }
+    }
+  }
+
+  // Long letter-only run (digits break it) — unbroken dictionary-phrase class.
+  let letterRun = 0;
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") {
+      letterRun += 1;
+      if (letterRun >= RECOVERY_SECRET_MAX_LETTER_RUN) return false;
+    } else {
+      letterRun = 0;
+    }
+  }
+
+  // Digit↔letter class alternation (0A1B2C… / A1B2C3…).
+  let altRun = 1;
+  for (let i = 1; i < n; i++) {
+    const prevDigit = secret[i - 1]! >= "0" && secret[i - 1]! <= "9";
+    const curDigit = secret[i]! >= "0" && secret[i]! <= "9";
+    if (prevDigit !== curDigit) {
+      altRun += 1;
+      if (altRun >= RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN) return false;
+    } else {
+      altRun = 1;
+    }
+  }
+
+  // Letter+digit / digit+letter pair sequences.
+  const isDigit = (c: string): boolean => c >= "0" && c <= "9";
+  const isLetter = (c: string): boolean => c >= "A" && c <= "Z";
+  for (const offset of [0, 1] as const) {
+    for (const kind of ["LD", "DL"] as const) {
+      let pairRun = 0;
+      let i = offset;
+      while (i + 1 < n) {
+        const a = secret[i]!;
+        const b = secret[i + 1]!;
+        const ok =
+          (kind === "LD" && isLetter(a) && isDigit(b)) ||
+          (kind === "DL" && isDigit(a) && isLetter(b));
+        if (ok) {
+          pairRun += 1;
+          if (pairRun >= RECOVERY_SECRET_MAX_CLASS_PAIR_RUN) return false;
+          i += 2;
+        } else {
+          pairRun = 0;
+          i += 1;
+        }
+      }
+    }
+  }
+
+  // Keyboard row/column/diagonal walks (raw + letter skeleton).
+  const letterSk = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
+  for (const walk of RECOVERY_SECRET_KEYBOARD_WALKS) {
+    if (walk.length < RECOVERY_SECRET_MAX_KEYBOARD_RUN) continue;
+    for (let len = RECOVERY_SECRET_MAX_KEYBOARD_RUN; len <= walk.length; len++) {
+      for (let i = 0; i <= walk.length - len; i++) {
+        const sub = walk.slice(i, i + len);
+        if (secret.includes(sub)) return false;
+        if (/^[A-Z]+$/.test(sub) && letterSk.includes(sub)) return false;
+      }
+    }
+  }
+
+  // Dictionary / digit-broken / reversed passphrase skeleton.
+  const bases: string[] = [letterSk];
+  let leetSk = "";
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") leetSk += c;
+    else {
+      const folded = RECOVERY_SECRET_LEET_FOLD[c];
+      if (folded !== undefined) leetSk += folded;
+    }
+  }
+  bases.push(leetSk);
+  const skeletons: string[] = [];
+  for (const sk of bases) {
+    skeletons.push(sk);
+    if (sk.length > 0) skeletons.push([...sk].reverse().join(""));
+  }
+  for (const sk of skeletons) {
+    for (const token of RECOVERY_SECRET_DICT_MIN5) {
+      if (sk.includes(token)) return false;
+      if (sk.includes([...token].reverse().join(""))) return false;
+    }
+    for (const token of RECOVERY_SECRET_DICT_LEN4_CUSTODY) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
+        return false;
+      }
+    }
+    let shortHits = 0;
+    for (const token of RECOVERY_SECRET_DICT_LEN4) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
+        shortHits += 1;
+        if (shortHits >= 2) return false;
+      }
+    }
+  }
+
+  // Non-list human-pattern class (ZTR-1220 r5) — mirror of node hasHumanPatternClass.
+  if (recoverySecretHumanPatternFail(secret)) return false;
+
+  return true;
+}
 
 /**
  * Generate the secret a new pack is sealed under. The operator never chooses it:
  * the pack is designed to leave the host, so its seal key has to be beyond
  * offline search. Drawn from the platform CSPRNG, shown once, never stored — the
- * node re-checks the entropy floor at creation regardless of what is sent.
+ * node re-checks the same shape + structure floor at creation (ZTR-1220).
+ * Redraws on the rare structure-guard miss; throws rather than last-resort-emit
+ * a secret the node would answer 400 weak_recovery_secret for.
  */
 export function generateRecoveryPackSecret(): string {
-  const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
-  crypto.getRandomValues(draws);
-  let out = "";
-  for (const d of draws) {
-    // 256 % 32 === 0, so the byte-to-symbol fold stays uniform.
-    out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
+  for (let attempt = 0; attempt < RECOVERY_SECRET_MAX_DRAW_ATTEMPTS; attempt++) {
+    const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
+    crypto.getRandomValues(draws);
+    let out = "";
+    for (const d of draws) {
+      // 256 % 32 === 0, so the byte-to-symbol fold stays uniform.
+      out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
+    }
+    if (recoveryPackSecretStructureOk(out)) return out;
   }
-  return out;
+  throw new Error(
+    "recovery pack secret generation failed structure floor — refuse weak emit",
+  );
 }
 
 export async function postRecoveryPackCreate(
   body: {
-    readonly recovery_secret: string;
     readonly vault_master_key?: string;
     /** Re-issue source: the existing pack file, opened server-side. */
     readonly from_pack?: string;
@@ -965,6 +1732,7 @@ export async function postRecoveryPackCreate(
   },
   totp: string,
 ): Promise<RecoveryPackCreateResponse> {
+  // Generate-only: never send recovery_secret — node seals and returns it once.
   return api<RecoveryPackCreateResponse>("/recovery-pack/create", {
     method: "POST",
     body: JSON.stringify(body),

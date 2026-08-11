@@ -69,6 +69,7 @@ export const ADMIN_ERROR_CODES = [
   { code: "backup_kek_collision", http: 409 },
   { code: "configured_env", http: 409 },
   { code: "weak_recovery_secret", http: 400 },
+  { code: "caller_supplied_recovery_secret", http: 400 },
   { code: "weak_secret", http: 400 },
   { code: "legacy_pack_v1", http: 400 },
   { code: "prove_failed", http: 400 },

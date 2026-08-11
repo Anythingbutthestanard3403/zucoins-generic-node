@@ -38,6 +38,7 @@ function state(): ReadinessStateInputs {
     vaultKeyRingLoaded: true,
     vaultCensusVerified: true,
     observationReadCapable: true,
+    restoreHoldClear: true,
     leadershipLockHeld: true,
     eventSignerAvailable: true,
     halted: false,

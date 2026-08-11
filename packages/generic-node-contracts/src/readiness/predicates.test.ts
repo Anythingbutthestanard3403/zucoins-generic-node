@@ -16,6 +16,7 @@ const READY_LEADER: NodeReadinessState = {
   vaultKeyRingLoaded: true,
   vaultCensusVerified: true,
   observationReadCapable: true,
+  restoreHoldClear: true,
   leadershipLockHeld: true,
 };
 
@@ -34,6 +35,7 @@ const GATING_FIELD_CASES: readonly {
   { checkId: "vault_available", field: "vaultKeyRingLoaded" },
   { checkId: "vault_available", field: "vaultCensusVerified" },
   { checkId: "observation_read_capable", field: "observationReadCapable" },
+  { checkId: "restore_hold_clear", field: "restoreHoldClear" },
 ];
 
 describe("readiness / leadership predicate split (the readiness concern)", () => {

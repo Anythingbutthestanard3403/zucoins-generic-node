@@ -7,7 +7,7 @@
 //      secret-free error BEFORE the HTTP server starts and BEFORE any
 //      migration can run (review indicator 2).
 //   1. Health server starts — liveness 200 immediately, readiness 503 until
-// the readiness gating checks pass (schema ∧ DB ∧ vault ∧ observation;
+// the readiness gating checks pass (schema ∧ DB ∧ vault ∧ observation ∧ restore_hold_clear;
 // leadership + EVENT_SIGNING are reported/money-only, non-gating — ZPAY-252).
 //   2. Graceful stop installed — a SIGTERM at ANY later phase is clean.
 //   3. runBootLane — migrations → privilege readiness → genesis bootstrap →
@@ -111,6 +111,7 @@ import {
   installFatalExceptionHandler,
   installGracefulStop,
   NodeReadiness,
+  stampRestoreHoldFromDb,
   runBootLane,
   type BootLogger,
   type SignerLeadershipHandle,
@@ -1045,6 +1046,12 @@ async function main(): Promise<void> {
       // migrate.ts don't exist yet — readiness must not flip before schema is complete.
       await assertSchemaCompleteness(pool);
       await assertPrivilegeReadiness(pool);
+      // ZTR-1172: stamp restore_hold_clear from durable state so /health/ready
+      // is 503 while a post-restore hold is active (RESTORE_HOLD_READINESS).
+      const holdStamp = await stampRestoreHoldFromDb(readiness, pool, config.NODE_ID);
+      logger.info(
+        `boot: restore_hold_clear=${holdStamp.restoreHoldClear} rowPresent=${holdStamp.rowPresent}`,
+      );
       // Money workers read isDatabaseReachable before any external health probe may have
       // refreshed the shared verdict — arm it once the pool is proven writable. refresh(),
       // not probe(): the keep-warm timer is already running by now, so a single failed tick

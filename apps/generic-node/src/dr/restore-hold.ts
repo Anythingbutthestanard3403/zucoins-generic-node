@@ -193,8 +193,10 @@ export async function forceRestoreHoldOnClient(
   const now = options.now ?? new Date();
   // Prefer rows already present in the dump; fall back to nodes.id so a
   // greenfield dump without a restore-state row still gets held.
+  // Absent reporting_restore_state is a hard failure (ZTR-1172) — never a silent pass.
   return runFailClosedPerNodeHold(client, {
     tableExistsSql: REPORTING_RESTORE_STATE_EXISTS_SQL,
+    requiredTableName: "reporting_restore_state",
     explicitNodeId: options.nodeId,
     discoverNodeIdsSql: DISCOVER_RESTORE_NODE_IDS_SQL,
     applyPerNode: async (c, nodeId) => {
@@ -206,9 +208,9 @@ export async function forceRestoreHoldOnClient(
 
 /**
  * After a successful psql apply, force reporting_restore_state.restore_hold=true
- * for every restored node (or a single explicit nodeId). No-ops when the
- * reporting schema is absent (e.g. destroy/restore drill DBs without the reporting DDL).
- * Fail-closed: any error while the table exists propagates to the caller.
+ * for every restored node (or a single explicit nodeId).
+ * Fail-closed: absent reporting schema throws; any error while the table exists
+ * propagates to the caller (ZTR-1172).
  */
 export async function applyForceRestoreHoldAfterRestore(
   databaseUrl: string,

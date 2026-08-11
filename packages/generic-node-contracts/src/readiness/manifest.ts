@@ -5,6 +5,7 @@ import {
   NON_GATING_CHECK_IDS,
   READINESS_LEADERSHIP_SEPARATION,
   RECONCILIATION,
+  RESTORE_HOLD_READINESS,
 } from "./readiness-checks.contract.ts";
 import {
   BOOT_SEQUENCE,
@@ -38,6 +39,7 @@ export const READINESS_CONTRACT = {
     NON_GATING_CHECK_IDS,
     READINESS_LEADERSHIP_SEPARATION,
     RECONCILIATION,
+    RESTORE_HOLD_READINESS,
   },
   boot: {
     BOOT_SEQUENCE,
@@ -79,6 +81,7 @@ export const READINESS_CONCERN_MANIFEST = defineConcernManifest({
     NON_GATING_CHECK_IDS,
     READINESS_LEADERSHIP_SEPARATION,
     RECONCILIATION,
+    RESTORE_HOLD_READINESS,
     BOOT_SEQUENCE,
     LEADERSHIP_PREREQUISITE_SEQUENCE,
     BOOT_SEQUENCE_INVARIANTS,
@@ -96,7 +99,7 @@ export const READINESS_CONCERN_MANIFEST = defineConcernManifest({
   goldenRefs: [
     {
       path: "gen/readiness.json",
-      sha256: "752a57a3895997c596074132e9121765f30391a1aad92ada41d4b4c708bd82b9",
+      sha256: "d8612ffcaf51cc2506a1fdcca54dd7447c3d082725067d8a3282ff2da447ec03",
     },
   ],
   scanRules: [

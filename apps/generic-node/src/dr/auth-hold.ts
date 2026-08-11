@@ -318,7 +318,34 @@ async function forceAuthHoldOnClient(
 ): Promise<ForceAuthHoldResult> {
   const headsExist = await client.query(LIFECYCLE_HEADS_EXISTS_SQL);
   if (headsExist.rowCount === 0) {
-    return { applied: false, headsForced: 0, headKeys: [] };
+    // ZTR-1172: absent reporting lifecycle schema is a restore failure, not a pass.
+    const { ReportingSchemaAbsentError } = await import("./hold-db-orchestration.js");
+    throw new ReportingSchemaAbsentError("reporting_key_lifecycle_heads");
+  }
+
+  // Case 2: lifecycle head without its terminal event — refuse restore.
+  const orphanHeads = await client.query<{ n: string }>(`
+    SELECT count(*)::text AS n
+      FROM reporting_key_lifecycle_heads h
+      LEFT JOIN reporting_key_lifecycle_events e
+        ON e.id = h.lifecycle_event_id
+     WHERE h.lifecycle_event_id IS NOT NULL
+       AND e.id IS NULL
+  `);
+  if (Number(orphanHeads.rows[0]?.n ?? "0") > 0) {
+    throw new Error(
+      "lifecycle head without its terminal event; refuse restore auth_hold force (fault case 2)",
+    );
+  }
+  const nullEventHeads = await client.query<{ n: string }>(`
+    SELECT count(*)::text AS n
+      FROM reporting_key_lifecycle_heads
+     WHERE epoch > 0 AND lifecycle_event_id IS NULL
+  `);
+  if (Number(nullEventHeads.rows[0]?.n ?? "0") > 0) {
+    throw new Error(
+      "lifecycle head without terminal event id; refuse restore auth_hold force (fault case 2)",
+    );
   }
 
   const advanceExists = await client.query(ADVANCE_FN_EXISTS_SQL);
@@ -452,9 +479,9 @@ async function forceAuthHoldOnClient(
 /**
  * After a successful psql apply, force auth_hold=true on every restored lifecycle
  * head that is currently false by appending AUTH_HOLD_SET + advancing the head.
- * No-ops when the lifecycle-heads table is absent — e.g. drill DBs without the reporting schema.
- * Fail-closed: any error while the table/path exists propagates to the caller.
- * Fail-closed if heads exist but reporting_advance_lifecycle_head is missing.
+ * Fail-closed: absent lifecycle-heads table throws (ZTR-1172); any error while the
+ * table/path exists propagates to the caller. Fail-closed if heads exist but
+ * reporting_advance_lifecycle_head is missing.
  */
 export async function applyForceAuthHoldAfterRestore(
   databaseUrl: string,

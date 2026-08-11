@@ -25,6 +25,7 @@ const STATE_READY_LEADER: NodeReadinessState = {
   vaultKeyRingLoaded: true,
   vaultCensusVerified: true,
   observationReadCapable: true,
+    restoreHoldClear: true,
   leadershipLockHeld: true,
 };
 const STATE_READY_FOLLOWER: NodeReadinessState = { ...STATE_READY_LEADER, leadershipLockHeld: false };
@@ -34,6 +35,7 @@ const STATE_BOOTING: NodeReadinessState = {
   vaultKeyRingLoaded: false,
   vaultCensusVerified: false,
   observationReadCapable: false,
+    restoreHoldClear: true,
   leadershipLockHeld: false,
 };
 const STATE_DEAD: NodeReadinessState = {
@@ -42,6 +44,7 @@ const STATE_DEAD: NodeReadinessState = {
   vaultKeyRingLoaded: false,
   vaultCensusVerified: false,
   observationReadCapable: false,
+    restoreHoldClear: true,
   leadershipLockHeld: false,
 };
 

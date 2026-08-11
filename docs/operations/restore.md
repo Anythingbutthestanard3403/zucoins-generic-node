@@ -157,9 +157,10 @@ Only after 3–5. In order:
 3. `gn_available_wallets` is non-zero — wallets carry a fresh ceremony stamp.
 4. An implementer call succeeds rather than returning `reporting_auth_hold`.
 
-A 200 from `/health/ready` on its own means nothing about the holds. Readiness gates on
-schema, vault, observation and the database probe; `restore_hold` is not one of the gating
-checks. A held node looks healthy from the outside and refuses every implementer call.
+A 200 from `/health/ready` requires `restore_hold` clear (ZTR-1172 / `RESTORE_HOLD_READINESS`).
+Readiness gates on schema, vault, observation, the database probe, **and** `restore_hold_clear`.
+A held restore forces `/health/ready` 503. Lifecycle `auth_hold` remains admission-only
+(both holds must be false before implementer traffic is admitted).
 
 ## Backup cadence
 

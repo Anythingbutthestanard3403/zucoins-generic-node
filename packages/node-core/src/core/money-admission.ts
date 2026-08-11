@@ -31,6 +31,7 @@ export const MONEY_ADMISSION_REFUSAL_CODES = [
   "database_unreachable",
   "vault_unavailable",
   "observation_not_read_capable",
+  "restore_hold_active",
   "event_signer_unavailable",
   "stopping",
 ] as const;
@@ -66,6 +67,8 @@ export function isGatingReadyForMoney(
   if (!databaseReachable) return false;
   if (!(state.vaultKeyRingLoaded && state.vaultCensusVerified)) return false;
   if (!state.observationReadCapable) return false;
+  // ZTR-1172: held restore refuses money work (matches deploy-ready gate).
+  if (!state.restoreHoldClear) return false;
   // Runtime EVENT_SIGNING authority loss quiesces the money surface (ZTR-1179).
   // Not part of the /health/ready verdict (ZPAY-252).
   if (!state.eventSignerAvailable) return false;
@@ -82,6 +85,7 @@ export function moneyAdmissionRefusal(
   if (!databaseReachable) return "database_unreachable";
   if (!(state.vaultKeyRingLoaded && state.vaultCensusVerified)) return "vault_unavailable";
   if (!state.observationReadCapable) return "observation_not_read_capable";
+  if (!state.restoreHoldClear) return "restore_hold_active";
   if (!state.eventSignerAvailable) return "event_signer_unavailable";
   return null;
 }

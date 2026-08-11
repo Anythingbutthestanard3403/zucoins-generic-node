@@ -37,6 +37,7 @@ export {
 
 export { rotateBackupKey, type RotationResult } from "./key-rotation.js";
 export { runDrill, type DrillResult } from "./drill.js";
+export { MINIMAL_DUAL_GATE_SCHEMA_SQL } from "./drill-node-schema.js";
 export {
   probePgClientBinaries,
   EXPECTED_PG_CLIENT_MAJOR_VERSION,
@@ -104,6 +105,7 @@ export {
   withConnectedPgClient,
   runFailClosedPerNodeHold,
   DISCOVER_RESTORE_NODE_IDS_SQL,
+  ReportingSchemaAbsentError,
   type HoldDbClient,
   type FailClosedPerNodeHoldInput,
   type FailClosedPerNodeHoldResult,

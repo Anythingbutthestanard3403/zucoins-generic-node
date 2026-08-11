@@ -16,6 +16,8 @@ export interface NodeReadinessState {
   readonly vaultKeyRingLoaded: boolean;
   readonly vaultCensusVerified: boolean;
   readonly observationReadCapable: boolean;
+  /** True when restore_hold is clear (or no hold row). ZTR-1172 gating input. */
+  readonly restoreHoldClear: boolean;
   readonly leadershipLockHeld: boolean;
 }
 
@@ -31,6 +33,7 @@ export const GATING_CHECK_EVALUATORS: Readonly<
   database_reachable: (state) => state.databaseReachable,
   vault_available: (state) => state.vaultKeyRingLoaded && state.vaultCensusVerified,
   observation_read_capable: (state) => state.observationReadCapable,
+  restore_hold_clear: (state) => state.restoreHoldClear,
   signer_leadership: undefined,
 };
 

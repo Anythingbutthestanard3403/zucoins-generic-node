@@ -61,6 +61,17 @@ export const READINESS_CHECKS = [
     doesNotAssert: ["signer leadership is held by this instance", "any transaction has landed"],
   },
   {
+    id: "restore_hold_clear",
+    gating: true,
+    stampingAuthority: "RESTORE_HOLD_PROBE",
+    asserts: "reporting restore_hold is false for this node (or no restore_hold row exists yet)",
+    doesNotAssert: [
+      "signer leadership is held by this instance",
+      "lifecycle auth_hold is clear on every head",
+      "implementer traffic is admitted",
+    ],
+  },
+  {
     id: "signer_leadership",
     gating: false,
     stampingAuthority: "LEADERSHIP_LOCK_MANAGER",
@@ -107,6 +118,32 @@ export const RECONCILIATION = {
     "operations-recovery draft degraded mode: readiness is false when the signer is unavailable",
   ],
   resolution:
-    "readiness gates on schema, database, vault, and observation checks only; signer_leadership is a reported non-gating check",
+    "readiness gates on schema, database, vault, observation, and restore_hold_clear; signer_leadership is a reported non-gating check",
   reason: "coupling readiness to leadership re-introduces the overlap-deploy deadlock the decoupling rule fixed",
+} as const;
+
+/**
+ * ZTR-1172 decision: restore_hold gates deploy readiness.
+ * Doc 09 §7.1 requires every restore fault-injection case to hold readiness false.
+ * This is independent of the leadership supersession above — a node that denies
+ * every implementer request must not report /health/ready 200.
+ * Machine-readable so census tests pin the decision the way RECONCILIATION pins
+ * the leadership decoupling.
+ */
+export const RESTORE_HOLD_READINESS = {
+  restore_hold_gates_readiness: true,
+  check_id: "restore_hold_clear",
+  stamping_authority: "RESTORE_HOLD_PROBE",
+  canonical: "operations-recovery §7.1",
+  supersedes_draft_clauses: [
+    "prior shell: restore_hold is admission-only and /health/ready stays 200 under a held restore",
+  ],
+  resolution:
+    "restore_hold_clear is a gating readiness check; a held restore forces /health/ready 503 while money-path four-mode partition is unchanged",
+  reason:
+    "a green ready on a node that refuses every implementer request misleads orchestrators and dashboards",
+  does_not_gate: [
+    "signer_leadership",
+    "lifecycle auth_hold (admission conjunction remains restore_hold ∧ auth_hold)",
+  ],
 } as const;

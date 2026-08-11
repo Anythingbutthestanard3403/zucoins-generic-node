@@ -3,7 +3,7 @@
 // Delegates to `@zucoins/node-core`'s NodeCoreReadinessState, which
 // implements the readiness gating policy:
 //   GATING (deploy /health/ready): schema, vault, observation
-//           (gateway read within failure budget)
+//           (gateway read within failure budget), restore_hold_clear (ZTR-1172)
 //   NON-GATING (reported): signer leadership, halt, storage pressure
 //   MONEY-ONLY (admission, not deploy ready): event signer (ZTR-1179 /
 //           ZPAY-252 — must not re-couple ready to post-leadership ensure)
@@ -31,6 +31,8 @@ export interface ReadinessChecks {
    * overlap-deploy deadlock (ZPAY-252).
    */
   readonly eventSigner: boolean;
+  /** restore_hold clear — gating on /health/ready (ZTR-1172). */
+  readonly restoreHoldClear: boolean;
   /** Live DB reachability is probed by the health handler, not stamped here. */
   readonly database?: boolean;
 }
@@ -91,6 +93,14 @@ export class NodeReadiness {
     this.inner.setEventSignerAvailable(available);
   }
 
+  /**
+   * Stamp restore_hold_clear. Post-restore force stamps false; dual-gate
+   * release stamps true. Defaults open for greenfield boots.
+   */
+  setRestoreHoldClear(clear: boolean): void {
+    this.inner.setRestoreHoldClear(clear);
+  }
+
   recordGatewayReadSuccess(): void {
     this.inner.recordObservationReadSuccess();
   }
@@ -115,9 +125,9 @@ export class NodeReadiness {
    * Snapshot used by the shell health router and boot lane.
    *
    * `ready` here is the stamp-side conjunction WITHOUT the live DB probe
-   * (schema ∧ vault ∧ observation ∧ !stopping). Leadership is reported in
-   * checks but excluded from ready — the live DB probe is applied by the
-   * health handler's CachedDbProbe.
+   * (schema ∧ vault ∧ observation ∧ restore_hold_clear ∧ !stopping). Leadership
+   * is reported in checks but excluded from ready — the live DB probe is
+   * applied by the health handler's CachedDbProbe.
    */
   snapshot(): ReadinessSnapshot {
     const inputs = this.inner.snapshot();
@@ -128,15 +138,18 @@ export class NodeReadiness {
       leadership: inputs.leadershipLockHeld,
       gateway: inputs.observationReadCapable,
       eventSigner: inputs.eventSignerAvailable,
+      restoreHoldClear: inputs.restoreHoldClear,
     };
     // Stamp-side ready (DB probe applied by the health handler). Leadership
     // and EVENT_SIGNING deliberately excluded from deploy-ready (ZPAY-252);
-    // money admission still requires eventSigner (ZTR-1179).
+    // money admission still requires eventSigner (ZTR-1179). restore_hold
+    // gates deploy-ready (ZTR-1172 / RESTORE_HOLD_READINESS).
     const ready =
       !inputs.stopping &&
       checks.schema &&
       checks.vault &&
-      checks.gateway;
+      checks.gateway &&
+      checks.restoreHoldClear;
     const degraded = inputs.observationDegraded && !inputs.stopping;
     return Object.freeze({
       checks: Object.freeze(checks),
@@ -146,5 +159,41 @@ export class NodeReadiness {
       gatewayConsecutiveFailures: this.inner.observationConsecutiveFailures,
       inputs,
     });
+  }
+}
+
+/**
+ * Probe reporting_restore_state for this node and stamp restore_hold_clear.
+ * Missing table or missing row → clear (greenfield). Held row → not clear.
+ * Fail-closed on query errors (throws).
+ */
+export async function stampRestoreHoldFromDb(
+  readiness: Pick<NodeReadiness, "setRestoreHoldClear">,
+  db: { query: (text: string, params?: readonly unknown[]) => Promise<{ rows: Array<{ restore_hold: boolean }> }> },
+  nodeId: string,
+): Promise<{ readonly restoreHoldClear: boolean; readonly rowPresent: boolean }> {
+  try {
+    const result = await db.query(
+      `SELECT restore_hold FROM reporting_restore_state WHERE node_id = $1::uuid`,
+      [nodeId],
+    );
+    if (result.rows.length === 0) {
+      readiness.setRestoreHoldClear(true);
+      return { restoreHoldClear: true, rowPresent: false };
+    }
+    const held = result.rows[0]!.restore_hold === true;
+    readiness.setRestoreHoldClear(!held);
+    return { restoreHoldClear: !held, rowPresent: true };
+  } catch (err) {
+    // Undefined table (42P01) on greenfield-before-reporting-DDL → clear.
+    const code =
+      err !== null && typeof err === "object" && "code" in err
+        ? String((err as { code?: unknown }).code)
+        : "";
+    if (code === "42P01") {
+      readiness.setRestoreHoldClear(true);
+      return { restoreHoldClear: true, rowPresent: false };
+    }
+    throw err;
   }
 }

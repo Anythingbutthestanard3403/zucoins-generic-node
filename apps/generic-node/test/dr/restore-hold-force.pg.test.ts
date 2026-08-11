@@ -9,7 +9,7 @@
  * quirk unrelated to the hold path under test.
  */
 import { execFileSync } from "node:child_process";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ import {
   exportEncryptedBackup,
   restoreEncryptedBackup,
 } from "../../src/dr/encrypted-backup.js";
+import { MINIMAL_DUAL_GATE_SCHEMA_SQL } from "../../src/dr/drill-node-schema.js";
 import { buildForceRestoreHoldUpsert } from "../../src/dr/restore-hold.js";
 
 const PG_AVAILABLE = (() => {
@@ -106,10 +107,66 @@ describe.skipIf(!PG_AVAILABLE)(
       execFileSync("createdb", ["--maintenance-db", maint, targetDb], { stdio: "ignore" });
 
       sourcePool = new Pool({ connectionString: dbUrl(sourceDb) });
-      await sourcePool.query(MINIMAL_SCHEMA_SQL);
+      await sourcePool.query(MINIMAL_DUAL_GATE_SCHEMA_SQL);
       await sourcePool.query(
         `INSERT INTO nodes (id, display_name) VALUES ($1, $2)`,
         [nodeId, "restore-hold-src"],
+      );
+
+      // Dual-gate force requires lifecycle heads (ZTR-1172): seed a held head
+      // so auth_hold force is a no-op apply rather than schema-absent failure.
+      const implementerId = randomUUID();
+      const keyId = randomUUID();
+      const eventId = randomUUID();
+      const nonceId = randomUUID();
+      const sha = (s: string) =>
+        createHash("sha256").update(s, "utf8").digest("hex");
+      const PUBKEY = "A".repeat(43) + "=";
+      const SIG = "A".repeat(86) + "==";
+      await sourcePool.query(`INSERT INTO implementers (id, name) VALUES ($1, $2)`, [
+        implementerId,
+        "impl",
+      ]);
+      await sourcePool.query(
+        `INSERT INTO implementer_reporting_keys (id, node_id, implementer_id, public_key, registered_at)
+         VALUES ($1, $2, $3, $4, now())`,
+        [keyId, nodeId, implementerId, PUBKEY],
+      );
+      await sourcePool.query(
+        `INSERT INTO reporting_nonce_burn_counters (node_id, next_burn_sequence) VALUES ($1, 2)`,
+        [nodeId],
+      );
+      await sourcePool.query(
+        `INSERT INTO reporting_request_nonces (
+          id, node_id, implementer_id, nonce, purpose, route_id, request_class, reporting_key_id,
+          lifecycle_epoch, nonce_burn_sequence, request_preimage_text, request_preimage_sha256,
+          request_signature, method, raw_target, body_sha256, issued_at, expires_at, received_at,
+          consumed_at, retention_class
+        ) VALUES (
+          $1, $2, $3, $4, 'zp-report-request-v1', 'seed', 'READ', $5, 1, 1, 'seed', $6, $7,
+          'GET', '/seed', $6, now(), now() + interval '30 seconds', now(), now(),
+          'READ_NO_PRUNE_UNTIL_SAFETY_FREEZE'
+        )`,
+        [nonceId, nodeId, implementerId, randomUUID(), keyId, sha("seed"), SIG],
+      );
+      await sourcePool.query(
+        `INSERT INTO reporting_key_lifecycle_events (
+          id, node_id, implementer_id, epoch, event_type, current_key_id, prior_key_id,
+          overlap_expires_at, auth_hold, successor_registered_at, nonce_evidence_id, nonce_purpose,
+          enrolment_evidence_id, public_evidence_text, public_evidence_sha256, previous_event_id,
+          previous_epoch, previous_event_hash, event_hash, committed_at
+        ) VALUES (
+          $1, $2, $3, 1, 'FIRST_KEY_ACTIVATED', $4, NULL, NULL, true, now(), $5,
+          'zp-report-request-v1', NULL, 'seed', $6, NULL, NULL, NULL, $7, now()
+        )`,
+        [eventId, nodeId, implementerId, keyId, nonceId, sha("seed"), "11".repeat(32)],
+      );
+      await sourcePool.query(
+        `INSERT INTO reporting_key_lifecycle_heads (
+          node_id, implementer_id, epoch, current_key_id, prior_key_id, overlap_expires_at,
+          auth_hold, lifecycle_event_id, updated_at
+        ) VALUES ($1, $2, 1, $3, NULL, NULL, true, $4, now())`,
+        [nodeId, implementerId, keyId, eventId],
       );
 
       // Seed a *released* restore_hold row — the production-backup case that

@@ -625,8 +625,8 @@ describe("admin inventory HTTP (contract)", () => {
 
   it("D3: SQL listWallets projects custody + observed balance path", async () => {
     const texts: string[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const sql = {
+      async query(text: string, _params?: readonly unknown[]) {
         texts.push(text);
         if (text.includes("FROM wallets")) {
           return {
@@ -652,7 +652,7 @@ describe("admin inventory HTTP (contract)", () => {
         return { rows: [] };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     const page = await store.listWallets(NODE_ID, { limit: 10 });
 
     const walletSelect = texts.find((t) => t.includes("FROM wallets"));
@@ -668,8 +668,8 @@ describe("admin inventory HTTP (contract)", () => {
 
   it("D3: SQL listDestinations projects blessing ids (SELECT + mapDestRow)", async () => {
     const texts: string[] = [];
-    const sql: InventorySqlExecutor = {
-      async query(text, _params) {
+    const sql = {
+      async query(text: string, _params?: readonly unknown[]) {
         texts.push(text);
         return {
           rows: [
@@ -692,7 +692,7 @@ describe("admin inventory HTTP (contract)", () => {
         };
       },
     };
-    const store = createSqlAdminInventoryStore(sql);
+    const store = createSqlAdminInventoryStore(sql as InventorySqlExecutor);
     const page = await store.listDestinations(NODE_ID, { limit: 10 });
 
     expect(texts).toHaveLength(1);

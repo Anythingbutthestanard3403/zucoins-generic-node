@@ -26,6 +26,7 @@ under pressure. Before you change anything at 3am, read this:
 | [`alert-reference.md`](alert-reference.md) | You want the meaning, severity and posture of one alert signal (generated from source) |
 | [`escalation-matrix.md`](escalation-matrix.md) | You need to decide who to wake (generated from source) |
 | [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml) | You are wiring Prometheus |
+| [`push-action-suffix-rotation.md`](push-action-suffix-rotation.md) | Boot fails with `PushActionVocabularyRejectedError` / wallet push action-name drift |
 
 ## What the node is
 
@@ -249,7 +250,6 @@ against those exact bytes. APNs was not captured — see the golden `meta.json`.
 golden; if the nest moved, update `payload.ts` precedence and refresh the golden in the
 same reviewed commit. Do **not** change the 204 response.
 
-
 ## Candidate-intake backlog (origin-relay + Web Push)
 
 The node admits payer step-1 partials through two producer lanes into one in-memory
@@ -277,3 +277,13 @@ pre-intake deposits. Genuine receives that were only sitting in the inbox are re
 by the node's existing **reconcile / periodic-repair** path once the corresponding on-chain
 evidence is visible again. Do not treat a post-restart backlog of 0 as proof that nothing
 was in flight — check open `RECEIVE_EXTERNAL` operations and reconcile outcomes instead.
+
+## Push action-name suffix rotation (ZTR-1207)
+
+The wallet push host dispatches on **opaque per-action suffixes** transcribed from the
+shipped wallet bundle. There is no client-side derivation rule. When a wallet release
+rotates those suffixes, boot fails loudly via the action-vocabulary probe.
+
+**Runbook:** [`push-action-suffix-rotation.md`](push-action-suffix-rotation.md) — probe-failure
+signature, the four literal locations, manual re-transcription recovery, and the deferred
+host discovery option (out of scope until the host offers it).

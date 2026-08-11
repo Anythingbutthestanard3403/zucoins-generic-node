@@ -1,6 +1,7 @@
 # ZTR-1173 — implementer r3 (Review B r2 rework)
 
-**Head SHA:** `6d2d8167bb0189b9bf58eb04b9810319ed374460`
+**Head SHA:** 
+**Code commit:**  (test/gates; docs pins may sit above)
 **Branch:** `ztr-1173-test-gate-integrity`
 **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/69
 **Prior FAIL:** Review B r2 @ `eaa5a59757a90c63524f84394bb94ffd581d9b04` (`tasks/ztr-1173-review-B-r2.md`)

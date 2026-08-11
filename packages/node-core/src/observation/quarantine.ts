@@ -621,13 +621,15 @@ export async function applyAnomalyAction(
     priorWallet = await store.getWallet(input.walletId);
   }
 
+  // Attention stamping needs an operation id when one exists. Missing/null operationId
+  // must NOT abort the caller's evidence transaction (observation+anomaly already written):
+  // apply wallet/audit portions and skip the operation write. Unknown non-null ids still throw.
   if (needsOperationWrite) {
-    if (input.operationId === null) {
-      throw new Error(`anomaly ${plan.anomaly} requires operationId for NEEDS_ATTENTION`);
-    }
-    priorOperation = await store.getOperation(input.operationId);
-    if (priorOperation === null) {
-      throw new Error(`operation ${input.operationId} not found for NEEDS_ATTENTION`);
+    if (input.operationId !== null) {
+      priorOperation = await store.getOperation(input.operationId);
+      if (priorOperation === null) {
+        throw new Error(`operation ${input.operationId} not found for NEEDS_ATTENTION`);
+      }
     }
   } else if (input.operationId !== null) {
     priorOperation = await store.getOperation(input.operationId);
@@ -670,10 +672,9 @@ export async function applyAnomalyAction(
       assertLeasePreserved(plan.anomaly, priorWallet as QuarantineWalletSnapshot, wallet);
     }
 
-    if (plan.operation.kind === "needs_attention") {
-      // preflight guarantees operationId + priorOperation
+    if (plan.operation.kind === "needs_attention" && input.operationId !== null && priorOperation !== null) {
       const marked = await store.markNeedsAttention(
-        input.operationId as string,
+        input.operationId,
         plan.operation.attentionReason,
       );
       operation = marked.operation;
@@ -681,7 +682,7 @@ export async function applyAnomalyAction(
         // current_state is the actual protocol status after mutation (receive keeps READY/EXPIRED).
         needsAttentionEvent = {
           event: "operation.needs_attention",
-          operationId: input.operationId as string,
+          operationId: input.operationId,
           data: {
             current_state: operation.status,
             attention_reason: plan.operation.attentionReason,

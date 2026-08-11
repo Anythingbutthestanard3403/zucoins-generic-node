@@ -12,18 +12,13 @@
 // (arm-route). That compare path is already landed; this module supplies the
 // honest gateway-derived T0 rows the compare consumes.
 
-import { randomUUID } from "node:crypto";
-import type { Pool, PoolClient } from "pg";
-
-import { applyMoneyPathStatementTimeout } from "../db/client.js";
-import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
+import type { Pool } from "pg";
 
 import {
   GENESIS_PROJECTION,
   buildGenesisWalletHeadFingerprint,
   buildGetTransactionActionData,
-  createSerializedStreamWriter,
-  createSqlStreamWriterEffects,
+
   fingerprintEndpoint,
   parseGatewayEnvelope,
   projectGenesisState,
@@ -36,6 +31,8 @@ import {
   type ReceiveT0Observer,
   type WalletStateProjection,
 } from "@zucoins/node-core";
+
+import { ensureNodeObserver, persistSqlObservation } from "./sql-observation-persistence.js";
 
 const DEFAULT_LIMITS = {
   readTimeoutMs: 10_000,
@@ -73,37 +70,22 @@ function genesisProjection(): WalletStateProjection {
   };
 }
 
+const EMPTY_ROW_PROJECTION = {
+  walletRole: null,
+  bAmount: null,
+  innerPreimageText: null,
+  step1Signature: null,
+  step2Signature: null,
+  completedTransactionText: null,
+  completedTransactionSha256: null,
+} as const;
+
 /**
  * The one NODE-domain observer row every gateway read on this node is attributed to.
  * Shared with sql-fresh-head-reader.ts so T0 and the landing confirm-read append to the
  * same observation stream rather than two observers for the same node.
  */
-export async function ensureNodeObserver(
-  client: PoolClient,
-  nodeId: string,
-  endpointFingerprint: string,
-): Promise<string> {
-  const existing = await client.query<{ id: string }>(
-    `SELECT id::text AS id FROM observers
-      WHERE domain = 'NODE' AND owner_id = $1::uuid LIMIT 1`,
-    [nodeId],
-  );
-  if (existing.rows[0]?.id !== undefined) return existing.rows[0].id;
-
-  const observerId = randomUUID();
-  await client.query(
-    `INSERT INTO observers (id, domain, owner_id, gateway_endpoint_fingerprint, created_at)
-     VALUES ($1::uuid, 'NODE', $2::uuid, $3, now())
-     ON CONFLICT (domain, owner_id) DO NOTHING`,
-    [observerId, nodeId, endpointFingerprint],
-  );
-  const again = await client.query<{ id: string }>(
-    `SELECT id::text AS id FROM observers
-      WHERE domain = 'NODE' AND owner_id = $1::uuid LIMIT 1`,
-    [nodeId],
-  );
-  return again.rows[0]?.id ?? observerId;
-}
+export { ensureNodeObserver };
 
 /**
  * Build a durable ReceiveT0Observer that OBSERVEs via get_transaction__v1 (read-only)
@@ -131,8 +113,28 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
           {
             endpoints: deps.gatewayUrls,
             limits: DEFAULT_LIMITS,
-            // Durability is owned by createSqlStreamWriterEffects below — not this hook.
-            recorder: { recordObservation: async () => {} },
+            recorder: {
+              recordObservation: async (observation) => {
+                if (!observation.transportAmbiguous) return;
+                await persistSqlObservation({
+                  pool: deps.pool,
+                  nodeId: deps.nodeId,
+                  walletPublicKey,
+                  moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+                  endpointFingerprint: observation.endpointFingerprint,
+                  httpStatus: null,
+                  capture: {
+                    parseResult: "TRANSPORT_ERROR",
+                    rawResponseBytes: new Uint8Array(),
+                    isGenesis: false,
+                    sSignature: "",
+                    pSignature: "",
+                    semanticFingerprint: "",
+                  },
+                  projection: EMPTY_ROW_PROJECTION,
+                });
+              },
+            },
             ...(deps.exchange !== undefined ? { exchange: deps.exchange } : {}),
             ...(deps.maxAttempts !== undefined ? { maxAttempts: deps.maxAttempts } : {}),
             ...(deps.backoffMaxMs !== undefined ? { backoffMaxMs: deps.backoffMaxMs } : {}),
@@ -164,6 +166,23 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
       const envelope = parseGatewayEnvelope(rawBytes);
       if (envelope.classification === "MALFORMED_ENVELOPE") {
         deps.metricsHooks?.onObservationAnomaly("MALFORMED_ENVELOPE");
+        await persistSqlObservation({
+          pool: deps.pool,
+          nodeId: deps.nodeId,
+          walletPublicKey,
+          moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+          endpointFingerprint,
+          httpStatus,
+          capture: {
+            parseResult: "MALFORMED_ENVELOPE",
+            rawResponseBytes: rawBytes,
+            isGenesis: false,
+            sSignature: "",
+            pSignature: "",
+            semanticFingerprint: "",
+          },
+          projection: EMPTY_ROW_PROJECTION,
+        });
         return {
           kind: "UNVERIFIED",
           detail: `T0 envelope malformed: ${envelope.reason}`,
@@ -222,6 +241,23 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
           // verified.verdict here is one of UNVERIFIED_SIGNATURE | WALLET_ROLE_INVALID |
           // MALFORMED_TRANSACTION — all three are closed METRIC_ANOMALY_KINDS values.
           deps.metricsHooks?.onObservationAnomaly(verified.verdict);
+          await persistSqlObservation({
+            pool: deps.pool,
+            nodeId: deps.nodeId,
+            walletPublicKey,
+            moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+            endpointFingerprint,
+            httpStatus,
+            capture: {
+              parseResult: verified.verdict,
+              rawResponseBytes: rawBytes,
+              isGenesis: false,
+              sSignature: "",
+              pSignature: "",
+              semanticFingerprint: "",
+            },
+            projection: EMPTY_ROW_PROJECTION,
+          });
           return { kind: "UNVERIFIED", detail };
         }
         sequenceCapture = {
@@ -244,92 +280,42 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
         };
       }
 
-      const client = await deps.pool.connect();
       try {
-        await client.query("BEGIN");
-        await applyMoneyPathStatementTimeout(
-          client,
-          deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
-        );
-        const observerId = await ensureNodeObserver(
-          client,
-          deps.nodeId,
+        const persisted = await persistSqlObservation({
+          pool: deps.pool,
+          nodeId: deps.nodeId,
+          walletPublicKey,
+          moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
           endpointFingerprint,
-        );
-
-        const wallet = await client.query<{ id: string }>(
-          `SELECT id::text AS id FROM wallets WHERE public_key = $1 LIMIT 1`,
-          [walletPublicKey],
-        );
-        const walletId = wallet.rows[0]?.id ?? null;
-
-        // Pre-mint so APPEND binds a known id; SUPPRESS reuses cursor tip.
-        let allocatedObservationId: string | null = null;
-        const effects = createSqlStreamWriterEffects({
-          sql: {
-            query: async <R>(text: string, params: readonly unknown[]) => {
-              const result = await client.query(text, params as never[]);
-              return { rows: result.rows as R[] };
-            },
-          },
-          project: (): ObservationRowProjection => ({
-            endpointFingerprint,
-            walletId,
-            httpStatus: httpStatus ?? 200,
-            observedAt: new Date(),
-            ...rowProjectionBase,
-          }),
-          allocateObservationId: () => {
-            allocatedObservationId = randomUUID();
-            return allocatedObservationId;
-          },
-          takeAdvisoryLock: true,
+          httpStatus: httpStatus ?? 200,
+          capture: sequenceCapture,
+          projection: rowProjectionBase,
         });
-        const writer = createSerializedStreamWriter(effects);
-        const writeResult = await writer.capture(
-          { observerId, walletPublicKey },
-          sequenceCapture,
-        );
-
-        let observationId: string;
-        if (writeResult.plan.kind === "APPEND") {
-          if (allocatedObservationId === null) {
-            throw new Error("stream writer APPEND without allocated observation id");
-          }
-          observationId = allocatedObservationId;
-        } else {
-          // Exact-byte re-observation: cursor tip is the bindable observation.
-          const tip = await client.query<{ id: string }>(
-            `SELECT last_recorded_observation_id::text AS id
-               FROM wallet_observation_cursors
-              WHERE observer_id = $1::uuid AND wallet_public_key = $2`,
-            [observerId, walletPublicKey],
-          );
-          const tipId = tip.rows[0]?.id;
-          if (tipId === undefined) {
-            throw new Error("stream writer SUPPRESS without cursor tip");
-          }
-          observationId = tipId;
+        // Anomalous relationships (REGRESSION / JUMP / COLLISION / GENESIS_AFTER_HISTORY)
+        // must never surface as VERIFIED — evidence + quarantine committed, but the money
+        // path must fail closed (no RECEIVER_T0 bind / arm off a self-contradicting head).
+        const anomalous =
+          persisted.relationship === "REGRESSION" ||
+          persisted.relationship === "UNEXPLAINED_JUMP" ||
+          persisted.relationship === "GENESIS_AFTER_HISTORY" ||
+          persisted.relationship === "SIGNATURE_COLLISION";
+        if (anomalous) {
+          deps.metricsHooks?.onObservationAnomaly(persisted.relationship);
+          return {
+            kind: "INDETERMINATE",
+            detail: `T0 anomalous relationship ${persisted.relationship} (observation ${persisted.observationId})`,
+          };
         }
-
-        await client.query("COMMIT");
         return {
           kind: "VERIFIED",
-          observationId,
+          observationId: persisted.observationId,
           projection: returnProjection,
         };
       } catch (err) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          /* original */
-        }
         return {
           kind: "INDETERMINATE",
           detail: err instanceof Error ? err.message : "gateway T0 persist failed",
         };
-      } finally {
-        client.release();
       }
     },
   };

@@ -39,6 +39,8 @@ import {
 } from "@zucoins/node-core";
 
 import type { MoneyWorkerLogger } from "./start-money-workers.js";
+import { persistSqlObservation } from "./sql-observation-persistence.js";
+import type { Pool } from "pg";
 
 /** Max candidates advanced per tick. Settling is signer- and network-bound; a small batch keeps
  * one slow gateway exchange from stalling the rest of the money tick. The batch is deliberately
@@ -55,6 +57,12 @@ export type ReceiveSettleVault = Pick<EncryptedWalletKeyStore, "open">;
 export interface ReceiveSettleStepDeps {
   /** The one statement seam. Driver-free so the whole step is drivable against a real server. */
   readonly query: SqlQueryFn;
+  /**
+   * Pool used solely by the transport-ambiguity observation recorder (same connection
+   * model as T0 / fresh-head). Required so ambiguous confirm-reads leave a durable
+   * TRANSPORT_ERROR pair rather than a silent no-op.
+   */
+  readonly pool: Pool;
   readonly vault: ReceiveSettleVault;
   readonly nodeId: string;
   readonly leadership: SignerLeadershipLatch;
@@ -221,17 +229,14 @@ function createLeaseReader(query: SqlQueryFn) {
  * construction — readGatewayAction's parameter type excludes the submit action, so this path
  * cannot become a resubmit (the never-blind-retry rule).
  *
- * Only the head body's step_2_signature is returned. The observation is not persisted here:
- * this is a transient confirm-read whose sole purpose is to decide submit vs observe — it is
- * not the durable terminal observation. The landing step (runReceiveLandingStep, wired into the
- * production tick) performs the durable RECEIVE_TERMINAL_CHECK via
- * sql-fresh-head-reader.ts, whose observation-ledger row becomes the proof's terminal
- * observation. A recorder that wrote nothing here is correct, not a gap: two durable writers
- * for one read would risk a stale observation being pinned as terminal.
+ * Only the head body's step_2_signature is returned on success. Successful heads are NOT
+ * persisted here: this is a transient confirm-read whose sole purpose is to decide submit vs
+ * observe — it is not the durable terminal observation. The landing step
+ * (runReceiveLandingStep) performs the durable RECEIVE_TERMINAL_CHECK via
+ * sql-fresh-head-reader.ts. Transport-ambiguous attempts ARE persisted as TRANSPORT_ERROR
+ * pairs so the anomaly ledger is never empty when the gateway is hostile/flaky.
  *
- * Exported for confirm-read unit test (receive-settle-step.confirm-read.test.ts),
- * which exercises this function directly against a scripted exchange rather than driving the
- * whole runReceiveSettleStep loop through a database.
+ * Exported for confirm-read unit test (receive-settle-step.confirm-read.test.ts).
  */
 export function createReceiverHeadReader(deps: ReceiveSettleStepDeps) {
   return async (receiverPublicKey: string): Promise<string | null> => {
@@ -244,7 +249,35 @@ export function createReceiverHeadReader(deps: ReceiveSettleStepDeps) {
       {
         endpoints: [deps.gateway.endpoint],
         limits: deps.gateway.limits,
-        recorder: { recordObservation: async () => {} },
+        recorder: {
+          recordObservation: async (observation) => {
+            if (!observation.transportAmbiguous) return;
+            await persistSqlObservation({
+              pool: deps.pool,
+              nodeId: deps.nodeId,
+              walletPublicKey: receiverPublicKey,
+              endpointFingerprint: observation.endpointFingerprint,
+              httpStatus: null,
+              capture: {
+                parseResult: "TRANSPORT_ERROR",
+                rawResponseBytes: new Uint8Array(),
+                isGenesis: false,
+                sSignature: "",
+                pSignature: "",
+                semanticFingerprint: "",
+              },
+              projection: {
+                walletRole: null,
+                bAmount: null,
+                innerPreimageText: null,
+                step1Signature: null,
+                step2Signature: null,
+                completedTransactionText: null,
+                completedTransactionSha256: null,
+              },
+            });
+          },
+        },
         exchange: deps.gateway.exchange,
         maxAttempts: deps.gateway.maxAttempts,
         backoffMaxMs: deps.gateway.backoffMaxMs,

@@ -104,7 +104,15 @@ export {
   type SqlExecutor as StreamWriterSqlExecutor,
   type SqlQueryResult as StreamWriterSqlQueryResult,
   type SqlStreamWriterEffectsOptions,
+  type SqlAnomalyRequiredHandler,
 } from "./stream-writer-sql.js";
+
+export {
+  ANOMALY_RECORDER_SQL,
+  createSqlAnomalyRecorder,
+  type SqlAnomalyRecorder,
+  type SqlAnomalyRecorderInput,
+} from "./anomaly-recorder-sql.js";
 
 export {
   inboundReceiverLinkMatchesBaselineS,

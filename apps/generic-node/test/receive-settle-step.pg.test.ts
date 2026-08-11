@@ -292,6 +292,12 @@ const logger = {
 function makeDeps(exchange: ReturnType<typeof makeExchange>): ReceiveSettleStepDeps {
   return {
     query,
+    // Success-path confirm-read never opens the pool; required for TRANSPORT_ERROR recorder.
+    pool: {
+      connect: async () => {
+        throw new Error("settle-step pool unused on non-ambiguous path");
+      },
+    } as never,
     vault,
     nodeId: NODE_ID,
     leadership: { held: true },

@@ -24,6 +24,7 @@
 // observe counter shows live deliveries carry verifiable VAPID and every ACTIVE row has a key.
 
 import { isValidEndpointId } from "./endpoint.js";
+import type { PushReceiveMetrics } from "./outcome-metrics.js";
 import { parsePushCleartext, resolveTransferCodeFromEnvelope } from "./payload.js";
 import type {
   PushAuditSink,
@@ -64,6 +65,11 @@ export interface PushReceiverDeps {
   readonly vapidMode?: PushVapidMode;
   /** Optional counter seam (app wires MetricsHooks). */
   readonly onVapidOutcome?: (outcome: PushVapidOutcome) => void;
+  /**
+   * Optional outcome metrics (ZTR-1154). Injected port — never a module-level metrics
+   * import. Emits enqueued / no_transfer_code / decrypt_failed; shape label on enqueue.
+   */
+  readonly metrics?: PushReceiveMetrics;
 }
 
 export type PushReceiveOutcome =
@@ -177,6 +183,7 @@ export function createPushReceiver(deps: PushReceiverDeps): PushReceiver {
           await audit("push.receive_decrypt_failed", row.walletId, {
             error: err instanceof Error ? err.message : String(err),
           });
+          deps.metrics?.onOutcome("decrypt_failed", "none");
           return "decrypt_failed";
         }
 
@@ -190,6 +197,7 @@ export function createPushReceiver(deps: PushReceiverDeps): PushReceiver {
           const resolved = resolveTransferCodeFromEnvelope(parsePushCleartext(cleartext));
           if (resolved === null) {
             await audit("push.receive_no_code", row.walletId, {});
+            deps.metrics?.onOutcome("no_transfer_code", "none");
             return "no_transfer_code";
           }
 
@@ -202,6 +210,7 @@ export function createPushReceiver(deps: PushReceiverDeps): PushReceiver {
             return "refused";
           }
           await audit("push.receive_enqueued", row.walletId, { shape: resolved.shape });
+          deps.metrics?.onOutcome("enqueued", resolved.shape);
           return "enqueued";
         } catch (err) {
           // Body/AEAD/sink failure: discard only. Sealed material opened fine — do not
@@ -209,6 +218,7 @@ export function createPushReceiver(deps: PushReceiverDeps): PushReceiver {
           await audit("push.receive_decrypt_failed", row.walletId, {
             error: err instanceof Error ? err.message : String(err),
           });
+          deps.metrics?.onOutcome("decrypt_failed", "none");
           return "decrypt_failed";
         }
       } finally {

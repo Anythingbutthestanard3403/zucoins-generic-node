@@ -1,0 +1,2 @@
+# Raw byte golden artifacts — digest-pinned; never reformat.
+packages/generic-node-contracts/goldens/**

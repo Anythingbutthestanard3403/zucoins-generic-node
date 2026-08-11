@@ -66,11 +66,12 @@ const SYNTHETIC_TRIGGERS: Readonly<Record<SafetyAlertSignal, number>> = {
   queue_caps: 0.9,
   signer_loss: 1,
   backup_age: 86_400_000,
+  push_no_transfer_code_streak: 20,
 };
 
-describe("safety alerts — ten signal classes", () => {
+describe("safety alerts — signal catalogue", () => {
   describe("rule catalogue", () => {
-    it("defines exactly the ten required signal classes", () => {
+    it("defines the required signal classes in order", () => {
       expect([...SAFETY_ALERT_SIGNALS]).toEqual([
         "invariant_breach",
         "duplicate_submit_attempt",
@@ -82,8 +83,9 @@ describe("safety alerts — ten signal classes", () => {
         "queue_caps",
         "signer_loss",
         "backup_age",
+        "push_no_transfer_code_streak",
       ]);
-      expect(SAFETY_ALERT_RULES).toHaveLength(10);
+      expect(SAFETY_ALERT_RULES).toHaveLength(SAFETY_ALERT_SIGNALS.length);
       expect(ALERT_METRICS).toEqual(SAFETY_ALERT_SIGNALS);
     });
 
@@ -99,6 +101,7 @@ describe("safety alerts — ten signal classes", () => {
         queue_caps: "P1",
         signer_loss: "P1",
         backup_age: "P1",
+        push_no_transfer_code_streak: "P1",
       };
       for (const rule of SAFETY_ALERT_RULES) {
         expect(ALERT_SEVERITIES).toContain(rule.severity);
@@ -127,6 +130,9 @@ describe("safety alerts — ten signal classes", () => {
       expect(SAFETY_ALERT_RULE_BY_SIGNAL.queue_caps.citation).toMatch(/503/);
       expect(SAFETY_ALERT_RULE_BY_SIGNAL.signer_loss.citation).toMatch(/[Ss]igner unavailable/);
       expect(SAFETY_ALERT_RULE_BY_SIGNAL.backup_age.citation).toMatch(/backup cadence/);
+      expect(SAFETY_ALERT_RULE_BY_SIGNAL.push_no_transfer_code_streak.citation).toMatch(
+        /no_transfer_code|ZTR-1154/,
+      );
     });
 
     it("marks lease_age diagnostic-only and never automatic release", () => {
@@ -261,7 +267,7 @@ describe("safety alerts — ten signal classes", () => {
   });
 
   describe("synthetic per-signal triggers", () => {
-    it("fires exactly its own rule and no others for each of the ten signals", () => {
+    it("fires exactly its own rule and no others for each catalogue signal", () => {
       const evaluator = createSafetyAlertEvaluator({
         backupMaxAgeMs: SYNTHETIC_TRIGGERS.backup_age,
       });
@@ -279,6 +285,7 @@ describe("safety alerts — ten signal classes", () => {
           queue_caps: 0,
           signer_loss: 0,
           backup_age: 0,
+          push_no_transfer_code_streak: 0,
         };
         readings[signal] = SYNTHETIC_TRIGGERS[signal];
 
@@ -317,7 +324,7 @@ describe("safety alerts — ten signal classes", () => {
   });
 
   describe("deriveSafetyAlertReadings", () => {
-    it("maps metric inputs onto the ten signals without cross-talk", () => {
+    it("maps metric inputs onto the catalogue signals without cross-talk", () => {
       const input: SafetyAlertMetricInput = {
         ...emptySafetyAlertMetricInput(),
         invariantBreachCount: 2,
@@ -334,6 +341,7 @@ describe("safety alerts — ten signal classes", () => {
         signerLeadershipHeld: 0,
         signerInFlightAmbiguous: 1,
         backupAgeMs: 1_000,
+        pushNoTransferCodeStreak: 21,
       };
       const readings = deriveSafetyAlertReadings(input);
       expect(readings.invariant_breach).toBe(2);
@@ -347,6 +355,7 @@ describe("safety alerts — ten signal classes", () => {
       expect(readings.queue_caps).toBe(0.95);
       expect(readings.signer_loss).toBe(2);
       expect(readings.backup_age).toBe(1_000);
+      expect(readings.push_no_transfer_code_streak).toBe(21);
     });
 
     it("queue_caps tracks pinned ratio so a consumer-less PINNED build-up is visible", () => {
@@ -601,7 +610,7 @@ describe("safety alerts — ten signal classes", () => {
       expect(snapshot.thresholds.some((t) => t.signal === "backup_age")).toBe(true);
       expect(snapshot.escalation).toEqual(DEFAULT_ESCALATION_PATH);
       expect(snapshot.channels).toEqual(["log"]);
-      expect(snapshot.rules).toHaveLength(10);
+      expect(snapshot.rules).toHaveLength(SAFETY_ALERT_SIGNALS.length);
       expect(snapshot.backupAgeThresholdSource).toBe("operator-backup-cadence");
       expect(snapshot.leaseAgeAutomaticRelease).toBe(false);
     });

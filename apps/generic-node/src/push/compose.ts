@@ -17,14 +17,20 @@
 import type { Pool } from "pg";
 
 import {
+  createPushNoTransferCodeStreakTracker,
+  createPushReceiveMetricsPort,
   createPushReceiver,
   createPushSecretSealer,
   createPushSubscriptionService,
+  DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,
   PushSubscriptionRequiredError,
+  type MetricsHooks,
+  type PushNoTransferCodeStreakAlert,
   type PushSubscriptionService,
   type PushVapidMode,
   type PushVapidOutcome,
   type PushWalletRef,
+  type SafetyAlertEvaluator,
 } from "@zucoins/node-core";
 
 import { createEceDecryptor } from "./ece-decryptor.js";
@@ -86,6 +92,17 @@ export interface ComposePushDeps {
    */
   readonly sink: (transferCodeEncoded: string) => boolean;
   readonly logger: PushCompositionLogger;
+  /**
+   * Optional metrics hooks (ZTR-1154). When set, push receive outcomes feed
+   * gn_push_receive_total and the consecutive no_transfer_code streak gauge.
+   */
+  readonly metricsHooks?: MetricsHooks;
+  /**
+   * Optional safety-alert evaluator (ZTR-1154). When set, a streak that reaches
+   * the threshold pages via SAFETY_ALERT_SIGNALS push_no_transfer_code_streak
+   * (log + webhook escalation), not only a local logger.error line.
+   */
+  readonly safetyAlertEvaluator?: SafetyAlertEvaluator;
 }
 
 export interface PushComposition {
@@ -181,7 +198,41 @@ export function composePush(deps: ComposePushDeps): PushComposition {
     },
   };
 
+  // ZTR-1154: consecutive no_transfer_code streak (shape-break detector). Process-local;
+  // threshold rationale is on DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD.
+  // Gauge publish runs after observe (createPushReceiveMetricsPort order) so Prom
+  // sees the post-increment streak at the threshold event.
+  const noCodeStreak = createPushNoTransferCodeStreakTracker({
+    threshold: DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,
+    onAlert: (alert: PushNoTransferCodeStreakAlert) => {
+      deps.logger.error(
+        `push: ALERT ${alert.kind} streak=${alert.streak} threshold=${alert.threshold} — ${alert.message}`,
+      );
+      const evaluator = deps.safetyAlertEvaluator;
+      if (evaluator !== undefined) {
+        void evaluator
+          .evaluateAndDispatch("push_no_transfer_code_streak", alert.streak)
+          .catch((err: unknown) => {
+            deps.logger.error("push: safety-alert dispatch failed for push_no_transfer_code_streak", err);
+          });
+      }
+    },
+  });
+  const pushReceiveMetrics = createPushReceiveMetricsPort({
+    streak: noCodeStreak,
+    sink:
+      deps.metricsHooks === undefined
+        ? undefined
+        : {
+            onOutcome(outcome, shape) {
+              deps.metricsHooks?.onPushReceive(outcome, shape);
+              deps.metricsHooks?.setPushNoTransferCodeStreak(noCodeStreak.streak());
+            },
+          },
+  });
+
   return {
+
     service,
 
     async onPushDelivery(endpointId, body, authorizationHeader) {
@@ -200,6 +251,7 @@ export function composePush(deps: ComposePushDeps): PushComposition {
         nodeOrigin: deps.nodeOrigin,
         vapidMode: deps.vapidMode ?? "observe",
         onVapidOutcome: deps.onVapidOutcome,
+        metrics: pushReceiveMetrics,
       });
       const outcome = await perRow.receive(endpointId, body, authorizationHeader);
       deps.logger.info(`push: delivery outcome=${outcome}`);

@@ -5,7 +5,7 @@ posture text are in [`alert-reference.md`](alert-reference.md), which is generat
 source; this document is the part that needs judgement — what to check, what is safe, and
 what will make it worse.
 
-Five of the ten signals **cannot fire today** (ZTR-1144): their inputs are hardcoded zero.
+Five of the original ten OPS signals **cannot fire today** (ZTR-1144): their inputs are hardcoded zero.
 Their sections are still here, because the underlying condition is real even when the alert
 is not, and because [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml) watches
 proxy metrics for several of them. Silence from an unbound signal is not an all-clear.
@@ -269,6 +269,35 @@ suppressed entirely when there has never been a successful backup, which is exac
 case. `GenericNodeBackupNeverSucceeded` covers that gap; make sure it is loaded.
 
 ---
+
+
+## push_no_transfer_code_streak
+
+**P1. Live:** `gn_push_no_transfer_code_streak` (process-local gauge) and in-process
+`SAFETY_ALERT_SIGNALS` evaluation from `composePush` when the consecutive count first
+reaches the threshold (default 20). Prometheus rule `GenericNodePushNoTransferCodeStreak`
+watches the same gauge.
+
+**Means.** The inbound Web Push channel returned `no_transfer_code` this many times in a
+row with no intervening `enqueued`. A single miss is normal (non-transfer notification).
+A sustained run is the silent-money-stop failure mode: the wallet reshaped the delivered
+envelope, `resolveTransferCodeFromEnvelope` returns null, the route still answers **204**
+by design, and nothing else goes red unless this signal fires.
+
+**Check.** Recent `push.receive_no_code` audit rows. A freshly decrypted live cleartext
+against `packages/generic-node-contracts/goldens/push/delivered-envelope.data.v1.json.txt`.
+`gn_push_receive_total{outcome,shape}` — whether any `enqueued` still occurs and whether
+shape labels migrated. Whether the subscription is still ACTIVE.
+
+**Safe.** Preserve evidence (audit rows, a redacted cleartext sample). Update
+`payload.ts` precedence and refresh the golden in the same reviewed commit if the nest
+moved. Page on-call; treat as a primary external-receive detection outage for the push
+channel.
+
+**Forbidden.** Changing the 204 discard response to "fix" the miss. Blind-retrying
+submits. Treating readiness green or other unbound signal silence as an all-clear on
+push. Deleting audit rows to "clear" the streak (the gauge is process-local; restart
+zeros it without fixing the shape).
 
 ## When you are not sure which section applies
 

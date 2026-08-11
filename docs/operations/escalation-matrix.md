@@ -25,7 +25,7 @@ Channels widen monotonically: a higher severity never drops a channel a lower on
 | Severity | Channels | Signals that reach this severity |
 | --- | --- | --- |
 | P0 | `log`, `webhook` | `duplicate_submit_attempt`, `invariant_breach`, `signer_loss`, `storage_pressure` |
-| P1 | `log`, `webhook` | `backup_age`, `endpoint_disagreement`, `lease_age`, `path_gap`, `queue_caps`, `regression`, `signer_loss`, `storage_pressure` |
+| P1 | `log`, `webhook` | `backup_age`, `endpoint_disagreement`, `lease_age`, `path_gap`, `push_no_transfer_code_streak`, `queue_caps`, `regression`, `signer_loss`, `storage_pressure` |
 | P2 | `log` | — |
 
 ## P0 signals and their required posture

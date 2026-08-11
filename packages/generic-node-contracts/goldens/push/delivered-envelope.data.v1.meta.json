@@ -1,0 +1,42 @@
+{
+  "concern": "push",
+  "slice": "push-envelope.1",
+  "golden": "DELIVERED Web Push cleartext envelope — FCM/Mozilla (data.type_data) shape",
+  "files": {
+    "cleartext_json": "delivered-envelope.data.v1.json.txt"
+  },
+  "digests": {
+    "cleartext_json_sha256": "5528e5a101730d3766d4af96ea8cbc7998fb63575fe0b5d5d93a76400df02f42",
+    "cleartext_json_len": 675
+  },
+  "shape": "data",
+  "shapes_captured": [
+    "data"
+  ],
+  "shapes_not_captured": [
+    "aps",
+    "send_side_fallback"
+  ],
+  "shapes_not_captured_note": "Only the FCM/Mozilla data.type_data shape is pinned. APNs (aps.data.type_data) and the send-side notification_type_data fallback remain covered by hand-written precedence cases in node-core push-payload-and-seal.test.ts, not by this golden.",
+  "provenance": {
+    "envelope_source": "Canonical constructor of the DELIVERED Web Push cleartext nesting that wallet.zucoins.com reshapes sender action_data into before RFC 8291 aes128gcm encryption. Nesting is the same shape the wallet service worker reads via event.data.json() (title/body + data.{id,type_name,type_data}). NOT a live post-decrypt capture of FCM/APNs ciphertext — no production wallet subscription was available to this implementer run. Supersedes the prior reconstructed mini-nest ({data:{type_data:{transfer_code_encoded,type}}}) that falsely advertised originKind wallet-capture.",
+    "constructor_authority": [
+      "Zucoins Merchant Wallets apps/node/src/receivers/push/route.test.ts notificationBody() — D8.92 DELIVERED FCM/Mozilla fixture used against live push crypto (title/body/data.id/type_name/type_data)",
+      "zucoins-wallet-mirror wallet-clone service-worker.js §505-543 — standard FCM/Mozilla branch reads notification.data.type_data",
+      "packages/node-core/src/push/payload.ts — resolveTransferCodeFromEnvelope data branch (type_data.transfer_code_encoded)"
+    ],
+    "wallet_mirror": "zucoins-wallet-mirror/wallet-clone/*/site/service-worker.js (FCM/Mozilla branch)",
+    "wallet_version": "v200.6 coupling audit 2026-08-06/07; SW nesting confirmed; merchant D8.92 2026-07-16",
+    "capture_date": "2026-08-11",
+    "origin_kind": "canonical-constructor",
+    "ac_claim": "ZTR-1154 AC asked for a real captured post-decrypt envelope. This golden honestly supersedes that claim: nesting is constructor-frozen from the merchant/wallet-SW delivered shape (proof citations above), not a live ciphertext capture. Runtime shape-break detection is the streak alert (gn_push_no_transfer_code_streak + SAFETY_ALERT_SIGNALS push_no_transfer_code_streak), which is what catches wallet changes between golden refreshes.",
+    "sanitisation": "transfer_code_encoded substituted with the already-committed digest-pinned RECEIVE transfer-code golden (goldens/transfer-code/receive-code.v1.b64url.txt, sha256 104eb00c3bda958b82b7ce5a24e582dd9efa3e63d2192838fe26b5b23dcb2bab). That code is a deterministic test vector (Ed25519 seeds 02/03), never a live funded transfer. Envelope nesting/field names are the pinned surface; the code body is structural ballast only.",
+    "hand_verified": "Shape fields and nesting hand-checked against resolveTransferCodeFromEnvelope data-branch precedence and merchant notificationBody(). transfer_code_encoded byte-identical to receive-code.v1.b64url.txt. No trailing newline on cleartext file. type_name=transfer_code__v1 (TRANSFER_CODE_NOTIFICATION_TYPE_NAME / D8.70).",
+    "regenerated_by": "Offline golden-writer (quarantined per packages/generic-node-contracts/CONTRACT.md \"Golden regeneration and quarantine\"; no committed test writes a golden).",
+    "decisions": [
+      "push-delivered-envelope-shape",
+      "transfer-code-encoding",
+      "D8.92"
+    ]
+  }
+}

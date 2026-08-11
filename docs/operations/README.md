@@ -216,3 +216,36 @@ node scripts/gen-operator-alert-docs.mjs --check   # exit 2 on drift
 
 `apps/generic-node/test/operator-docs.census.test.ts` fails if a signal or attention reason
 loses its documentation, or if a generated file stops matching a fresh render.
+
+## Push delivered-envelope shape (ZTR-1154)
+
+Inbound Web Push is the primary external-receive detection channel. The route answers
+**204 on every path** (discard semantics) — a reshape of the wallet envelope therefore
+looks healthy from outside.
+
+**Detection**
+
+| Signal | Source | Meaning |
+| --- | --- | --- |
+| `gn_push_receive_total{outcome,shape}` | `createPushReceiver` via injected metrics port | Per-outcome counter. `enqueued` carries `shape` ∈ {`aps`,`data`,`send_side_fallback`}; misses use `shape="none"`. |
+| `gn_push_no_transfer_code_streak` | process-local gauge | Consecutive `no_transfer_code` since the last `enqueued`. |
+| log `push: ALERT push_no_transfer_code_streak` | `composePush` streak tracker | Fires once when the streak first reaches the threshold. |
+| `SAFETY_ALERT_SIGNALS` `push_no_transfer_code_streak` | `composePush` → `safetyAlertEvaluator` + Prom rule | Pageable P1 (log+webhook escalation); same threshold 20. |
+
+**Threshold:** `DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD = 20` consecutive
+`no_transfer_code` with no intervening `enqueued`.
+
+**Rationale:** a single `no_transfer_code` is normal (non-transfer notifications). Twenty
+in a row on a live subscription is far above ambient noise for a funded node and short
+enough that a wallet-side envelope reshape pages within one delivery burst rather than
+being found by a later volume review. A consecutive count needs no clock, survives scrape
+gaps, and matches the failure mode (sustained shape miss).
+
+**Golden:** `packages/generic-node-contracts/goldens/push/delivered-envelope.data.v1.json.txt`
+pins the FCM/Mozilla cleartext shape; `resolveTransferCodeFromEnvelope` is exercised
+against those exact bytes. APNs was not captured — see the golden `meta.json`.
+
+**Operator action on alert:** compare a freshly decrypted live cleartext against the
+golden; if the nest moved, update `payload.ts` precedence and refresh the golden in the
+same reviewed commit. Do **not** change the 204 response.
+

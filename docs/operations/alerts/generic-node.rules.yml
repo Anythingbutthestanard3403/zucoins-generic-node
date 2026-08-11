@@ -152,6 +152,27 @@ groups:
           summary: "Configured backup RPO is breached"
           runbook: docs/operations/restore.md#backup-cadence
 
+
+      # --- push_no_transfer_code_streak (P1, ZTR-1154) ---------------------------
+      # DEFAULT_ALERT_THRESHOLDS / DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD: >= 20.
+      # Process-local gauge published on every push receive outcome. A single miss is
+      # normal; a sustained run with no intervening enqueued is a delivered-envelope
+      # shape break (wallet reshape) while the route still answers 204.
+      - alert: GenericNodePushNoTransferCodeStreak
+        expr: gn_push_no_transfer_code_streak >= 20
+        for: 0m
+        labels:
+          severity: P1
+          signal: push_no_transfer_code_streak
+        annotations:
+          summary: "Push no_transfer_code streak at {{ $value }} (shape-break detector)"
+          posture: >-
+            Page operator. Compare a freshly decrypted live cleartext against
+            goldens/push/delivered-envelope.data.v1; if the nest moved, update
+            payload.ts precedence and refresh the golden in the same reviewed commit.
+            Do not change the 204 discard response.
+          runbook: docs/operations/incidents.md#push_no_transfer_code_streak
+
   - name: generic-node-direct-metrics
     interval: 30s
     rules:

@@ -36,6 +36,7 @@ const EXPECTATIONS: Readonly<Record<string, FixtureExpectation>> = {
   "artifacts/zp-receive-expected-v1": { byteClass: "suite-tuple", originKind: "canonical-constructor", captureDate: "2026-07-20" },
   "artifacts/zp-send-external-expected-v1": { byteClass: "suite-tuple", originKind: "canonical-constructor", captureDate: "2026-07-20" },
   "event-commit/commit.vectors": { byteClass: "unsigned-evidence", originKind: "canonical-constructor", captureDate: "2026-07-19" },
+  "push/delivered-envelope.data.v1": { byteClass: "unsigned-evidence", originKind: "canonical-constructor", captureDate: "2026-08-11" },
   "receive-golden/attack-vectors": { byteClass: "signed-preimage", originKind: "canonical-constructor", captureDate: "2026-07-21" },
   "receive-golden/gen": { byteClass: "signed-preimage", originKind: "canonical-constructor", captureDate: "2026-07-19" },
   "receive-golden/negative-vectors": { byteClass: "signed-preimage", originKind: "canonical-constructor", captureDate: "2026-07-19" },

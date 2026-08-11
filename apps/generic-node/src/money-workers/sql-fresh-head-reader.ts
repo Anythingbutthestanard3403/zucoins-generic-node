@@ -249,6 +249,18 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
         },
         projection: rowProjectionBase,
       });
+      // Landing oracle must not mint proofs from anomalous heads. Evidence is durable;
+      // the read fails closed so terminal_observation_id cannot pin a REGRESSION/JUMP.
+      const anomalous =
+        persisted.relationship === "REGRESSION" ||
+        persisted.relationship === "UNEXPLAINED_JUMP" ||
+        persisted.relationship === "GENESIS_AFTER_HISTORY" ||
+        persisted.relationship === "SIGNATURE_COLLISION";
+      if (anomalous) {
+        throw new FreshHeadReadError(
+          `head anomalous relationship ${persisted.relationship} (observation ${persisted.observationId})`,
+        );
+      }
       return { observationId: persisted.observationId, envelope };
     } catch (err) {
       throw err instanceof FreshHeadReadError

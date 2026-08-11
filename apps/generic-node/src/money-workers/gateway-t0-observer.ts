@@ -291,6 +291,21 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
           capture: sequenceCapture,
           projection: rowProjectionBase,
         });
+        // Anomalous relationships (REGRESSION / JUMP / COLLISION / GENESIS_AFTER_HISTORY)
+        // must never surface as VERIFIED — evidence + quarantine committed, but the money
+        // path must fail closed (no RECEIVER_T0 bind / arm off a self-contradicting head).
+        const anomalous =
+          persisted.relationship === "REGRESSION" ||
+          persisted.relationship === "UNEXPLAINED_JUMP" ||
+          persisted.relationship === "GENESIS_AFTER_HISTORY" ||
+          persisted.relationship === "SIGNATURE_COLLISION";
+        if (anomalous) {
+          deps.metricsHooks?.onObservationAnomaly(persisted.relationship);
+          return {
+            kind: "INDETERMINATE",
+            detail: `T0 anomalous relationship ${persisted.relationship} (observation ${persisted.observationId})`,
+          };
+        }
         return {
           kind: "VERIFIED",
           observationId: persisted.observationId,

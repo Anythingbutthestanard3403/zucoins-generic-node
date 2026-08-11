@@ -637,29 +637,49 @@ describe("lease-preservation enforce at apply boundary (D3)", () => {
 });
 
 describe("multi-effect apply atomicity (D5)", () => {
-  it("GATEWAY + operationId null throws with zero durable mutation", async () => {
+  it("GATEWAY + operationId null applies wallet halt + audit; skips attention stamp", async () => {
     const store = seededStore({
       wallet: leasedWallet({ signingHalted: false }),
       operation: liveOp("AWAITING_REDEMPTION"),
     });
     const plan = planAnomalyAction({ anomaly: "GATEWAY_ENDPOINT_DISAGREEMENT" });
-    await expect(
-      applyAnomalyAction(store, {
-        plan,
-        walletId: WALLET_ID,
-        operationId: null,
-        nowMs: 1_700_000_000_000,
-      }),
-    ).rejects.toThrow(/requires operationId for NEEDS_ATTENTION/);
+    const result = await applyAnomalyAction(store, {
+      plan,
+      walletId: WALLET_ID,
+      operationId: null,
+      nowMs: 1_700_000_000_000,
+    });
 
-    const wallet = await store.getWallet(WALLET_ID);
-    expect(wallet?.signingHalted).toBe(false);
-    expect(wallet?.activeLeaseId).toBe(LEASE_ID);
-    expect(wallet?.state).toBe("PINNED");
+    // Wallet/audit portions must still land so evidence transactions never roll back for
+    // missing operation context (ZTR-1127 Q5 / JUMP class).
+    expect(result.wallet?.signingHalted).toBe(true);
+    expect(result.wallet?.activeLeaseId).toBe(LEASE_ID);
+    expect(result.needsAttentionEvent).toBeNull();
     const op = await store.getOperation(OP_ID);
     expect(op?.attentionRequired).toBe(false);
     expect(op?.status).toBe("AWAITING_REDEMPTION");
-    expect(store.getAuditLog()).toHaveLength(0);
+    expect(store.getAuditLog()).toHaveLength(1);
+    expect(store.getAuditLog()[0]!.action).toBe("anomaly.halt_wallet_operation");
+  });
+
+  it("UNEXPLAINED_JUMP + operationId null audits without throwing", async () => {
+    const store = seededStore({
+      wallet: leasedWallet(),
+      operation: liveOp("READY"),
+    });
+    const plan = planAnomalyAction({ anomaly: "UNEXPLAINED_JUMP" });
+    const result = await applyAnomalyAction(store, {
+      plan,
+      walletId: WALLET_ID,
+      operationId: null,
+      nowMs: 1_700_000_000_000,
+    });
+    expect(result.needsAttentionEvent).toBeNull();
+    expect(result.leaseReleased).toBe(false);
+    expect(store.getAuditLog()).toHaveLength(1);
+    expect(store.getAuditLog()[0]!.action).toBe("anomaly.needs_attention");
+    const op = await store.getOperation(OP_ID);
+    expect(op?.attentionRequired).toBe(false);
   });
 
   it("GATEWAY + unknown operationId throws with zero durable mutation", async () => {

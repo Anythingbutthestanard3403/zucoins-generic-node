@@ -97,6 +97,8 @@ function makeDeps(exchange: GatewayExchangeTransport): ReceiveSettleStepDeps {
     query: async () => {
       throw new Error("query must not be called by createReceiverHeadReader");
     },
+    // Successful confirm-read never opens the pool; transport-ambiguous path would.
+    pool: { connect: async () => { throw new Error("pool unused on success path"); } } as never,
     vault,
     nodeId: "00000000-0000-4000-8000-00000000000a",
     leadership: { held: true },

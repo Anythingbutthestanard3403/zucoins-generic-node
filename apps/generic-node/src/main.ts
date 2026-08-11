@@ -1206,8 +1206,14 @@ async function main(): Promise<void> {
             maxRequestBytes: 1_048_576,
             maxResponseBytes: 4_194_304,
           },
+          // Boot readiness smoke only — not a money-workers custody path. No wallet key
+          // is known here (empty transaction_id probe), so there is nothing to attribute
+          // a TRANSPORT_ERROR pair to. Money-path readers all route through
+          // persistSqlObservation (see inert-recorder gate test).
           recorder: {
-            recordObservation: async () => {},
+            recordObservation: async () => {
+              /* readiness smoke: intentionally non-durable */
+            },
           },
           exchange: gatewayExchange,
           maxAttempts: config.GATEWAY_READ_RETRY_MAX_ATTEMPTS,

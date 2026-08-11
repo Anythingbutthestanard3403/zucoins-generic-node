@@ -1,5 +1,7 @@
 // SQL ports for RECEIVE candidate intake.
 
+import type { Pool } from "pg";
+
 import {
   GENESIS_PROJECTION,
   buildGetTransactionActionData,
@@ -19,6 +21,8 @@ import {
   type SenderPreflightObserver,
   type SqlQueryFn,
 } from "@zucoins/node-core";
+
+import { persistSqlObservation } from "./sql-observation-persistence.js";
 
 const LOCATE_SQL = `
   SELECT o.id::text AS operation_id,
@@ -192,6 +196,8 @@ const DEFAULT_LIMITS: GatewayLimits = {
 };
 
 export function createGatewaySenderPreflightObserver(deps: {
+  readonly pool: Pool;
+  readonly nodeId: string;
   readonly endpoint: string;
   readonly limits?: GatewayLimits;
   readonly exchange?: GatewayExchangeTransport;
@@ -199,6 +205,7 @@ export function createGatewaySenderPreflightObserver(deps: {
   readonly maxAttempts?: number;
   /** GATEWAY_READ_BACKOFF_MAX_MS — absent resolves to the read primitive's default. */
   readonly backoffMaxMs?: number;
+  readonly moneyPathStatementTimeoutMs?: number;
 }): SenderPreflightObserver {
   return {
     async observe(senderPubkey, _role): Promise<SenderPreflightObservation> {
@@ -211,7 +218,36 @@ export function createGatewaySenderPreflightObserver(deps: {
           {
             endpoints: [deps.endpoint],
             limits: deps.limits ?? DEFAULT_LIMITS,
-            recorder: { recordObservation: async () => {} },
+            recorder: {
+              recordObservation: async (observation) => {
+                if (!observation.transportAmbiguous) return;
+                await persistSqlObservation({
+                  pool: deps.pool,
+                  nodeId: deps.nodeId,
+                  walletPublicKey: senderPubkey,
+                  moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
+                  endpointFingerprint: observation.endpointFingerprint,
+                  httpStatus: null,
+                  capture: {
+                    parseResult: "TRANSPORT_ERROR",
+                    rawResponseBytes: new Uint8Array(),
+                    isGenesis: false,
+                    sSignature: "",
+                    pSignature: "",
+                    semanticFingerprint: "",
+                  },
+                  projection: {
+                    walletRole: null,
+                    bAmount: null,
+                    innerPreimageText: null,
+                    step1Signature: null,
+                    step2Signature: null,
+                    completedTransactionText: null,
+                    completedTransactionSha256: null,
+                  },
+                });
+              },
+            },
             ...(deps.exchange !== undefined ? { exchange: deps.exchange } : {}),
             ...(deps.maxAttempts !== undefined ? { maxAttempts: deps.maxAttempts } : {}),
             ...(deps.backoffMaxMs !== undefined ? { backoffMaxMs: deps.backoffMaxMs } : {}),

@@ -90,3 +90,31 @@ describe("createSqlAnomalyRecorder", () => {
     expect(params[1][5]).toBe("REGRESSION");
   });
 });
+
+describe("createSqlStreamWriterEffects onAnomalyRequired gate", () => {
+  it("throws before cursor upsert when anomalyRequired and handler is missing", async () => {
+    const { createSqlStreamWriterEffects } = await import("./stream-writer-sql.js");
+    const { createSerializedStreamWriter } = await import("./capture-writer.js");
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("pg_advisory") || sql.includes("wallet_observation_cursors")) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO gateway_observations")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    });
+    // Cast forces the runtime path that a future optional-omit would hit.
+    const effects = createSqlStreamWriterEffects({
+      sql: { query },
+      project: () => ({ endpointFingerprint: "a".repeat(64) }),
+      takeAdvisoryLock: false,
+      onAnomalyRequired: undefined as never,
+    });
+    const writer = createSerializedStreamWriter(effects);
+    const capture = malformedCapture(Uint8Array.from([1, 2, 3]));
+    await expect(
+      writer.capture(key, capture),
+    ).rejects.toThrow(/onAnomalyRequired is required when plan\.anomalyRequired/);
+  });
+});

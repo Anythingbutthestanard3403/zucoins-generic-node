@@ -183,6 +183,8 @@ const CAP_C = headCapture({
   fpLabel: "fpC",
 });
 
+const onAnomalyRequiredNoOp = async (): Promise<void> => {};
+
 const project = (capture: SequenceCapture) => ({
   endpointFingerprint: ENDPOINT_FP,
   walletId: null as string | null,
@@ -320,6 +322,7 @@ describeIfPg("observation-stores real-PG behaviour (hermetic scratch DB)", () =>
       sql,
       project,
       takeAdvisoryLock: false,
+      onAnomalyRequired: onAnomalyRequiredNoOp,
     });
     const writer = createSerializedStreamWriter(effects);
 
@@ -357,7 +360,7 @@ describeIfPg("observation-stores real-PG behaviour (hermetic scratch DB)", () =>
     const sql = makePsqlExecutor(scratchDb);
 
     {
-      const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false });
+      const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false, onAnomalyRequired: onAnomalyRequiredNoOp });
       const writer = createSerializedStreamWriter(effects);
       const r1 = await writer.capture(key, CAP_A);
       const r2 = await writer.capture(key, CAP_B);
@@ -368,7 +371,7 @@ describeIfPg("observation-stores real-PG behaviour (hermetic scratch DB)", () =>
     }
 
     {
-      const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false });
+      const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false, onAnomalyRequired: onAnomalyRequiredNoOp });
       const writer = createSerializedStreamWriter(effects);
       const r3 = await writer.capture(key, CAP_C);
       expect(r3.plan.kind).toBe("APPEND");
@@ -397,7 +400,7 @@ describeIfPg("observation-stores real-PG behaviour (hermetic scratch DB)", () =>
   it("test-14: two observers on the same public key keep independent cursors and sequences", async () => {
     const pk = `${"F".repeat(43)}=`;
     const sql = makePsqlExecutor(scratchDb);
-    const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false });
+    const effects = createSqlStreamWriterEffects({ sql, project, takeAdvisoryLock: false, onAnomalyRequired: onAnomalyRequiredNoOp });
     const writer = createSerializedStreamWriter(effects);
     const node: ObservationStreamKey = { observerId: OBSERVER_NODE, walletPublicKey: pk };
     const platform: ObservationStreamKey = {

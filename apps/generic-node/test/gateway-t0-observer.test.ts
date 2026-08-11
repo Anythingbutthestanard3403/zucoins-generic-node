@@ -31,6 +31,7 @@ import {
 
 import { createGatewayT0Observer } from "../src/money-workers/gateway-t0-observer.js";
 import { createSqlFreshHeadReader } from "../src/money-workers/sql-fresh-head-reader.js";
+import { persistSqlObservation } from "../src/money-workers/sql-observation-persistence.js";
 import {
   resolveMoneyPathT0Observer,
   startMoneyWorkers,
@@ -678,7 +679,7 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(pool._observations.map((o) => o.wallet_seq).sort()).toEqual([1, 2]);
   });
 
-  it("REGRESSION atomically records evidence, quarantines the wallet and preserves its lease", async () => {
+  it("REGRESSION atomically records evidence, quarantines the wallet, preserves lease, fails closed", async () => {
     const pool = fakePoolForStreamWriterT0(SEED_02);
     let call = 0;
     const observer = createGatewayT0Observer({
@@ -699,7 +700,12 @@ describe("real T0 OBSERVE (offline)", () => {
 
     expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
     expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
-    expect((await observer.observe(SEED_02)).kind).toBe("VERIFIED");
+    // Anomalous relationship must never surface as VERIFIED (D1).
+    const third = await observer.observe(SEED_02);
+    expect(third.kind).toBe("INDETERMINATE");
+    if (third.kind === "INDETERMINATE") {
+      expect(third.detail).toMatch(/REGRESSION/);
+    }
 
     expect(pool._observations.map((row) => row.relationship)).toEqual([
       "FIRST",
@@ -711,8 +717,141 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(pool._wallet?.state).toBe("QUARANTINED");
     expect(pool._wallet?.quarantineReason).toBe("REGRESSION");
     expect(pool._wallet?.activeLeaseId).toBe("44444444-4444-4444-8444-444444444444");
+    // canAcquireNewLease-equivalent: QUARANTINED or active lease blocks new claims.
+    expect(
+      pool._wallet?.state === "QUARANTINED" || pool._wallet?.activeLeaseId !== null,
+    ).toBe(true);
     expect(pool._audits).toEqual(["anomaly.quarantine_wallet_halt_signing"]);
     expect(pool._cursors.values().next().value?.next_wallet_seq).toBe(4);
+  });
+
+  it("UNEXPLAINED_JUMP with no active lease still commits observation+anomaly (no rollback)", async () => {
+    // No wallet/lease seeded → operationId null. Prior defect threw in applyAnomalyAction
+    // and ROLLBACKed the observation+anomaly pair (Q5 / empty-ledger failure mode).
+    const pool = fakePoolForStreamWriterT0();
+    const walletPk = mintTestWalletPublicKey();
+    const fp = (label: string) => sha256Hex(new TextEncoder().encode(label));
+    const sig = (ch: string) => `${ch.repeat(86)}==`;
+
+    const first = await persistSqlObservation({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      walletPublicKey: walletPk,
+      endpointFingerprint: fingerprintEndpoint(GATEWAY_A),
+      httpStatus: 200,
+      capture: {
+        parseResult: "VERIFIED_HEAD",
+        rawResponseBytes: new TextEncoder().encode("head-A"),
+        isGenesis: false,
+        sSignature: sig("A"),
+        pSignature: "",
+        semanticFingerprint: fp("A"),
+      },
+      projection: {
+        walletRole: "sender",
+        bAmount: "1",
+        innerPreimageText: null,
+        step1Signature: null,
+        step2Signature: null,
+        completedTransactionText: null,
+        completedTransactionSha256: null,
+      },
+    });
+    expect(first.relationship).toBe("FIRST");
+
+    // Different S, P does not equal prior S → UNEXPLAINED_JUMP. No lease → operationId null.
+    const jump = await persistSqlObservation({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      walletPublicKey: walletPk,
+      endpointFingerprint: fingerprintEndpoint(GATEWAY_A),
+      httpStatus: 200,
+      capture: {
+        parseResult: "VERIFIED_HEAD",
+        rawResponseBytes: new TextEncoder().encode("head-JUMP"),
+        isGenesis: false,
+        sSignature: sig("Z"),
+        pSignature: sig("Y"),
+        semanticFingerprint: fp("Z"),
+      },
+      projection: {
+        walletRole: "sender",
+        bAmount: "9",
+        innerPreimageText: null,
+        step1Signature: null,
+        step2Signature: null,
+        completedTransactionText: null,
+        completedTransactionSha256: null,
+      },
+    });
+    expect(jump.relationship).toBe("UNEXPLAINED_JUMP");
+    expect(pool._observations.map((row) => row.relationship)).toEqual([
+      "FIRST",
+      "UNEXPLAINED_JUMP",
+    ]);
+    expect(pool._anomalies).toHaveLength(1);
+    expect(pool._anomalies[0]!.kind).toBe("UNEXPLAINED_JUMP");
+    expect(pool._anomalies[0]!.observation_id).toBe(jump.observationId);
+    // Audit landed even without an operation to stamp attention on.
+    expect(pool._audits).toContain("anomaly.needs_attention");
+    expect(pool._cursors.values().next().value?.next_wallet_seq).toBe(3);
+  });
+
+  it("T0 surface: REGRESSION relationship never returns VERIFIED to the money path", async () => {
+    // Companion to the evidence test — pin the outcome kind at the observer boundary.
+    const pool = fakePoolForStreamWriterT0(SEED_02);
+    let call = 0;
+    const observer = createGatewayT0Observer({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      gatewayUrls: [GATEWAY_A],
+      exchange: syntheticExchange({
+        responseForKey: () => {
+          call += 1;
+          return call === 1
+            ? headEnvelopeBytes("predecessor.settled.json")
+            : call === 2
+              ? headEnvelopeBytes("target.settled.json")
+              : headEnvelopeBytes("predecessor.settled.json");
+        },
+      }),
+    });
+    await observer.observe(SEED_02);
+    await observer.observe(SEED_02);
+    const outcome = await observer.observe(SEED_02);
+    expect(outcome.kind).toBe("INDETERMINATE");
+    expect(pool._anomalies[0]!.kind).toBe("REGRESSION");
+  });
+
+  it("fresh-head REGRESSION fails closed after durable quarantine evidence", async () => {
+    const pool = fakePoolForStreamWriterT0(SEED_02);
+    let call = 0;
+    const reader = createSqlFreshHeadReader({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      gatewayUrls: [GATEWAY_A],
+      exchange: syntheticExchange({
+        responseForKey: () => {
+          call += 1;
+          return call === 1
+            ? headEnvelopeBytes("predecessor.settled.json")
+            : call === 2
+              ? headEnvelopeBytes("target.settled.json")
+              : headEnvelopeBytes("predecessor.settled.json");
+        },
+      }),
+    });
+    await reader(SEED_02);
+    await reader(SEED_02);
+    await expect(reader(SEED_02)).rejects.toThrow(/REGRESSION/);
+    expect(pool._observations.map((r) => r.relationship)).toEqual([
+      "FIRST",
+      "SUCCESSOR",
+      "REGRESSION",
+    ]);
+    expect(pool._anomalies[0]!.kind).toBe("REGRESSION");
+    expect(pool._wallet?.state).toBe("QUARANTINED");
+    expect(pool._wallet?.activeLeaseId).toBe("44444444-4444-4444-8444-444444444444");
   });
 
   it("D1: second stream-writer path after T0 does not collide on wallet_seq=1", async () => {
@@ -892,6 +1031,71 @@ describe("real T0 OBSERVE (offline)", () => {
         nodeIdentitySigner: () => null,
       }),
     ).toThrow(/non-empty gatewayUrls/);
+  });
+
+
+  it("gate: onAnomalyRequired is required on SqlStreamWriterEffectsOptions (money-workers)", () => {
+    const streamWriter = readFileSync(
+      join(here, "../../../packages/node-core/src/observation/stream-writer-sql.ts"),
+      "utf8",
+    );
+    // Non-optional property (no `?:`)
+    expect(streamWriter).toMatch(/readonly onAnomalyRequired:\s*SqlAnomalyRequiredHandler/);
+    expect(streamWriter).not.toMatch(/readonly onAnomalyRequired\?:/);
+    // Runtime throw when anomalyRequired and handler missing
+    expect(streamWriter).toMatch(/onAnomalyRequired is required when plan\.anomalyRequired/);
+    const persistence = readFileSync(
+      join(here, "../src/money-workers/sql-observation-persistence.ts"),
+      "utf8",
+    );
+    expect(persistence).toMatch(/onAnomalyRequired:\s*async/);
+    expect(persistence).toMatch(/planAnomalyAction|planActionForRelationship/);
+    expect(persistence).toMatch(/applyAnomalyAction/);
+  });
+
+  it("gate: money-workers gateway readers do not pass inert ObservationRecorder no-ops", () => {
+    const sites = [
+      "gateway-t0-observer.ts",
+      "sql-fresh-head-reader.ts",
+      "receive-settle-step.ts",
+      "sql-candidate-intake-ports.ts",
+    ] as const;
+    for (const file of sites) {
+      const src = readFileSync(join(here, `../src/money-workers/${file}`), "utf8");
+      expect(src, file).not.toMatch(/recordObservation:\s*async\s*\(\s*\)\s*=>\s*\{\s*\}/);
+      expect(src, file).not.toMatch(/recordObservation:\s*async\s*\(\)\s*=>\s*\{\}/);
+      expect(src, file).toMatch(/persistSqlObservation/);
+    }
+    // Boot readiness smoke in main.ts is allowed a documented no-op (no wallet to attribute).
+    const main = readFileSync(join(here, "../src/main.ts"), "utf8");
+    expect(main).toMatch(/readiness smoke: intentionally non-durable/);
+  });
+
+  it("parse-result MALFORMED_ENVELOPE applies retain/alert audit action", async () => {
+    const pool = fakePoolForStreamWriterT0(SEED_02);
+    const bad: GatewayExchangeTransport = {
+      async exchange(endpoint, request): Promise<GatewayExchangeCapture> {
+        const responseBytes = new TextEncoder().encode("not-json{");
+        return {
+          endpoint,
+          endpointFingerprint: fingerprintEndpoint(endpoint),
+          requestBytes: request.bodyBytes,
+          requestSha256: sha256Hex(request.bodyBytes),
+          statusCode: 200,
+          responseBytes,
+          responseSha256: sha256Hex(responseBytes),
+        };
+      },
+    };
+    const observer = createGatewayT0Observer({
+      pool: pool as never,
+      nodeId: NODE_ID,
+      gatewayUrls: [GATEWAY_A],
+      exchange: bad,
+    });
+    await observer.observe(SEED_02);
+    expect(pool._anomalies[0]!.kind).toBe("MALFORMED_ENVELOPE");
+    expect(pool._audits).toContain("anomaly.retain_raw_alert_no_sign");
   });
 
   it("ARM 409 t0_mismatch path remains load-bearing (census)", () => {

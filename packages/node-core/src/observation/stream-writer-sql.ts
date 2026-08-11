@@ -38,18 +38,26 @@ export interface ObservationRowProjection {
   readonly observedAt?: Date;
 }
 
+export type SqlAnomalyRequiredHandler = (args: {
+  readonly key: ObservationStreamKey;
+  readonly observationId: string;
+  readonly walletId: string | null;
+  readonly priorObservationId: string | null;
+  readonly result: CaptureWriteResult;
+  readonly capture: SequenceCapture;
+}) => Promise<void>;
+
 export interface SqlStreamWriterEffectsOptions {
   readonly sql: SqlExecutor;
   readonly project: (capture: SequenceCapture) => ObservationRowProjection;
   readonly allocateObservationId?: () => string;
-  readonly onAnomalyRequired?: (args: {
-    readonly key: ObservationStreamKey;
-    readonly observationId: string;
-    readonly walletId: string | null;
-    readonly priorObservationId: string | null;
-    readonly result: CaptureWriteResult;
-    readonly capture: SequenceCapture;
-  }) => Promise<void>;
+  /**
+   * Required pairing callback. When the frozen classifier marks anomalyRequired, the
+   * observation INSERT must be followed by an observation_anomalies row in the same
+   * transaction. Omitting this handler is a compile-time error; a runtime throw still
+   * guards any casted call site that would otherwise COMMIT unpaired.
+   */
+  readonly onAnomalyRequired: SqlAnomalyRequiredHandler;
   readonly takeAdvisoryLock?: boolean;
 }
 
@@ -377,7 +385,12 @@ export function createSqlStreamWriterEffects(
       previousId,
     ]);
 
-    if (plan.anomalyRequired && onAnomalyRequired) {
+    if (plan.anomalyRequired) {
+      if (typeof onAnomalyRequired !== "function") {
+        throw new Error(
+          "onAnomalyRequired is required when plan.anomalyRequired is true (observation anomaly pairing)",
+        );
+      }
       await onAnomalyRequired({
         key,
         observationId: obsId,

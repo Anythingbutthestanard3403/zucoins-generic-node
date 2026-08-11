@@ -104,6 +104,7 @@ export {
   type SqlExecutor as StreamWriterSqlExecutor,
   type SqlQueryResult as StreamWriterSqlQueryResult,
   type SqlStreamWriterEffectsOptions,
+  type SqlAnomalyRequiredHandler,
 } from "./stream-writer-sql.js";
 
 export {

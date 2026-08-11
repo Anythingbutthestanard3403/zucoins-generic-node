@@ -7,8 +7,10 @@ import {
   createSqlAnomalyRecorder,
   createSqlStreamWriterEffects,
   planActionForRelationship,
+  planAnomalyAction,
   type AnomalyQuarantineStore,
   type ObservationRowProjection,
+  type Obs15AnomalyKind,
   type QuarantineOperationSnapshot,
   type QuarantineWalletSnapshot,
 } from "@zucoins/node-core";
@@ -172,6 +174,56 @@ function sqlStore(client: PoolClient, nodeId: string): AnomalyQuarantineStore {
   };
 }
 
+
+/**
+ * Map a stream-writer anomaly-required capture onto the doc-08 §15 action vocabulary.
+ * Relationship anomalies (REGRESSION/JUMP/…) take precedence over parse-result kinds,
+ * matching observation_anomaly_required_kind / createSqlAnomalyRecorder.
+ */
+function planActionForAnomalyCapture(args: {
+  readonly result: { readonly plan: { readonly kind: string; readonly observation?: { readonly relationship: ObservationRelationship } } };
+  readonly capture: SequenceCapture;
+}): ReturnType<typeof planAnomalyAction> {
+  if (args.result.plan.kind === "APPEND") {
+    const relationship = (args.result.plan as { observation: { relationship: ObservationRelationship } })
+      .observation.relationship;
+    if (
+      relationship === "REGRESSION" ||
+      relationship === "UNEXPLAINED_JUMP" ||
+      relationship === "GENESIS_AFTER_HISTORY" ||
+      relationship === "SIGNATURE_COLLISION"
+    ) {
+      return planActionForRelationship(relationship);
+    }
+  }
+  const parseResult = args.capture.parseResult;
+  let anomaly: Obs15AnomalyKind;
+  switch (parseResult) {
+    case "TRANSPORT_ERROR":
+      anomaly = "TRANSPORT_READ_FAILURE";
+      break;
+    case "MALFORMED_ENVELOPE":
+      anomaly = "MALFORMED_ENVELOPE";
+      break;
+    case "MALFORMED_TRANSACTION":
+      // doc-08 §15 has no separate MALFORMED_TRANSACTION row; retain/alert like envelope.
+      anomaly = "MALFORMED_ENVELOPE";
+      break;
+    case "UNVERIFIED_SIGNATURE":
+      anomaly = "INVALID_STEP_SIGNATURE";
+      break;
+    case "WALLET_ROLE_INVALID":
+      anomaly = "WALLET_ROLE_INVALID";
+      break;
+    default:
+      // Defensive: classifier/recorder should never mark anomalyRequired for verified parses
+      // without an anomalous relationship. Still stamp a retain/alert plan so audit fires.
+      anomaly = "MALFORMED_ENVELOPE";
+      break;
+  }
+  return planAnomalyAction({ anomaly });
+}
+
 export interface PersistSqlObservationInput {
   readonly pool: Pool;
   readonly nodeId: string;
@@ -230,26 +282,33 @@ export async function persistSqlObservation(
         return allocatedObservationId;
       },
       onAnomalyRequired: async (args) => {
+        // Evidence first: anomaly row must land even if the action layer cannot mutate.
         await recordAnomaly(args);
-        if (args.result.plan.kind !== "APPEND" || walletId === null) return;
-        const relationship = args.result.plan.observation.relationship;
-        if (
-          relationship !== "REGRESSION" &&
-          relationship !== "UNEXPLAINED_JUMP" &&
-          relationship !== "GENESIS_AFTER_HISTORY" &&
-          relationship !== "SIGNATURE_COLLISION"
-        ) {
+        const plan = planActionForAnomalyCapture(args);
+        const needsWalletWrite =
+          plan.wallet.kind === "quarantine" ||
+          plan.wallet.kind === "quarantine_candidate" ||
+          plan.wallet.kind === "halt_signing";
+        // Wallet-mutating plans require a known wallet row. Parse-result plans that only
+        // refuse/alert still run with walletId null so audit is durable.
+        if (needsWalletWrite && walletId === null) {
           return;
         }
-        const lease = await client.query<{ operation_id: string }>(
-          `SELECT operation_id::text AS operation_id FROM wallet_active_leases
-            WHERE wallet_id = $1::uuid`,
-          [walletId],
-        );
+        let operationId: string | null = null;
+        if (walletId !== null) {
+          const lease = await client.query<{ operation_id: string }>(
+            `SELECT operation_id::text AS operation_id FROM wallet_active_leases
+              WHERE wallet_id = $1::uuid`,
+            [walletId],
+          );
+          operationId = lease.rows[0]?.operation_id ?? null;
+        }
+        // applyAnomalyAction skips needs_attention when operationId is null (does not throw),
+        // so JUMP evidence always COMMITs even on an unleashed wallet.
         await applyAnomalyAction(sqlStore(client, input.nodeId), {
-          plan: planActionForRelationship(relationship),
+          plan,
           walletId,
-          operationId: lease.rows[0]?.operation_id ?? null,
+          operationId,
         });
       },
       takeAdvisoryLock: true,

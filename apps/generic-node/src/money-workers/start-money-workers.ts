@@ -1001,6 +1001,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     deps.senderPreflightObserver ??
     (deps.submitGateway !== undefined
       ? createGatewaySenderPreflightObserver({
+          pool: deps.pool,
+          nodeId: deps.config.nodeId,
           endpoint: deps.submitGateway.endpoint,
           limits: deps.submitGateway.limits,
           exchange: deps.submitGateway.exchange ?? deps.gatewayExchange,
@@ -1009,6 +1011,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             : {}),
           ...(deps.gatewayBackoffMaxMs !== undefined
             ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
+            : {}),
+          ...(deps.moneyPathStatementTimeoutMs !== undefined
+            ? { moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs }
             : {}),
         })
       : null);
@@ -1229,6 +1234,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       const settled = await runReceiveSettleStep({
         query: async (text, values) =>
           (await deps.pool.query(text, values as unknown[])).rows as Record<string, unknown>[],
+        pool: deps.pool,
         vault: deps.vault,
         nodeId: deps.config.nodeId,
         leadership: deps.leadership,

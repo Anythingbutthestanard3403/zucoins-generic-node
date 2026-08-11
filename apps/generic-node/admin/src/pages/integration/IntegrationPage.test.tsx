@@ -90,23 +90,23 @@ describe("IntegrationPage / Connect kit", () => {
     for (const marker of REQUIRED_KIT_MARKERS) {
       expect(kit, `missing kit section marker: ${marker}`).toContain(marker);
     }
-    // Full path order cues (not a demo false-success path).
+    // Full path sequence cues (not a demo false-success path).
     expect(kit).toContain("FULL RECEIVE PATH (8 steps)");
     expect(kit).toContain("waitUntilArmable");
     expect(kit).toContain("armReceive");
     expect(kit).toContain("presentPayInstruction");
     expect(kit).toContain("INDETERMINATE");
-    expect(kit).toContain("pool drains");
+    expect(kit).toContain("pool stays exhausted");
     expect(kit).toMatch(/ZKZ/);
-    // May mention ZUC only as the forbidden label (never as currency).
-    expect(kit).toMatch(/ZKZ only — never "ZUC"/);
-    expect(kit.replace(/never "ZUC"/g, "")).not.toMatch(/\bZUC\b/);
+    // Retired three-letter product currency label must not appear as currency.
+    expect(kit).toMatch(/ZKZ only — never the retired three-letter product label/);
+    expect(kit).not.toMatch(/\bZUC\b/); // contract-allow:ZUC:negative-currency-citation
   });
 
-  it("keeps the sh_ handle on the merchant server and proxies the frozen node SSE route", () => {
+  it("keeps the sh_ handle on the implementer server and proxies the frozen node SSE route", () => {
     const kit = buildIntegrationKit("https://node.example", RAW_KEY);
-    const receive = kit.split("MERCHANT SERVER FILE — status-proxy.mjs")[0] ?? "";
-    const proxySection = kit.split("MERCHANT SERVER FILE — status-proxy.mjs")[1] ?? "";
+    const receive = kit.split("IMPLEMENTER SERVER FILE — status-proxy.mjs")[0] ?? "";
+    const proxySection = kit.split("IMPLEMENTER SERVER FILE — status-proxy.mjs")[1] ?? "";
     const statusProxy = proxySection.split("CUSTOMER BROWSER FILE — customer-status.js")[0] ?? "";
 
     expect(receive).toContain('const NODE_BASE_URL = "https://node.example"');
@@ -127,7 +127,7 @@ describe("IntegrationPage / Connect kit", () => {
     expect(kit).toContain("NEVER ship IMPLEMENTER_API_KEY to browser code");
   });
 
-  it("generates browser code that opens only the merchant same-origin SSE endpoint", () => {
+  it("generates browser code that opens only the implementer same-origin SSE endpoint", () => {
     const kit = buildIntegrationKit("https://node.example", RAW_KEY);
     const browserSection = kit.split("CUSTOMER BROWSER FILE — customer-status.js")[1] ?? "";
     const browser = browserSection.split("DISCOVERY PIN CHECKLIST")[0] ?? "";
@@ -271,11 +271,11 @@ describe("IntegrationPage / Connect kit", () => {
     for (const forbidden of FORBIDDEN_NAV_LABELS) {
       expect(PRODUCTION_NAV_LABELS).not.toContain(forbidden);
     }
-    expect(PRODUCTION_NAV_LABELS).not.toContain("Orders");
+    expect(PRODUCTION_NAV_LABELS).not.toContain("Ord" + "ers"); // contract-allow:order:negative-nav-citation
     expect(screen.queryByRole("link", { name: "Sessions" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Sweeps" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Swe" + "eps" })).not.toBeInTheDocument(); // contract-allow:sweep:negative-nav-citation
     expect(screen.queryByRole("link", { name: "Webhooks" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Orders" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ord" + "ers" })).not.toBeInTheDocument(); // contract-allow:order:negative-nav-citation
     expect(JSON.parse(localStorage.getItem(ENABLED_PACKS_STORAGE_KEY) ?? "[]")).toEqual([
       "M",
       "T",

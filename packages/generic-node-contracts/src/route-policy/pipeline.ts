@@ -32,7 +32,7 @@ export const REQUEST_PIPELINE = [
   { order: 2, name: "authenticate_credential", failsWith: CANONICAL_AUTH_FAILURE_CODE, deferredTo: null }, // contract-allow:frozen-manifest-field-name
   { order: 3, name: "authorize_scope", failsWith: CANONICAL_AUTH_FAILURE_CODE, deferredTo: null }, // contract-allow:frozen-manifest-field-name
   { order: 4, name: "enforce_idempotency", failsWith: null, deferredTo: "idempotency-key-contract" }, // contract-allow:frozen-manifest-field-name
-  { order: 5, name: "resolve_object_with_tenant_predicate", failsWith: CANONICAL_NOT_FOUND_CODE, deferredTo: null }, // contract-allow:frozen-manifest-field-name
+  { order: 5, name: "resolve_object_with_tenant_predicate", failsWith: CANONICAL_NOT_FOUND_CODE, deferredTo: "tenant-object-resolution-contract" }, // contract-allow:frozen-manifest-field-name
   { order: 6, name: "handler", failsWith: null, deferredTo: null }, // contract-allow:frozen-manifest-field-name
   { order: 7, name: "audit_record", failsWith: null, deferredTo: "audit-record-contract" }, // contract-allow:frozen-manifest-field-name
   { order: 8, name: "emit_error_envelope", failsWith: null, deferredTo: null }, // contract-allow:frozen-manifest-field-name

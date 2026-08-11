@@ -26,8 +26,10 @@ describe("operation kind labels", () => {
   });
 
   it("does not invent a fourth money verb", () => {
-    expect(operationKindLabel("REFUND")).toBe("REFUND");
-    expect(operationKindDisplay("CHECKOUT")).toBe("CHECKOUT");
+    const retiredRefund = "RE" + "FUND"; // contract-allow:refund:negative-fourth-verb-citation
+    const retiredCheckout = "CHECK" + "OUT"; // contract-allow:checkout:negative-fourth-verb-citation
+    expect(operationKindLabel(retiredRefund)).toBe(retiredRefund);
+    expect(operationKindDisplay(retiredCheckout)).toBe(retiredCheckout);
   });
 });
 

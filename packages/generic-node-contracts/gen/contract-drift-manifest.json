@@ -918,7 +918,7 @@
       "goldenRefs": [
         {
           "path": "src/route-policy/gen/route-policy.json",
-          "sha256": "3ffb407268b2f8c4c3cefacd3bd46b4090df6f39bab0384c73c7bebdd9a6bc22"
+          "sha256": "ea36c430ecc3d066a3e5c57dae9dc8d0f71edcf423694c603b9f9b94bcee6626"
         }
       ]
     },

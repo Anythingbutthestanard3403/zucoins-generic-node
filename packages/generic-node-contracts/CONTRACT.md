@@ -51,11 +51,14 @@ makes checkout/payment/sweep/treasury/etc. implementer-projection concepts, not 
 tolerate-absent globbing and frozen the current exemption count); this section documents the
 mechanism, i.e. what the scanner actually does at the code level.
 
-- **Forbidden-term list** (`FORBIDDEN_TERMS`): a fixed array of thirteen lowercase stems —
-  `payment`, `refund`, `sweep`, `treasury`, `checkout`, `payout`, `withdrawal`, `order`,
-  `merchant`, `reservation`, `outbound`, `drain`, `ZUC`.
+- **Forbidden-term list** (`FORBIDDEN_TERMS`): sixteen stems — `payment`, `refund`, `sweep`,
+  `treasury`, `checkout`, `payout`, `withdrawal`, `order`, `merchant`, `reservation`,
+  `outbound`, `drain`, `ZUC`, `finalised`, `fulfilled`, `treasury settlement`. The count in
+  this prose is descriptive only; the authoritative length is `FORBIDDEN_TERMS.length` in
+  `src/scan/forbidden-terms.ts`.
 - **Scan scope** (`SCAN_SCOPE`): `packages/generic-node-contracts/src`, `packages/node-core/src`,
-  `apps/generic-node/src` — the broad scope `drift-gate-scanner` frozen. `src/scan/**` (this module's own
+  `apps/generic-node/src`, `apps/generic-node/admin/src` — the broad scope `drift-gate-scanner`
+  frozen, extended to the operator SPA (`.ts` / `.tsx` / `.md`). `src/scan/**` (this module's own
   directory) is never itself a scan target, the same way a lint rule's definition file is not
   linted against the pattern it forbids.
 - **Tokenization and suffix-stripping** (`matchForbiddenTerm`): a candidate is matched as a

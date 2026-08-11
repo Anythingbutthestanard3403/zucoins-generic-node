@@ -164,7 +164,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 /**
- * Funnel step routes: require auth, enforce order via server next_step.
+ * Funnel step routes: require auth, enforce sequence via server next_step.
  * Not wrapped in App shell (no money nav until Home).
  */
 function RequireFunnel({ children }: { children: ReactNode }) {

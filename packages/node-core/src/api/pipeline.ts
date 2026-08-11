@@ -8,7 +8,7 @@
 // 2. authenticate_credential → failsWith invalid_api_key (401)
 // 3. authorize_scope → failsWith invalid_api_key (401) [never 403]
 // 4. enforce_idempotency → deferred to
-// 5. resolve_object_with_tenant_predicate → failsWith not_found (404)
+// 5. resolve_object_with_tenant_predicate → failsWith not_found (404); deferredTo tenant-object-resolution-contract
 // 6. handler
 // 7. audit_record → deferred to
 // 8. emit_error_envelope

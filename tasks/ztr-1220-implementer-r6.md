@@ -64,4 +64,4 @@ pnpm --filter @zucoins/generic-node exec tsc -b
 
 ## Head SHA
 
-(see git tip after commit)
+`e5272cdc4c50c8d07e23891c4524bca8b1a2c409`

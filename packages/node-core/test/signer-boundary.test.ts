@@ -306,6 +306,98 @@ describe("signUnderLease drain bridge", () => {
   });
 });
 
+describe("withSignTransaction (ZTR-1160)", () => {
+  it("runs lease read, vault, and SIGNED audit inside the supplied transaction body", async () => {
+    const order: string[] = [];
+    const lease = makeLease();
+    const vaultSigner: VaultSigner = {
+      sign: vi.fn().mockImplementation(async () => {
+        order.push("vault");
+        return "c2lnbmF0dXJlLWJ5dGVz";
+      }),
+    };
+    const txLeaseReader = {
+      readActiveLease: vi.fn().mockImplementation(async () => {
+        order.push("lease");
+        return lease;
+      }),
+    };
+    const txAudit = {
+      append: vi.fn().mockImplementation(async () => {
+        order.push("audit");
+      }),
+    };
+    const fallbackLease = { readActiveLease: vi.fn().mockResolvedValue(lease) };
+    const fallbackAudit = { append: vi.fn() };
+
+    const result = await signUnderLease(
+      {
+        leadership: { held: true },
+        leaseReader: fallbackLease,
+        vaultSigner,
+        auditLog: fallbackAudit,
+        now: () => FIXED_TIME,
+        assertMoneyAdmitted: () => {},
+        assertCanOperate: () => {},
+        assertWalletMaySign: async () => {},
+        withSignTransaction: async (body) => {
+          order.push("begin");
+          const out = await body({ leaseReader: txLeaseReader, auditLog: txAudit });
+          order.push("commit");
+          return out;
+        },
+      },
+      makeCapability(),
+    );
+
+    expect(result.signature).toBe("c2lnbmF0dXJlLWJ5dGVz");
+    expect(order).toEqual(["begin", "lease", "vault", "audit", "commit"]);
+    expect(fallbackLease.readActiveLease).not.toHaveBeenCalled();
+    expect(fallbackAudit.append).not.toHaveBeenCalled();
+    expect(txAudit.append).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "SIGNED" }),
+    );
+  });
+
+  it("commits REJECTED audit before surfacing SignerBoundaryError (no rollback of audit)", async () => {
+    const order: string[] = [];
+    const txAudit = {
+      append: vi.fn().mockImplementation(async () => {
+        order.push("audit");
+      }),
+    };
+    await expect(
+      signUnderLease(
+        {
+          leadership: { held: true },
+          leaseReader: { readActiveLease: async () => null },
+          vaultSigner: { sign: vi.fn() },
+          auditLog: { append: vi.fn() },
+          now: () => FIXED_TIME,
+          assertMoneyAdmitted: () => {},
+          assertCanOperate: () => {},
+          assertWalletMaySign: async () => {},
+          withSignTransaction: async (body) => {
+            order.push("begin");
+            const out = await body({
+              leaseReader: { readActiveLease: async () => null },
+              auditLog: txAudit,
+            });
+            order.push("commit");
+            return out;
+          },
+        },
+        makeCapability(),
+      ),
+    ).rejects.toThrow(SignerBoundaryError);
+    // Rejection is thrown AFTER commit so the FAILED audit row is not rolled back.
+    expect(order).toEqual(["begin", "audit", "commit"]);
+    expect(txAudit.append).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "REJECTED", rejectionReason: "no active lease for wallet" }),
+    );
+  });
+});
+
 describe("money-path gates fail-closed", () => {
   it("signUnderLease without money gates throws MoneyPathGatesMissingError (never admits)", () => {
     const lease = makeLease();

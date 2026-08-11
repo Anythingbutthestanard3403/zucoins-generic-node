@@ -113,6 +113,11 @@ export function createMoneySignerBoundaryDeps(
     vaultSigner: base.vaultSigner,
     auditLog: base.auditLog,
     now: base.now,
+    // ZTR-1160: pin lease FOR UPDATE across vault sign + SIGNED audit when the composition
+    // root supplies a transaction scope (production SEND/MOVE/RECEIVE).
+    ...(base.withSignTransaction !== undefined
+      ? { withSignTransaction: base.withSignTransaction }
+      : {}),
     assertMoneyAdmitted: ports.assertMoneyAdmitted,
     assertCanOperate: ports.assertCanOperate,
     assertWalletMaySign: ports.assertWalletMaySign,

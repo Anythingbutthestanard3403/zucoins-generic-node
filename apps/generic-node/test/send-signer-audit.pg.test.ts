@@ -41,7 +41,10 @@ import {
 import { ensureNodeRow } from "../src/bootstrap/genesis.js";
 import { publicKeyFromSeed } from "../src/ops/ed25519-ops.js";
 import { createSqlBootRecovery } from "../src/boot/sql-boot-recovery.js";
-import { createSqlLeaseReader } from "../src/money-workers/send-signer-deps.js";
+import {
+  createSqlLeaseReader,
+  createSqlSignUnderLeaseTransaction,
+} from "../src/money-workers/send-signer-deps.js";
 import { createPoolVaultSigner } from "../src/money-workers/send-vault-signer.js";
 
 const PG_TEST_TIMEOUT_MS = 180_000;
@@ -219,6 +222,8 @@ describe.skipIf(!PG_AVAILABLE)("signer_audit — SEND production wiring (real PG
         leaseReader: createSqlLeaseReader(pool),
         vaultSigner: createPoolVaultSigner({ pool, vault, nodeId }),
         auditLog: createSqlSignerAuditLog(query),
+        // ZTR-1160: production SEND pins lease FOR UPDATE across vault + audit.
+        withSignTransaction: createSqlSignUnderLeaseTransaction(pool),
       },
       {
         assertMoneyAdmitted: () => {},

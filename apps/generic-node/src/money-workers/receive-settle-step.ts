@@ -32,6 +32,7 @@ import {
   type MetricsHooks,
   type ReceiveSettleEntryPhase,
   type ReceiveSettleOutcome,
+  type SignUnderLeaseTransactionFn,
   type SignerLeadershipLatch,
   type SqlQueryFn,
   type Uuid,
@@ -58,6 +59,12 @@ export interface ReceiveSettleStepDeps {
   readonly nodeId: string;
   readonly leadership: SignerLeadershipLatch;
   readonly moneyPathGates: MoneyPathSignerGates;
+  /**
+   * ZTR-1160: pin lease FOR UPDATE across vault co-sign + SIGNED audit. Production
+   * start-money-workers supplies createSqlSignUnderLeaseTransaction(pool). Tests that only
+   * exercise non-sign paths may omit it.
+   */
+  readonly withSignTransaction?: SignUnderLeaseTransactionFn;
   readonly gateway: {
     readonly endpoint: string;
     readonly limits: GatewayLimits;
@@ -126,12 +133,12 @@ const SELECT_SETTLEABLE = `
      AND ot.attempt_phase = ANY($1::text[])
    LIMIT ${SETTLE_BATCH_LIMIT}`;
 
-// FOR SHARE, not a bare read. The proof-backed release path takes FOR UPDATE on this
-// row (leases/repository.ts SELECT_ACTIVE_FOR_UPDATE, receive/expiry-release.ts
-// LOCK_RECEIVER_LEASE), so sharing the lock makes a release that is already in flight block this
-// read instead of letting it return the doomed pre-release snapshot. Autocommit holds the share
-// lock only for this statement, which is the point: it serializes the signer's lease check
-// against a concurrent release without pinning a lock across the vault unseal that follows.
+// FOR UPDATE (ZTR-1160) — not FOR SHARE. Two concurrent signers must not both proceed under
+// shared locks, and the release path (leases/repository.ts SELECT_ACTIVE_FOR_UPDATE,
+// receive/expiry-release.ts LOCK_RECEIVER_LEASE) must block until the sign critical section
+// commits. Production supplies withSignTransaction so this SELECT runs on a pinned client
+// held open across vaultSigner.sign and the SIGNED audit append; bare autocommit still
+// releases at statement end and must not be the production path.
 const SELECT_ACTIVE_LEASE = `
   SELECT operation_id::text AS operation_id,
          wallet_id::text    AS wallet_id,
@@ -140,7 +147,7 @@ const SELECT_ACTIVE_LEASE = `
     FROM wallet_active_leases
    WHERE wallet_id = $1::uuid
    LIMIT 1
-     FOR SHARE`;
+     FOR UPDATE`;
 
 /**
  * The VaultSigner port over the audited vault. The secret is opened, used, and wiped in
@@ -333,9 +340,14 @@ export async function runReceiveSettleStep(deps: ReceiveSettleStepDeps): Promise
           query: deps.query,
           signerDeps: {
             leadership: deps.leadership,
+            // Fallback leaseReader/auditLog — production sign uses withSignTransaction so
+            // FOR UPDATE is held across vault + audit (ZTR-1160).
             leaseReader,
             vaultSigner: createVaultSigner(deps, row.receiverPublicKey),
             auditLog,
+            ...(deps.withSignTransaction !== undefined
+              ? { withSignTransaction: deps.withSignTransaction }
+              : {}),
             ...deps.moneyPathGates,
           },
           claimStore,

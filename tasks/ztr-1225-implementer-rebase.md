@@ -3,7 +3,7 @@
 - **lane:** implementer
 - **run:** `7be9a03f-0b91-473a-9701-dc8a6d855c38`
 - **prior CONFLICTING head:** `4b99a62a0cdfc41e265adef2dc86e9342aee1d52`
-- **new HEAD:** `PRODUCT_HEAD_PLACEHOLDER`
+- **new HEAD:** `db84f06b1b1a0a2ee126fd51c504ebf981b1cd2e`
 - **base:** `origin/main` @ `dac8a97ccfbedba730672a3fa2cc2263db46e8fe`
 - **PR:** #90 (`ztr-1225-typecheck-tests`)
 - **worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1225-rebase`
@@ -43,7 +43,12 @@ rejects that under generic `R`. Fixed by matching the file's existing pattern
 ## Commits after rebase (onto `dac8a97ccfbedba730672a3fa2cc2263db46e8fe`)
 
 ```
-COMMITS_PLACEHOLDER
+db84f06b docs(tasks): ZTR-1225 implementer rebase handoff (PR #90)
+c06cc242 fix(test): cast ZTR-1217 inventory SQL stubs for typecheck:tests (ZTR-1225)
+8ab615c4 docs(tasks): ZTR-1225 r2 implementer evidence head pin
+cf32f670 fix(test): restore nodeId on admin router fixtures (ZTR-1225 r2)
+1eab06c4 docs(tasks): ZTR-1225 implementer evidence
+7eb5da93 fix(test): typecheck apps/generic-node/test and clear latent TS errors (ZTR-1225)
 ```
 
 ## Product preserved (r2)

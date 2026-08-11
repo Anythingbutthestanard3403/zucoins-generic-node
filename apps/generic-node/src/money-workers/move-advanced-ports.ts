@@ -77,7 +77,10 @@ import {
 import { issueLandedAccessWindow } from "./issue-landed-access-window.js";
 
 import type { MoveInternalWorkerLogger } from "./move-internal-worker.js";
-import { createSqlLeaseReader } from "./send-signer-deps.js";
+import {
+  createSqlLeaseReader,
+  createSqlSignUnderLeaseTransaction,
+} from "./send-signer-deps.js";
 import { createPoolVaultSigner } from "./send-vault-signer.js";
 import { createSqlFreshHeadReader } from "./sql-fresh-head-reader.js";
 
@@ -429,9 +432,13 @@ export function createMoveAdvancedPorts(
       return createMoneySignerBoundaryDeps(
         {
           leadership: deps.leadership,
+          // Fallback reader — production sign pins FOR UPDATE via withSignTransaction (ZTR-1160).
           leaseReader: createSqlLeaseReader(deps.pool),
           vaultSigner: createPoolVaultSigner({ pool: deps.pool, vault: deps.vault, nodeId: deps.nodeId }),
           auditLog: createSqlSignerAuditLog(query),
+          withSignTransaction: createSqlSignUnderLeaseTransaction(deps.pool, {
+            statementTimeoutMs: statementTimeoutMs,
+          }),
         },
         deps.moneyPathGates,
       );

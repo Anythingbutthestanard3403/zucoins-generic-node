@@ -95,7 +95,10 @@ type WorkerMoneyPathGates = MoneyPathSignerGates & {
 };
 import { tickSendCompletionLander } from "./send-completion-lander.js";
 import { createSendFormationObserverFromReceiveT0 } from "./send-formation-observer.js";
-import { createSqlLeaseReader } from "./send-signer-deps.js";
+import {
+  createSqlLeaseReader,
+  createSqlSignUnderLeaseTransaction,
+} from "./send-signer-deps.js";
 import {
   createSqlApprovalIdLoader,
   createSqlApprovedSendClaimPort,
@@ -957,6 +960,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       return createMoneySignerBoundaryDeps(
         {
           leadership,
+          // Fallback reader (autocommit) — production sign uses withSignTransaction so the
+          // FOR UPDATE is held across vault + audit (ZTR-1160).
           leaseReader: createSqlLeaseReader(deps.pool),
           vaultSigner: createPoolVaultSigner({
             pool: deps.pool,
@@ -964,6 +969,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
             nodeId: deps.config.nodeId,
           }),
           auditLog: createSqlSignerAuditLog(createSqlQueryFn(deps.pool)),
+          withSignTransaction: createSqlSignUnderLeaseTransaction(deps.pool, {
+            statementTimeoutMs: statementTimeoutMs,
+          }),
         },
         deps.moneyPathGates,
       );
@@ -1233,6 +1241,10 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
         nodeId: deps.config.nodeId,
         leadership: deps.leadership,
         moneyPathGates: deps.moneyPathGates,
+        // ZTR-1160: lease FOR UPDATE held across RECEIVE step-2 co-sign + audit.
+        withSignTransaction: createSqlSignUnderLeaseTransaction(deps.pool, {
+          statementTimeoutMs: statementTimeoutMs,
+        }),
         gateway: {
           endpoint: deps.submitGateway.endpoint,
           limits: deps.submitGateway.limits,

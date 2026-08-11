@@ -306,6 +306,24 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       pinned: "pool.connect() → BEGIN → CAS → mirror → COMMIT on one client",
     },
   ],
+  "apps/generic-node/src/money-workers/send-signer-deps.ts": [
+    {
+      site: "createSqlSignUnderLeaseTransaction",
+      pathClass: "money-path",
+      isolation: "READ COMMITTED",
+      mechanism: "ROW_LOCK",
+      covering:
+        "`SELECT … FROM wallet_active_leases WHERE wallet_id = $1::uuid … FOR UPDATE` " +
+        "(send-signer-deps.ts SELECT_ACTIVE_LEASE_FOR_UPDATE) — held open across " +
+        "vaultSigner.sign and signer_audit SIGNED append inside signUnderLease " +
+        "(signer-boundary.ts). Persists a signature under a wallet lease, hence money-path. " +
+        "ROW_LOCK (not SERIALIZABLE): the vault unseal is non-DB work, so " +
+        "withSerializationRetry is forbidden (CONVENTIONS.md §1.1 / §2). ZTR-1160.",
+      pinned:
+        "pool.connect() → BEGIN → applyMoneyPathStatementTimeout → body(txPorts) → COMMIT; " +
+        "leaseReader + auditLog both route through the same PoolClient",
+    },
+  ],
   "apps/generic-node/src/money-workers/send-sql-ports.ts": [
     {
       site: "withPoolTransaction (claim / source lease / sign intent / partial)",

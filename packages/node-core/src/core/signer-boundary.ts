@@ -75,6 +75,30 @@ export interface LeaseReader {
   readActiveLease(walletId: string): Promise<ActiveLeaseRecord | null>;
 }
 
+/**
+ * Ports bound to one pinned-client transaction for the lease-lock critical section.
+ * Production money-path wiring supplies these via {@link SignerBoundaryDepsOf.withSignTransaction}
+ * so `FOR UPDATE` on `wallet_active_leases` stays held across vault sign and the SIGNED audit
+ * append (ZTR-1160).
+ */
+export type SignUnderLeaseTxPortsOf<P extends string> = {
+  readonly leaseReader: LeaseReader;
+  readonly auditLog: SignerAuditLogOf<P>;
+};
+
+export type SignUnderLeaseTxPorts = SignUnderLeaseTxPortsOf<SigningPurpose>;
+
+/**
+ * Runs `body` inside one DB transaction on a pinned client. The body must not throw to
+ * report a lease/digest rejection — return a value and throw after commit so REJECTED audit
+ * rows are not rolled back with the lock transaction.
+ */
+export type SignUnderLeaseTransactionFnOf<P extends string> = <T>(
+  body: (tx: SignUnderLeaseTxPortsOf<P>) => Promise<T>,
+) => Promise<T>;
+
+export type SignUnderLeaseTransactionFn = SignUnderLeaseTransactionFnOf<SigningPurpose>;
+
 export interface VaultSigner {
   sign(walletId: string, preimageBytes: Uint8Array): Promise<string>;
 }
@@ -181,6 +205,13 @@ export interface SignerBoundaryDepsOf<P extends string> {
   readonly assertMoneyAdmitted: () => void;
   readonly assertCanOperate: () => void;
   readonly assertWalletMaySign: (walletId: string) => void | Promise<void>;
+  /**
+   * Optional transaction scope for the lease-lock critical section (ZTR-1160).
+   * When present, lease `FOR UPDATE`, vault sign, and audit append run on one pinned
+   * client; COMMIT releases the row lock. Production money-path wirings MUST supply this.
+   * Recovery / in-memory harnesses omit it and use {@link leaseReader} + {@link auditLog} directly.
+   */
+  readonly withSignTransaction?: SignUnderLeaseTransactionFnOf<P>;
 }
 
 /** Wallet is signing-halted or quarantined — refuse before lease read / vault. */
@@ -247,6 +278,67 @@ async function validateLease<P extends string>(
   return null;
 }
 
+/** Outcome of the locked critical section — thrown rejections surface only AFTER commit. */
+type LockedSignOutcome =
+  | { readonly kind: "signed"; readonly result: SigningResult }
+  | { readonly kind: "rejected"; readonly reason: string };
+
+async function runLockedSignSection<P extends string>(
+  ports: SignUnderLeaseTxPortsOf<P>,
+  vaultSigner: VaultSigner,
+  capability: SigningCapabilityOf<P>,
+  now: () => string,
+): Promise<LockedSignOutcome> {
+  const rejection = await validateLease(ports.leaseReader, capability);
+  if (rejection !== null) {
+    await ports.auditLog.append({
+      walletId: capability.walletId,
+      operationId: capability.operationId,
+      leaseEpoch: capability.leaseEpoch,
+      purpose: capability.purpose,
+      preimageSha256: capability.expectedPreimageSha256,
+      outcome: "REJECTED",
+      rejectionReason: rejection,
+      timestamp: now(),
+    });
+    return { kind: "rejected", reason: rejection };
+  }
+
+  const computedDigest = sha256Hex(capability.preimageText);
+  if (computedDigest !== capability.expectedPreimageSha256) {
+    const reason = "preimage digest mismatch";
+    await ports.auditLog.append({
+      walletId: capability.walletId,
+      operationId: capability.operationId,
+      leaseEpoch: capability.leaseEpoch,
+      purpose: capability.purpose,
+      preimageSha256: capability.expectedPreimageSha256,
+      outcome: "REJECTED",
+      rejectionReason: reason,
+      timestamp: now(),
+    });
+    return { kind: "rejected", reason };
+  }
+
+  const preimageBytes = new TextEncoder().encode(capability.preimageText);
+  const signature = await vaultSigner.sign(capability.walletId, preimageBytes);
+
+  await ports.auditLog.append({
+    walletId: capability.walletId,
+    operationId: capability.operationId,
+    leaseEpoch: capability.leaseEpoch,
+    purpose: capability.purpose,
+    preimageSha256: computedDigest,
+    outcome: "SIGNED",
+    timestamp: now(),
+  });
+
+  return {
+    kind: "signed",
+    result: Object.freeze({ signature, preimageSha256: computedDigest }),
+  };
+}
+
 // The single signing enforcement path: re-read the current lease row, require an exact
 // wallet / operation / epoch / permitted-role match, recompute the preimage digest, sign, audit.
 // Purpose is opaque here so the recovery probe runs THIS code rather than a parallel
@@ -285,53 +377,27 @@ async function signUnderLeaseBody<P extends string>(
 
   // Per-wallet quarantine (anomaly action). Runs inside the body so the
   // flush bridge still covers the full mid-sign window when the gate awaits I/O.
+  // Ordering (unchanged): leadership → money gates → quarantine → lease → digest → vault → audit.
   await moneyGates.assertWalletMaySign(capability.walletId);
 
-  const rejection = await validateLease(deps.leaseReader, capability);
-  if (rejection !== null) {
-    await deps.auditLog.append({
-      walletId: capability.walletId,
-      operationId: capability.operationId,
-      leaseEpoch: capability.leaseEpoch,
-      purpose: capability.purpose,
-      preimageSha256: capability.expectedPreimageSha256,
-      outcome: "REJECTED",
-      rejectionReason: rejection,
-      timestamp: now(),
-    });
-    throw new SignerBoundaryError(rejection, rejectionCode(rejection));
+  // Transaction-scoped path (production): lease FOR UPDATE + sign + audit on one pinned client.
+  // Outcome is returned (not thrown) so REJECTED audit rows commit with the lock release —
+  // throwing inside withSignTransaction would ROLLBACK the audit append.
+  const withTx = deps.withSignTransaction;
+  const outcome: LockedSignOutcome =
+    withTx !== undefined
+      ? await withTx((tx) => runLockedSignSection(tx, deps.vaultSigner, capability, now))
+      : await runLockedSignSection(
+          { leaseReader: deps.leaseReader, auditLog: deps.auditLog },
+          deps.vaultSigner,
+          capability,
+          now,
+        );
+
+  if (outcome.kind === "rejected") {
+    throw new SignerBoundaryError(outcome.reason, rejectionCode(outcome.reason));
   }
-
-  const computedDigest = sha256Hex(capability.preimageText);
-  if (computedDigest !== capability.expectedPreimageSha256) {
-    const reason = "preimage digest mismatch";
-    await deps.auditLog.append({
-      walletId: capability.walletId,
-      operationId: capability.operationId,
-      leaseEpoch: capability.leaseEpoch,
-      purpose: capability.purpose,
-      preimageSha256: capability.expectedPreimageSha256,
-      outcome: "REJECTED",
-      rejectionReason: reason,
-      timestamp: now(),
-    });
-    throw new SignerBoundaryError(reason, "PREIMAGE_DIGEST_MISMATCH");
-  }
-
-  const preimageBytes = new TextEncoder().encode(capability.preimageText);
-  const signature = await deps.vaultSigner.sign(capability.walletId, preimageBytes);
-
-  await deps.auditLog.append({
-    walletId: capability.walletId,
-    operationId: capability.operationId,
-    leaseEpoch: capability.leaseEpoch,
-    purpose: capability.purpose,
-    preimageSha256: computedDigest,
-    outcome: "SIGNED",
-    timestamp: now(),
-  });
-
-  return Object.freeze({ signature, preimageSha256: computedDigest });
+  return outcome.result;
 }
 
 export class LeaseSignerBoundary {
@@ -370,5 +436,6 @@ function rejectionCode(reason: string): SignerBoundaryError["code"] {
   if (reason.includes("wallet mismatch")) return "WALLET_MISMATCH";
   if (reason.includes("operation mismatch")) return "OPERATION_MISMATCH";
   if (reason.includes("epoch")) return "EPOCH_MISMATCH";
+  if (reason.includes("preimage digest")) return "PREIMAGE_DIGEST_MISMATCH";
   return "ROLE_NOT_PERMITTED";
 }

@@ -3,8 +3,8 @@
 - **lane:** implementer
 - **run:** `e0d41209-7043-441d-8756-de74b04f4ae1`
 - **prior dual-PASS head (VOID):** `2b6a9420a7f0b947598fe6f75260e33b6038caca`
-- **new HEAD:** `7d60aed20933b5cd3bc72dc332f8c57ea50deafd` (docs tip; product verify @ `3bf1c562b33a9bdfc7cffd0c5befdd3c3ecc7d79`)
-- **base:** `origin/main` @ `d833039ec838cadeb991255bdacd21e3afb3f601`
+- **new HEAD:** `643db5d956de9d28bc9da4d839e19480b6b954e0` (docs tip; product verify @ `3bf1c562b33a9bdfc7cffd0c5befdd3c3ecc7d79`)
+- **base:** `origin/main` @ `e65e1805e36aa157ddf72020fe096db57d36b9a8`
 - **PR:** #72 (`ztr-1218-login-rate-limit`)
 - **worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1218-rebase`
 - **local branch during rebase:** `ztr-1218-login-rate-limit-rebase` → force-with-lease pushed to `origin/ztr-1218-login-rate-limit`
@@ -17,6 +17,7 @@ and later merges). Dual PASS at `2b6a942` is void after rebase.
 ## Commits after rebase
 
 ```
+643db5d docs(tasks): pin ZTR-1218 rebase tip SHA after handoff commit
 7d60aed docs(tasks): ZTR-1218 implementer rebase handoff
 3bf1c56 docs(tasks): ZTR-1218 implementer r2 handoff (Date.now freeze)
 23515af fix(test): freeze Date.now in malformed login rate-limit suite (ZTR-1218)

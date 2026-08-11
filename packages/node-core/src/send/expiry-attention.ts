@@ -635,12 +635,28 @@ export async function loadSendExpiryOperationFacts(
  * touches wallet_active_leases. Partial immutable bytes must be bit-identical
  * before and after (asserted; throws on mutation).
  */
+/**
+ * Optional dual-chain projection after a successful park CAS (ZTR-1146). Bound by the
+ * composition root so `operation.needs_attention` reaches implementer_events on the same
+ * transaction as the AWAITING_REDEMPTION → NEEDS_ATTENTION flip.
+ */
+export type SendExpiryDualChainEmitter = (
+  query: SqlQueryFn,
+  input: {
+    readonly operationId: string;
+    readonly attentionReason: AttentionReason;
+    readonly attentionEpisode: number;
+    readonly dataText: string;
+  },
+) => Promise<void>;
+
 export async function parkPastExpiryAwaitingRedemption(
   query: SqlQueryFn,
   input: {
     readonly operationId: string;
     readonly nowUnixSecs: number;
     readonly attentionReason?: AttentionReason;
+    readonly dualChain?: SendExpiryDualChainEmitter;
   },
 ): Promise<ParkPastExpiryResult> {
   const reason = input.attentionReason ?? SEND_EXPIRY_ATTENTION_REASON;
@@ -759,6 +775,20 @@ export async function parkPastExpiryAwaitingRedemption(
     throw new Error(
       `parkPastExpiryAwaitingRedemption: lease_epoch changed for ${input.operationId}`,
     );
+  }
+
+  if (input.dualChain !== undefined) {
+    const dataText = JSON.stringify({
+      attention_reason: reason,
+      attention_episode: episode,
+      parked_at_unix_secs: input.nowUnixSecs,
+    });
+    await input.dualChain(query, {
+      operationId: input.operationId,
+      attentionReason: reason,
+      attentionEpisode: episode,
+      dataText,
+    });
   }
 
   return {

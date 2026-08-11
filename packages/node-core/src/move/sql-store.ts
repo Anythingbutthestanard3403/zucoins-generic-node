@@ -8,8 +8,9 @@
 //
 // Lease acquisition is OUT OF SCOPE. This store creates or joins a lease_groups
 // row so the admitted operation has a durable group identity; it never writes
-// wallet_active_leases. Event append is a port (full zp-node-event-v1 signing is /
-// reporting); the port runs inside the same TX so a rolled-back admit leaves no event.
+// wallet_active_leases. Event append is a port: production wires dual-chain
+// `internal_move.created` (node_events + implementer_events); the port runs inside
+// the same TX so a rolled-back admit leaves no event (ZTR-1146).
 
 import { randomUUID } from "node:crypto";
 
@@ -26,6 +27,11 @@ import type {
 } from "./create.js";
 import { MOVE_OPERATION_KIND } from "./create.js";
 import { readTransactionMaterialFacts } from "../core/transaction-material-store.js";
+import {
+  appendDurableDualChainEvent,
+  type DualChainEventQuota,
+  type NodeEventSigner,
+} from "../event-log/dual-chain-appender.js";
 
 export interface SqlQueryResult<R> {
   readonly rows: R[];
@@ -300,6 +306,65 @@ export function defaultMoveCreatedEventAppender(
       input.amountZkz,
       input.createdAt,
     ]);
+  };
+}
+
+/** Stable data payload for internal_move.created (byte-exact digest surface). */
+export function buildInternalMoveCreatedEventData(input: {
+  readonly operationId: string;
+  readonly sourceWalletId: string;
+  readonly destinationId: string;
+  readonly amountZkz: string;
+  readonly createdAt: string;
+}): string {
+  return JSON.stringify({
+    operation_id: input.operationId,
+    source_wallet_id: input.sourceWalletId,
+    destination_id: input.destinationId,
+    amount_zkz: input.amountZkz,
+    created_at: input.createdAt,
+  });
+}
+
+export interface DualChainMoveCreatedAppenderConfig {
+  readonly signer: NodeEventSigner;
+  readonly quota?: DualChainEventQuota;
+  readonly generateId?: () => string;
+}
+
+/**
+ * Production appender: slice-local admission row + signed dual-chain
+ * `internal_move.created` on the caller's admission transaction.
+ */
+export function createDualChainMoveCreatedEventAppender(
+  config: DualChainMoveCreatedAppenderConfig,
+): MoveCreatedEventAppender {
+  const generateId = config.generateId ?? (() => randomUUID());
+  const local = defaultMoveCreatedEventAppender(generateId);
+  return async (tx, input) => {
+    await local(tx, input);
+    const dataText = buildInternalMoveCreatedEventData({
+      operationId: input.operationId,
+      sourceWalletId: input.sourceWalletId,
+      destinationId: input.destinationId,
+      amountZkz: input.amountZkz,
+      createdAt: input.createdAt,
+    });
+    await appendDurableDualChainEvent(
+      async (text, values) =>
+        (await tx.query<Record<string, unknown>>(text, values)).rows,
+      {
+        nodeId: input.nodeId,
+        implementerId: input.implementerId,
+        operationId: input.operationId,
+        walletId: input.sourceWalletId,
+        eventType: "internal_move.created",
+        dataText,
+        createdAt: input.createdAt,
+        signer: config.signer,
+        ...(config.quota !== undefined ? { quota: config.quota } : {}),
+      },
+    );
   };
 }
 

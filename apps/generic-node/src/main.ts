@@ -79,7 +79,10 @@ import {
   SqlMoveCreateStore,
   SqlReceiveAdmissionStore,
   SqlSendCreateStore,
+  appendDurableDualChainEvent,
+  createDualChainMoveCreatedEventAppender,
   type SendArtifactSigner,
+  type SendCreatedEventAppender,
   SendAdmissionError,
   toBase64UrlPadded,
   type MoneyPathAdmissionPorts,
@@ -532,11 +535,56 @@ async function main(): Promise<void> {
   const receiveStore = new SqlReceiveAdmissionStore(poolSql, {
     withTransaction: withPgTransaction,
   });
+  // Dual-chain appenders are late-bound through eventSignerHolder: admission routes only
+  // open after EVENT_SIGNING is installed, and a missing signer fails the create TX closed
+  // rather than admitting money without a tenant-visible event (ZTR-1146 / Byte-exact).
+  const requireEventSigner = (): NodeEventSigner => {
+    const signer = eventSignerHolder.current;
+    if (signer === null) {
+      throw new Error(
+        "EVENT_SIGNING signer unavailable — refusing durable event append (Byte-exact)",
+      );
+    }
+    return signer;
+  };
   const moveStore = new SqlMoveCreateStore({
     sql: poolSql,
     withTransaction: withPgTransaction,
+    appendCreatedEvent: async (tx, input) => {
+      const appender = createDualChainMoveCreatedEventAppender({
+        signer: requireEventSigner(),
+      });
+      await appender(tx, input);
+    },
   });
-  const sendStore = new SqlSendCreateStore(poolSql);
+  const appendExternalSendCreated: SendCreatedEventAppender = async (tx, input) => {
+    const dataText = JSON.stringify({
+      operation_id: input.operationId,
+      source_wallet_id: input.sourceWalletId,
+      destination_address: input.destinationAddress,
+      amount_zkz: input.amountZkz,
+      created_at: input.createdAt,
+    });
+    await appendDurableDualChainEvent(
+      async (text, values) =>
+        (await tx.query<Record<string, unknown>>(text, values as readonly unknown[])).rows,
+      {
+        nodeId: input.nodeId,
+        implementerId: input.implementerId,
+        operationId: input.operationId,
+        walletId: input.sourceWalletId,
+        eventType: "external_send.created",
+        dataText,
+        createdAt: input.createdAt,
+        signer: requireEventSigner(),
+      },
+    );
+  };
+  const sendStore = new SqlSendCreateStore({
+    sql: poolSql,
+    withTransaction: withPgTransaction,
+    appendCreatedEvent: appendExternalSendCreated,
+  });
   const operationStore = createSqlOperationRouteStore({
     nodeId: config.NODE_ID,
     queueCap: receiveQueueCap(config),

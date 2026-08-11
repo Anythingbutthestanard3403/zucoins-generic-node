@@ -95,7 +95,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // re-sorting or re-inserting wallet_active_leases itself. The live point-read reuses
   // core's canonical execution-phase derivation and transaction-material fact reader;
   // move remains read-only across that edge.
-  move: ["protocol", "leases", "core"],
+  // dual-chain internal_move.created (ZTR-1146) adds event-log — leaf over protocol only.
+  move: ["protocol", "leases", "core", "event-log"],
   // persisted lease foundation: reads frozen schema version/file constants only.
   leases: ["schema"],
   workers: ["protocol", "core", "gateway"],
@@ -432,6 +433,8 @@ describe("node-core dependency boundaries", () => {
         // (ZTR-1202: destination_address was read off a summary row nothing populated).
         "@zucoins/generic-node-contracts/admin-inventory",
         "@zucoins/generic-node-contracts/admin-auth-errors",
+        // Frozen observation wire vocabulary for SQL anomaly/stream persistence (ZTR-1127).
+        "@zucoins/generic-node-contracts/observation",
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/node-core",
         "@zucoins/node-core/data",

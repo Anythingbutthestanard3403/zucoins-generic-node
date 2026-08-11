@@ -300,6 +300,7 @@ export {
   type ExpireReceiveInput,
   type ExpireReceiveOutcome,
   type ReceiveExpiryAttentionReason,
+  type ReceiveExpiryDualChainEmitter,
   type ReceiveExpiryLeaseRepository,
   type ReceiveExpiryTxFactory,
   type ReceiveReleasePredicateName,

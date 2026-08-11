@@ -467,7 +467,12 @@ interface ParkedSend {
  * evidence — the golden bodies below stay bound to SOURCE_PUBKEY.
  */
 async function seedParkedSend(
-  options: { buried?: boolean; sourcePubkey?: string } = {},
+  options: {
+    buried?: boolean;
+    sourcePubkey?: string;
+    /** Pin signed redemption expiry at INSERT (sign_intents are insert-only). */
+    signedExpiryUnixSecs?: number;
+  } = {},
 ): Promise<ParkedSend> {
   const sourcePubkey = options.sourcePubkey ?? SOURCE_PUBKEY;
   const nodeId = randomUUID();
@@ -691,6 +696,12 @@ async function seedParkedSend(
      `approval-preimage-${operationId}`, sha256HexOfText(`approval-preimage-${operationId}`)],
   );
 
+  // Byte-immutability (ZTR-1138): external_send_sign_intents is INSERT-only. Expiry drills
+  // pin signed expiry here rather than UPDATEing inner_preimage_text after seed.
+  const intentInnerText =
+    options.signedExpiryUnixSecs !== undefined
+      ? JSON.stringify({ expiry__unix_time_secs: String(options.signedExpiryUnixSecs) })
+      : TARGET_INNER_TEXT;
   await pool.query(
     `INSERT INTO external_send_sign_intents (
        operation_id, approval_id, source_wallet_id,
@@ -700,7 +711,7 @@ async function seedParkedSend(
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
        $6::uuid, $7, $8, $9, now() + interval '5 min', now())`,
     [operationId, approvalId, walletId, sourceT0ObsId, destT0ObsId,
-     leaseGroupId, leaseEpoch, TARGET_INNER_TEXT, sha256HexOfText(TARGET_INNER_TEXT)],
+     leaseGroupId, leaseEpoch, intentInnerText, sha256HexOfText(intentInnerText)],
   );
 
   const transferCodeSha = sha256HexOfText("transfer-code-fixture-b");
@@ -765,6 +776,8 @@ function landerDeps(
     store: createSqlExternalSendLandingStore(pool, sendSigners.get(nodeId)),
     nodeId,
     deviceKeyStore: new InMemoryDeviceKeyStore(),
+    // ZTR-1146: park path dual-chains operation.needs_attention with EVENT_SIGNING.
+    eventSigner: sendSigners.get(nodeId) ?? null,
   };
 }
 
@@ -807,22 +820,6 @@ async function attentionReasonOf(operationId: string): Promise<string | null> {
   return row.rows[0]!.attention_reason;
 }
 
-/**
- * Pin the signed redemption deadline the F1.1 park reads.
- *
- * The lander takes T2 from the sign intent's inner preimage — the bytes the recipient
- * redeems against — so a drill that wants to sit on one side of expiry says so here rather
- * than depending on how old the golden fixture happens to be. Only the WAITING/park drills
- * use it: they never reach evidence assembly, so the preimage's other fields are moot.
- */
-async function setSignedExpiry(operationId: string, expiryUnixSecs: number): Promise<void> {
-  await pool.query(
-    `UPDATE external_send_sign_intents
-        SET inner_preimage_text = $2
-      WHERE operation_id = $1::uuid`,
-    [operationId, JSON.stringify({ expiry__unix_time_secs: String(expiryUnixSecs) })],
-  );
-}
 
 /** Put a send in the parked state F2.2 starts from, without going through the lander. */
 async function parkPastExpiryByHand(operationId: string): Promise<void> {
@@ -978,8 +975,9 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   it(
     "AC3: unchanged T0 head BEFORE the signed expiry → WAITING (stay AWAITING_REDEMPTION, no park, no landing)",
     async () => {
-      const parked = await seedParkedSend();
-      await setSignedExpiry(parked.operationId, Math.floor(Date.now() / 1000) + 3600);
+      const parked = await seedParkedSend({
+        signedExpiryUnixSecs: Math.floor(Date.now() / 1000) + 3600,
+      });
 
       const result = await tickSendCompletionLander(landerDeps(parked.nodeId, t0Exchange()));
       expect(result.landed).toEqual([]);
@@ -1009,10 +1007,10 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   it(
     "F1.1: unchanged T0 head PAST expiry + aging margin → PARK NEEDS_ATTENTION/POST_EXPIRY_RECONCILING (never terminal, lease held)",
     async () => {
-      const parked = await seedParkedSend();
-      // The golden partial's own signed expiry is already in the past; pin it explicitly so
-      // the drill states the boundary it is testing rather than depending on fixture age.
-      await setSignedExpiry(parked.operationId, Math.floor(Date.now() / 1000) - 7200);
+      // Pin past expiry at INSERT (sign_intents insert-only) so the drill states the boundary.
+      const parked = await seedParkedSend({
+        signedExpiryUnixSecs: Math.floor(Date.now() / 1000) - 7200,
+      });
 
       const result = await tickSendCompletionLander(landerDeps(parked.nodeId, t0Exchange()));
       expect(result.landed).toEqual([]);
@@ -1119,7 +1117,7 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   );
 
   it(
-    "B4: changed head (different transaction) → PARK NEEDS_ATTENTION (reason + event + mirror sync)",
+    "B4: changed head (different transaction) → PARK NEEDS_ATTENTION (reason + event + mirror sync + dual-chain)",
     async () => {
       const parked = await seedParkedSend();
 
@@ -1138,6 +1136,47 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       expect(ev.rowCount).toBe(1);
       expect(ev.rows[0]!.event_type).toBe("operation.needs_attention");
 
+      // ZTR-1146: tenant stream must observe the park (not slice-local only).
+      const chains = await sendDualChainRows(parked.operationId);
+      expect(chains.node.map((r) => r.event_type)).toEqual(["operation.needs_attention"]);
+      expect(chains.implementer.map((r) => r.event_type)).toEqual(["operation.needs_attention"]);
+      const payload = JSON.parse(chains.node[0]!.data_text) as {
+        current_state: string;
+        attention_reason: string;
+        operator_action_required: boolean;
+      };
+      expect(payload.current_state).toBe("NEEDS_ATTENTION");
+      expect(payload.operator_action_required).toBe(true);
+      expect(typeof payload.attention_reason).toBe("string");
+
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "B4/ZTR-1146: park without EVENT_SIGNING fails closed (no NEEDS_ATTENTION, no dual-chain)",
+    async () => {
+      const parked = await seedParkedSend();
+      const deps = {
+        ...landerDeps(parked.nodeId, changedExchange()),
+        eventSigner: null,
+      };
+
+      const result = await tickSendCompletionLander(deps);
+      expect(result.parked).toBe(0);
+      expect(result.indeterminate).toBe(1);
+      expect(await sendStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
+      expect(await opsStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
+
+      const slice = await pool.query(
+        `SELECT 1 FROM external_send_attention_events WHERE operation_id = $1::uuid`,
+        [parked.operationId],
+      );
+      expect(slice.rowCount).toBe(0);
+      const chains = await sendDualChainRows(parked.operationId);
+      expect(chains.node).toEqual([]);
+      expect(chains.implementer).toEqual([]);
       expect(await leaseHeld(parked.walletId)).toBe(true);
     },
     PG_TEST_TIMEOUT_MS,

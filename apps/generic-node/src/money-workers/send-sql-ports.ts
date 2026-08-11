@@ -13,6 +13,7 @@ import {
   buildMoveStep2PreimageText,
   createLeaseGroup,
   hashMovePreimageText,
+  appendDurableDualChainEvent,
   persistSendPartialSql,
   persistSendSignIntentSql,
   recordPartialDelivery,
@@ -23,6 +24,7 @@ import {
   type ApprovedSendClaimPort,
   type ApprovalIdLoader,
   type CommitExternalSendLandingCommand,
+  type DualChainEventQuota,
   type ExternalSendLandingStore,
   type ExternalSendPartialDelivery,
   type ExternalSendPartialLoader,
@@ -306,14 +308,86 @@ export function createSqlSignIntentPort(pool: Pool): SignIntentPersistPort {
   };
 }
 
-export function createSqlPartialPort(pool: Pool): PartialPersistPort {
+export interface SqlPartialPortDeps {
+  readonly pool: Pool;
+  /** Node id that owns the dual-chain seq counters. */
+  readonly nodeId: string;
+  /** Sealed EVENT_SIGNING signer; null refuses the AWAITING_REDEMPTION transition. */
+  readonly eventSigner: () => NodeEventSigner | null;
+  readonly eventQuota?: DualChainEventQuota;
+}
+
+/**
+ * Post-sign partial port: persists the partial + CAS to AWAITING_REDEMPTION and appends
+ * `external_send.awaiting_redemption` on both signed chains in the same commit (ZTR-1146).
+ * The transfer code must not become visible before this commit succeeds.
+ */
+export function createSqlPartialPort(deps: SqlPartialPortDeps | Pool): PartialPersistPort {
+  // Back-compat for unit tests that still pass a bare Pool (no dual-chain append).
+  const config: SqlPartialPortDeps =
+    typeof (deps as Pool).query === "function" && !("pool" in (deps as object))
+      ? {
+          pool: deps as Pool,
+          nodeId: "",
+          eventSigner: () => null,
+        }
+      : (deps as SqlPartialPortDeps);
+
   return {
     async commitPartialAndAwaitRedemption(input) {
-      return withPoolTransaction(pool, async (tx) => {
+      return withPoolTransaction(config.pool, async (tx) => {
         const result = await persistSendPartialSql(txQueryFn(tx), input);
-        if (result.ok) {
-          await syncOperationsMirrorFromSendInTx(tx, input.intent.operationId);
+        if (!result.ok) return result;
+
+        await syncOperationsMirrorFromSendInTx(tx, input.intent.operationId);
+
+        // Production wiring always supplies nodeId + signer. Empty nodeId is the bare-Pool
+        // test path — skip dual-chain so pure SQL drills stay driver-local.
+        if (config.nodeId === "") {
+          return result;
         }
+
+        const signer = config.eventSigner();
+        if (signer === null) {
+          throw new Error(
+            `money-workers: external_send.awaiting_redemption NOT appended op=${input.intent.operationId} — EVENT_SIGNING signer unavailable; refusing AWAITING_REDEMPTION (Byte-exact)`,
+          );
+        }
+
+        const owner = await tx.query<{
+          implementer_id: string;
+          source_wallet_id: string | null;
+        }>(
+          `SELECT implementer_id::text AS implementer_id,
+                  source_wallet_id::text AS source_wallet_id
+             FROM send_operations
+            WHERE operation_id = $1::uuid`,
+          [input.intent.operationId],
+        );
+        const row = owner.rows[0];
+        if (row === undefined) {
+          throw new Error(
+            `money-workers: external_send.awaiting_redemption NOT appended op=${input.intent.operationId} — send_operations row missing after CAS`,
+          );
+        }
+
+        const dataText = JSON.stringify({
+          operation_id: input.intent.operationId,
+          transfer_code_sha256: result.transferCodeSha256,
+          redemption_expiry_at: input.intent.redemptionExpiryAt,
+          awaiting_at: input.persistedAt,
+        });
+        await appendDurableDualChainEvent(txQueryFn(tx), {
+          nodeId: config.nodeId,
+          implementerId: row.implementer_id,
+          operationId: input.intent.operationId,
+          walletId: row.source_wallet_id,
+          eventType: "external_send.awaiting_redemption",
+          dataText,
+          createdAt: input.persistedAt,
+          signer,
+          ...(config.eventQuota !== undefined ? { quota: config.eventQuota } : {}),
+        });
         return result;
       });
     },

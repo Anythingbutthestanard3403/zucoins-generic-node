@@ -14,7 +14,12 @@ export {
 // port shapes and its `STATEMENTS` / column constants share names with sibling persistence
 // modules, and the package barrel re-exports every module. Consumers that need those import
 // them from "@zucoins/node-core/send/sql-store.js" directly.
-export { SqlSendCreateStore } from "./sql-store.js";
+export {
+  SqlSendCreateStore,
+  type SendCreatedEventAppender,
+  type SqlSendCreateStoreConfig,
+  type SqlTxFn as SendSqlTxFn,
+} from "./sql-store.js";
 export { createSqlApprovalChallengeStore } from "./sql-approval-store.js";
 export { createSqlApprovalOperationLoader, APPROVAL_LOAD_SQL } from "./sql-approval-load.js";
 export {
@@ -107,6 +112,7 @@ export {
   fingerprintPartialImmutableBytes,
   loadSendExpiryOperationFacts,
   parkPastExpiryAwaitingRedemption,
+  type SendExpiryDualChainEmitter,
   continueExternalWait,
   redeliverExactPartial,
   assertNoForbiddenSqlInAllowedSet,

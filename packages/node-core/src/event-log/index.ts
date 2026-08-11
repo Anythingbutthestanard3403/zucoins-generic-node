@@ -34,17 +34,22 @@ export {
 } from "./pg-event-store.js";
 
 export {
+  appendDurableDualChainEvent,
   appendImplementerEventLeg,
+  appendTerminalLandedEvent,
   buildArtifactEnvelope,
   createDualChainEventAppender,
   implementerEventHashOf,
   DEFAULT_IMPLEMENTER_EVENT_QUOTA,
+  TerminalEventNotAppendableError,
   type DualChainAppendInput,
   type DualChainAppendOutcome,
   type DualChainAppenderConfig,
   type DualChainEventAppender,
   type DualChainEventQuota,
+  type DurableDualChainEventInput,
   type ImplementerEventLegInput,
   type ImplementerEventLegResult,
   type NodeEventSigner,
+  type TerminalLandedEventInput,
 } from "./dual-chain-appender.js";

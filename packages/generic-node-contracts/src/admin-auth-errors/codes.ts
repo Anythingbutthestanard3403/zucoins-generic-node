@@ -45,7 +45,7 @@ export const ADMIN_ERROR_CODES = [
   { code: "idempotency_unavailable", http: 503 },
 
   // Approvals / money mutations.
-  { code: "approval_rejected", http: 403 },
+  { code: "approval_rejected", http: 401 },
   { code: "same_operator_both_sides", http: 403 },
   { code: "operation_conflict", http: 409 },
   { code: "authorizer_unknown", http: 404 },

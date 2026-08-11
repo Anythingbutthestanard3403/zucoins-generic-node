@@ -74,6 +74,8 @@ import {
   requireSessionCsrf,
   // Second-device enrol, dual-control policy, operator push
   APPROVAL_POLICY_DENIAL_CODE,
+  APPROVAL_FACTOR_FAILURE_CODE,
+  APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
   DUAL_CONTROL_COPY,
   DEVICE_SIGNATURE_POLICY_COPY,
   combineDeviceSignatureRequirement,
@@ -3202,7 +3204,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   ),
                 };
               }
-              return { outcome: "abort", response: fail(403, "approval_rejected", "approval rejected", requestId) };
+              return { outcome: "abort", response: fail(APPROVAL_FACTOR_FAILURE_HTTP_STATUS, APPROVAL_FACTOR_FAILURE_CODE, "approval rejected", requestId) };
             }
             if (deps.challengeIssuerStore !== undefined) {
               await deps.challengeIssuerStore.clear(m[1]!);

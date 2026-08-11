@@ -34,7 +34,7 @@ function requireAuthRedirect(
   return null;
 }
 
-/** Mirrors RequireFunnel sequence bounce. */
+/** Mirrors RequireFunnel order bounce. */
 function requireFunnelRedirect(
   pathname: string,
   next_step: Day0Step,
@@ -90,7 +90,7 @@ describe("RequireAuth money-route matrix", () => {
   });
 });
 
-describe("RequireFunnel sequence matrix", () => {
+describe("RequireFunnel order matrix", () => {
   it("cannot skip ahead of server next_step", () => {
     expect(requireFunnelRedirect("/start/device", "install")).toBe("/start/install");
     expect(requireFunnelRedirect("/start/backup", "device")).toBe("/start/device");

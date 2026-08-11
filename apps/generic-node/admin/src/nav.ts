@@ -1,4 +1,4 @@
-/** Production SPA nav — generic custody model only. */
+/** Production SPA nav — generic treasury model only. */
 export const PRODUCTION_NAV_LABELS = [
   "Overview",
   "Approve",
@@ -16,17 +16,17 @@ export const PRODUCTION_NAV_LABELS = [
   "Settings",
 ] as const;
 
-/** v1 product-projection chrome — must not appear in production nav. */
+/** v1 checkout / payment-product chrome — must not appear in production nav. */
 export const FORBIDDEN_NAV_LABELS = [
   "Sessions",
-  "Sweeps", // contract-allow:sweep:retired-nav-label-citation
+  "Sweeps",
   "Webhooks",
   "Recent sessions",
 ] as const;
 
 export type ProductionNavLabel = (typeof PRODUCTION_NAV_LABELS)[number];
 
-/** Closed production path set (no retired product-projection routes). */
+/** Closed production path set (no sessions/sweeps/webhooks product routes). */
 export const PRODUCTION_NAV_PATHS = [
   "/",
   "/approve",
@@ -51,6 +51,6 @@ export const PRODUCTION_NAV_PATHS = [
 
 export const FORBIDDEN_NAV_PATHS = [
   "/sessions",
-  "/sweeps", // contract-allow:sweep:retired-nav-path-citation
+  "/sweeps",
   "/webhooks",
 ] as const;

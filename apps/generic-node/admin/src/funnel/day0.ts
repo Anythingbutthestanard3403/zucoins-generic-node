@@ -1,7 +1,7 @@
 /**
  * Day-0 funnel routing.
  *
- * Sequence after login: password → totp → install → device → vault → backup → prove → home.
+ * Order after login: password → totp → install → device → vault → backup → prove → home.
  * Server `next_step` is authoritative for money-route gating. SPA may soft-split
  * backup vs prove with a local create marker; recovery_proven still requires a real recovery_verified_at stamp.
  */
@@ -64,7 +64,7 @@ export function day0StepIndex(step: Day0Step): number {
 }
 
 /**
- * Enforce sequence: visiting a step ahead of server `next_step` bounces back;
+ * Enforce order: visiting a step ahead of server `next_step` bounces back;
  * visiting a completed earlier step advances to `next_step`.
  * Returns null when the current path is allowed.
  */

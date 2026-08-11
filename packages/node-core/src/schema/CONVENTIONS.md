@@ -95,19 +95,6 @@ whole transaction has rolled back, so re-running it from the start is safe.
   sequence buildable — every edge must independently hold under ascending-version
   application.
 
-## 3.1 Contract files without a `.sql` twin
-
-Most schema slices are a 1:1 pair: `NNNN_description.sql` plus a matching
-`*.contract.ts` inventory. A `.contract.ts` MAY stand alone when it is a
-**cross-cutting or multi-table manifest** rather than a single DDL slice. Named
-standalone manifests today:
-
-- `registry-group.contract.ts`
-- `sealed-store-exclusions.contract.ts`
-- `sealed-store-registry.contract.ts`
-
-Do not invent further unpaired contracts without updating this list.
-
 ## 4. Migration journal
 
 One append-only table, `schema_migrations`, created if absent:

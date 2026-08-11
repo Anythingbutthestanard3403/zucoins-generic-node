@@ -78,7 +78,7 @@ describe("day0 redirect matrix", () => {
     expect(hasPackCreateMarker(storage)).toBe(false);
   });
 
-  it("DAY0_STEPS sequence is stable product sequence", () => {
+  it("DAY0_STEPS order is stable product order", () => {
     expect([...DAY0_STEPS]).toEqual([
       "password",
       "totp",

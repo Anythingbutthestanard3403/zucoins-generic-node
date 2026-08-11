@@ -90,6 +90,19 @@ describe("frozen configuration schema — happy path", () => {
     expect(DEFAULT_PUSH_API_BASE).toBe("https://wallet.zucoins.com/api__v1/");
   });
 
+
+  it("defaults PUSH_VAPID_MODE to observe (ZTR-1161 staged rollout)", () => {
+    expect(loadNodeConfig(validEnv()).PUSH_VAPID_MODE).toBe("observe");
+    expect(loadNodeConfig(validEnv({ PUSH_VAPID_MODE: "enforce" })).PUSH_VAPID_MODE).toBe(
+      "enforce",
+    );
+  });
+
+  it("rejects unknown PUSH_VAPID_MODE", () => {
+    const issues = loadIssues(validEnv({ PUSH_VAPID_MODE: "maybe" }));
+    expect(issues.some((issue) => issue.startsWith("PUSH_VAPID_MODE:"))).toBe(true);
+  });
+
   it("accepts an explicit https push relay override", () => {
     const config = loadNodeConfig(
       validEnv({ ZUCOINS_PUSH_API_BASE: "https://push.staging.example/api__v1/" }),

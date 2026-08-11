@@ -42,6 +42,7 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   // Push relay base is read once at compose time; a runtime write would not
   // re-point the already-built gateway client (ZTR-1182).
   "ZUCOINS_PUSH_API_BASE",
+  "PUSH_VAPID_MODE",
   "NODE_ID",
   "INITIAL_ADMIN_USERNAME",
   "INITIAL_ADMIN_PASSWORD",

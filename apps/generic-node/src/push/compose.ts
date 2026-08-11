@@ -22,6 +22,8 @@ import {
   createPushSubscriptionService,
   PushSubscriptionRequiredError,
   type PushSubscriptionService,
+  type PushVapidMode,
+  type PushVapidOutcome,
   type PushWalletRef,
 } from "@zucoins/node-core";
 
@@ -62,6 +64,19 @@ export interface ComposePushDeps {
   readonly pushApiBase: string;
   /** Public base URL; the per-wallet endpoint is built from it. */
   readonly nodePublicUrl: string;
+  /**
+   * Node origin for VAPID `aud` (scheme://host[:port]). Derived from PUBLIC_BASE_URL
+   * at composition; never the full path.
+   */
+  readonly nodeOrigin: string;
+  /**
+   * VAPID gate mode. Default observe (count+audit, never block). Flip to enforce
+   * only after gn_push_vapid_total shows live verified deliveries and ACTIVE rows
+   * all carry app_server_public_key (ZTR-1161 rollout).
+   */
+  readonly vapidMode?: PushVapidMode;
+  /** Optional counter seam for VAPID outcomes. */
+  readonly onVapidOutcome?: (outcome: PushVapidOutcome) => void;
   /** Signs the id-proof with the wallet's own Ed25519 key (vault seam). */
   readonly sign: (walletId: string, preimage: Uint8Array) => Promise<string>;
   /**
@@ -76,7 +91,11 @@ export interface ComposePushDeps {
 export interface PushComposition {
   readonly service: PushSubscriptionService;
   /** Bind to runtime-listener `onPushDelivery`. */
-  readonly onPushDelivery: (endpointId: string, body: Buffer) => Promise<void>;
+  readonly onPushDelivery: (
+    endpointId: string,
+    body: Buffer,
+    authorizationHeader?: string | null,
+  ) => Promise<void>;
   /** Bind to money-workers `onWalletsMinted`. */
   readonly onWalletsMinted: (walletIds: readonly string[]) => void;
   /** One immediate pass; call during boot after the vault is available. */
@@ -165,7 +184,7 @@ export function composePush(deps: ComposePushDeps): PushComposition {
   return {
     service,
 
-    async onPushDelivery(endpointId, body) {
+    async onPushDelivery(endpointId, body, authorizationHeader) {
       // Resolve the row here so the sealer can be bound to the right wallet before decrypt.
       const row = await store.findByEndpointId(endpointId);
       if (row === null) {
@@ -178,8 +197,11 @@ export function composePush(deps: ComposePushDeps): PushComposition {
         decryptor,
         sink: deps.sink,
         audit,
+        nodeOrigin: deps.nodeOrigin,
+        vapidMode: deps.vapidMode ?? "observe",
+        onVapidOutcome: deps.onVapidOutcome,
       });
-      const outcome = await perRow.receive(endpointId, body);
+      const outcome = await perRow.receive(endpointId, body, authorizationHeader);
       deps.logger.info(`push: delivery outcome=${outcome}`);
     },
 

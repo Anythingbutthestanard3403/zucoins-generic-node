@@ -845,12 +845,24 @@ async function main(): Promise<void> {
       vault: vaultKeyStore,
       nodeId: config.NODE_ID,
     });
+    let nodeOrigin = publicBaseUrl;
+    try {
+      nodeOrigin = new URL(publicBaseUrl).origin;
+    } catch {
+      // schema already requires a well-formed URL; fall back to the raw base
+    }
+    const vapidMode = config.PUSH_VAPID_MODE;
     push = composePush({
       pool,
       nodeId: config.NODE_ID,
       rootKey,
       pushApiBase,
       nodePublicUrl: publicBaseUrl,
+      nodeOrigin,
+      vapidMode,
+      onVapidOutcome: (outcome) => {
+        metricsHooks.onPushVapid(outcome);
+      },
       sign: (walletId, preimage) => pushSigner.sign(walletId, preimage),
       // Same inbox the origin relay feeds — one intake path, two producers, but the
       // authenticated lane has its own capacity and is served first.
@@ -861,6 +873,7 @@ async function main(): Promise<void> {
         }),
       logger,
     });
+    logger.info(`push: VAPID mode=${vapidMode} (observe counts without blocking; enforce fails closed)`);
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);
     pushConfiguredRef.current = true;
   }
@@ -898,8 +911,8 @@ async function main(): Promise<void> {
       // composition is discarded rather than half-handled. The route answers 204 regardless
       // (non-oracular), so nothing upstream retries — the discard is final and is why the
       // window is closed inside the boot lane rather than tolerated.
-      onPushDelivery: async (endpointId, body) => {
-        await push?.onPushDelivery(endpointId, body);
+      onPushDelivery: async (endpointId, body, authorizationHeader) => {
+        await push?.onPushDelivery(endpointId, body, authorizationHeader);
       },
     }),
   );

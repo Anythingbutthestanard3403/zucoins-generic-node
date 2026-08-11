@@ -285,7 +285,11 @@ describe("push self-heal gaps", () => {
 
       const outcome = await receiver.receive("wp_abcdefghijklmnopqrs5", Buffer.from("body"));
       expect(outcome).toBe("refused");
-      expect(audit.records).toEqual([{ type: "push.receive_refused", walletId: "wallet-5" }]);
+      expect(audit.records.map((r) => r.type)).toEqual([
+        "push.receive_vapid",
+        "push.receive_refused",
+      ]);
+      expect(audit.records.at(-1)).toEqual({ type: "push.receive_refused", walletId: "wallet-5" });
 
       // The row is not flipped: a shed deposit says nothing about the subscription's health.
       expect((await store.findByWalletId("wallet-5"))?.status).toBe("ACTIVE");
@@ -306,7 +310,11 @@ describe("push self-heal gaps", () => {
 
       const outcome = await receiver.receive("wp_abcdefghijklmnopqrs6", Buffer.from("body"));
       expect(outcome).toBe("enqueued");
-      expect(audit.records).toEqual([{ type: "push.receive_enqueued", walletId: "wallet-6" }]);
+      expect(audit.records.map((r) => r.type)).toEqual([
+        "push.receive_vapid",
+        "push.receive_enqueued",
+      ]);
+      expect(audit.records.at(-1)).toEqual({ type: "push.receive_enqueued", walletId: "wallet-6" });
     });
   });
 

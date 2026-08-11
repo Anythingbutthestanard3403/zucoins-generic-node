@@ -222,8 +222,13 @@ export interface NodeRuntimeListenerDeps {
    * decrypts it and feeds the SAME candidate-intake inbox the origin relay uses. Like
    * the relay this is fire-and-forget: every outcome is 204, so a probe cannot
    * distinguish a known endpoint from an unknown one. Absent when push is not composed.
+   * `authorizationHeader` is the raw `Authorization` value (RFC 8292 VAPID) when present.
    */
-  readonly onPushDelivery?: (endpointId: string, body: Buffer) => Promise<void>;
+  readonly onPushDelivery?: (
+    endpointId: string,
+    body: Buffer,
+    authorizationHeader?: string | null,
+  ) => Promise<void>;
 }
 
 const ITEM_COLLECTIONS = new Set(["receives", "internal-moves", "external-sends"]);
@@ -766,10 +771,16 @@ export function createNodeRuntimeListener(
       onPushDelivery !== undefined
     ) {
       const endpointId = pathname.slice(PUSH_RECEIVER_PATH_PREFIX.length + 1);
+      // Single Authorization value only — duplicate headers are treated as absent so
+      // a smuggled second header cannot bypass VAPID parse (fail closed at verify).
+      const authorizationHeader =
+        countHeader(request.rawHeaders, "authorization") === 1
+          ? (normalizeHeaders(request.rawHeaders).authorization ?? null)
+          : null;
       void (async () => {
         try {
           const bodyBytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
-          await onPushDelivery(endpointId, Buffer.from(bodyBytes));
+          await onPushDelivery(endpointId, Buffer.from(bodyBytes), authorizationHeader);
         } catch (cause) {
           const requestId = newRequestId();
           const { cause_name, cause_message } = sanitizeFailureCause(cause);

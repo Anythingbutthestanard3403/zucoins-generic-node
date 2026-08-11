@@ -2,6 +2,12 @@
 // receives. Policy + the single RFC 8291 aes128gcm decrypt live here. SQL and the
 // push-API transport remain app-supplied ports; the decryptor port's production binding
 // is `decryptWebPushPayload` in this package.
+//
+// Inbound factors (ZTR-1161):
+//   1. ECE auth secret + endpoint id (AEAD) — always required to decrypt.
+//   2. RFC 8292 VAPID Authorization — verified against the stored app-server public
+//      key before decrypt. Default mode is observe (count+audit); enforce fails closed
+//      while the HTTP edge stays uniform 204. See receiver.ts + PUSH_VAPID_MODE.
 
 export { decodeTolerantBase64 } from "./base64-tolerant.js";
 
@@ -56,6 +62,8 @@ export {
   type PushReceiverDeps,
   type PushReceiveOutcome,
   type PushTransferCodeSink,
+  type PushVapidMode,
+  type PushVapidOutcome,
 } from "./receiver.js";
 
 export type {

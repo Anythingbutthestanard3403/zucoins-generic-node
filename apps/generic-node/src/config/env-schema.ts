@@ -176,6 +176,19 @@ export const CONFIG_FIELD_SCHEMAS = {
       .default(DEFAULT_PUSH_API_BASE),
   ),
 
+  /**
+   * VAPID gate on inbound Web Push (ZTR-1161).
+   * `observe` (default) — verify, count, audit; never block decrypt.
+   * `enforce` — fail closed on non-verified (still uniform 204 at HTTP edge).
+   * Flip to enforce only after gn_push_vapid_total shows live verified deliveries
+   * and every ACTIVE push_subscriptions row has app_server_public_key.
+   */
+  PUSH_VAPID_MODE: z
+    .enum(["observe", "enforce"], {
+      message: "PUSH_VAPID_MODE must be observe or enforce",
+    })
+    .default("observe"),
+
   // Initial admin bootstrap — gates irreversible genesis state; first-boot only.
   INITIAL_ADMIN_USERNAME: z
     .string()

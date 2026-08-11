@@ -3,7 +3,7 @@
 - **lane:** implementer
 - **run:** `7be9a03f-0b91-473a-9701-dc8a6d855c38`
 - **prior dual-void head:** `76ba7637f6f01f5e846763b7cc219a88f7b18190`
-- **new HEAD:** `71e462a8cbbf937f09785ca99851e73a3709688d`
+- **new HEAD:** `17afa07220c6c918ee2e79906faf0d0db48294a1`
 - **product commit:** `c421cbcfe2b8bde6d5177163f91dfcb981bcb7ac` (serialize PG suites; verify bar)
 - **base:** `origin/main` @ `7617099405ea709203e551b2b34942e2136abe88`
 - **PR:** #92 (`ztr-1209-pg-flakiness`)
@@ -18,12 +18,13 @@ PR #92 was CONFLICTING after main advanced past dual head `76ba7637`. Prior dual
 ## Commits after rebase
 
 ```
+17afa072 docs(tasks): ZTR-1209 rebase r2 HEAD pin
+71e462a8 docs(tasks): ZTR-1209 implementer rebase r2 handoff
 3298225a docs(tasks): ZTR-1209 implementer rebase handoff
 6be8cce6 docs(tasks): ZTR-1209 final HEAD pin
 b605876d docs(tasks): ZTR-1209 PR #92 + final HEAD
 02e7041f docs(tasks): ZTR-1209 implementer evidence
 c421cbcf fix(vitest): serialize PG suites to end full-suite deadlock flakes (ZTR-1209)
-(plus this handoff commit)
 ```
 
 ## Conflicts (commit 1/5 only: product admit)

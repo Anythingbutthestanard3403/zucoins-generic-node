@@ -207,6 +207,7 @@ export {
   buildReceiveReadyEventData,
   commitReceiveReady,
   completeReadyFromDurableCode,
+  isNonEmptySubscriptionHandle,
   type CommitReceiveReadyInput,
   type CommitReceiveReadyRejectionReason,
   type CommitReceiveReadyResult,

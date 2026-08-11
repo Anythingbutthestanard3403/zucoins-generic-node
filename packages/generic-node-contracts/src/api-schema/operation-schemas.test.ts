@@ -171,6 +171,23 @@ describe("the named concern RECEIVE_EXTERNAL strict schemas", () => {
     ).toBe(false);
   });
 
+  it("rejects null/empty subscription_handle on READY and QUEUED (ZTR-1142 frozen minLength:1)", () => {
+    for (const bad of [null, "", undefined] as const) {
+      expect(
+        ReceiveExternalReadyResponseSchema.safeParse({
+          ...RECEIVE_READY_RESPONSE,
+          subscription_handle: bad,
+        }).success,
+      ).toBe(false);
+      expect(
+        ReceiveExternalQueuedResponseSchema.safeParse({
+          ...RECEIVE_QUEUED_RESPONSE,
+          subscription_handle: bad,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it.each([
     ["omitted", RECEIVE_REQUEST_WITHOUT_EXPIRY, undefined],
     ["one second", { ...RECEIVE_REQUEST, expires_in_seconds: 1 }, 1],

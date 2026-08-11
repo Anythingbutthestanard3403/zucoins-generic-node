@@ -540,6 +540,7 @@ export {
   classifyReceiveCodePhase,
   commitReceiveReady,
   completeReadyFromDurableCode,
+  isNonEmptySubscriptionHandle,
   formReceiveCodeAndArtifact,
   type ArtifactEnvelope,
   type CommitReceiveReadyInput,

@@ -271,7 +271,33 @@ export function createSqlOperationRouteStore(
       const bodyText = JSON.stringify(body);
       // Store the first completed status+body so a concurrent retry gets exact replay
       // (or idempotency_in_progress) — never a fabricated second admit (the never-blind-retry rule).
-      await config.receive.completeOperation(admission.operation.operationId, 202, bodyText);
+      // Honour the boolean: if another writer already completed (or the row vanished),
+      // do not pretend durable complete — surface in-progress so the client retries
+      // and the READY worker cannot race a missing create body (ZTR-1142).
+      const completed = await config.receive.completeOperation(
+        admission.operation.operationId,
+        202,
+        bodyText,
+      );
+      if (!completed) {
+        // Winner's body may already be durable (exact replay) or still racing.
+        const existing = await config.receive.findByOperationId(
+          admission.operation.operationId,
+          input.implementerId,
+        );
+        if (
+          existing !== null &&
+          existing.responseBody !== null &&
+          existing.responseStatus !== null
+        ) {
+          return {
+            status: (existing.responseStatus === 201 ? 201 : 202) as 201 | 202,
+            body: JSON.parse(existing.responseBody) as ReceiveResponse,
+            idempotentReplay: true,
+          };
+        }
+        throw new IdempotencyInProgressError(1);
+      }
       return { status: 202 as const, body };
     },
 

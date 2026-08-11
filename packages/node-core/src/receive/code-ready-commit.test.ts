@@ -15,6 +15,7 @@ import {
   buildReceiveReadyEventData,
   commitReceiveReady,
   completeReadyFromDurableCode,
+  isNonEmptySubscriptionHandle,
   type SqlExecutor,
 } from "./code-ready-commit.js";
 
@@ -30,6 +31,8 @@ const TTL_BOUNDS = { defaultSecs: 300, minSecs: 60, maxSecs: 3600 } as const;
 // Frozen expiry is 1784336400 = 2026-07-18T01:00:00.000Z; readyAt must be before that.
 const READY_AT = "2026-07-18T00:55:00.000Z";
 const CREATED_AT = "2026-07-18T00:50:00.000Z";
+/** Create-time handle re-embedded on READY (ZTR-1142 — never null). */
+const SUBSCRIPTION_HANDLE = "sh_test_ready_handle_plaintext";
 
 function paddedBase64Url(bytes: Buffer): string {
   return bytes.toString("base64").replace(/\+/g, "-").replace(/\//g, "_");
@@ -213,11 +216,12 @@ describe("buildReceiveReady201Body", () => {
       rowVersion: 2,
       createdAt: CREATED_AT,
       updatedAt: READY_AT,
-      subscriptionHandle: null,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
     });
     const parsed = JSON.parse(body) as {
       transfer_code: unknown;
       code_status: string;
+      subscription_handle: string;
       expected_artifact: { key_id: string; preimage_text: string; preimage_sha256: string; signature: string };
       t0: { observation_id: string; projection: { s: string; p: string; b_zkz: string } };
       discriminator: string;
@@ -228,12 +232,39 @@ describe("buildReceiveReady201Body", () => {
     expect(parsed.code_status).toBe("AWAITING_ARM");
     expect(parsed.operation.state).toBe("READY");
     expect(parsed.discriminator).toBe(OPERATION_ID);
+    expect(parsed.subscription_handle).toBe(SUBSCRIPTION_HANDLE);
     expect(parsed.expected_artifact.key_id).toBe(SIGNING_KEY_ID);
     expect(parsed.expected_artifact.preimage_text).toBe(formed.artifact.envelope.preimage_text);
     expect(parsed.t0.projection).toEqual({ s: "", p: "", b_zkz: "0" });
     // Secrecy: plaintext absent.
     expect(body.includes(formed.transferCode.transferCodeText)).toBe(false);
     assertWithheldTransferCode(body, formed.transferCode.transferCodeText);
+  });
+
+  it("rejects null/empty subscriptionHandle (frozen READY schema — ZTR-1142)", async () => {
+    const formed = await formFixture();
+    expect(isNonEmptySubscriptionHandle(null)).toBe(false);
+    expect(isNonEmptySubscriptionHandle("")).toBe(false);
+    expect(isNonEmptySubscriptionHandle(SUBSCRIPTION_HANDLE)).toBe(true);
+    expect(() =>
+      buildReceiveReady201Body({
+        formed,
+        rowVersion: 2,
+        createdAt: CREATED_AT,
+        updatedAt: READY_AT,
+        subscriptionHandle: "",
+      }),
+    ).toThrow(/subscriptionHandle must be a non-empty string/);
+    // Runtime cast: production callers must not pass null; builder throws if they do.
+    expect(() =>
+      buildReceiveReady201Body({
+        formed,
+        rowVersion: 2,
+        createdAt: CREATED_AT,
+        updatedAt: READY_AT,
+        subscriptionHandle: null as unknown as string,
+      }),
+    ).toThrow(/subscriptionHandle must be a non-empty string/);
   });
 
   it("event data also withholds the code", async () => {
@@ -258,6 +289,7 @@ describe("commitReceiveReady", () => {
       readyAt: READY_AT,
       destinationId: null,
       createdAt: CREATED_AT,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
       sql,
       events: {
         async appendReceiveReady(input) {
@@ -276,9 +308,11 @@ describe("commitReceiveReady", () => {
     const body = JSON.parse(result.responseBody) as {
       transfer_code: unknown;
       code_status: string;
+      subscription_handle: string;
     };
     expect(body.transfer_code).toBeNull();
     expect(body.code_status).toBe("AWAITING_ARM");
+    expect(body.subscription_handle).toBe(SUBSCRIPTION_HANDLE);
     assertWithheldTransferCode(result.responseBody, formed.transferCode.transferCodeText);
     assertWithheldTransferCode(events[0]!.dataText, formed.transferCode.transferCodeText);
 
@@ -292,6 +326,28 @@ describe("commitReceiveReady", () => {
     expect(insert!.text).toMatch(/AWAITING_ARM/);
   });
 
+  it("rejects when subscription_handle is missing/empty before any durable write (ZTR-1142)", async () => {
+    const formed = await formFixture();
+    const sql = new FakeSql();
+    const result = await commitReceiveReady({
+      formed,
+      receiverWalletId: WALLET_ID,
+      leaseEpoch: 1n,
+      readyAt: READY_AT,
+      destinationId: null,
+      // Simulate race / fail-open prior-load: empty handle must not READY.
+      subscriptionHandle: "",
+      sql,
+      events: { async appendReceiveReady() {} },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe("subscription_handle_missing");
+    expect(sql.codeInserted).toBe(false);
+    expect(sql.status).toBe("CREATED");
+    expect(sql.responseBody).toBeNull();
+  });
+
   it("rejects when lease is lost", async () => {
     const formed = await formFixture();
     const sql = new FakeSql();
@@ -302,6 +358,7 @@ describe("commitReceiveReady", () => {
       leaseEpoch: 1n,
       readyAt: READY_AT,
       destinationId: null,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
       sql,
       events: { async appendReceiveReady() {} },
     });
@@ -321,6 +378,7 @@ describe("commitReceiveReady", () => {
       leaseEpoch: 1n,
       readyAt: READY_AT,
       destinationId: "66666666-6666-4666-8666-666666666666",
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
       sql,
       events: { async appendReceiveReady() {} },
     });
@@ -339,6 +397,7 @@ describe("commitReceiveReady", () => {
       // Far future readyAt past the frozen expiry 1784336400.
       readyAt: new Date((1_784_336_400 + 10) * 1000).toISOString(),
       destinationId: null,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
       sql,
       events: { async appendReceiveReady() {} },
     });
@@ -360,6 +419,7 @@ describe("completeReadyFromDurableCode", () => {
       readyAt: READY_AT,
       destinationId: null,
       createdAt: CREATED_AT,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
       sql,
       events: { async appendReceiveReady() {} },
     });

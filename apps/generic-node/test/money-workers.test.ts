@@ -46,6 +46,10 @@ describe("money-workers composition", () => {
     expect(workers).toMatch(/expireQueueAgedReceives/);
     expect(workers).toMatch(/formReceiveCodeAndArtifact/);
     expect(workers).toMatch(/commitReceiveReady/);
+    // ZTR-1142: fail closed when create-time handle is not durable — never READY with null.
+    expect(workers).toMatch(/defer READY/);
+    expect(workers).toMatch(/create response_body not durable yet/);
+    expect(workers).toMatch(/lacks non-empty subscription_handle/);
     expect(workers).toMatch(/NO_ELIGIBLE_WALLET/);
     expect(workers).toMatch(/recovery_verified pending ceremony/);
     expect(workers).toMatch(/runUnderLeadership/);

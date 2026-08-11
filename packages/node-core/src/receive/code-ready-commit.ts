@@ -152,9 +152,14 @@ export interface CommitReceiveReadyInput {
     readonly rowVersion: number;
     readonly createdAt: string;
     readonly updatedAt: string;
-    readonly subscriptionHandle: string | null;
+    readonly subscriptionHandle: string;
   }) => string;
-  readonly subscriptionHandle?: string | null;
+  /**
+   * Create-time `sh_…` plaintext (required, min length 1). Must match the handle
+   * minted at admit and frozen into the 202 body — READY never mints and never
+   * accepts null (frozen ReceiveExternalReadyResponseSchema).
+   */
+  readonly subscriptionHandle: string;
   /** ISO created_at from the operations row when known; falls back to readyAt. */
   readonly createdAt?: string;
 }
@@ -166,7 +171,9 @@ export type CommitReceiveReadyRejectionReason =
   | "expiry_passed"
   | "cas_lost"
   | "code_already_present"
-  | "idempotency_already_completed";
+  | "idempotency_already_completed"
+  /** Create-time `sh_…` plaintext missing/empty — refuse READY rather than emit schema-illegal null. */
+  | "subscription_handle_missing";
 
 export type CommitReceiveReadyResult =
   | {
@@ -194,19 +201,35 @@ function toIso(value: string | Date): string {
 }
 
 /**
+ * True when `handle` is a non-empty string suitable for the frozen READY/QUEUED
+ * `subscription_handle` field (z.string().min(1) / OpenAPI minLength:1).
+ */
+export function isNonEmptySubscriptionHandle(handle: unknown): handle is string {
+  return typeof handle === "string" && handle.length > 0;
+}
+
+/**
  * Synchronous-assignment 201 body. Explicit key insertion sequence (the byte-exact signing rule):
  * these bytes are the idempotency result and are replayed verbatim.
  *
  * Secrecy: `transfer_code` is the JSON null literal — never the withheld plaintext, never
  * omitted, never the empty string. `code_status` is exactly `"AWAITING_ARM"`.
+ *
+ * `subscription_handle` is the create-time `sh_…` plaintext (required, min length 1) —
+ * never null, never empty (frozen ReceiveExternalReadyResponseSchema).
  */
 export function buildReceiveReady201Body(input: {
   readonly formed: FormedReceiveCode;
   readonly rowVersion: number;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly subscriptionHandle: string | null;
+  readonly subscriptionHandle: string;
 }): string {
+  if (!isNonEmptySubscriptionHandle(input.subscriptionHandle)) {
+    throw new Error(
+      "buildReceiveReady201Body: subscriptionHandle must be a non-empty string (frozen READY schema)",
+    );
+  }
   const { formed } = input;
   const expiresAt = new Date(Number(formed.expiryUnixTimeSecs) * 1000).toISOString();
   return JSON.stringify({
@@ -289,6 +312,17 @@ async function finishReadyTransition(
 ): Promise<CommitReceiveReadyResult> {
   const { formed, sql } = input;
 
+  // Fail closed before any CAS / code write: inventing null would launder a
+  // schema-illegal body into the durable idempotency carrier (ZTR-1142).
+  if (!isNonEmptySubscriptionHandle(input.subscriptionHandle)) {
+    return {
+      ok: false,
+      reason: "subscription_handle_missing",
+      detail: `create-time subscription_handle missing for ${formed.discriminator}; refuse READY`,
+    };
+  }
+  const subscriptionHandle = input.subscriptionHandle;
+
   const cas = await sql.query<{
     operation_id: string;
     row_version: number;
@@ -319,7 +353,7 @@ async function finishReadyTransition(
     rowVersion: ready.row_version,
     createdAt,
     updatedAt,
-    subscriptionHandle: input.subscriptionHandle ?? null,
+    subscriptionHandle,
   });
   assertWithheldTransferCode(responseBody, formed.transferCode.transferCodeText);
 
@@ -364,6 +398,15 @@ export async function commitReceiveReady(
   input: CommitReceiveReadyInput,
 ): Promise<CommitReceiveReadyResult> {
   const { formed, sql } = input;
+
+  // Fail closed up front so we never insert a code row then discover the handle is missing.
+  if (!isNonEmptySubscriptionHandle(input.subscriptionHandle)) {
+    return {
+      ok: false,
+      reason: "subscription_handle_missing",
+      detail: `create-time subscription_handle missing for ${formed.discriminator}; refuse READY`,
+    };
+  }
 
   // Expiry recheck: refuse to READY a code whose frozen expiry is already past readyAt.
   const readyAtUnixSecs = Math.floor(Date.parse(input.readyAt) / 1000);
@@ -449,6 +492,14 @@ export async function completeReadyFromDurableCode(
   input: CommitReceiveReadyInput,
 ): Promise<CommitReceiveReadyResult> {
   const { formed, sql } = input;
+
+  if (!isNonEmptySubscriptionHandle(input.subscriptionHandle)) {
+    return {
+      ok: false,
+      reason: "subscription_handle_missing",
+      detail: `create-time subscription_handle missing for ${formed.discriminator}; refuse READY`,
+    };
+  }
 
   const held = await sql.query<{
     operation_id: string;

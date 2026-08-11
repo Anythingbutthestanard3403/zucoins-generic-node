@@ -765,6 +765,8 @@ function landerDeps(
     store: createSqlExternalSendLandingStore(pool, sendSigners.get(nodeId)),
     nodeId,
     deviceKeyStore: new InMemoryDeviceKeyStore(),
+    // ZTR-1146: park path dual-chains operation.needs_attention with EVENT_SIGNING.
+    eventSigner: sendSigners.get(nodeId) ?? null,
   };
 }
 
@@ -1119,7 +1121,7 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   );
 
   it(
-    "B4: changed head (different transaction) → PARK NEEDS_ATTENTION (reason + event + mirror sync)",
+    "B4: changed head (different transaction) → PARK NEEDS_ATTENTION (reason + event + mirror sync + dual-chain)",
     async () => {
       const parked = await seedParkedSend();
 
@@ -1138,6 +1140,47 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       expect(ev.rowCount).toBe(1);
       expect(ev.rows[0]!.event_type).toBe("operation.needs_attention");
 
+      // ZTR-1146: tenant stream must observe the park (not slice-local only).
+      const chains = await sendDualChainRows(parked.operationId);
+      expect(chains.node.map((r) => r.event_type)).toEqual(["operation.needs_attention"]);
+      expect(chains.implementer.map((r) => r.event_type)).toEqual(["operation.needs_attention"]);
+      const payload = JSON.parse(chains.node[0]!.data_text) as {
+        current_state: string;
+        attention_reason: string;
+        operator_action_required: boolean;
+      };
+      expect(payload.current_state).toBe("NEEDS_ATTENTION");
+      expect(payload.operator_action_required).toBe(true);
+      expect(typeof payload.attention_reason).toBe("string");
+
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "B4/ZTR-1146: park without EVENT_SIGNING fails closed (no NEEDS_ATTENTION, no dual-chain)",
+    async () => {
+      const parked = await seedParkedSend();
+      const deps = {
+        ...landerDeps(parked.nodeId, changedExchange()),
+        eventSigner: null,
+      };
+
+      const result = await tickSendCompletionLander(deps);
+      expect(result.parked).toBe(0);
+      expect(result.indeterminate).toBe(1);
+      expect(await sendStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
+      expect(await opsStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
+
+      const slice = await pool.query(
+        `SELECT 1 FROM external_send_attention_events WHERE operation_id = $1::uuid`,
+        [parked.operationId],
+      );
+      expect(slice.rowCount).toBe(0);
+      const chains = await sendDualChainRows(parked.operationId);
+      expect(chains.node).toEqual([]);
+      expect(chains.implementer).toEqual([]);
       expect(await leaseHeld(parked.walletId)).toBe(true);
     },
     PG_TEST_TIMEOUT_MS,

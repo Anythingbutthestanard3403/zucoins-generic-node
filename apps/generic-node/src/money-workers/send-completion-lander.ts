@@ -28,6 +28,7 @@ import { applyMoneyPathStatementTimeout } from "../db/client.js";
 import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
 
 import {
+  appendDurableDualChainEvent,
   GENESIS_PROJECTION,
   OPERATION_NEEDS_ATTENTION_EVENT,
   SEND_EXPIRY_ATTENTION_REASON,
@@ -50,9 +51,11 @@ import {
   InMemoryLineagePathProofStore,
   type CommitExternalSendLandingOutcome,
   type DeviceKeyStore,
+  type DualChainEventQuota,
   type ExternalSendLandingStore,
   type FreshHeadRead,
   type MetricsHooks,
+  type NodeEventSigner,
   type ParsedSettledTransaction,
   type ReadFreshHead,
   type SendLandingEntryStatus,
@@ -114,6 +117,13 @@ export interface SendObserveLanderDeps {
   readonly batchSize?: number;
   /** Transaction-local money-path statement_timeout (ZTR-1156). */
   readonly moneyPathStatementTimeoutMs?: number;
+  /**
+   * Sealed EVENT_SIGNING signer for dual-chain `operation.needs_attention` on SEND park
+   * (ZTR-1146). Null / missing refuses the park so NEEDS_ATTENTION never commits without a
+   * tenant-stream event (fail-closed; same TX as CAS).
+   */
+  readonly eventSigner?: NodeEventSigner | null;
+  readonly eventQuota?: DualChainEventQuota;
 }
 
 const DEFAULT_BATCH = 25;
@@ -789,32 +799,40 @@ function isPastOracleEligibility(candidate: SendLandingCandidate): boolean {
 
 /**
  * Park an AWAITING_REDEMPTION send to NEEDS_ATTENTION with a closed reason + event in
- * one DB-TX (CAS_AWAITING_TO_NEEDS_ATTENTION), then sync the operations mirror. Returns true
- * when the park was applied. A row that already advanced (landed, or already attention) is a
- * no-op.
+ * one DB-TX (CAS_AWAITING_TO_NEEDS_ATTENTION), sync the operations mirror, and project
+ * `operation.needs_attention` onto both signed chains (ZTR-1146). Returns true when the
+ * park was applied. A row that already advanced (landed, or already attention) is a no-op.
  *
  * Two callers, two reasons: B4's head anomaly (UNEXPECTED_HEAD_CHANGE) and F1.1's plain
  * post-expiry hold (POST_EXPIRY_RECONCILING). Both are attention-only — no terminal status,
- * no lease touched.
+ * no lease touched. Missing EVENT_SIGNING / quota exhaust throws → ROLLBACK (fail-closed).
  */
 async function parkSendNeedsAttention(
-  pool: Pool,
+  deps: SendObserveLanderDeps,
   operationId: string,
   reason: string,
-  statementTimeoutMs: number = MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
 ): Promise<boolean> {
-  const client = await pool.connect();
+  const statementTimeoutMs =
+    deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
+  const client = await deps.pool.connect();
   try {
     await client.query("BEGIN");
     await applyMoneyPathStatementTimeout(client, statementTimeoutMs);
-    const cas = await client.query<{ operation_id: string; row_version: string }>(
-      SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION,
-      [operationId, reason, OPERATION_NEEDS_ATTENTION_EVENT],
-    );
+    const cas = await client.query<{
+      operation_id: string;
+      row_version: string;
+      attention_episode: string | number;
+      attention_reason: string;
+    }>(SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION, [
+      operationId,
+      reason,
+      OPERATION_NEEDS_ATTENTION_EVENT,
+    ]);
     if (cas.rows.length === 0) {
       await client.query("ROLLBACK");
       return false;
     }
+    const casRow = cas.rows[0]!;
     // Sync the operations mirror (lockstep) in the same TX.
     await client.query(
       `UPDATE operations o
@@ -830,6 +848,59 @@ async function parkSendNeedsAttention(
           AND o.kind = 'SEND_EXTERNAL'`,
       [operationId],
     );
+
+    // Dual-chain projection on the SAME client/TX as the CAS (ZTR-1146). Slice-local
+    // external_send_attention_events alone is not enough — GET /v1/events reads
+    // implementer_events. Fail closed if the signer is unavailable.
+    const signer = deps.eventSigner ?? null;
+    if (signer === null) {
+      throw new Error(
+        `send-landing: operation.needs_attention NOT appended op=${operationId} — EVENT_SIGNING signer unavailable; refusing attention park (Byte-exact)`,
+      );
+    }
+    const owner = await client.query<{
+      implementer_id: string;
+      source_wallet_id: string;
+    }>(
+      `SELECT implementer_id::text AS implementer_id,
+              source_wallet_id::text AS source_wallet_id
+         FROM send_operations
+        WHERE operation_id = $1::uuid`,
+      [operationId],
+    );
+    const ownerRow = owner.rows[0];
+    if (ownerRow === undefined) {
+      throw new Error(
+        `send-landing: operation.needs_attention NOT appended op=${operationId} — send_operations row missing after CAS`,
+      );
+    }
+    const episode = Number(casRow.attention_episode);
+    // Match the CAS CTE payload shape so slice-local audit + dual-chain digest the same
+    // attention facts (episode / reason / operator flag).
+    const dataText = JSON.stringify({
+      current_state: "NEEDS_ATTENTION",
+      attention_reason: casRow.attention_reason,
+      attention_episode: episode,
+      operator_action_required: true,
+    });
+    await appendDurableDualChainEvent(
+      async (text, values) => {
+        const result = await client.query(text, values as never);
+        return result.rows as Record<string, unknown>[];
+      },
+      {
+        nodeId: deps.nodeId,
+        implementerId: ownerRow.implementer_id,
+        operationId,
+        walletId: ownerRow.source_wallet_id,
+        eventType: OPERATION_NEEDS_ATTENTION_EVENT,
+        dataText,
+        createdAt: new Date().toISOString(),
+        signer,
+        ...(deps.eventQuota !== undefined ? { quota: deps.eventQuota } : {}),
+      },
+    );
+
     await client.query("COMMIT");
     return true;
   } catch (err) {
@@ -887,12 +958,7 @@ export async function tickSendCompletionLander(
         // status stays non-terminal and the source lease is untouched.
         if (candidate.status === "AWAITING_REDEMPTION" && isPastOracleEligibility(candidate)) {
           try {
-            if (await parkSendNeedsAttention(
-              deps.pool,
-              candidate.operationId,
-              POST_EXPIRY_REASON,
-              deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
-            )) {
+            if (await parkSendNeedsAttention(deps, candidate.operationId, POST_EXPIRY_REASON)) {
               parked += 1;
               deps.logger.info(
                 `send-landing: op=${candidate.operationId} PARKED NEEDS_ATTENTION: ${gather.detail} and past redemption expiry + aging margin`,
@@ -914,10 +980,9 @@ export async function tickSendCompletionLander(
       case "PARK_ATTENTION": {
         try {
           const didPark = await parkSendNeedsAttention(
-            deps.pool,
+            deps,
             candidate.operationId,
             gather.reason,
-            deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT,
           );
           if (didPark) {
             parked += 1;

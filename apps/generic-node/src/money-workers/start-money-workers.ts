@@ -1325,6 +1325,10 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           deviceKeyStore: deps.deviceKeyStore ?? new InMemoryDeviceKeyStore(),
           ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
           moneyPathStatementTimeoutMs: statementTimeoutMs,
+          // ZTR-1146: SEND park (head anomaly / post-expiry) must dual-chain
+          // operation.needs_attention on the same TX as the CAS.
+          eventSigner: deps.eventSigner?.() ?? null,
+          ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
         });
       } catch (err) {
         deps.logger.error("money-workers: SEND completion lander tick failed", err);

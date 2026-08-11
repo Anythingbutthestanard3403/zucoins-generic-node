@@ -431,17 +431,10 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "which restates the queued predicate so an assigner that already won matches zero " +
         "rows (receive/pool-scaler.ts:446-448).",
       pinned:
-        "pool.connect() → BEGIN → fn(tx) → COMMIT on one client per call, WITH ONE " +
-        "EXCEPTION. KNOWN OPEN OBLIGATION (pre-existing, not introduced by ZTR-1155): the " +
-        "emitExpired callback (start-money-workers.ts:1068-1080), invoked from inside fn(tx) " +
-        "by expireQueueAgedReceives (receive/pool-scaler.ts:477), ignores the `_db` it is " +
-        "handed and issues its `UPDATE receive_operations … SET status = 'EXPIRED'` on " +
-        "deps.pool — a second pooled connection, in autocommit, while this transaction is " +
-        "still open. That mirror write commits independently, so a rollback of the enclosing " +
-        "transaction leaves receive_operations EXPIRED while the in-transaction operations " +
-        "flip is undone. The exposure is a mirror-table divergence on rollback, not a " +
-        "double-apply — the guarded UPDATE above is still the arbiter. Routing emitExpired " +
-        "through `_db` closes it; tracked separately, not fixed here.",
+        "pool.connect() → BEGIN → fn(tx) → COMMIT on one client per call. emitExpired " +
+        "(start-money-workers.ts) now routes the receive_operations mirror UPDATE and " +
+        "appendDurableDualChainEvent through the same `db` TX client handed by " +
+        "expireQueueAgedReceives (ZTR-1146) — no second-pool autocommit tear.",
     },
     {
       site: "runReceiveExpiryReleaseStep (SqlReceiveExpiryReleaseService)",

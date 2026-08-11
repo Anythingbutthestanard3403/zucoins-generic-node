@@ -132,4 +132,44 @@ describe("durable events implementer-stream emitter census (ZTR-1146)", () => {
     );
     expect(hits).toEqual([]);
   });
+
+  /**
+   * Path-complete gate for SEND park (ZTR-1146 rework): production sites that run
+   * CAS_AWAITING_TO_NEEDS_ATTENTION must co-locate a dual-chain marker (or the library
+   * dualChain emitter port). A single receive hit must not green
+   * `operation.needs_attention` while the live SEND lander park stays slice-local.
+   */
+  it("every CAS_AWAITING_TO_NEEDS_ATTENTION production site co-locates a dual-chain marker", () => {
+    const casSites = sources.filter((s) => s.text.includes("CAS_AWAITING_TO_NEEDS_ATTENTION"));
+    expect(
+      casSites.map((s) => s.path),
+      "expected production CAS_AWAITING_TO_NEEDS_ATTENTION call sites",
+    ).not.toEqual([]);
+
+    const bare: string[] = [];
+    for (const site of casSites) {
+      const hasDual = DUAL_CHAIN_MARKERS.some((marker) => site.text.includes(marker));
+      // Library helper may bind dual-chain via SendExpiryDualChainEmitter rather than
+      // importing the appender by name — still counts as a dual-chain neighbor.
+      const hasLibraryPort =
+        site.text.includes("SendExpiryDualChainEmitter") ||
+        site.text.includes("input.dualChain");
+      if (!hasDual && !hasLibraryPort) bare.push(site.path);
+    }
+    expect(
+      bare,
+      `CAS_AWAITING_TO_NEEDS_ATTENTION without dual-chain marker (SEND park must project operation.needs_attention): ${bare.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("send-completion-lander parks with dual-chain operation.needs_attention", () => {
+    const lander = sources.find((s) =>
+      s.path.replaceAll("\\", "/").endsWith("money-workers/send-completion-lander.ts"),
+    );
+    expect(lander, "send-completion-lander.ts must be in the production scan").toBeDefined();
+    expect(fileReachesImplementerStream(lander!.text, "operation.needs_attention")).toBe(true);
+    expect(lander!.text.includes("CAS_AWAITING_TO_NEEDS_ATTENTION")).toBe(true);
+    // Live production park path must call the appender directly (not only a dead library port).
+    expect(lander!.text.includes("appendDurableDualChainEvent")).toBe(true);
+  });
 });

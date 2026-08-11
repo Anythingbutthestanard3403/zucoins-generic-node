@@ -4,7 +4,7 @@
  * the single production call site for consumeLoginAttempt.
  */
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAdminSessionService,
@@ -55,8 +55,15 @@ function buildRouter(userStore: InMemoryAdminUserStore) {
 describe("ZTR-1218 malformed login body volume throttle", () => {
   beforeEach(() => {
     _resetLoginRateLimitForTests();
+    // Fixed-window limiter keys Math.floor(Date.now()/windowMs). Shared-budget
+    // cases spend ~half the budget on real bcrypt wrong-password compares and
+    // can cross a real 60s bucket mid-case under load — pin the clock so the
+    // suite measures the ceiling, not wall-clock placement (same pattern as
+    // packages/node-core/test/login-rate-limit.test.ts).
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     _resetLoginRateLimitForTests();
   });
 

@@ -104,11 +104,16 @@ const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s
  *   and path forms that happen to contain `@` (pnpm `file:///…/pkg@1.2.3`) are
  *   left alone: the former is uncommon in free-text diagnostics, the latter is
  *   ordinary stack material that must not be chewed.
- * Greedy `*` on a class that permits `@` makes the engine take the rightmost
- * `@` that still leaves a `:` in the captured userinfo — first-`@` stop would
- * leak the password tail (`postgres://u:P@ssw0rd@h` → `…[redacted]@ssw0rd@h`).
+ * - `/ ? #` are excluded from the userinfo class so the greedy last-`@` stop is
+ *   authority-scoped: a Windows `file:///C:/…/vitest@3.2.7` frame and a real
+ *   credential URL followed by a path `@` (`…@host/path/pkg@1.2.3`) must not
+ *   let path material extend the match past the authority boundary.
+ * Greedy `*` on a class that permits `@` (but not `/ ? #`) makes the engine
+ * take the rightmost authority `@` that still leaves a `:` in userinfo —
+ * first-`@` stop would leak the password tail
+ * (`postgres://u:P@ssw0rd@h` → `…[redacted]@ssw0rd@h`).
  */
-const TEXT_URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'<>]*:[^\s"'<>]*)@/g;
+const TEXT_URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'<>/?#]*:[^\s"'<>/?#]*)@/g;
 
 /**
  * Candidate bare tokens for the high-entropy pass. Length floor is deliberate:

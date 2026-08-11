@@ -262,6 +262,26 @@ describe("scrubText redacts bare tokens and URL userinfo (ZTR-1215)", () => {
     expect(scrubText(frame)).toBe(frame);
   });
 
+  it("does not chew Windows file:///C:/…/pkg@version stack frames (authority-bounded)", () => {
+    // Drive letter supplies `:`; path vitest@ver supplies `@`. Without excluding
+    // `/` from the userinfo class the greedy last-@ match redacts the whole path.
+    const frame =
+      "file:///C:/Users/op/project/node_modules/.pnpm/vitest@3.2.7/node_modules/vitest/dist/index.js";
+    expect(scrubText(frame)).toBe(frame);
+  });
+
+  it("keeps host and path when a real userinfo URL is followed by path @", () => {
+    const url =
+      "https://api:zp_live_AbCdEfGhIjKlMnOp@gateway.example/v1/packages/foo@1.2.3/tgz";
+    const out = scrubText(`fetch ${url}`);
+    expect(out).not.toContain("zp_live_AbCdEfGhIjKlMnOp");
+    // Authority-bounded: password gone, host + path-@ package tag intact.
+    // Unbounded last-@ would collapse to `https://[redacted]@1.2.3/tgz`.
+    expect(out).toBe(
+      `fetch https://${REDACTED}@gateway.example/v1/packages/foo@1.2.3/tgz`,
+    );
+  });
+
   it("redacts URL userinfo when the password itself contains a colon", () => {
     const dsn = "postgresql://u:p:art:two@localhost/db";
     const out = scrubText(dsn);

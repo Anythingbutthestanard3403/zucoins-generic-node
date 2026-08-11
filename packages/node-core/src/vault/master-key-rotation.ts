@@ -1682,11 +1682,13 @@ async function verifyCompletedStoreCensus(
         );
       }
       try {
-        // Writer-first open inside rewrap: live row must open under new (already under
-        // writer after durable rewrap). Pass both roots so a mis-wired stale snapshot still
-        // fails closed only after live reload — not via oldRoot===newRoot alone.
+        // D-B5 open-proof under the **new** root only (r2 shape). Pass
+        // oldRootKey === newRootKey === new so rewrap cannot succeed by opening
+        // a still-old durable row and returning an in-memory reseal without commit.
+        // Live envelope is already reloaded above; ceremony (ROTATING) still uses
+        // both roots + commitBootCanary. Finalize must refuse, not silent-reseal.
         const proof = await input.rewrapBootCanary({
-          oldRootKey: input.oldRootKey,
+          oldRootKey: input.newRootKey,
           newRootKey: input.newRootKey,
           envelope,
         });

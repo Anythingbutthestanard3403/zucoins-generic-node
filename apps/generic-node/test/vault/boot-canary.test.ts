@@ -262,6 +262,30 @@ describe("rewrapVaultBootCanary (ZTR-1177 r2 rotation)", () => {
     expect(report.rewrappedEnvelope).toBe(sealedB);
   });
 
+  it("finalize-style new-only roots refuse a durable canary still under old (D-B5)", () => {
+    // Mirror verifyCompletedStoreCensus: oldRootKey === newRootKey === new.
+    // Opening under old alone must not count as finalize success (in-memory reseal brick).
+    const sealedA = sealVaultBootCanary(rootA, nodeId);
+    expect(() =>
+      rewrapVaultBootCanary({
+        oldRootKey: rootB,
+        newRootKey: rootB,
+        nodeId,
+        envelope: sealedA,
+      }),
+    ).toThrow(/VAULT_BOOT_CANARY_DOES_NOT_OPEN/);
+    // Durable envelope unchanged and still only opens under old.
+    const opened = openVaultBootCanary(rootA, nodeId, sealedA);
+    try {
+      expect(Buffer.from(opened).toString("utf8")).toBe(VAULT_BOOT_CANARY_PLAINTEXT);
+    } finally {
+      opened.fill(0);
+    }
+    expect(() => openVaultBootCanary(rootB, nodeId, sealedA)).toThrow(
+      /VAULT_BOOT_CANARY_DOES_NOT_OPEN/,
+    );
+  });
+
   it("commit updates the durable row; wrong-key prove still fails closed without overwrite", async () => {
     const sealedA = sealVaultBootCanary(rootA, nodeId);
     const store = new Map<string, string>([[VAULT_BOOT_CANARY_SETTING_KEY, sealedA]]);

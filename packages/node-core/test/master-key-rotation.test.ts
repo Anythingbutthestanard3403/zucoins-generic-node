@@ -1838,6 +1838,13 @@ describe("ZTR-1177 r3 — boot canary crash-resume / D-B5 live envelope", () => 
           };
         }
         if (input.envelope === CANARY_OLD) {
+          // Ceremony (old≠new): open under old and reseal under new.
+          // Finalize open-proof (old===new===new): cannot open still-old durable row.
+          if (input.oldRootKey === input.newRootKey) {
+            throw new Error(
+              "VAULT_BOOT_CANARY_DOES_NOT_OPEN: finalize new-only proof cannot open still-old canary",
+            );
+          }
           if (input.oldRootKey !== OLD_ROOT) {
             throw new Error("old-root mismatch on still-old canary");
           }
@@ -1905,11 +1912,19 @@ describe("ZTR-1177 r3 — boot canary crash-resume / D-B5 live envelope", () => 
 
     // Live row is under NEW; caller still holds pre-rotation OLD snapshot in bootCanary.
     const live = { envelope: CANARY_NEW as string | null };
-    let rewrapSaw: string | null = null;
+    let rewrapSaw: {
+      envelope: string;
+      oldRootKey: Uint8Array;
+      newRootKey: Uint8Array;
+    } | null = null;
     const ports = canaryPorts(live);
     const baseRewrap = ports.rewrapBootCanary;
     ports.rewrapBootCanary = async (input) => {
-      rewrapSaw = input.envelope;
+      rewrapSaw = {
+        envelope: input.envelope,
+        oldRootKey: input.oldRootKey,
+        newRootKey: input.newRootKey,
+      };
       return baseRewrap(input);
     };
 
@@ -1934,8 +1949,54 @@ describe("ZTR-1177 r3 — boot canary crash-resume / D-B5 live envelope", () => 
 
     expect(result.committed).toBe(true);
     expect((await journal.read()).phase).toBe("STABLE");
-    expect(rewrapSaw).toBe(CANARY_NEW);
-    expect(rewrapSaw).not.toBe(CANARY_OLD);
+    expect(rewrapSaw?.envelope).toBe(CANARY_NEW);
+    expect(rewrapSaw?.envelope).not.toBe(CANARY_OLD);
+    // Finalize open-proof is new-root only (r2 shape) — never both roots.
+    expect(rewrapSaw?.oldRootKey).toBe(NEW_ROOT);
+    expect(rewrapSaw?.newRootKey).toBe(NEW_ROOT);
+  });
+
+  it("D-B5 refuses settle when live canary is still under OLD (no in-memory reseal false-STABLE)", async () => {
+    // Review B r3: durable still-old + ROTATION_COMPLETE must not settle via
+    // rewrap(old,new) that reseals in memory without commitBootCanary.
+    const fixtures = [makeRow(0xb4, 1, NEW_ROOT)];
+    const journal = new InMemoryMasterKeyRotationJournal(FROM_EPOCH);
+    await journal.begin({ fromEpoch: FROM_EPOCH, toEpoch: TO_EPOCH });
+    await journal.complete();
+    expect((await journal.read()).phase).toBe("ROTATION_COMPLETE");
+
+    const live = { envelope: CANARY_OLD as string | null };
+    let commitCalled = false;
+    const ports = canaryPorts(live);
+    ports.commitBootCanary = async () => {
+      commitCalled = true;
+    };
+
+    await expect(
+      rotateMasterKey({
+        sealedStores: registry(),
+        ...census(fixtures.map((f) => f.row)),
+        ...ports,
+        bootCanary: { envelope: CANARY_OLD },
+        keyRing: makeKeyRing(),
+        fromEpoch: FROM_EPOCH,
+        toEpoch: TO_EPOCH,
+        oldRootKey: OLD_ROOT,
+        newRootKey: NEW_ROOT,
+        journal,
+        interlock: makeInterlock(),
+        commitWalletVault: async () => {
+          throw new Error("finalize must not re-commit vault");
+        },
+        unitOfWork: makeUow(),
+      }),
+    ).rejects.toMatchObject({ code: "ROTATION_STATE" });
+
+    // Journal must remain ROTATION_COMPLETE (not false-settled STABLE).
+    expect((await journal.read()).phase).toBe("ROTATION_COMPLETE");
+    expect((await journal.read()).writerEpoch).toBe(TO_EPOCH);
+    expect(live.envelope).toBe(CANARY_OLD);
+    expect(commitCalled).toBe(false);
   });
 
   it("refuses when countBootCanaryRows is wired without loadBootCanaryEnvelope", async () => {

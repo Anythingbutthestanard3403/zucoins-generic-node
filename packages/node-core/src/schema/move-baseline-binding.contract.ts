@@ -79,7 +79,7 @@ export const SCHEMA_EXECUTION_OBLIGATIONS = [
   "unique: a second move_observation_evidence row for the same operation_id is rejected (unique_violation 23505) -- the durable one-capture-per-operation bound.",
   "check reject: a move_observation_evidence row whose two T0 observation ids are equal is rejected (check_violation 23514) even when both wallets project identical genesis state.",
   "unique: a second operation_observation_bindings row for the same (operation_id, evidence_role) is rejected, and rebinding one observation_id under a second role of the same operation is rejected.",
-  "composition: when expected-artifacts.sql is applied first (pack order), capture flow through a real SqlExecutor persists both bindings, the evidence row, and the artifact for one operation; a rejected capture persists nothing.",
+  "composition: when expected-artifacts.sql is applied first (pack sequence), capture flow through a real SqlExecutor persists both bindings, the evidence row, and the artifact for one operation; a rejected capture persists nothing.",
 ] as const;
 
 export const MOVE_BASELINE_SCHEMA_SOURCE =

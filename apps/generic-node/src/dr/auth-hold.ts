@@ -19,7 +19,16 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Client } from "pg";
 
 import { withConnectedPgClient } from "./hold-db-orchestration.js";
-import { forceRestoreHoldOnClient } from "./restore-hold.js";
+import {
+  deriveContinuitySnapshotOnClient,
+  type ContinuityMarkers,
+} from "./markers.js";
+import {
+  buildRestoreHoldReleaseUpdate,
+  evaluateRestoreHoldRelease,
+  forceRestoreHoldOnClient,
+  type RestoreHoldDecision,
+} from "./restore-hold.js";
 
 export interface ForceAuthHoldResult {
   readonly applied: boolean;
@@ -76,6 +85,11 @@ const OPEN_HEADS_SQL = `
      AND h.epoch > 0
      AND h.lifecycle_event_id IS NOT NULL
 `;
+
+const HELD_HEADS_SQL = OPEN_HEADS_SQL.replace(
+  "WHERE h.auth_hold = false",
+  "WHERE h.auth_hold = true",
+);
 
 /**
  * IF/ELSIF rewrite of the stock reporting-DDL reporting_validate_lifecycle_deferred.
@@ -228,6 +242,57 @@ export function buildForceAuthHoldSetStatements(input: {
       nowIso,
       expiresIso,
       nonceBurnSequence,
+    },
+  };
+}
+
+/** Canonical lifecycle writer shape for operator-authorized auth-hold release. */
+export function buildReleaseAuthHoldStatements(input: {
+  readonly nodeId: string;
+  readonly implementerId: string;
+  readonly priorEpoch: bigint;
+  readonly previousEventId: string;
+  readonly previousEventHash: string;
+  readonly currentKeyId: string;
+  readonly priorKeyId: string | null;
+  readonly overlapExpiresAt: string | null;
+  readonly now: Date;
+  readonly evidenceSha256: string;
+  readonly nonceBurnSequence: bigint;
+  readonly eventId?: string;
+  readonly nonceRowId?: string;
+  readonly nonceValue?: string;
+}): ReturnType<typeof buildForceAuthHoldSetStatements> {
+  const eventId = input.eventId ?? randomUUID();
+  const nonceRowId = input.nonceRowId ?? randomUUID();
+  const nonceValue = input.nonceValue ?? randomUUID();
+  const epoch = (input.priorEpoch + 1n).toString();
+  const evidenceText = `zp-gn-restore-auth-release-v1\n${input.nodeId}\n${input.implementerId}\n${epoch}\n${input.evidenceSha256}\n${input.now.toISOString()}`;
+  const evidenceSha256 = sha256Hex(evidenceText);
+  const built = buildForceAuthHoldSetStatements({
+    ...input,
+    eventId,
+    nonceRowId,
+    nonceValue,
+    eventHash: sha256Hex(
+      `AUTH_HOLD_RELEASED|${eventId}|${input.previousEventHash}|${evidenceSha256}`,
+    ),
+  });
+  return {
+    nonceSql: built.nonceSql.replace("'restore_auth_hold'", "'restore_auth_hold_release'"),
+    eventSql: built.eventSql
+      .replace("'AUTH_HOLD_SET'", "'AUTH_HOLD_RELEASED'")
+      .replace(
+        "$5::uuid, $6::uuid, $7::timestamptz, true,",
+        "$5::uuid, $6::uuid, $7::timestamptz, false,",
+      ),
+    advanceSql: built.advanceSql,
+    params: {
+      ...built.params,
+      evidenceText,
+      evidenceSha256,
+      bodySha256: evidenceSha256,
+      preimageSha256: evidenceSha256,
     },
   };
 }
@@ -401,6 +466,160 @@ export async function applyForceAuthHoldAfterRestore(
       const result = await forceAuthHoldOnClient(client, options);
       await client.query("COMMIT");
       return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    }
+  });
+}
+
+export type DualGateReleaseResult =
+  | {
+      readonly released: true;
+      readonly decision: Extract<RestoreHoldDecision, { release: true }>;
+      readonly authHeadsReleased: number;
+    }
+  | {
+      readonly released: false;
+      readonly decision: Extract<RestoreHoldDecision, { release: false }>;
+    };
+
+/**
+ * Evidence-gated release of both restore gates in one database transaction.
+ * The local marker is derived under the same locks; callers cannot supply it.
+ */
+export async function releaseDualGatesWithTrustedMarkers(
+  databaseUrl: string,
+  input: {
+    readonly nodeId: string;
+    readonly trusted: ContinuityMarkers;
+    readonly now?: Date;
+  },
+): Promise<DualGateReleaseResult> {
+  return withConnectedPgClient(databaseUrl, async (client) => {
+    await client.query("BEGIN");
+    try {
+      const restoreState = await client.query(
+        `SELECT restore_hold FROM reporting_restore_state WHERE node_id = $1::uuid FOR UPDATE`,
+        [input.nodeId],
+      );
+      if (restoreState.rowCount !== 1) {
+        const decision = { release: false, reason: "missing_local_snapshot" } as const;
+        await client.query("ROLLBACK");
+        return { released: false, decision };
+      }
+      await client.query(
+        `SELECT 1 FROM reporting_key_lifecycle_heads WHERE node_id = $1::uuid FOR UPDATE`,
+        [input.nodeId],
+      );
+      // Freeze nonce allocation while deriving and applying the evidence decision.
+      // Reporting writers serialize burns through this node-scoped counter row.
+      await client.query(
+        `SELECT 1 FROM reporting_nonce_burn_counters WHERE node_id = $1::uuid FOR UPDATE`,
+        [input.nodeId],
+      );
+      const local = await deriveContinuitySnapshotOnClient(client, input.nodeId);
+      const decision = evaluateRestoreHoldRelease({ trusted: input.trusted, local });
+      if (!decision.release) {
+        await client.query("ROLLBACK");
+        return { released: false, decision };
+      }
+
+      await healLifecycleDeferredValidator(client);
+      const now = input.now ?? new Date();
+      const held = await client.query<{
+        node_id: string;
+        implementer_id: string;
+        epoch: string;
+        current_key_id: string | null;
+        prior_key_id: string | null;
+        overlap_expires_at: Date | string | null;
+        lifecycle_event_id: string;
+        previous_event_hash: string;
+      }>(HELD_HEADS_SQL + " AND h.node_id = $1::uuid", [input.nodeId]);
+
+      let released = 0;
+      for (const row of held.rows) {
+        if (row.current_key_id === null) {
+          throw new Error("cannot release auth_hold on a lifecycle head without current_key_id");
+        }
+        const seqRes = await client.query<{ next: string }>(
+          `SELECT COALESCE(MAX(nonce_burn_sequence), 0) + 1 AS next
+             FROM reporting_request_nonces WHERE node_id = $1::uuid`,
+          [row.node_id],
+        );
+        const nextSeq = BigInt(seqRes.rows[0]?.next ?? "1");
+        await client.query(
+          `INSERT INTO reporting_nonce_burn_counters (node_id, next_burn_sequence)
+           VALUES ($1::uuid, $2::bigint)
+           ON CONFLICT (node_id) DO UPDATE
+             SET next_burn_sequence = GREATEST(
+               reporting_nonce_burn_counters.next_burn_sequence,
+               EXCLUDED.next_burn_sequence
+             )`,
+          [row.node_id, (nextSeq + 1n).toString()],
+        );
+        const overlap =
+          row.overlap_expires_at === null
+            ? null
+            : row.overlap_expires_at instanceof Date
+              ? row.overlap_expires_at.toISOString()
+              : String(row.overlap_expires_at);
+        const built = buildReleaseAuthHoldStatements({
+          nodeId: row.node_id,
+          implementerId: row.implementer_id,
+          priorEpoch: BigInt(row.epoch),
+          previousEventId: row.lifecycle_event_id,
+          previousEventHash: row.previous_event_hash,
+          currentKeyId: row.current_key_id,
+          priorKeyId: row.prior_key_id,
+          overlapExpiresAt: overlap,
+          now,
+          evidenceSha256: decision.holdReleaseEvidenceSha256,
+          nonceBurnSequence: nextSeq,
+        });
+        const p = built.params;
+        await client.query(built.nonceSql, [
+          p.nonceRowId,
+          row.node_id,
+          row.implementer_id,
+          p.nonceValue,
+          row.current_key_id,
+          p.epoch,
+          p.nonceBurnSequence,
+          p.evidenceText,
+          p.preimageSha256,
+          dummySignature(),
+          p.bodySha256,
+          p.nowIso,
+          p.expiresIso,
+        ]);
+        await client.query(built.eventSql, [
+          p.eventId,
+          row.node_id,
+          row.implementer_id,
+          p.epoch,
+          row.current_key_id,
+          row.prior_key_id,
+          overlap,
+          p.nonceRowId,
+          p.evidenceText,
+          p.evidenceSha256,
+          row.lifecycle_event_id,
+          row.epoch,
+          row.previous_event_hash,
+          p.eventHash,
+          p.nowIso,
+        ]);
+        await client.query(built.advanceSql, [p.eventId]);
+        released += 1;
+      }
+
+      const update = buildRestoreHoldReleaseUpdate({ nodeId: input.nodeId, decision, now });
+      const updateResult = await client.query(update.sql, update.params as unknown[]);
+      if (updateResult.rowCount !== 1) throw new Error("restore_hold_not_active");
+      await client.query("COMMIT");
+      return { released: true, decision, authHeadsReleased: released };
     } catch (err) {
       await client.query("ROLLBACK");
       throw err;

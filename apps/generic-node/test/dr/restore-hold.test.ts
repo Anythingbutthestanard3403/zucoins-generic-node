@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildMarkersFromLocal,
+  buildScheduledBackupMarkers,
   hashHoldReleaseEvidence,
   type ContinuityMarkers,
   type LocalContinuitySnapshot,
@@ -33,6 +33,9 @@ function trusted(overrides: Partial<ContinuityMarkers> = {}): ContinuityMarkers 
     lifecycleEpoch: "7",
     nonceBurnHighWater: "42",
     terminalEventHash: HASH_A,
+    provenance: "successful_scheduled_backup",
+    backupArtifactSha256: "22".repeat(32),
+    backupOutputPath: "/offsite/backup.zbkp",
     ...overrides,
   };
 }
@@ -113,9 +116,12 @@ describe("evaluateRestoreHoldRelease — fail-closed matrix", () => {
     expect(decision.release).toBe(false);
   });
 
-  it("buildMarkersFromLocal + evaluate is the explicit external path", () => {
+  it("scheduled-backup markers + evaluate is the explicit external path", () => {
     const snap = local();
-    const markers = buildMarkersFromLocal(snap, "operator-usb-1");
+    const markers = buildScheduledBackupMarkers(snap, {
+      backupArtifactSha256: "22".repeat(32),
+      backupOutputPath: "/offsite/backup.zbkp",
+    });
     const decision = evaluateRestoreHoldRelease({ trusted: markers, local: snap });
     expect(decision.release).toBe(true);
   });

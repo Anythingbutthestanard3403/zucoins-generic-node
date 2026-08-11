@@ -30,7 +30,14 @@ export interface BackupScheduleConfig {
    * . Invoked with the in-flight run promise before it is awaited.
    */
   readonly trackInflight?: <T>(work: Promise<T>) => Promise<T>;
-  readonly afterSuccess?: (result: ScheduledBackupSuccess) => Promise<void> | void;
+  readonly afterSuccess?: (result: ScheduledBackupPairingInput) => Promise<void> | void;
+  /**
+   * When set, production export binds continuity derivation to the same
+   * PostgreSQL snapshot as `pg_dump` (ZTR-1136 / Review B D1).
+   */
+  readonly continuityNodeId?: string;
+  /** Test seam; production always uses exportEncryptedBackup. */
+  readonly exportBackup?: typeof exportEncryptedBackup;
   /**
    * Leadership / ownership gate (ZTR-1183). When provided, start() and each
    * loop iteration consult it; followers must not beginTrackedRun backups.
@@ -43,10 +50,14 @@ export interface BackupScheduleConfig {
   };
 }
 
-export interface ScheduledBackupSuccess {
+/** Input to afterSuccess — artifact is sealed; markers must pair before RPO advances. */
+export interface ScheduledBackupPairingInput {
   readonly result: BackupResult;
   readonly startedAtMs: number;
   readonly finishedAtMs: number;
+}
+
+export interface ScheduledBackupSuccess extends ScheduledBackupPairingInput {
   readonly retention: RetentionReport;
 }
 
@@ -175,35 +186,54 @@ export function createBackupScheduler(config: BackupScheduleConfig): BackupSched
     const tmpPath = `${finalPath}.partial`;
 
     try {
-      const result = await exportEncryptedBackup(config.databaseUrl, tmpPath, config.masterKey);
+      const exportOpts =
+        config.continuityNodeId !== undefined && config.continuityNodeId.trim() !== ""
+          ? { continuityNodeId: config.continuityNodeId.trim() }
+          : {};
+      const result = await (config.exportBackup ?? exportEncryptedBackup)(
+        config.databaseUrl,
+        tmpPath,
+        config.masterKey,
+        exportOpts,
+      );
+      // Publish the sealed envelope only after dump+encrypt succeeded. Marker
+      // pairing (afterSuccess) must still complete before RPO success anchors
+      // advance — unpaired finals are quarantined below (Review B D2).
       await rename(tmpPath, finalPath);
       const published: BackupResult = { ...result, outputPath: finalPath };
+      const finishedAtMs = nowMs();
+      const pendingSuccess = {
+        result: published,
+        startedAtMs,
+        finishedAtMs,
+      };
+      // Pair continuity markers BEFORE retention prune / RPO advance.
+      // If afterSuccess throws, the final .zbkp is removed and prior artifacts stay.
+      await config.afterSuccess?.(pendingSuccess);
       const retention = await pruneRetainedBackups({
         directory: config.outputDir,
         retentionDays: policy.retentionDays,
         nowMs: nowMs(),
       });
-      const finishedAtMs = nowMs();
       lastSuccessAtMs = finishedAtMs;
       newestArtifactAtMs = finishedAtMs;
       lastError = null;
       consecutiveFailures = 0;
       const success: ScheduledBackupSuccess = {
-        result: published,
-        startedAtMs,
-        finishedAtMs,
+        ...pendingSuccess,
         retention,
       };
       log.info(
         `dr: backup ok path=${finalPath} bytes=${published.bytesWritten} sha256=${published.sha256} pruned=${retention.pruned.length}`,
       );
-      await config.afterSuccess?.(success);
       return success;
     } catch (err) {
       consecutiveFailures += 1;
       lastFailureAtMs = nowMs();
       lastError = err instanceof Error ? err.message : String(err);
+      // Quarantine unpaired partial AND any final that failed marker pairing.
       await rm(tmpPath, { force: true }).catch(() => undefined);
+      await rm(finalPath, { force: true }).catch(() => undefined);
       log.error(`dr: backup failed: ${lastError}`, err);
       throw err;
     }

@@ -124,6 +124,7 @@ describe("frozen configuration schema — happy path", () => {
     );
     expect(issues.some((i) => i.includes("BACKUP_MASTER_KEY"))).toBe(true);
     expect(issues.some((i) => i.includes("BACKUP_OUTPUT_DIR"))).toBe(true);
+    expect(issues.some((i) => i.includes("BACKUP_CONTINUITY_MARKERS_PATH"))).toBe(true);
 
     const tmpIssues = loadIssues(
       validEnv({
@@ -139,10 +140,14 @@ describe("frozen configuration schema — happy path", () => {
         BACKUP_SCHEDULE_ENABLED: "true",
         BACKUP_MASTER_KEY: VALID_MASTER_KEY,
         BACKUP_OUTPUT_DIR: "/var/lib/generic-node/backups",
+        BACKUP_CONTINUITY_MARKERS_PATH: "/var/lib/generic-node/continuity/markers.json",
       }),
     );
     expect(ok.BACKUP_SCHEDULE_ENABLED).toBe(true);
     expect(ok.BACKUP_OUTPUT_DIR).toBe("/var/lib/generic-node/backups");
+    expect(ok.BACKUP_CONTINUITY_MARKERS_PATH).toBe(
+      "/var/lib/generic-node/continuity/markers.json",
+    );
   });
 
   // ZTR-1148 / doc 01 §4.2. The regression: every one of these once resolved to

@@ -1,20 +1,9 @@
 # Restore runbook
 
-Rebuilding this node from an encrypted backup. Read the whole document before you start —
-step 4 is currently **blocked**, and you need to know that before you destroy anything.
-
-> **Restore is a one-way door today.** A restored node comes up holding two independent
-> gates, and no shipped code path releases either one (ZTR-1135). Its money surface works;
-> its reporting surface answers `reporting_auth_hold` to every implementer call, and stays
-> that way. Do not restore into your only live node expecting to be back in service.
-
-> **This runbook is unrehearsed.** It was written from the shipped code, not from a
-> dry run. Steps 3 and 4 cannot be executed at all until ZTR-1135 lands, so an end-to-end
-> rehearsal against a real backup is not possible today and the gaps a first reader would
-> hit are therefore unknown. What *is* rehearsable now is steps 1–2 and the mechanics
-> underneath them, via `dr drill` against a throwaway database (Preflight step 4). Run that
-> quarterly, and record what the runbook got wrong here. When ZTR-1135 lands, the first
-> full restore must be treated as the rehearsal — schedule it, do not discover it.
+Rebuilding this node from an encrypted backup. Read the whole document before you start.
+The restore deliberately boots with two independent reporting holds; the operator releases
+both together only after comparison with successful-backup continuity evidence held outside
+the restored database.
 
 ## What you must hold before you begin
 
@@ -23,6 +12,7 @@ step 4 is currently **blocked**, and you need to know that before you destroy an
 | The `.zbkp` artifact | Nothing to restore |
 | `BACKUP_MASTER_KEY` used to seal it | The artifact is unreadable. It is a dedicated KEK — not the vault key |
 | `VAULT_MASTER_KEY` for this node | The database restores and every wallet secret stays sealed forever |
+| The continuity marker emitted for this `.zbkp` by the successful scheduled backup | Hold release refuses; never manufacture a replacement from the restored database |
 | A target Postgres database that is **empty** | See "Preflight" — the restore will roll back |
 | `node_core_app` and `node_core_send` roles on the target cluster | Boot refuses at privilege readiness |
 
@@ -97,7 +87,7 @@ Both gates are **forced after apply**, deliberately, even if the dump encoded th
 `restoreHoldApplied: false` means the `reporting_restore_state` table was absent, not that
 you are clear.
 
-### 2. Obtain the continuity markers — from outside this database
+### 2. Obtain and check the continuity markers — from outside this database
 
 You need three values from a **separately trusted external source**: the lifecycle epoch,
 the node-wide nonce-burn high-water mark, and the terminal lifecycle-event hash. Equal
@@ -105,42 +95,49 @@ values read only from the restored database have no authority — that is the en
 anti-rollback property. If an attacker can hand you a stale database, they can hand you a
 stale database that agrees with itself.
 
+Every successful scheduled backup captures the three continuity values on the **same
+PostgreSQL snapshot** as the sealed `.zbkp` (`pg_export_snapshot` + `pg_dump --snapshot`),
+then writes a provenance-bound marker to `BACKUP_CONTINUITY_MARKERS_PATH` only after that
+pair succeeds. RPO success anchors do not advance if marker write fails (the unpaired
+artifact is removed). Archive that marker file with the corresponding `.zbkp` outside the
+database/PVC restore boundary. Its `backupArtifactSha256` and `backupOutputPath` identify
+the successful backup that emitted it. `BACKUP_SCHEDULE_ENABLED=true` is refused at boot
+unless the marker path is configured.
+
+Retrieve that externally held file, then let the command derive the local values from the
+restored database:
+
 ```bash
+DATABASE_URL=postgresql://... NODE_ID=<this node's uuid> \
 pnpm --filter @zucoins/generic-node dr markers check \
-  --file /path/to/continuity-markers.json \
-  --local-epoch <n> --local-high-water <n> --local-event-hash <hex>
+  --file /path/from-offsite/continuity-markers.json
 ```
 
 Exit 0 means the trusted markers and the local snapshot agree and release is warranted.
 Exit 2 prints the reject reason — `lifecycle_epoch_mismatch`,
 `regression_nonce_burn_high_water`, `terminal_event_hash_mismatch` and friends. A
 regression reason means the restore rolled the node backwards: **stop, and escalate**. Do
-not proceed to make the markers agree.
+not proceed to make the markers agree. Files without `successful_scheduled_backup`
+provenance, including legacy/self-derived marker files, are refused.
 
-> **Known-blocked (ZTR-1136).** `dr markers write` builds the "trusted" file **from** the
-> local snapshot you pass it, so a file produced that way compares equal by construction and
-> proves nothing. There is also no shipped query that derives the three `--local-*` values
-> from the database. Until ZTR-1136 lands, treat `markers write` as a formatting utility
-> only, and source both the trusted markers and the local values from records you keep
-> outside this node.
+### 3. Release both holds atomically
 
-### 3. Release `restore_hold` — **blocked**
+After `markers check` succeeds, run the operator-driven release against the same externally
+held file:
 
-### 4. Release `auth_hold` — **blocked**
+```bash
+DATABASE_URL=postgresql://... NODE_ID=<this node's uuid> \
+pnpm --filter @zucoins/generic-node dr markers release \
+  --file /path/from-offsite/continuity-markers.json
+```
 
-> **Known-blocked (ZTR-1135).** The release *predicate* is implemented and tested
-> (`evaluateRestoreHoldRelease`), and the statement that writes `restore_hold = false`
-> exists (`buildRestoreHoldReleaseUpdate`) — nothing invokes it. `AUTH_HOLD_RELEASED` is a
-> legal lifecycle event type that no code path ever appends. `dr markers check` computes the
-> release decision and returns an exit code; it cannot perform the release.
->
-> There is no command, endpoint or supported SQL to clear either hold. Do **not** improvise
-> one: `auth_hold` is inside a hash-chained lifecycle head protected by composite foreign
-> keys, epoch and nonce-evidence CHECKs and a deferred assertion, and a hand-written event
-> that fails any of them leaves the head and its event chain in a state the guard trigger
-> rejects. Escalate to ZTR-1135.
+The command re-derives the local snapshot under database locks, compares it again, appends a
+hash-chained `AUTH_HOLD_RELEASED` event (including nonce evidence) for every held lifecycle
+head, and clears `restore_hold` in the **same transaction**. Exit 2 leaves both gates held and
+prints a typed reason. Never clear either gate with hand-written SQL; clearing only one gate
+does not open admission.
 
-### 5. Re-run the recovery ceremony
+### 4. Re-run the recovery ceremony
 
 `recovery_verified_at` does not survive an untrusted restore as an assurance. The stamp
 means an operator proved **offline** possession of both the wallet secret and the master
@@ -151,7 +148,7 @@ witness. Restore re-runs the per-wallet open probe (decrypt → derive public ke
 See [`recovery-ceremony.md`](recovery-ceremony.md). Wallets without a valid stamp are not
 eligible for receive assignment, so this is what actually returns the pool to service.
 
-### 6. Verify admission
+### 5. Verify admission
 
 Only after 3–5. In order:
 
@@ -177,8 +174,9 @@ checks. A held node looks healthy from the outside and refuses every implementer
 pnpm --filter @zucoins/generic-node dr status    # exit 2 when the RPO is breached
 ```
 
-`BACKUP_OUTPUT_DIR` must be a durable volume. Never `/tmp` — an ephemeral `emptyDir` means
-you have no backups and a green status.
+`BACKUP_OUTPUT_DIR` and `BACKUP_CONTINUITY_MARKERS_PATH` must be durable, and the marker must
+also be copied offsite with its matching artifact. Never rely on `/tmp` or on a marker restored
+from the database/PVC snapshot you are validating.
 
 Alerts on this cadence: `GenericNodeBackupAge`, `GenericNodeBackupNeverSucceeded`,
 `GenericNodeBackupRpoBreached` in

@@ -13,6 +13,7 @@ import {
   HEADER_LENGTH,
   OFF_SHA256,
   awaitCleanExit,
+  buildPgDumpArgs,
   buildRestorePsqlArgs,
   decryptBuffer,
   encryptBuffer,
@@ -210,6 +211,26 @@ describe("awaitCleanExit exit-code guard", () => {
     child.emit("close", 0, null);
     await expect(p).resolves.toBeUndefined();
   }, 120_000);
+});
+
+describe("buildPgDumpArgs", () => {
+  it("omits --snapshot unless a snapshot id is provided", () => {
+    const args = buildPgDumpArgs("postgresql://u@h/db");
+    expect(args).toEqual([
+      "--format=plain",
+      "--no-owner",
+      "--no-acl",
+      "--dbname",
+      "postgresql://u@h/db",
+    ]);
+    expect(args.some((a) => a.startsWith("--snapshot"))).toBe(false);
+  });
+
+  it("binds --snapshot when exporting under a held backend snapshot", () => {
+    const args = buildPgDumpArgs("postgresql://u@h/db", "0000000A-0000000B-1");
+    expect(args).toContain("--snapshot=0000000A-0000000B-1");
+    expect(args[args.indexOf("--dbname") + 1]).toBe("postgresql://u@h/db");
+  });
 });
 
 describe("buildRestorePsqlArgs", () => {

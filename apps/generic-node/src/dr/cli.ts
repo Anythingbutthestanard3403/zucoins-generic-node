@@ -5,11 +5,8 @@ import { resolve } from "node:path";
 import { exportEncryptedBackup, restoreEncryptedBackup } from "./encrypted-backup.js";
 import { runDrill } from "./drill.js";
 import {
-  buildMarkersFromLocal,
-  compareContinuityMarkers,
+  deriveContinuitySnapshot,
   loadContinuityMarkers,
-  writeContinuityMarkers,
-  type LocalContinuitySnapshot,
 } from "./markers.js";
 import {
   BACKUP_RPO_TARGET_MS,
@@ -20,6 +17,7 @@ import {
 import { newestBackupArtifactMtimeMs } from "./schedule.js";
 import { verifyProviderBackups } from "./provider-verify.js";
 import { evaluateRestoreHoldRelease } from "./restore-hold.js";
+import { releaseDualGatesWithTrustedMarkers } from "./auth-hold.js";
 
 export interface CliEnv {
   readonly DATABASE_URL?: string;
@@ -48,8 +46,8 @@ Commands:
   restore --in <file>           Restore ZBKP into DATABASE_URL (forces restore_hold + auth_hold)
   drill                         Throwaway destroy/restore drill (RPO/RTO evidence)
   verify  --path <file-or-dir>  Decrypt-verify provider artifacts (no apply)
-  markers write --file <path>   Write external continuity markers from --local-* flags
-  markers check --file <path>   Compare markers to --local-* flags (no DB write)
+  markers check --file <path>   Compare externally-held successful-backup markers to live DB
+  markers release --file <path> Atomically append AUTH_HOLD_RELEASED and clear both holds
   status                        RPO posture against BACKUP_OUTPUT_DIR
 
 Environment:
@@ -68,20 +66,6 @@ function requireEnv(env: CliEnv, key: keyof CliEnv): string {
   const v = env[key];
   if (typeof v !== "string" || v.trim() === "") throw new Error(`${key} is required`);
   return v;
-}
-
-function parseLocalSnapshot(args: readonly string[]): LocalContinuitySnapshot {
-  const epoch = flag(args, "--local-epoch");
-  const highWater = flag(args, "--local-high-water");
-  const hash = flag(args, "--local-event-hash");
-  if (!epoch || !highWater || !hash) {
-    throw new Error("markers require --local-epoch --local-high-water --local-event-hash");
-  }
-  return {
-    lifecycleEpoch: BigInt(epoch),
-    nonceBurnHighWater: BigInt(highWater),
-    terminalEventHash: hash,
-  };
 }
 
 export async function runDrCli(
@@ -189,42 +173,46 @@ export async function runDrCli(
       case "markers": {
         const sub = args[1];
         const file = flag(args, "--file") ?? env.BACKUP_CONTINUITY_MARKERS_PATH;
-        if (!file) throw new Error("markers requires --file or BACKUP_CONTINUITY_MARKERS_PATH");
-        if (sub === "write") {
-          const local = parseLocalSnapshot(args);
-          const sourceId = flag(args, "--source-id") ?? `file:${resolve(file)}`;
-          const markers = buildMarkersFromLocal(local, sourceId);
-          await writeContinuityMarkers(resolve(file), markers);
+        if (!file) {
+          io.log(JSON.stringify({ ok: false, command: `markers-${sub ?? "unknown"}`, reason: "missing_trusted_source" }));
+          return 2;
+        }
+        const loaded = await loadContinuityMarkers(resolve(file));
+        if (!loaded.ok) {
           io.log(
             JSON.stringify({
-              ok: true,
-              command: "markers-write",
-              path: resolve(file),
-              markers,
+              ok: false,
+              command: `markers-${sub ?? "unknown"}`,
+              reason: loaded.reason === "markers_source_unreadable" ? "missing_trusted_source" : loaded.reason,
             }),
           );
-          return 0;
+          return 2;
         }
+        const databaseUrl = requireEnv(env, "DATABASE_URL");
+        const nodeId = requireEnv(env, "NODE_ID");
         if (sub === "check") {
-          const local = parseLocalSnapshot(args);
-          const loaded = await loadContinuityMarkers(resolve(file));
-          if (!loaded.ok) {
-            io.log(JSON.stringify({ ok: false, command: "markers-check", reason: loaded.reason }));
-            return 2;
-          }
-          const comparison = compareContinuityMarkers(local, loaded.markers);
+          const local = await deriveContinuitySnapshot(databaseUrl, nodeId);
           const decision = evaluateRestoreHoldRelease({ trusted: loaded.markers, local });
+          io.log(JSON.stringify({ ok: decision.release, command: "markers-check", decision }));
+          return decision.release ? 0 : 2;
+        }
+        if (sub === "release") {
+          const result = await releaseDualGatesWithTrustedMarkers(databaseUrl, {
+            nodeId,
+            trusted: loaded.markers,
+          });
           io.log(
             JSON.stringify({
-              ok: comparison.equal && decision.release,
-              command: "markers-check",
-              comparison,
-              decision,
+              ok: result.released,
+              command: "markers-release",
+              reason: result.released ? undefined : result.decision.reason,
+              authHeadsReleased: result.released ? result.authHeadsReleased : undefined,
+              decision: result.decision,
             }),
           );
-          return comparison.equal && decision.release ? 0 : 2;
+          return result.released ? 0 : 2;
         }
-        throw new Error("markers requires subcommand write|check");
+        throw new Error("markers requires subcommand check|release");
       }
       case "status": {
         const dir = env.BACKUP_OUTPUT_DIR;

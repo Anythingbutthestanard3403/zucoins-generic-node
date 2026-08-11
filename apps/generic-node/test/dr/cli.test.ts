@@ -139,4 +139,22 @@ describe("dr CLI", () => {
     // clock edge trips — assert the envelope was discovered either way.
     expect([0, 2]).toContain(code);
   });
+
+  it("markers release refuses with a typed missing-trusted-source reason", async () => {
+    const lines: string[] = [];
+    const code = await runDrCli(
+      ["markers", "release", "--file", "/definitely/missing/continuity.json"],
+      {
+        DATABASE_URL: "postgresql://localhost/unused",
+        NODE_ID: "11111111-1111-4111-8111-111111111111",
+      },
+      { log: (line) => lines.push(line), error: (line) => lines.push(line) },
+    );
+    expect(code).toBe(2);
+    expect(JSON.parse(lines.find((line) => line.startsWith("{")) ?? "{}")).toMatchObject({
+      ok: false,
+      command: "markers-release",
+      reason: "missing_trusted_source",
+    });
+  });
 });

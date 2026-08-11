@@ -129,7 +129,12 @@ import {
   withPostgresDeadline,
 } from "./db/client.js";
 import { createProductionStoragePressureWiring } from "./storage-pressure.js";
-import { createBackupScheduler, probePgClientBinaries } from "./dr/index.js";
+import {
+  buildScheduledBackupMarkers,
+  createBackupScheduler,
+  probePgClientBinaries,
+  writeContinuityMarkers,
+} from "./dr/index.js";
 import { createProductionMetricsSnapshotSource } from "./metrics/snapshot-source.js";
 import {
   CUSTODY_ALERT_COOLDOWN_MS,
@@ -1455,6 +1460,28 @@ async function main(): Promise<void> {
       // Same latch family money workers consult — lost leadership stops further dumps.
       isLeader: () => shutdownRegistry.authority.held,
       trackInflight: (work) => shutdownRegistry.trackInflight(work),
+      // Bind marker values to the dump snapshot inside exportEncryptedBackup.
+      continuityNodeId: config.NODE_ID,
+      afterSuccess: async (success) => {
+        const markerPath = config.BACKUP_CONTINUITY_MARKERS_PATH;
+        if (markerPath === undefined) {
+          throw new Error("BACKUP_CONTINUITY_MARKERS_PATH is required for scheduled backup continuity");
+        }
+        const snapshot = success.result.continuitySnapshot;
+        if (snapshot === undefined) {
+          throw new Error(
+            "scheduled backup missing dump-bound continuitySnapshot — refusing unpaired artifact",
+          );
+        }
+        await writeContinuityMarkers(
+          markerPath,
+          buildScheduledBackupMarkers(snapshot, {
+            backupArtifactSha256: success.result.sha256,
+            backupOutputPath: success.result.outputPath,
+            observedAt: new Date(success.finishedAtMs),
+          }),
+        );
+      },
       logger,
     });
     backupScheduler.start();

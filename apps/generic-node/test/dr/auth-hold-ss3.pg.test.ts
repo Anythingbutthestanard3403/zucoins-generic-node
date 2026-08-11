@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 
 import { applyDualGateForceAfterRestore } from "../../src/dr/auth-hold.js";
-import { buildMarkersFromLocal } from "../../src/dr/markers.js";
+import { buildScheduledBackupMarkers } from "../../src/dr/markers.js";
 import {
   buildRestoreHoldReleaseUpdate,
   evaluateRestoreHoldRelease,
@@ -24,7 +24,21 @@ import {
 
 const PG_AVAILABLE = (() => {
   try {
-    execFileSync("pg_isready", ["-t", "1"], { stdio: "ignore", timeout: 2000 });
+    execFileSync(
+      "psql",
+      [
+        "-h",
+        process.env.PGHOST ?? "localhost",
+        "-p",
+        process.env.PGPORT ?? "5432",
+        "-d",
+        "postgres",
+        "-qAt",
+        "-c",
+        "SELECT 1",
+      ],
+      { stdio: "ignore", timeout: 2000 },
+    );
     return true;
   } catch {
     return false;
@@ -316,7 +330,7 @@ describe.skipIf(!PG_AVAILABLE)(
 
     beforeAll(async () => {
       const maint = maintenanceUrl();
-      execFileSync("createdb", ["--maintenance-db", maint, dbName], { stdio: "ignore" });
+      execFileSync("psql", ["--dbname", maint, "-v", "ON_ERROR_STOP=1", "-qAt", "-c", `CREATE DATABASE "${dbName}"`], { stdio: "ignore" });
       pool = new Pool({ connectionString: dbUrl(dbName) });
       await applyStockSs3(pool);
       await seedOpenAuthHoldHead(pool, {
@@ -352,7 +366,7 @@ describe.skipIf(!PG_AVAILABLE)(
       await pool?.end();
       const maint = maintenanceUrl();
       try {
-        execFileSync("dropdb", ["--if-exists", "--maintenance-db", maint, dbName], {
+        execFileSync("psql", ["--dbname", maint, "-qAt", "-c", `DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE)`], {
           stdio: "ignore",
         });
       } catch {
@@ -425,7 +439,10 @@ describe.skipIf(!PG_AVAILABLE)(
         nonceBurnHighWater: BigInt(burnHw),
         terminalEventHash: eventHash2,
       };
-      const markers = buildMarkersFromLocal(local, "file:/external-markers.json");
+      const markers = buildScheduledBackupMarkers(local, {
+        backupArtifactSha256: "22".repeat(32),
+        backupOutputPath: "/offsite/backup.zbkp",
+      });
       const decision = evaluateRestoreHoldRelease({ trusted: markers, local });
       expect(decision.release).toBe(true);
       if (!decision.release) return;

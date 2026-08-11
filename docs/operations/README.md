@@ -165,7 +165,7 @@ first.
 | `pnpm --filter @zucoins/generic-node dr restore --in <file>` | Restore, **forcing both post-restore holds** |
 | `pnpm --filter @zucoins/generic-node dr drill` | Throwaway destroy/restore drill with RPO/RTO evidence |
 | `pnpm --filter @zucoins/generic-node dr verify --path <file-or-dir>` | Decrypt-verify provider artifacts without applying |
-| `pnpm --filter @zucoins/generic-node dr markers write\|check --file <path>` | Continuity markers — **see the warning in [`restore.md`](restore.md)** |
+| `pnpm --filter @zucoins/generic-node dr markers check\|release --file <path>` | Continuity markers check / dual-gate release — **see [`restore.md`](restore.md)** |
 | `pnpm --filter @zucoins/generic-node dr status` | RPO posture against `BACKUP_OUTPUT_DIR` |
 | `node dist/ops/run-recovery-ceremony.js` | Break-glass recovery-verification ceremony ([`recovery-ceremony.md`](recovery-ceremony.md)) |
 | `node dist/operations/rotate-master-key.cli.js` | **Not operational.** See "Known-blocked" below |
@@ -177,8 +177,8 @@ None of these are fixed by this document; each has a ticket.
 
 | Procedure | State | Ticket |
 | --- | --- | --- |
-| Releasing `restore_hold` / `auth_hold` after a restore | The release predicate is implemented and tested; **nothing invokes the writer**, and `AUTH_HOLD_RELEASED` is a legal enum value no code path ever appends. A restored node's reporting surface stays refused | ZTR-1135 |
-| Deriving continuity markers | `dr markers write` builds the "trusted" markers **from the local snapshot**, so they compare equal by construction. No shipped query derives the three `--local-*` values | ZTR-1136 |
+| Releasing `restore_hold` / `auth_hold` after a restore | Shipped: `dr markers release --file <offsite-markers>` atomically clears both gates when trusted markers match the restored dump (`AUTH_HOLD_RELEASED` + restore_hold clear). See [`restore.md`](restore.md) | ZTR-1135 (shipped) |
+| Continuity marker emission | Shipped on the scheduled-backup path: dump-bound snapshot via `pg_export_snapshot` + `pg_dump --snapshot`, written to `BACKUP_CONTINUITY_MARKERS_PATH` only after pair success (RPO anchors stay cold otherwise) | ZTR-1136 (shipped) |
 | Master-key rotation via CLI | `rotate-master-key.cli.js` refuses with `adapters_not_wired` — the composition root does not inject the census/journal/unit-of-work ports. The node-core rotation flow underneath it is real; the binary entry is not | none — flagged with ZTR-1131 |
 | Paging on any alert | Delivery is `log` only; no webhook URL is configurable. Two P0 signals and three P1 signals read permanently-zero inputs | ZTR-1144 |
 

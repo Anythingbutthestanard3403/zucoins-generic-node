@@ -40,6 +40,11 @@ import {
   applyDualGateForceAfterRestore,
   type ForceAuthHoldResult,
 } from "./auth-hold.js";
+import { withConnectedPgClient } from "./hold-db-orchestration.js";
+import {
+  deriveContinuitySnapshotOnClient,
+  type LocalContinuitySnapshot,
+} from "./markers.js";
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -183,6 +188,20 @@ export interface BackupResult {
   outputPath: string;
   sha256: string;
   bytesWritten: number;
+  /**
+   * Continuity point true of the sealed dump snapshot when export captured it
+   * under the same PostgreSQL snapshot as `pg_dump` (scheduled path).
+   */
+  continuitySnapshot?: LocalContinuitySnapshot;
+}
+
+export interface ExportEncryptedBackupOptions {
+  /**
+   * When set, open a REPEATABLE READ transaction, derive continuity on that
+   * connection, `pg_export_snapshot()`, and run `pg_dump --snapshot=…` so the
+   * returned markers are bound to the sealed artifact (not a post-dump live re-read).
+   */
+  readonly continuityNodeId?: string;
 }
 
 export interface DecryptedBackup {
@@ -240,13 +259,58 @@ export async function decryptBuffer(
  * pg_dump a database and write an encrypted ZBKP envelope to `outputPath`. The
  * plaintext SQL is held only in memory (never written to disk) and zeroed once
  * the envelope is sealed.
+ *
+ * When `options.continuityNodeId` is set, continuity markers are derived on the
+ * same PostgreSQL snapshot that `pg_dump --snapshot` exports — concurrent
+ * writers after dump start cannot desync the paired witness from the artifact.
  */
 export async function exportEncryptedBackup(
   databaseUrl: string,
   outputPath: string,
   masterKey: string,
+  options: ExportEncryptedBackupOptions = {},
 ): Promise<BackupResult> {
+  const nodeId = options.continuityNodeId?.trim();
+  if (nodeId !== undefined && nodeId !== "") {
+    return exportEncryptedBackupBoundToContinuity(databaseUrl, outputPath, masterKey, nodeId);
+  }
   const plaintext = await runPgDump(databaseUrl);
+  return sealPlaintextToPath(plaintext, outputPath, masterKey);
+}
+
+async function exportEncryptedBackupBoundToContinuity(
+  databaseUrl: string,
+  outputPath: string,
+  masterKey: string,
+  continuityNodeId: string,
+): Promise<BackupResult> {
+  return withConnectedPgClient(databaseUrl, async (client) => {
+    // Hold one RR snapshot for both continuity derivation and pg_dump.
+    await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    try {
+      const continuitySnapshot = await deriveContinuitySnapshotOnClient(client, continuityNodeId);
+      const exported = await client.query<{ pg_export_snapshot: string }>(
+        "SELECT pg_export_snapshot() AS pg_export_snapshot",
+      );
+      const snapshotId = exported.rows[0]?.pg_export_snapshot;
+      if (snapshotId === undefined || snapshotId.trim() === "") {
+        throw new Error("pg_export_snapshot returned empty id");
+      }
+      // pg_dump must finish while this transaction still holds the snapshot.
+      const plaintext = await runPgDump(databaseUrl, snapshotId);
+      const sealed = await sealPlaintextToPath(plaintext, outputPath, masterKey);
+      return { ...sealed, continuitySnapshot };
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
+  });
+}
+
+async function sealPlaintextToPath(
+  plaintext: Buffer,
+  outputPath: string,
+  masterKey: string,
+): Promise<BackupResult> {
   try {
     const envelope = await encryptBuffer(plaintext, masterKey);
     await writeFile(outputPath, envelope);
@@ -308,13 +372,21 @@ export function buildRestorePsqlArgs(databaseUrl: string): string[] {
   return ["--single-transaction", "-v", "ON_ERROR_STOP=1", "--quiet", "--dbname", databaseUrl];
 }
 
+/** Build `pg_dump` argv. Optional `snapshotId` binds the dump to an open backend snapshot. */
+export function buildPgDumpArgs(databaseUrl: string, snapshotId?: string): string[] {
+  const args = ["--format=plain", "--no-owner", "--no-acl"];
+  if (snapshotId !== undefined && snapshotId.trim() !== "") {
+    args.push(`--snapshot=${snapshotId}`);
+  }
+  args.push("--dbname", databaseUrl);
+  return args;
+}
+
 /** Run `pg_dump` and return its full stdout. Rejects on nonzero exit or signal-kill. */
-function runPgDump(databaseUrl: string): Promise<Buffer> {
-  const pgDump = spawn(
-    "pg_dump",
-    ["--format=plain", "--no-owner", "--no-acl", "--dbname", databaseUrl],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
+function runPgDump(databaseUrl: string, snapshotId?: string): Promise<Buffer> {
+  const pgDump = spawn("pg_dump", buildPgDumpArgs(databaseUrl, snapshotId), {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const stdout: Buffer[] = [];
   pgDump.stdout.on("data", (d: Buffer) => stdout.push(d));
   return awaitCleanExit(pgDump, "pg_dump").then(() => Buffer.concat(stdout));

@@ -1588,7 +1588,7 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
     for (let i = 0; i <= n; i++) {
       const c = secret[i];
       if (c !== undefined && c >= "0" && c <= "9") {
-        run.push(Number(c));
+        run.push(c.charCodeAt(0) - 48);  // digit 0-9 (avoid Number() — amounts-admin/no-float-amount)
       } else if (flush()) {
         return false;
       }

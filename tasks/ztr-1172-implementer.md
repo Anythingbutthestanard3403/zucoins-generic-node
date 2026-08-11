@@ -1,7 +1,7 @@
 # ZTR-1172 implementer
 
 - **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/68
-- **Head SHA:** `b68a67421a7df248bda86a8d476c73acf96e3af4`
+- **Head SHA:** `e81ddf9283221771bfbe7f4578fec52ddcdbb501`
 - **Worktree:** `/Volumes/Ai Building/.zup-scratch/ztr-1172-impl/`
 - **Claim:** implementer run=`ba405bf6-dd43-4f33-bab0-12e6f996acd7`
 - **Governing:** doc 09 §7.1 / §7.7; `docs/operations/restore.md`; readiness `RESTORE_HOLD_READINESS`

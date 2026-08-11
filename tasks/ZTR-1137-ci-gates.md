@@ -44,7 +44,7 @@
 - Actions permissions API: enabled=true, allowed_actions=all; account has admin on repo.
 - Branch protection / rulesets API: **403** plan gate on private free repo — this lane cannot mark required checks without Pro/public or org admin plan change.
 - Sibling private repos show recent `BuildFailed` on schedules and sparse successes since mid-July — possible account-minutes / runner entitlement residual outside YAML.
-- After r2 push: re-check `gh run list` / named jobs. If still `BuildFailed`, residual is account/entitlement, not workflow parse (actionlint 0; yaml.safe_load ok).
+- After r2 push head `bc2e0d2`: runs 31448970879 (push) and 31448973820 (pull_request) still `startup_failure` / `BuildFailed`, jobs=0. Residual is account/entitlement, not workflow parse (actionlint 0; yaml.safe_load ok).
 
 ## Deliberately broken commit
 

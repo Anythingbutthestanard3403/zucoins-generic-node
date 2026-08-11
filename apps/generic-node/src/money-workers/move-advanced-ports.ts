@@ -928,6 +928,26 @@ export function createMoveAdvancedPorts(
             Date.parse(nowIso),
           );
 
+          // Tenant stream: node_events was inserted inside persistMoveOutcome's CTE; the
+          // zp-implementer-event-v1 leg must co-commit so internal_move.landed is public
+          // (ZTR-1146). Same pattern as the NEEDS_ATTENTION branch above.
+          {
+            const identity = deps.nodeIdentitySigner();
+            if (identity === null) throw new Error("node identity signer unavailable");
+            await appendImplementerEventLeg(txQuery, {
+              nodeId: deps.nodeId,
+              implementerId: details.implementerId,
+              eventId: event.eventId,
+              eventType: event.eventType,
+              operationId,
+              walletId: null,
+              dataSha256,
+              nodeEventHash: event.eventHash,
+              createdAt: nowIso,
+              signer: asSyncEventSigner(identity),
+            });
+          }
+
           await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
           await client.query("COMMIT");
           return { ok: true, land: { outcome, persist: persistResult } };

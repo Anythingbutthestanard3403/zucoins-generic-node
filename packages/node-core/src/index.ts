@@ -48,6 +48,8 @@ export {
   type MoveSqlExecutor,
   type MoveSqlTxFn,
   type MoveCreatedEventAppender,
+  createDualChainMoveCreatedEventAppender,
+  buildInternalMoveCreatedEventData,
   createInternalMove,
   MOVE_ADMISSION_EVENTS_DDL,
   // money workers — dual-lease for MOVE_INTERNAL.
@@ -597,6 +599,7 @@ export {
   type ExpireReceiveInput,
   type ExpireReceiveOutcome,
   type ReceiveExpiryAttentionReason,
+  type ReceiveExpiryDualChainEmitter,
   type ReceiveExpiryLeaseRepository,
   type ReceiveExpiryTxFactory,
   type ReceiveReleasePredicateName,

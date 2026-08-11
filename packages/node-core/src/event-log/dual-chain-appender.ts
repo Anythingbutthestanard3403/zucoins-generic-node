@@ -466,8 +466,8 @@ export function createDualChainEventAppender(
 }
 
 /**
- * Raised when a terminal landed transition cannot be accompanied by its signed dual-chain
- * event. Always aborts the caller's landing transaction — see `appendTerminalLandedEvent`.
+ * Raised when a durable state change cannot be accompanied by its signed dual-chain
+ * event. Always aborts the caller's transaction — see `appendDurableDualChainEvent`.
  */
 export class TerminalEventNotAppendableError extends Error {
   constructor(message: string) {
@@ -476,40 +476,45 @@ export class TerminalEventNotAppendableError extends Error {
   }
 }
 
-export interface TerminalLandedEventInput {
+/** @deprecated Prefer DurableDualChainEventInput — kept as the landed-path historical name. */
+export type TerminalLandedEventInput = DurableDualChainEventInput;
+
+export interface DurableDualChainEventInput {
   readonly nodeId: string;
   readonly implementerId: string;
   readonly operationId: string;
   readonly walletId: string | null;
-  /** Terminal event literal for the slice — `receive.landed` or `external_send.landed`. */
+  /**
+   * Closed durable public event literal (Appendix B nine-value set). Used for terminal
+   * `*.landed` paths and every other production emitter that must reach the tenant stream.
+   */
   readonly eventType: NodeEventType;
   /** The slice's already-built event data. Digested, never re-serialized (the byte-exact signing rule). */
   readonly dataText: string;
-  /** The landed instant, so the signed tuples and the durable row cite one timestamp. */
+  /** Instant shared by both signed tuples and the durable business row. */
   readonly createdAt: string;
   readonly signer: NodeEventSigner;
   readonly quota?: DualChainEventQuota;
 }
 
 /**
- * append a terminal `*.landed` event on BOTH continuity chains, on the caller's
- * open landing transaction.
+ * Append one durable public event on BOTH continuity chains, on the caller's open transaction.
  *
- * `query` MUST be bound to the transaction running the landed status CAS: that is what makes
+ * `query` MUST be bound to the transaction running the state change: that is what makes
  * the status change and its authoritative event one durable unit ("appended in
- * the same transaction"). Before this existed, RECEIVE and SEND landings wrote only their
- * slice-local `*_landing_events` row, so an operation could be durably LANDED while every
- * signed pull/SSE consumer of `node_events` / `implementer_events` saw nothing terminal.
+ * the same transaction"). Before dual-chain appends existed on every path, several
+ * slice-local tables could record a transition while signed pull/SSE consumers of
+ * `node_events` / `implementer_events` saw nothing.
  *
  * FAIL-CLOSED, and that is the point (Byte-exact): every non-append path here THROWS rather than
- * returning, so the caller's transaction rolls back and no landed status is ever committed
+ * returning, so the caller's transaction rolls back and no state change is ever committed
  * without its signed event. That includes an exhausted tenant event quota — a dropped
- * terminal event is a permanent hole in the authoritative chain, whereas an aborted landing
- * is a retryable stall that leaves the settled body and the operation exactly as they were.
+ * durable event is a permanent hole in the authoritative chain, whereas an aborted transition
+ * is a retryable stall that leaves the business row exactly as it was.
  */
-export async function appendTerminalLandedEvent(
+export async function appendDurableDualChainEvent(
   query: SqlQueryFn,
-  input: TerminalLandedEventInput,
+  input: DurableDualChainEventInput,
 ): Promise<DualChainAppendOutcome & { readonly kind: "APPENDED" }> {
   const appender = createDualChainEventAppender({
     nodeId: input.nodeId,
@@ -530,8 +535,19 @@ export async function appendTerminalLandedEvent(
     throw new TerminalEventNotAppendableError(
       `${input.eventType} for operation ${input.operationId} cannot be appended: implementer ` +
         `${input.implementerId} is over its event quota (${outcome.windowCap} per ` +
-        `${outcome.windowMs}ms). The landing is aborted rather than committed unproven (Byte-exact).`,
+        `${outcome.windowMs}ms). The transition is aborted rather than committed unproven (Byte-exact).`,
     );
   }
   return outcome;
+}
+
+/**
+ * Append a terminal `*.landed` event on both chains. Alias of
+ * {@link appendDurableDualChainEvent} retained for landing-store call sites.
+ */
+export async function appendTerminalLandedEvent(
+  query: SqlQueryFn,
+  input: DurableDualChainEventInput,
+): Promise<DualChainAppendOutcome & { readonly kind: "APPENDED" }> {
+  return appendDurableDualChainEvent(query, input);
 }

@@ -30,6 +30,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
 import {
+  appendDurableDualChainEvent,
   ATTEMPT_PHASE_LADDER,
   createSqlRetainedPathBodySource,
   DEFAULT_MAX_PATH_DEPTH,
@@ -42,7 +43,9 @@ import {
   verifySettledTransaction,
   walkAncestryPath,
   type CommitReceiveLandingOutcome,
+  type DualChainEventQuota,
   type MetricsHooks,
+  type NodeEventSigner,
   type ParsedSettledTransaction,
   type PathBaseline,
   type ReadFreshHead,
@@ -129,6 +132,9 @@ export interface ReceiveLandingStepDeps {
   /** Lifecycle metrics fire only after the landing DB-TX returns APPLIED. */
   readonly metricsHooks?: MetricsHooks;
   readonly batchSize?: number;
+  /** Sealed EVENT_SIGNING signer for dual-chain operation.needs_attention (ZTR-1146). */
+  readonly eventSigner?: NodeEventSigner | null;
+  readonly eventQuota?: DualChainEventQuota;
 }
 
 /**
@@ -144,28 +150,86 @@ async function setAttentionForIndeterminate(
   pool: Pool,
   operationId: string,
   reason: string,
+  dualChain?: {
+    readonly nodeId: string;
+    readonly eventSigner: NodeEventSigner | null;
+    readonly eventQuota?: DualChainEventQuota;
+  },
 ): Promise<void> {
-  await pool.query(
-    `WITH updated AS (
-       UPDATE operations
-          SET attention_required = true,
-              attention_reason = $2,
-              attention_detail = $3
-        WHERE id = $1::uuid AND attention_required = false
-      RETURNING id
-     )
-     INSERT INTO receive_expiry_attention_events
-       (operation_id, event_type, attention_reason, attention_episode, data_text)
-     SELECT $1::uuid, 'operation.needs_attention', $2,
-            COALESCE((SELECT MAX(attention_episode)
-                        FROM receive_expiry_attention_events
-                       WHERE operation_id = $1::uuid), 0) + 1,
-            $3
-       FROM updated
-     WHERE EXISTS (SELECT 1 FROM updated)`,
-    [operationId, reason, JSON.stringify({ reason, at: new Date().toISOString() })],
-  );
-  // rowCount = 0 means already attention-flagged (same episode) — idempotent no-op.
+  const dataText = JSON.stringify({ reason, at: new Date().toISOString() });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const inserted = await client.query(
+      `WITH updated AS (
+         UPDATE operations
+            SET attention_required = true,
+                attention_reason = $2,
+                attention_detail = $3
+          WHERE id = $1::uuid AND attention_required = false
+        RETURNING id
+       )
+       INSERT INTO receive_expiry_attention_events
+         (operation_id, event_type, attention_reason, attention_episode, data_text)
+       SELECT $1::uuid, 'operation.needs_attention', $2,
+              COALESCE((SELECT MAX(attention_episode)
+                          FROM receive_expiry_attention_events
+                         WHERE operation_id = $1::uuid), 0) + 1,
+              $3
+         FROM updated
+       WHERE EXISTS (SELECT 1 FROM updated)
+       RETURNING operation_id`,
+      [operationId, reason, dataText],
+    );
+    // rowCount = 0 means already attention-flagged (same episode) — idempotent no-op.
+    if ((inserted.rowCount ?? 0) > 0 && dualChain !== undefined) {
+      const signer = dualChain.eventSigner;
+      if (signer === null) {
+        throw new Error(
+          `receive-landing: operation.needs_attention NOT appended op=${operationId} — EVENT_SIGNING signer unavailable; refusing attention park (Byte-exact)`,
+        );
+      }
+      const owner = await client.query<{
+        implementer_id: string;
+        receiver_wallet_id: string | null;
+      }>(
+        `SELECT implementer_id::text AS implementer_id,
+                receiver_wallet_id::text AS receiver_wallet_id
+           FROM receive_operations
+          WHERE operation_id = $1::uuid`,
+        [operationId],
+      );
+      const row = owner.rows[0];
+      if (row === undefined) {
+        throw new Error(
+          `receive-landing: operation.needs_attention NOT appended op=${operationId} — receive_operations row missing`,
+        );
+      }
+      await appendDurableDualChainEvent(
+        async (text, values) => {
+          const result = await client.query(text, values as never);
+          return result.rows as Record<string, unknown>[];
+        },
+        {
+          nodeId: dualChain.nodeId,
+          implementerId: row.implementer_id,
+          operationId,
+          walletId: row.receiver_wallet_id,
+          eventType: "operation.needs_attention",
+          dataText,
+          createdAt: new Date().toISOString(),
+          signer,
+          ...(dualChain.eventQuota !== undefined ? { quota: dualChain.eventQuota } : {}),
+        },
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export interface ReceiveLandingStepResult {
@@ -488,6 +552,11 @@ export async function runReceiveLandingStep(
           deps.pool,
           candidate.operationId,
           `INDETERMINATE: ${err instanceof Error ? err.message : "landing attempt failed"}`,
+          {
+            nodeId: deps.nodeId,
+            eventSigner: deps.eventSigner ?? null,
+            ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
+          },
         );
       } catch {
         // An attention-set failure never causes a landing or resubmit. Log only.
@@ -527,6 +596,11 @@ export async function runReceiveLandingStep(
         deps.pool,
         candidate.operationId,
         `${outcome.outcome}/${outcome.reason}: ${outcome.detail}`,
+        {
+          nodeId: deps.nodeId,
+          eventSigner: deps.eventSigner ?? null,
+          ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
+        },
       );
     } catch (attentionErr) {
       // An attention-set failure never causes a landing, resubmit, or lease release. Log only.

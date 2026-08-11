@@ -9,10 +9,12 @@
 // is the only layer that touches a socket. The store issues exactly the parameterized
 // statements catalogued in STATEMENTS.
 //
-// The insert is the arbiter, and it is ONE statement. step 3 requires the operation row
-// and its one expected artifact to be created in a single DB-TX; a data-modifying CTE gives
-// that atomically without a transaction port, and the artifact insert selects FROM the
-// operation CTE, so no artifact can exist without the operation row that produced it.
+// The insert is the arbiter. step 3 requires the operation row and its one expected artifact
+// to be created in a single DB-TX; a data-modifying CTE gives that atomically, and the
+// artifact insert selects FROM the operation CTE, so no artifact can exist without the
+// operation row that produced it. When a dual-chain event appender is wired, the same TX
+// also appends `external_send.created` on both signed chains so a rolled-back create leaves
+// no tenant-visible event (ZTR-1146).
 // `ON CONFLICT DO NOTHING` targets the idempotency UNIQUE constraint only, so a losing racer
 // yields zero rows instead of raising — it deliberately does NOT swallow the one-in-flight-per-wallet
 // partial unique index, whose unique_violation propagates and is mapped to WALLET_IN_FLIGHT
@@ -38,6 +40,26 @@ export interface SqlQueryResult<R> {
 export interface SqlExecutor {
   query<R>(text: string, params: readonly unknown[]): Promise<SqlQueryResult<R>>;
 }
+
+/** Transaction port — one BEGIN/COMMIT around create + dual-chain event append. */
+export type SqlTxFn = <T>(body: (tx: SqlExecutor) => Promise<T>) => Promise<T>;
+
+/**
+ * Appends `external_send.created` inside the create TX. Production wires the dual-chain
+ * appender; unit tests may omit the port (slice-local create drills still pass).
+ */
+export type SendCreatedEventAppender = (
+  tx: SqlExecutor,
+  input: {
+    readonly operationId: string;
+    readonly nodeId: string;
+    readonly implementerId: string;
+    readonly sourceWalletId: string;
+    readonly destinationAddress: string;
+    readonly amountZkz: string;
+    readonly createdAt: string;
+  },
+) => Promise<void>;
 
 export const SQLSTATE_UNIQUE_VIOLATION = "23505";
 
@@ -237,8 +259,37 @@ function constraintOf(error: unknown): string | undefined {
   return typeof err.constraint === "string" ? err.constraint : undefined;
 }
 
+export interface SqlSendCreateStoreConfig {
+  readonly sql: SqlExecutor;
+  /** Optional TX port. Required when `appendCreatedEvent` is set so create + event co-commit. */
+  readonly withTransaction?: SqlTxFn;
+  readonly appendCreatedEvent?: SendCreatedEventAppender;
+}
+
+function isSqlExecutorOnly(
+  value: SqlExecutor | SqlSendCreateStoreConfig,
+): value is SqlExecutor {
+  return typeof (value as SqlExecutor).query === "function" && !("sql" in value);
+}
+
 export class SqlSendCreateStore implements SendCreateStore {
-  constructor(private readonly sql: SqlExecutor) {}
+  private readonly sql: SqlExecutor;
+  private readonly withTransaction: SqlTxFn;
+  private readonly appendCreatedEvent: SendCreatedEventAppender | undefined;
+
+  constructor(sqlOrConfig: SqlExecutor | SqlSendCreateStoreConfig) {
+    // Back-compat: existing call sites pass the executor alone.
+    if (isSqlExecutorOnly(sqlOrConfig)) {
+      this.sql = sqlOrConfig;
+      this.withTransaction = async (body) => body(sqlOrConfig);
+      this.appendCreatedEvent = undefined;
+    } else {
+      this.sql = sqlOrConfig.sql;
+      this.withTransaction =
+        sqlOrConfig.withTransaction ?? (async (body) => body(sqlOrConfig.sql));
+      this.appendCreatedEvent = sqlOrConfig.appendCreatedEvent;
+    }
+  }
 
   async findSourceWallet(walletId: string): Promise<SendSourceWalletRecord | null> {
     const result = await this.sql.query<WalletRow>(STATEMENTS.SELECT_SOURCE_WALLET, [walletId]);
@@ -287,21 +338,43 @@ export class SqlSendCreateStore implements SendCreateStore {
       artifact.preimageSha256,
       artifact.signature,
     ];
-    try {
-      const result = await this.sql.query<{ operation_id: string }>(
-        STATEMENTS.INSERT_CREATED,
-        params,
-      );
-      // ON CONFLICT DO NOTHING targets the idempotency constraint only, so an empty
-      // created_operation CTE means another caller already holds this key — and the artifact
-      // insert selecting FROM that CTE writes nothing either.
-      return result.rows.length === 0 ? { kind: "IDEMPOTENCY_CONFLICT" } : { kind: "INSERTED" };
-    } catch (error) {
-      if (constraintOf(error) === SOURCE_IN_FLIGHT_INDEX) {
-        return { kind: "WALLET_IN_FLIGHT", walletId: operation.sourceWalletId };
+
+    const runInsert = async (tx: SqlExecutor): Promise<SendInsertOutcome> => {
+      try {
+        const result = await tx.query<{ operation_id: string }>(
+          STATEMENTS.INSERT_CREATED,
+          params,
+        );
+        // ON CONFLICT DO NOTHING targets the idempotency constraint only, so an empty
+        // created_operation CTE means another caller already holds this key — and the artifact
+        // insert selecting FROM that CTE writes nothing either.
+        if (result.rows.length === 0) return { kind: "IDEMPOTENCY_CONFLICT" };
+        if (this.appendCreatedEvent !== undefined) {
+          await this.appendCreatedEvent(tx, {
+            operationId: operation.operationId,
+            nodeId: operation.nodeId,
+            implementerId: operation.implementerId,
+            sourceWalletId: operation.sourceWalletId,
+            destinationAddress: operation.destinationAddress,
+            amountZkz: operation.amountZkz,
+            createdAt: new Date(operation.createdAt).toISOString(),
+          });
+        }
+        return { kind: "INSERTED" };
+      } catch (error) {
+        if (constraintOf(error) === SOURCE_IN_FLIGHT_INDEX) {
+          return { kind: "WALLET_IN_FLIGHT", walletId: operation.sourceWalletId };
+        }
+        throw error;
       }
-      throw error;
+    };
+
+    // Dual-chain append needs a real TX so a failed event rolls back the create. Without an
+    // appender the single-statement CTE remains atomic on its own (unit / DDL drills).
+    if (this.appendCreatedEvent !== undefined) {
+      return this.withTransaction(runInsert);
     }
+    return runInsert(this.sql);
   }
 
   async findByIdempotency(

@@ -26,6 +26,7 @@ import type { Pool } from "pg";
 import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js";
 import { applyMoneyPathStatementTimeout } from "../db/client.js";
 import {
+  appendDurableDualChainEvent,
   assignReceiveWallet,
   captureReceiveT0,
   commitReceiveReady,
@@ -654,6 +655,8 @@ async function advanceApprovedSends(deps: {
   readonly resolveSignerDeps: () => SignerBoundaryDeps | null;
   readonly trackSigningInflight?: (work: Promise<unknown>) => void;
   readonly stopped: () => boolean;
+  readonly eventSigner?: () => NodeEventSigner | null;
+  readonly eventQuota?: DualChainEventQuota;
 }): Promise<void> {
   let approved: readonly string[];
   try {
@@ -678,7 +681,12 @@ async function advanceApprovedSends(deps: {
   const leasePort = createSqlSendSourceLeasePort(deps.pool, deps.config.ownerInstanceId);
   const approvalIds = createSqlApprovalIdLoader(deps.pool);
   const signIntentPort = createSqlSignIntentPort(deps.pool);
-  const partialPort = createSqlPartialPort(deps.pool);
+  const partialPort = createSqlPartialPort({
+    pool: deps.pool,
+    nodeId: deps.config.nodeId,
+    eventSigner: () => deps.eventSigner?.() ?? null,
+    ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
+  });
   const delivery = createSqlPartialDeliveryMarker(deps.pool);
 
   for (const operationId of approved) {
@@ -735,6 +743,9 @@ async function runReceiveExpiryReleaseStep(deps: {
   readonly logger: MoneyWorkerLogger;
   readonly stopped: () => boolean;
   readonly moneyPathStatementTimeoutMs?: number;
+  readonly nodeId: string;
+  readonly eventSigner?: () => NodeEventSigner | null;
+  readonly eventQuota?: DualChainEventQuota;
 }): Promise<{
   readonly processed: number;
   readonly released: number;
@@ -758,34 +769,78 @@ async function runReceiveExpiryReleaseStep(deps: {
   // wraps this very service.
   const expiryStatementTimeoutMs =
     deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
-  const service = new SqlReceiveExpiryReleaseService({
-    withTransaction: async <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> =>
-      withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, async () => {
-        const client = await deps.pool.connect();
-        try {
-          await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
-          await applyMoneyPathStatementTimeout(client, expiryStatementTimeoutMs);
-          const tx: SqlTx = {
-            query: async <R>(text: string, params?: readonly unknown[]) => {
-              const result = await client.query(text, params as never);
-              return { rows: result.rows as R[], rowCount: result.rowCount };
-            },
-          };
-          const out = await fn(tx);
-          await client.query("COMMIT");
-          return out;
-        } catch (err) {
+  const service = new SqlReceiveExpiryReleaseService(
+    {
+      withTransaction: async <T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> =>
+        withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, async () => {
+          const client = await deps.pool.connect();
           try {
-            await client.query("ROLLBACK");
-          } catch {
-            /* original */
+            await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+            await applyMoneyPathStatementTimeout(client, expiryStatementTimeoutMs);
+            const tx: SqlTx = {
+              query: async <R>(text: string, params?: readonly unknown[]) => {
+                const result = await client.query(text, params as never);
+                return { rows: result.rows as R[], rowCount: result.rowCount };
+              },
+            };
+            const out = await fn(tx);
+            await client.query("COMMIT");
+            return out;
+          } catch (err) {
+            try {
+              await client.query("ROLLBACK");
+            } catch {
+              /* original */
+            }
+            throw err;
+          } finally {
+            client.release();
           }
-          throw err;
-        } finally {
-          client.release();
-        }
-      }),
-  });
+        }),
+    },
+    // Dual-chain projection for operation.expired / operation.needs_attention (ZTR-1146).
+    async (tx, event) => {
+      const signer = deps.eventSigner?.() ?? null;
+      if (signer === null) {
+        throw new Error(
+          `money-workers: ${event.eventType} NOT appended op=${event.operationId} — EVENT_SIGNING signer unavailable; refusing receive expiry transition (Byte-exact)`,
+        );
+      }
+      const owner = await tx.query<{
+        implementer_id: string;
+        receiver_wallet_id: string | null;
+      }>(
+        `SELECT implementer_id::text AS implementer_id,
+                receiver_wallet_id::text AS receiver_wallet_id
+           FROM receive_operations
+          WHERE operation_id = $1::uuid`,
+        [event.operationId],
+      );
+      const row = owner.rows[0];
+      if (row === undefined) {
+        throw new Error(
+          `money-workers: ${event.eventType} NOT appended op=${event.operationId} — receive_operations row missing`,
+        );
+      }
+      await appendDurableDualChainEvent(
+        async (text, values) => {
+          const result = await tx.query(text, values as readonly unknown[]);
+          return result.rows as Record<string, unknown>[];
+        },
+        {
+          nodeId: deps.nodeId,
+          implementerId: row.implementer_id,
+          operationId: event.operationId,
+          walletId: row.receiver_wallet_id,
+          eventType: event.eventType,
+          dataText: event.dataText,
+          createdAt: new Date().toISOString(),
+          signer,
+          ...(deps.eventQuota !== undefined ? { quota: deps.eventQuota } : {}),
+        },
+      );
+    },
+  );
 
   let processed = 0;
   let released = 0;
@@ -1119,18 +1174,69 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     const expiredReceives = await withMoneyTx(async (tx) =>
       expireQueueAgedReceives(tx, {
         limits,
-        emitExpired: async (_db, p) => {
-          await deps.pool.query(
+        emitExpired: async (db, p) => {
+          // Mirror + dual-chain must use the SAME tx as the status flip so a failed
+          // append rolls back the EXPIRED transition (ZTR-1146).
+          const responseBody = JSON.stringify({
+            error: "receive_queue_expired",
+            waited_secs: p.waitedSecs,
+          });
+          await db.query(
             `UPDATE receive_operations
                 SET status = 'EXPIRED',
                     completed_at = COALESCE(completed_at, now()),
                     response_status = COALESCE(response_status, 410),
                     response_body = COALESCE(response_body, $2)
               WHERE operation_id = $1::uuid AND status = 'CREATED'`,
-            [
-              p.operationId,
-              JSON.stringify({ error: "receive_queue_expired", waited_secs: p.waitedSecs }),
-            ],
+            [p.operationId, responseBody],
+          );
+
+          const signer = deps.eventSigner?.() ?? null;
+          if (signer === null) {
+            throw new Error(
+              `money-workers: operation.expired NOT appended op=${p.operationId} — EVENT_SIGNING signer unavailable; refusing queue-age expiry (Byte-exact)`,
+            );
+          }
+          const owner = await db.query<{
+            implementer_id: string;
+            receiver_wallet_id: string | null;
+          }>(
+            `SELECT implementer_id::text AS implementer_id,
+                    receiver_wallet_id::text AS receiver_wallet_id
+               FROM receive_operations
+              WHERE operation_id = $1::uuid`,
+            [p.operationId],
+          );
+          const row = owner.rows[0];
+          if (row === undefined) {
+            throw new Error(
+              `money-workers: operation.expired NOT appended op=${p.operationId} — receive_operations row missing`,
+            );
+          }
+          const createdAt = new Date().toISOString();
+          const dataText = JSON.stringify({
+            previous_state: "CREATED",
+            expired_at: createdAt,
+            wallet_assigned: false,
+            waited_secs: p.waitedSecs,
+            release_status: null,
+          });
+          await appendDurableDualChainEvent(
+            async (text, values) => {
+              const result = await db.query(text, values as readonly unknown[]);
+              return result.rows as Record<string, unknown>[];
+            },
+            {
+              nodeId: deps.config.nodeId,
+              implementerId: row.implementer_id,
+              operationId: p.operationId,
+              walletId: row.receiver_wallet_id,
+              eventType: "operation.expired",
+              dataText,
+              createdAt,
+              signer,
+              ...(deps.eventQuota !== undefined ? { quota: deps.eventQuota } : {}),
+            },
           );
           deps.logger.info(
             `money-workers: queue-age expired op=${p.operationId} waitedSecs=${p.waitedSecs}`,
@@ -1184,6 +1290,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       resolveSignerDeps: resolveSendSignerDeps,
       trackSigningInflight: deps.trackSigningInflight,
       stopped: () => stopped,
+      eventSigner: deps.eventSigner,
+      ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
     });
     // SEND completion observe-lander. Requires gateway URLs for the source-head
     // confirm-read; when none are configured (genesis stub / offline) the lander is skipped —
@@ -1289,6 +1397,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
         readFreshHead: receiveLandingDeps.readFreshHead,
         store: receiveLandingDeps.store,
         ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+        eventSigner: deps.eventSigner?.() ?? null,
+        ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
       });
       if (landing.landed.length > 0) {
         deps.logger.info(
@@ -1334,6 +1444,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           logger: deps.logger,
           stopped: () => stopped,
           moneyPathStatementTimeoutMs: statementTimeoutMs,
+          nodeId: deps.config.nodeId,
+          eventSigner: deps.eventSigner,
+          ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
         });
         if (expiryResult.released > 0) {
           deps.logger.info(

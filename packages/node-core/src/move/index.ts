@@ -47,11 +47,14 @@ export {
   STATEMENTS as MOVE_SQL_STATEMENTS,
   MOVE_ADMISSION_EVENTS_DDL,
   defaultMoveCreatedEventAppender,
+  createDualChainMoveCreatedEventAppender,
+  buildInternalMoveCreatedEventData,
   SQLSTATE_UNIQUE_VIOLATION as MOVE_SQLSTATE_UNIQUE_VIOLATION,
   type SqlExecutor as MoveSqlExecutor,
   type SqlTxFn as MoveSqlTxFn,
   type MoveCreatedEventAppender,
   type SqlMoveCreateStoreConfig,
+  type DualChainMoveCreatedAppenderConfig,
 } from "./sql-store.js";
 
 // Continuous receive→child handoff create — steps 1–2.

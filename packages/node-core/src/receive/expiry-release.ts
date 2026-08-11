@@ -78,6 +78,20 @@ export interface ReceiveExpiryTxFactory {
   withTransaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T>;
 }
 
+/**
+ * Dual-chain projection for receive expiry events (ZTR-1146). Bound by the composition
+ * root to `appendDurableDualChainEvent`. Runs on the same `tx` as the slice-local insert
+ * so a failed append rolls back the EXPIRED / NEEDS_ATTENTION transition.
+ */
+export type ReceiveExpiryDualChainEmitter = (
+  tx: SqlExecutor,
+  input: {
+    readonly operationId: string;
+    readonly eventType: typeof RECEIVE_EXPIRED_EVENT | typeof RECEIVE_NEEDS_ATTENTION_EVENT;
+    readonly dataText: string;
+  },
+) => Promise<void>;
+
 export interface ExpireReceiveInput {
   readonly operationId: string;
   /** Fresh, already-persisted gateway observation produced for this expiry pass. */
@@ -587,15 +601,24 @@ async function appendExpiredEvent(
     readonly walletAssigned: boolean;
     readonly releaseStatus: ReceiveExpiryReleaseStatus | null;
   },
+  dualChain?: ReceiveExpiryDualChainEmitter,
 ): Promise<boolean> {
+  const dataText = buildEventData(input);
   const inserted = await tx.query<{ event_id: string }>(
     RECEIVE_EXPIRY_RELEASE_STATEMENTS.APPEND_EXPIRED_EVENT,
     [
       operationId,
       RECEIVE_EXPIRED_EVENT,
-      buildEventData(input),
+      dataText,
     ],
   );
+  if (inserted.rows.length === 1 && dualChain !== undefined) {
+    await dualChain(tx, {
+      operationId,
+      eventType: RECEIVE_EXPIRED_EVENT,
+      dataText,
+    });
+  }
   return inserted.rows.length === 1;
 }
 
@@ -604,6 +627,7 @@ async function openAttention(
   operationId: string,
   reason: ReceiveExpiryAttentionReason,
   failed: readonly ReceiveReleasePredicateName[],
+  dualChain?: ReceiveExpiryDualChainEmitter,
 ): Promise<Extract<ExpireReceiveOutcome, { kind: "NEEDS_ATTENTION" }>> {
   const detail = JSON.stringify({ failed_predicates: failed });
   const opened = await tx.query<{
@@ -619,6 +643,13 @@ async function openAttention(
   ]);
   const row = opened.rows[0];
   if (row !== undefined) {
+    if (dualChain !== undefined) {
+      await dualChain(tx, {
+        operationId,
+        eventType: RECEIVE_NEEDS_ATTENTION_EVENT,
+        dataText: detail,
+      });
+    }
     return {
       kind: "NEEDS_ATTENTION",
       status: row.status,
@@ -740,11 +771,34 @@ const CANONICAL_RECEIVE_EXPIRY_LEASE_REPOSITORY: ReceiveExpiryLeaseRepository = 
 };
 
 export class SqlReceiveExpiryReleaseService {
+  private readonly dualChain: ReceiveExpiryDualChainEmitter | undefined;
+
   constructor(
-    private readonly txFactory: ReceiveExpiryTxFactory,
-    private readonly leaseRepository: ReceiveExpiryLeaseRepository =
-      CANONICAL_RECEIVE_EXPIRY_LEASE_REPOSITORY,
-  ) {}
+    txFactory: ReceiveExpiryTxFactory,
+    leaseRepositoryOrDualChain?:
+      | ReceiveExpiryLeaseRepository
+      | ReceiveExpiryDualChainEmitter,
+    dualChainMaybe?: ReceiveExpiryDualChainEmitter,
+  ) {
+    // Back-compat: (txFactory) | (txFactory, leaseRepo) | (txFactory, dualChain) |
+    // (txFactory, leaseRepo, dualChain). A dual-chain emitter is detected by arity 2.
+    this.txFactory = txFactory;
+    if (
+      leaseRepositoryOrDualChain !== undefined &&
+      typeof leaseRepositoryOrDualChain === "function"
+    ) {
+      this.leaseRepository = CANONICAL_RECEIVE_EXPIRY_LEASE_REPOSITORY;
+      this.dualChain = leaseRepositoryOrDualChain;
+    } else {
+      this.leaseRepository =
+        (leaseRepositoryOrDualChain as ReceiveExpiryLeaseRepository | undefined) ??
+        CANONICAL_RECEIVE_EXPIRY_LEASE_REPOSITORY;
+      this.dualChain = dualChainMaybe;
+    }
+  }
+
+  private readonly txFactory: ReceiveExpiryTxFactory;
+  private readonly leaseRepository: ReceiveExpiryLeaseRepository;
 
   async expire(input: ExpireReceiveInput): Promise<ExpireReceiveOutcome> {
     const nowMs = input.nowMs ?? Date.now();
@@ -753,6 +807,7 @@ export class SqlReceiveExpiryReleaseService {
       input.safetyMarginSecs ?? RECEIVE_EXPIRY_SAFETY_MARGIN_SECS;
     const safetyMarginMs = safetyMarginSecs * 1000;
     const newId = input.newId ?? randomUUID;
+    const dualChain = this.dualChain;
 
     if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
       throw new RangeError("expire receive nowMs must be a non-negative safe integer");
@@ -834,6 +889,7 @@ export class SqlReceiveExpiryReleaseService {
           input.operationId,
           POST_EXPIRY_RECONCILING,
           failed,
+          dualChain,
         );
       }
 
@@ -845,7 +901,7 @@ export class SqlReceiveExpiryReleaseService {
             expiredAt: new Date(nowMs).toISOString(),
             walletAssigned: false,
             releaseStatus: null,
-          });
+          }, dualChain);
           return {
             kind: "EXPIRED_UNASSIGNED",
             status: "EXPIRED",
@@ -858,6 +914,7 @@ export class SqlReceiveExpiryReleaseService {
             input.operationId,
             "LEASE_INVARIANT_VIOLATION",
             ["PRE_CODE_FORMATION_PROVEN_SAFE"],
+            dualChain,
           );
         }
         const updated = await tx.query<{ status: "EXPIRED" }>(
@@ -891,7 +948,7 @@ export class SqlReceiveExpiryReleaseService {
             expiredAt: new Date(nowMs).toISOString(),
             walletAssigned: false,
             releaseStatus: null,
-          }),
+          }, dualChain),
         };
       }
 
@@ -906,6 +963,7 @@ export class SqlReceiveExpiryReleaseService {
           input.operationId,
           "LEASE_INVARIANT_VIOLATION",
           ["PRE_CODE_FORMATION_PROVEN_SAFE"],
+          dualChain,
         );
       }
 
@@ -930,6 +988,7 @@ export class SqlReceiveExpiryReleaseService {
           input.operationId,
           "EXACT_BYTES_UNAVAILABLE",
           ["PRE_CODE_FORMATION_PROVEN_SAFE"],
+          dualChain,
         );
         return {
           kind: "INVARIANT_BREACH",
@@ -950,6 +1009,7 @@ export class SqlReceiveExpiryReleaseService {
           input.operationId,
           "T0_RELEASE_MISMATCH",
           ["EXPIRY_PLUS_SAFETY_MARGIN"],
+          dualChain,
         );
       }
 
@@ -1050,6 +1110,7 @@ export class SqlReceiveExpiryReleaseService {
           freshObservedAt: null,
           predicates,
           newId,
+          dualChain,
         });
       }
 
@@ -1110,6 +1171,7 @@ export class SqlReceiveExpiryReleaseService {
           input.operationId,
           attentionReasonFor(failed, material, lease, binding),
           failed,
+          dualChain,
         );
       }
 
@@ -1128,6 +1190,7 @@ export class SqlReceiveExpiryReleaseService {
         freshObservedAt: observations.fresh_observed_at,
         predicates,
         newId,
+        dualChain,
       });
     });
   }
@@ -1150,6 +1213,7 @@ async function commitRelease(
     readonly freshObservedAt: string | null;
     readonly predicates: ReceiveReleasePredicates;
     readonly newId: () => string;
+    readonly dualChain?: ReceiveExpiryDualChainEmitter;
   },
 ): Promise<Extract<ExpireReceiveOutcome, { kind: "RELEASED" }>> {
   const leaseProofId = input.newId();
@@ -1215,7 +1279,7 @@ async function commitRelease(
     expiredAt: new Date(input.nowMs).toISOString(),
     walletAssigned: true,
     releaseStatus: input.releaseStatus,
-  });
+  }, input.dualChain);
 
   return {
     kind: "RELEASED",

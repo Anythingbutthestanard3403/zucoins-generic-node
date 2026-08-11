@@ -780,6 +780,16 @@ describe("shutdown registry composition — mid-flight / shared latch / boot sta
     await signBody;
   });
 
+  it("ZTR-1166: enginesQuiesced is false when money surface was never armed", () => {
+    const registry = createShutdownRegistry();
+    expect(registry.moneySurfaceArmed).toBe(false);
+    expect(registry.enginesQuiesced).toBe(false);
+    // stopWorkers on never-armed must not flip the quiesced bit.
+    registry.hooks().stopWorkers();
+    expect(registry.enginesQuiesced).toBe(false);
+    expect(registry.moneySurfaceArmed).toBe(false);
+  });
+
   it("Defect A3 / PROBE3: armMoneySurface refuses reopen after ENGINE_QUIESCE", async () => {
     const events: string[] = [];
     const registry = createShutdownRegistry();

@@ -5,27 +5,17 @@ import { CopyButton } from "../../components/CopyButton.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { toApiFailureDetail } from "../../lib/api.js";
 import { getWalletInventory } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 
 export function WalletDetailPage() {
   const { pubkey = "" } = useParams();
-  const demoMode = useAuth((s) => s.demoMode);
   const q = useQuery({
-    queryKey: ["wallet-detail", pubkey, demoMode],
+    queryKey: ["wallet-detail", pubkey],
     queryFn: () => getWalletInventory(pubkey),
-    enabled: !demoMode && pubkey.length > 0,
+    enabled: pubkey.length > 0,
   });
   const w = q.data ?? undefined;
 
-  if (demoMode) {
-    return (
-      <div className="page">
-        <Link to="/wallets" className="linkish">← Wallets</Link>
-        <div className="page-title-row"><h1>Wallet</h1></div>
-        <p className="muted">No fixtures — log in for a live session to load wallet detail.</p>
-      </div>
-    );
-  }
+  
 
   if (q.isLoading) {
     return (

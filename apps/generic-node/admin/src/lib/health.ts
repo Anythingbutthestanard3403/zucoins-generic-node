@@ -2,7 +2,7 @@
  * Client for GET /health/ready — the v2 node's own readiness probe
  * (apps/generic-node/src/health/routes.ts, the readiness gate / the readiness-split rule).
  *
- * Deliberately NOT routed through api()/apiOrDemo(): those unconditionally
+ * Deliberately NOT routed through api()/apiSoftRead(): those unconditionally
  * prefix every request with ADMIN_BASE ("/admin/v1"), but /health/ready is
  * mounted at the bare top level by the same listener (runtime-listener.ts
  * dispatches it only when the path does not start with "/admin/v1"), and a
@@ -65,17 +65,13 @@ export interface NodeReadinessQueryState {
 }
 
 /**
- * Derive the shell's health state. Demo mode is the only path allowed to show
- * "healthy" without a real probe (it is fixture data, already flagged by the
- * design-preview banner). Everywhere else: no data yet → "checking", a failed
+ * Derive the shell's health state. No data yet → "checking", a failed
  * fetch → "offline", a verified non-ready body → "degraded". "Healthy" is
  * reachable only via a verified `status: "ready"` response.
  */
 export function deriveNodeHealthUiState(
-  demoMode: boolean,
   query: NodeReadinessQueryState,
 ): NodeHealthUiState {
-  if (demoMode) return "healthy";
   if (query.isPending) return "checking";
   if (query.isError || query.data === undefined) return "offline";
   return query.data.status === "ready" ? "healthy" : "degraded";

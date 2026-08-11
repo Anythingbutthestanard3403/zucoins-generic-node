@@ -85,7 +85,6 @@ function renderDetail(id = OP_ID) {
 describe("OperationDetailPage", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         username: "admin",
@@ -154,15 +153,6 @@ describe("OperationDetailPage", () => {
     await waitFor(() => expect(screen.getByText("0.01")).toBeInTheDocument());
     expect(screen.getAllByText(inventory.receiver_wallet_id).length).toBeGreaterThan(0);
     expect(screen.getByText(/Recovery detail unavailable/i)).toBeInTheDocument();
-  });
-
-  it("demo mode does not invent money fields", async () => {
-    useAuth.setState({ demoMode: true, user: null });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderDetail();
-    expect(await screen.findByText(/No fixtures/i)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
 

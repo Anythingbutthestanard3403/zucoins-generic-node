@@ -653,13 +653,11 @@ export {
   type GroupReleaseReason,
   type OperationWalletAssignment,
   type StoredAcknowledgement,
-  type LeaseReleaseStatus as AckLeaseReleaseStatus,
 } from "./verification/index.js";
 
 // registry group: nodes/implementers + signing-key tables
 // and read layer. Isolation/rotation scenario suite remains.
 export {
-  SCHEMA_EXECUTION_OBLIGATIONS as NODE_IMPLEMENTER_GN3_EXECUTION_OBLIGATIONS,
   NODE_IMPLEMENTER_SCHEMA_FILE,
   NODE_IMPLEMENTER_SCHEMA_INVARIANTS,
   NODE_IMPLEMENTER_SCHEMA_SOURCE,
@@ -667,7 +665,6 @@ export {
 } from "./schema/node-implementer-registry.contract.js";
 
 export {
-  SCHEMA_EXECUTION_OBLIGATIONS as SIGNING_KEY_GN3_EXECUTION_OBLIGATIONS,
   SIGNING_KEY_SCHEMA_FILE,
   SIGNING_KEY_SCHEMA_INVARIANTS,
   SIGNING_KEY_SCHEMA_SOURCE,
@@ -691,7 +688,6 @@ export {
   NODE_SIGNING_KEY_PURPOSES,
   NODE_SIGNING_SECRET_AAD_DOMAIN,
   REPORTING_KEY_COLUMNS,
-  STATEMENTS as SIGNING_KEY_REGISTRY_STATEMENTS,
   SigningKeyRegistry,
   UnknownSigningKeyPurposeError,
   assertExactPurpose,
@@ -714,7 +710,6 @@ export {
   type NodeSigningKeySealedStoreRewrapResult,
   type ReportingKeyRow,
   type SqlExecutor as SigningKeySqlExecutor,
-  type SqlQueryResult as SigningKeySqlQueryResult,
 } from "./signing-keys/index.js";
 
 // destination bless device authorizer + SQL device/enrol mounts.

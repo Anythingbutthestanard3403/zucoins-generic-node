@@ -3,7 +3,6 @@
  * Thin wrappers: install/device/vault reuse SetupPage; backup/prove reuse PackStep.
  */
 import { useNavigate } from "react-router";
-import { useAuth } from "../../store/auth.js";
 import { PackStep } from "../ceremony/RecoveryCeremonyPage.js";
 import { SetupPage } from "../Setup.js";
 import {
@@ -18,7 +17,6 @@ export function StartSetupStepPage() {
 }
 
 export function StartBackupPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const nav = useNavigate();
   return (
     <div className="auth-shell" data-testid="day0-step-backup">
@@ -27,7 +25,6 @@ export function StartBackupPage() {
           Day-0 · Recovery pack create
         </p>
         <PackStep
-          demoMode={demoMode}
           mode="create"
           onCreated={() => {
             markPackCreated();
@@ -43,7 +40,6 @@ export function StartBackupPage() {
 }
 
 export function StartProvePage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const nav = useNavigate();
   return (
     <div className="auth-shell" data-testid="day0-step-prove">
@@ -52,7 +48,6 @@ export function StartProvePage() {
           Day-0 · Recovery pack prove
         </p>
         <PackStep
-          demoMode={demoMode}
           mode="prove"
           onBack={() => nav(pathForNextStep("backup"), { replace: true })}
           onNext={() => {

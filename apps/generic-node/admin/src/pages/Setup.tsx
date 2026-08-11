@@ -127,7 +127,6 @@ function SetupPageInner() {
   const changePassword = useAuth((s) => s.changePassword);
   const enrolTotp = useAuth((s) => s.enrolTotp);
   const confirmTotp = useAuth((s) => s.confirmTotp);
-  const demoMode = useAuth((s) => s.demoMode);
   const nav = useNavigate();
   const location = useLocation();
 
@@ -183,35 +182,17 @@ function SetupPageInner() {
   );
 
   const refreshSetup = useCallback(async () => {
-    if (demoMode) {
-      // Demo: synthesize complete-after-auth posture.
-      setSetup({
-        object: "setup_state",
-        current_step: "W12",
-        complete: true,
-        ceremony_master_key_blocked: true,
-        next_step: "home",
-        password_ok: true,
-        totp_ok: true,
-        pwa_installed: true,
-        device_enrolled: true,
-        vault_ready: true,
-        recovery_proven: true,
-        flags: {},
-        steps: [],
-      });
-      return;
-    }
+    
     const view = await apiJson<SetupStateView>("/admin/v1/setup-state");
     setSetup(view);
     maybeRedirectFunnel(view);
-  }, [demoMode, maybeRedirectFunnel]);
+  }, [maybeRedirectFunnel]);
 
   const refreshVault = useCallback(async () => {
-    if (demoMode) return;
+    
     const st = await apiJson<VaultMasterStatus>("/admin/v1/vault-master");
     setVaultStatus(st);
-  }, [demoMode]);
+  }, []);
 
   const deviceEnrol = useTotpGatedMutation(
     async (_: void, totp: string) => runGenesisDeviceEnrol({ label: deviceLabel, totp }),
@@ -237,10 +218,7 @@ function SetupPageInner() {
     setBusy(true);
     setErr(null);
     try {
-      if (demoMode) {
-        setBusy(false);
-        return;
-      }
+      
       const view = await apiJson<SetupStateView>("/admin/v1/setup-state/device-break-glass", {
         method: "POST",
         csrf,
@@ -261,7 +239,7 @@ function SetupPageInner() {
     let cancelled = false;
     (async () => {
       try {
-        if (!demoMode && isSecureContextClient()) {
+        if (isSecureContextClient()) {
           await apiJson("/admin/v1/setup-state", {
             method: "PATCH",
             csrf,
@@ -281,14 +259,14 @@ function SetupPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [user, demoMode, csrf, refreshSetup, refreshVault]);
+  }, [user, csrf, refreshSetup, refreshVault]);
 
   // Re-probe vault status whenever the wizard lands on W5.
   useEffect(() => {
-    if (setup?.current_step === "W5" && !demoMode) {
+    if (setup?.current_step === "W5" ) {
       void refreshVault();
     }
-  }, [setup?.current_step, demoMode, refreshVault]);
+  }, [setup?.current_step, refreshVault]);
 
   if (!user) return <Navigate to="/login" replace />;
 
@@ -302,15 +280,7 @@ function SetupPageInner() {
       setErr("New passwords do not match");
       return;
     }
-    if (demoMode) {
-      useAuth.setState({
-        user: user
-          ? { ...user, mustChangePassword: false, mustEnrolTotp: false }
-          : null,
-      });
-      nav("/");
-      return;
-    }
+    
     setBusy(true);
     setErr(null);
     try {
@@ -333,13 +303,7 @@ function SetupPageInner() {
 
   async function onEnrolSubmit(e: FormEvent) {
     e.preventDefault();
-    if (demoMode) {
-      useAuth.setState({
-        user: user ? { ...user, mustEnrolTotp: false } : null,
-      });
-      nav("/");
-      return;
-    }
+    
     setBusy(true);
     setErr(null);
     try {
@@ -357,13 +321,7 @@ function SetupPageInner() {
 
   async function onConfirmSubmit(e: FormEvent) {
     e.preventDefault();
-    if (demoMode) {
-      useAuth.setState({
-        user: user ? { ...user, mustEnrolTotp: false } : null,
-      });
-      nav("/");
-      return;
-    }
+    
     setBusy(true);
     setErr(null);
     try {
@@ -383,10 +341,7 @@ function SetupPageInner() {
     setBusy(true);
     setErr(null);
     try {
-      if (demoMode) {
-        setBusy(false);
-        return;
-      }
+      
       const view = await apiJson<SetupStateView>("/admin/v1/setup-state", {
         method: "PATCH",
         csrf,
@@ -481,7 +436,7 @@ function SetupPageInner() {
               autoComplete="current-password"
               value={current}
               onChange={(e) => setCurrent(e.target.value)}
-              required={!demoMode}
+              required
             />
           </div>
           <div className="field">
@@ -537,7 +492,7 @@ function SetupPageInner() {
               autoComplete="current-password"
               value={enrolPassword}
               onChange={(e) => setEnrolPassword(e.target.value)}
-              required={!demoMode}
+              required
             />
           </div>
           {err ? <p className="err">{err}</p> : null}

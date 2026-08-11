@@ -15,17 +15,15 @@ import {
   type OperationListItem,
   type RecoveryDetail,
 } from "../../lib/money.js";
-import { apiOrDemo } from "../../lib/api.js";
+import { apiSoftRead } from "../../lib/api.js";
 import { relativeTime } from "../../lib/format.js";
 import { EMPTY_NEEDS_ATTENTION, type NeedsAttentionResponse } from "../../lib/ops.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 import { operationKindLabel, statusLabel } from "../../lib/labels.js";
 
 type Tab = "attention" | "history";
 
 export function OperationsPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("attention");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -35,17 +33,17 @@ export function OperationsPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const attentionQ = useQuery({
-    queryKey: ["needs-attention", demoMode],
+    queryKey: ["needs-attention"],
     queryFn: async () =>
-      apiOrDemo<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: demoMode ? false : 15_000,
+      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
+    refetchInterval: 15_000,
   });
 
   const historyQ = useQuery({
-    queryKey: ["operations-history", demoMode],
+    queryKey: ["operations-history"],
     queryFn: () => listOperationsInventory(),
-    enabled: !demoMode && tab === "history",
-    refetchInterval: demoMode ? false : 30_000,
+    enabled: tab === "history",
+    refetchInterval: 30_000,
   });
 
   const live = attentionQ.data?.live ?? false;
@@ -76,12 +74,7 @@ export function OperationsPage() {
     setDetailErr(null);
     setMsg(null);
     setErr(null);
-    if (demoMode) {
-      setExpanded(operationId);
-      setDetail(null);
-      setDetailErr("Design preview — recovery GET is live-session only.");
-      return;
-    }
+    
     setExpanded(operationId);
     try {
       const d = await getRecovery(operationId);
@@ -135,9 +128,7 @@ export function OperationsPage() {
       <div className="page-title-row">
         <h1>Operations</h1>
         <span className="muted" style={{ fontSize: 12.5 }}>
-          {demoMode
-            ? "Demo"
-            : loading
+          {loading
               ? "Loading…"
               : attentionQ.isFetching
                 ? "Refreshing…"
@@ -164,7 +155,7 @@ export function OperationsPage() {
           onClick={() => setTab("history")}
         >
           History{" "}
-          <span className="n">{historyLive ? historyCounts.total : demoMode ? "—" : "…"}</span>
+          <span className="n">{historyLive ? historyCounts.total : "…"}</span>
         </button>
       </div>
 
@@ -181,11 +172,7 @@ export function OperationsPage() {
             </div>
           </div>
           <div className="panel">
-            {demoMode ? (
-              <p className="muted" style={{ padding: 16, margin: 0 }}>
-                No fixtures — log in for a live session to view the attention queue.
-              </p>
-            ) : loading ? (
+            {loading ? (
               <p className="muted" style={{ padding: 16, margin: 0 }}>Loading…</p>
             ) : ops.length === 0 ? (
               <>
@@ -273,7 +260,7 @@ export function OperationsPage() {
                                           key={action}
                                           type="button"
                                           className="mini-btn primary"
-                                          disabled={act.isPending || demoMode}
+                                          disabled={act.isPending }
                                           onClick={() => {
                                             setErr(null);
                                             setMsg(null);
@@ -339,11 +326,7 @@ export function OperationsPage() {
             </div>
           </div>
           <div className="table-wrap">
-            {demoMode ? (
-              <p className="muted" style={{ padding: 16, margin: 0 }}>
-                No fixtures — log in for a live session to view operation history.
-              </p>
-            ) : historyQ.isLoading ? (
+            {historyQ.isLoading ? (
               <p className="muted" style={{ padding: 16, margin: 0 }}>Loading…</p>
             ) : !historyLive ? (
               <>

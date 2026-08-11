@@ -7,7 +7,6 @@ import { useAuth } from "../../store/auth.js";
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: { userId: "u1", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "csrf" },
   });
 }
@@ -73,17 +72,6 @@ describe("WalletsPage honesty", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByText("No wallets")).toBeInTheDocument());
-  });
-
-  it("shows demo preview copy and never conflates it with unavailable or empty", () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage();
-    expect(screen.getAllByText("No fixtures — log in for live").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Inventory unavailable/)).not.toBeInTheDocument();
-    expect(screen.queryByText("No wallets")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("renders a live wallet row from a real 200", async () => {

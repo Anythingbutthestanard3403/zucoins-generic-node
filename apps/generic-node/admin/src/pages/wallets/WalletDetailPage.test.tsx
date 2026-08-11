@@ -21,7 +21,6 @@ function renderDetail(pubkey: string) {
 describe("WalletDetailPage point-read", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         role: "admin",

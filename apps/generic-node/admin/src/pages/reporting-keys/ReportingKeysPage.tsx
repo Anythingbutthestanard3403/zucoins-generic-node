@@ -14,7 +14,6 @@ import {
   type ReportingKeyIssueResult,
   type ReportingKeyRecoverResult,
 } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 const QUERY_KEY = ["reporting-keys"] as const;
@@ -24,7 +23,6 @@ type OnceShown =
   | { readonly kind: "recover"; readonly result: ReportingKeyRecoverResult };
 
 export function ReportingKeysPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [issued, setIssued] = useState<OnceShown | null>(null);
   const [copiedSeed, setCopiedSeed] = useState(false);
@@ -33,9 +31,9 @@ export function ReportingKeysPage() {
   const [recoverConfirm, setRecoverConfirm] = useState(false);
 
   const list = useQuery({
-    queryKey: [...QUERY_KEY, demoMode],
+    queryKey: [...QUERY_KEY],
     queryFn: listReportingKeys,
-    enabled: !demoMode,
+    
   });
 
   const issue = useTotpGatedMutation<ReportingKeyIssueResult, void>(
@@ -80,10 +78,10 @@ export function ReportingKeysPage() {
 
   const keys = list.data?.keys ?? [];
   const live = list.data?.live === true;
-  const unavailable = !demoMode && !live;
+  const unavailable = !live;
   const activeKey = keys.find((k) => k.status === "ACTIVE") ?? null;
-  const canIssue = !demoMode && list.isSuccess && !unavailable && activeKey === null;
-  const canRecover = !demoMode && list.isSuccess && !unavailable && activeKey !== null;
+  const canIssue = list.isSuccess && !unavailable && activeKey === null;
+  const canRecover = list.isSuccess && !unavailable && activeKey !== null;
 
   const seedText =
     issued === null
@@ -160,15 +158,9 @@ export function ReportingKeysPage() {
         only). Save it to a password manager immediately.
       </p>
 
-      {demoMode ? (
-        <p className="muted">
-          No fixtures — log in for a live session to manage reporting credentials.
-        </p>
-      ) : null}
+      {list.isPending ? <p className="muted">Loading…</p> : null}
 
-      {!demoMode && list.isPending ? <p className="muted">Loading…</p> : null}
-
-      {!demoMode && list.isError ? (
+      {list.isError ? (
         <div className="banner banner-error" role="alert">
           Reporting credential inventory and issuing are not available. No credentials can be
           shown or issued until the live node responds.
@@ -344,7 +336,7 @@ export function ReportingKeysPage() {
         </div>
       ) : null}
 
-      {demoMode || (list.isSuccess && !unavailable) ? (
+      {(list.isSuccess && !unavailable) ? (
         <div className="table-wrap" style={{ marginTop: 12 }}>
           <table>
             <thead>
@@ -356,7 +348,7 @@ export function ReportingKeysPage() {
               </tr>
             </thead>
             <tbody>
-              {demoMode || keys.length === 0 ? (
+              {keys.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="muted">
                     No reporting credentials listed

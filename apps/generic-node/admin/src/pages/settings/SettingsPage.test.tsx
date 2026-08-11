@@ -5,14 +5,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { SettingsPage } from "./SettingsPage.js";
 
 vi.mock("../../lib/api.js", () => ({
-  apiOrDemo: vi.fn(async (_path: string, fallback: unknown) => ({
+  apiSoftRead: vi.fn(async (_path: string, fallback: unknown) => ({
     data: fallback,
     live: false,
   })),
 }));
 
 vi.mock("../../store/auth.js", () => ({
-  useAuth: (sel: (s: { demoMode: boolean }) => unknown) => sel({ demoMode: true }),
+  useAuth: (sel: (s: { user: null }) => unknown) => sel({}),
 }));
 
 function renderPage() {
@@ -43,13 +43,5 @@ describe("SettingsPage", () => {
     // No edit controls
     expect(screen.queryByRole("button", { name: /save|edit|update/i })).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it("shows demo fixture values", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getAllByText("https://demo-node.example").length).toBeGreaterThan(0);
-    });
-    expect(screen.getAllByText(/Demo fixture/i).length).toBeGreaterThan(0);
   });
 });

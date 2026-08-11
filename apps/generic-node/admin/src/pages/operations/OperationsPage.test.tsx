@@ -8,7 +8,6 @@ import { useAuth } from "../../store/auth.js";
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: { userId: "u1", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "csrf" },
   });
 }
@@ -63,16 +62,6 @@ describe("OperationsPage honesty", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByText("No operations need attention.")).toBeInTheDocument());
-  });
-
-  it("distinguishes demo preview from a live-fetch unavailable state", () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage();
-    expect(screen.getByText(/No fixtures — log in for a live session to view the attention queue\./)).toBeInTheDocument();
-    expect(screen.queryByText(/Attention queue unavailable/)).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("renders a live attention row from a real 200", async () => {

@@ -167,6 +167,9 @@ export function createShutdownRegistry(): ShutdownRegistry {
    * unlock gate or reopen accept after quiesce (Defect D3 / A3).
    */
   let moneySurface: "unarmed" | "armed" | "quiesced" = "unarmed";
+  /** True once a stop has been registered (arm). Survives quiesce so enginesQuiesced
+   * means "was armed and is now quiesced", not "never armed" (ZTR-1166). */
+  let moneySurfaceEverArmed = false;
 
   /**
    * Add `work` to the tracked set and hand back the waitable, so a caller that
@@ -233,6 +236,7 @@ export function createShutdownRegistry(): ShutdownRegistry {
     assertArmable();
     workerStops.push(stop);
     moneySurface = "armed";
+    moneySurfaceEverArmed = true;
   }
 
   function armMoneySurfaceInternal(stop: () => void): void {
@@ -359,7 +363,9 @@ export function createShutdownRegistry(): ShutdownRegistry {
       return moneySurface === "armed";
     },
     get enginesQuiesced() {
-      return moneySurface !== "armed";
+      // True only after arm→ENGINE_QUIESCE. Never-armed stays false even if
+      // stopWorkers ran (still blocks re-arm via moneySurface === "quiesced").
+      return moneySurfaceEverArmed && moneySurface === "quiesced";
     },
     trackInflight: trackInflightInternal,
     registerWorkerStop(stop: () => void): void {

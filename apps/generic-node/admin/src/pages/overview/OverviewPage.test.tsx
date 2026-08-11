@@ -108,7 +108,6 @@ function haltFailure(requestId: string) {
 describe("OverviewPage halt truthfulness", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "operator-1",
         role: "admin",
@@ -196,7 +195,7 @@ describe("OverviewPage halt truthfulness", () => {
       expect(within(stat).getByText(detail)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: action })).toBeEnabled();
 
-      await client.refetchQueries({ queryKey: ["overview", "halt-state", false] });
+      await client.refetchQueries({ queryKey: ["overview", "halt-state"] });
 
       await waitFor(() => expect(within(stat).getByText("UNKNOWN")).toBeInTheDocument());
       expect(within(stat).getByRole("alert")).toHaveTextContent(/treat money rails as unknown/i);
@@ -251,7 +250,7 @@ describe("OverviewPage halt truthfulness", () => {
         target: { value: "stale warning reason" },
       });
 
-      await client.refetchQueries({ queryKey: ["overview", "halt-state", false] });
+      await client.refetchQueries({ queryKey: ["overview", "halt-state"] });
 
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(screen.getByTestId("halt-stat")).toHaveTextContent("UNKNOWN");
@@ -259,13 +258,13 @@ describe("OverviewPage halt truthfulness", () => {
       expect(screen.getByText(/retry the halt-state request/i)).toBeInTheDocument();
       expect(postHaltToggle).not.toHaveBeenCalled();
 
-      await client.refetchQueries({ queryKey: ["overview", "halt-state", false] });
+      await client.refetchQueries({ queryKey: ["overview", "halt-state"] });
       await waitFor(() => expect(screen.getByText(/req-latest-failure/)).toBeInTheDocument());
       expect(screen.queryByText(/req-first-failure/)).not.toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(postHaltToggle).not.toHaveBeenCalled();
 
-      await client.refetchQueries({ queryKey: ["overview", "halt-state", false] });
+      await client.refetchQueries({ queryKey: ["overview", "halt-state"] });
       const recovered = await screen.findByRole("button", { name: recoveredAction });
       expect(recovered).toBeEnabled();
       expect(screen.queryByRole("button", { name: confirmation })).not.toBeInTheDocument();
@@ -303,7 +302,7 @@ describe("OverviewPage halt truthfulness", () => {
     const inputs = within(dialog).getAllByRole("textbox");
 
     await act(async () => {
-      const refetch = client.refetchQueries({ queryKey: ["overview", "halt-state", false] });
+      const refetch = client.refetchQueries({ queryKey: ["overview", "halt-state"] });
       "123456".split("").forEach((digit, index) => {
         fireEvent.change(inputs[index]!, { target: { value: digit } });
       });
@@ -316,18 +315,6 @@ describe("OverviewPage halt truthfulness", () => {
     expect(postHaltToggle).not.toHaveBeenCalled();
   });
 
-  test("preserves the explicit demo-mode clear state without calling the halt API", async () => {
-    useAuth.setState({ demoMode: true });
-    const fetchHaltState = vi.spyOn(money, "fetchHaltState");
-
-    renderOverview();
-
-    const stat = await screen.findByTestId("halt-stat");
-    await waitFor(() => expect(within(stat).getByText("Clear")).toBeInTheDocument());
-    expect(within(stat).getByText("Money rails open")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Halt engines" })).toBeEnabled();
-    expect(fetchHaltState).not.toHaveBeenCalled();
-  });
 
   test.each([
     [CLEAR, "Clear", "Money rails open", "Halt engines"],
@@ -425,7 +412,6 @@ describe("OverviewPage activity toolbar honesty", () => {
 
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "operator-1",
         role: "admin",
@@ -609,7 +595,6 @@ describe("OverviewPage health honesty", () => {
 
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "operator-1",
         role: "admin",
@@ -669,7 +654,6 @@ describe("OverviewPage health honesty", () => {
 describe("OverviewPage readiness checklist", () => {
   beforeEach(() => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "operator-1",
         role: "admin",
@@ -760,7 +744,6 @@ describe("OverviewPage pack checklist", () => {
   beforeEach(() => {
     localStorage.clear();
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         username: "op",

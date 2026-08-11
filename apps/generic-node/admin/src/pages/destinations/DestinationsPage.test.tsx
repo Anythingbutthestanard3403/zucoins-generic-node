@@ -9,7 +9,6 @@ import { saveEnabledPacks } from "../../lib/packs.js";
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: { userId: "u1", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "csrf" },
   });
 }
@@ -63,16 +62,6 @@ describe("DestinationsPage honesty", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByText("No destinations yet")).toBeInTheDocument());
-  });
-
-  it("distinguishes demo preview from a live-fetch unavailable state", () => {
-    useAuth.setState({ demoMode: true });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage();
-    expect(screen.getByText(/No fixtures — log in for a live session to view destinations\./)).toBeInTheDocument();
-    expect(screen.queryByText("Destinations unavailable")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("renders a live destination row from a real 200", async () => {

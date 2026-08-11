@@ -88,7 +88,6 @@ const FALLBACK = <p className="muted">Loading…</p>;
  */
 function RequireAuth({ children }: { children: ReactNode }) {
   const user = useAuth((s) => s.user);
-  const demoMode = useAuth((s) => s.demoMode);
   const location = useLocation();
   const [gate, setGate] = useState<
     | { readonly kind: "loading" }
@@ -106,10 +105,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
       setGate({ kind: "funnel", next: "totp" });
       return;
     }
-    if (demoMode) {
-      setGate({ kind: "ok" });
-      return;
-    }
+    
     let cancelled = false;
     void fetch("/admin/v1/setup-state", { credentials: "include" })
       .then(async (res) => {
@@ -147,7 +143,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [user, demoMode, location.pathname]);
+  }, [user, location.pathname]);
 
   if (!user) return <Navigate to="/login" replace />;
   if (user.mustChangePassword || user.mustEnrolTotp) {
@@ -169,7 +165,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
  */
 function RequireFunnel({ children }: { children: ReactNode }) {
   const user = useAuth((s) => s.user);
-  const demoMode = useAuth((s) => s.demoMode);
   const location = useLocation();
   const [next, setNext] = useState<Day0Step | "loading" | "home">("loading");
 
@@ -183,10 +178,7 @@ function RequireFunnel({ children }: { children: ReactNode }) {
       setNext("totp");
       return;
     }
-    if (demoMode) {
-      setNext("home");
-      return;
-    }
+    
     let cancelled = false;
     void fetch("/admin/v1/setup-state", { credentials: "include" })
       .then(async (res) => {
@@ -217,7 +209,7 @@ function RequireFunnel({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [user, demoMode, location.pathname]);
+  }, [user, location.pathname]);
 
   if (!user) return <Navigate to="/login" replace />;
   if (user.mustChangePassword || user.mustEnrolTotp) {

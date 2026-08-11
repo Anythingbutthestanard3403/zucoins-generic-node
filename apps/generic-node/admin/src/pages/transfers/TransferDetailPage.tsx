@@ -24,7 +24,6 @@ import {
 } from "../../lib/money.js";
 import { APPROVE_SUCCESS_NOTE, operationKindLabel, statusLabel } from "../../lib/labels.js";
 import { getDeviceRecord, listLocalDeviceRecords, signPreimage } from "../../lib/device-crypto.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type LoadState =
@@ -48,13 +47,8 @@ type LoadState =
   | { kind: "redirect_receive"; operationType: string }
   | { kind: "missing"; message: string };
 
-async function loadTransfer(id: string, demoMode: boolean): Promise<LoadState> {
-  if (demoMode) {
-    return {
-      kind: "missing",
-      message: "No fixtures — log in for a live session to load transfer " + id,
-    };
-  }
+async function loadTransfer(id: string): Promise<LoadState> {
+  
 
   // Always try inventory first so we can route receives to the operation page
   // and fill amount/wallets when challenge is gone. Outages throw; 404 → null.
@@ -113,7 +107,6 @@ async function loadTransfer(id: string, demoMode: boolean): Promise<LoadState> {
 
 export function TransferDetailPage() {
   const { id = "" } = useParams();
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -121,12 +114,12 @@ export function TransferDetailPage() {
   const [pollStatus, setPollStatus] = useState<string | null>(null);
 
   const q = useQuery({
-    queryKey: ["transfer-detail", id, demoMode],
-    queryFn: () => loadTransfer(id, demoMode),
+    queryKey: ["transfer-detail", id],
+    queryFn: () => loadTransfer(id),
     enabled: Boolean(id),
     refetchInterval: (query) => {
       const d = query.state.data;
-      if (!d || demoMode) return false;
+      if (!d ) return false;
       if (d.kind === "challenge") return 10_000;
       if (d.kind === "recovery" && d.recovery.status === "APPROVED") return 5_000;
       return false;
@@ -337,7 +330,7 @@ export function TransferDetailPage() {
       ? data.challenge.destination_address
       : inventory?.destination_address ?? "—";
 
-  const canApproveReject = data.kind === "challenge" && !demoMode;
+  const canApproveReject = data.kind === "challenge" ;
   const recovery =
     data.kind === "recovery"
       ? data.recovery
@@ -360,11 +353,6 @@ export function TransferDetailPage() {
         <div className="toolbar">
           <StatusTag status={status} />
           {recovery?.classification ? <StatusTag status={recovery.classification} /> : null}
-          {demoMode ? (
-            <span className="muted" style={{ fontSize: 12.5 }}>
-              No fixtures — log in for a live session
-            </span>
-          ) : null}
           <Link className="mini-btn" to={`/operations/${encodeURIComponent(id)}`}>
             Full operation detail
           </Link>
@@ -439,7 +427,7 @@ export function TransferDetailPage() {
       {canApproveReject ? (
         <div className="card form-card" style={{ marginTop: 16 }}>
           <h2 style={{ fontSize: 14, marginBottom: 12 }}>Dual-control decision</h2>
-          <DualControlPolicyBanner demoMode={demoMode} />
+          <DualControlPolicyBanner />
           <p
             className="muted"
             style={{ fontSize: 12.5, marginBottom: 12 }}
@@ -487,7 +475,7 @@ export function TransferDetailPage() {
         </div>
       ) : null}
 
-      {recovery && !demoMode ? (
+      {recovery  ? (
         <div className="card form-card" style={{ marginTop: 16 }}>
           <h2 style={{ fontSize: 14, marginBottom: 8 }}>Recovery</h2>
           <p className="muted" style={{ fontSize: 12.5 }}>
@@ -551,20 +539,10 @@ export function TransferDetailPage() {
 }
 
 /** Plain-language dual-control mode banner matching server enforcement. */
-function DualControlPolicyBanner({ demoMode }: { readonly demoMode: boolean }) {
+function DualControlPolicyBanner() {
   const q = useQuery({
-    queryKey: ["dual-control-policy", demoMode],
-    queryFn: async () => {
-      if (demoMode) {
-        return {
-          mode: "single_operator" as const,
-          short: "Single-operator",
-          long: "Demo single-operator.",
-          approve_hint: "You may approve sends you challenged (single-operator mode).",
-        };
-      }
-      return fetchDualControlPolicy();
-    },
+    queryKey: ["dual-control-policy"],
+    queryFn: async () => fetchDualControlPolicy(),
     staleTime: 60_000,
   });
   if (q.isLoading) {

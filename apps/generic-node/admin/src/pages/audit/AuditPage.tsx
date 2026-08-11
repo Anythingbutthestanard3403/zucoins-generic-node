@@ -1,24 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { listAuditInventory } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 
 export function AuditPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const q = useQuery({
-    queryKey: ["audit-inventory", demoMode],
+    queryKey: ["audit-inventory"],
     queryFn: listAuditInventory,
-    enabled: !demoMode,
+    
   });
-
-  if (demoMode) {
-    return (
-      <div className="page">
-        <div className="page-title-row"><h1>Audit log</h1></div>
-        <p className="muted">No fixtures — log in for a live session to view audit events.</p>
-      </div>
-    );
-  }
 
   if (q.isLoading) {
     return (

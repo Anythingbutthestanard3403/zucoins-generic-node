@@ -6,6 +6,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { computeSecurityHeaders } from "@zucoins/node-core";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -102,18 +103,16 @@ export function tryServeAdminSpa(
     ext === ".webmanifest" ||
     filePath.endsWith(`${sep}sw.js`) ||
     filePath.endsWith("/sw.js");
-  response.writeHead(200, {
+  // Single definition of admin header set (ZTR-1166) — cache-control overridden
+  // for hashed assets (immutable) vs HTML/SW (no-cache).
+  const sec = computeSecurityHeaders("admin");
+  const headers: Record<string, string> = {
+    ...sec.headers,
     "content-type": type,
-    "content-length": stat.size,
+    "content-length": String(stat.size),
     "cache-control": noCache ? "no-cache" : "public, max-age=31536000, immutable",
-    "x-content-type-options": "nosniff",
-    // Admin security gates: no framing; restrictive CSP on Operator PWA.
-    "content-security-policy":
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-    "x-frame-options": "DENY",
-    "referrer-policy": "no-referrer",
-    "permissions-policy": "camera=(), microphone=(), geolocation=()",
-  });
+  };
+  response.writeHead(200, headers);
   if (method === "HEAD") {
     response.end();
     return true;

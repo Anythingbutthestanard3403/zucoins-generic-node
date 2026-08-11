@@ -15,7 +15,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
-import { apiOrDemo } from "../../lib/api.js";
+import { apiSoftRead } from "../../lib/api.js";
 import { truncatePubkey } from "../../lib/format.js";
 import {
   formatMoneyError,
@@ -66,7 +66,6 @@ type ExpandedSend = {
 };
 
 export function ApproveInboxPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const user = useAuth((s) => s.user);
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
@@ -85,34 +84,34 @@ export function ApproveInboxPage() {
   const [deviceSig, setDeviceSig] = useState("");
 
   const pendingSendsQ = useQuery({
-    queryKey: ["approve-inbox-sends", demoMode],
+    queryKey: ["approve-inbox-sends"],
     queryFn: async () => {
-      if (demoMode) return { live: false as const, data: [] as const, error: undefined };
+      
       return listSendOperationsInventory({ status: "CREATED" });
     },
-    refetchInterval: demoMode ? false : 15_000,
+    refetchInterval: 15_000,
   });
 
   const attentionQ = useQuery({
-    queryKey: ["approve-inbox-attention", demoMode],
+    queryKey: ["approve-inbox-attention"],
     queryFn: async () =>
-      apiOrDemo<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: demoMode ? false : 15_000,
+      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
+    refetchInterval: 15_000,
   });
 
   const destinationsQ = useQuery({
-    queryKey: ["approve-inbox-destinations", demoMode],
+    queryKey: ["approve-inbox-destinations"],
     queryFn: async () => {
-      if (demoMode) return { live: false as const, data: [] as const, error: undefined };
+      
       return listDestinationsInventory();
     },
-    refetchInterval: demoMode ? false : 30_000,
+    refetchInterval: 30_000,
   });
 
   const deviceKeysQ = useQuery({
-    queryKey: ["device-keys", demoMode],
+    queryKey: ["device-keys"],
     queryFn: listDeviceKeys,
-    enabled: blessTarget !== null && !demoMode,
+    enabled: blessTarget !== null ,
   });
   const selectedDeviceKeyId = deviceKeyId || deviceKeysQ.data?.[0]?.id || "";
 
@@ -141,7 +140,6 @@ export function ApproveInboxPage() {
   const anySourceLoading =
     pendingSendsQ.isLoading || attentionQ.isLoading || destinationsQ.isLoading;
   const primaryUnavailable =
-    !demoMode &&
     !anySourceLoading &&
     !primaryLive &&
     pendingSendsQ.data !== undefined &&
@@ -335,9 +333,7 @@ export function ApproveInboxPage() {
         <h1>Approve</h1>
         <div className="toolbar">
           <span className="muted" style={{ fontSize: 12.5 }} data-testid="approve-inbox-status">
-            {demoMode
-              ? "Design preview"
-              : anySourceLoading
+            {anySourceLoading
                 ? "Loading…"
                 : primaryLive
                   ? `${totalPending} pending`
@@ -368,14 +364,7 @@ export function ApproveInboxPage() {
         </p>
       ) : null}
 
-      {demoMode ? (
-        <div className="empty approve-empty" data-testid="approve-empty-demo">
-          No fixtures — sign in against a live node to review pending outgoing approvals,
-          bless requests, and recovery actions.
-        </div>
-      ) : null}
-
-      {!demoMode && setupIncomplete ? (
+      {setupIncomplete ? (
         <div className="banner banner-error" data-testid="approve-setup-incomplete">
           Setup incomplete — finish password and TOTP enrolment before approving money moves.{" "}
           <Link className="linkish" to="/setup">
@@ -384,13 +373,13 @@ export function ApproveInboxPage() {
         </div>
       ) : null}
 
-      {!demoMode && anySourceLoading ? (
+      {anySourceLoading ? (
         <div className="empty" data-testid="approve-loading">
           Loading…
         </div>
       ) : null}
 
-      {!demoMode && primaryUnavailable ? (
+      {primaryUnavailable ? (
         <div className="empty approve-empty" data-testid="approve-empty-unavailable">
           <p style={{ margin: "0 0 8px" }}>
             Inbox unavailable — not implying clear. Check node health and operator session.
@@ -399,7 +388,7 @@ export function ApproveInboxPage() {
         </div>
       ) : null}
 
-      {!demoMode && inboxClear ? (
+      {inboxClear ? (
         <div className="empty approve-empty" data-testid="approve-empty-clear">
           <p style={{ margin: "0 0 8px", fontWeight: 550 }}>Inbox clear</p>
           <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
@@ -418,7 +407,7 @@ export function ApproveInboxPage() {
       ) : null}
 
       {/* ── Pending SEND_EXTERNAL ─────────────────────────────────────── */}
-      {!demoMode && sends.length > 0 ? (
+      {sends.length > 0 ? (
         <section className="approve-section" aria-labelledby="approve-sends-h">
           <h2 id="approve-sends-h" className="approve-section-title">
             Outgoing (needs approval)
@@ -478,7 +467,7 @@ export function ApproveInboxPage() {
                     </div>
                   ) : null}
 
-                  {open && challenge && !demoMode ? (
+                  {open && challenge  ? (
                     <div className="approve-actions" data-testid="approve-send-actions">
                       <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
                         TOTP required. Approve starts formation only — not settlement.
@@ -548,7 +537,7 @@ export function ApproveInboxPage() {
       ) : null}
 
       {/* ── Pending bless ─────────────────────────────────────────────── */}
-      {!demoMode && pendingBless.length > 0 ? (
+      {pendingBless.length > 0 ? (
         <section className="approve-section" aria-labelledby="approve-bless-h">
           <h2 id="approve-bless-h" className="approve-section-title">
             Bless destination
@@ -705,7 +694,7 @@ export function ApproveInboxPage() {
       ) : null}
 
       {/* ── Recovery attentions ───────────────────────────────────────── */}
-      {!demoMode && recoveryCards.length > 0 ? (
+      {recoveryCards.length > 0 ? (
         <section className="approve-section" aria-labelledby="approve-recovery-h">
           <h2 id="approve-recovery-h" className="approve-section-title">
             Recovery

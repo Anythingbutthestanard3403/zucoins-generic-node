@@ -14,7 +14,6 @@ import {
   subscribeOperatorPush,
   unsubscribeOperatorPush,
 } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -34,39 +33,23 @@ function bufferToBase64Url(buf: ArrayBuffer | null): string | null {
 }
 
 export function OperatorSecurityPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const queryClient = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
   const policyQ = useQuery({
-    queryKey: ["dual-control-policy", demoMode],
+    queryKey: ["dual-control-policy"],
     queryFn: async () => {
-      if (demoMode) {
-        return {
-          mode: "single_operator" as const,
-          short: "Single-operator",
-          long: "Demo: one human may both request and approve.",
-          approve_hint: "Demo single-operator mode.",
-        };
-      }
+      
       return fetchDualControlPolicy();
     },
   });
 
   const pushQ = useQuery({
-    queryKey: ["operator-push", demoMode],
+    queryKey: ["operator-push"],
     queryFn: async () => {
-      if (demoMode) {
-        return {
-          opt_in: true,
-          wired: false,
-          note: "Demo — operator push is optional and separate from wallet receiver push.",
-          subscriptions: [],
-          vapid_public_key: null as string | null,
-        };
-      }
+      
       return fetchOperatorPushStatus();
     },
   });
@@ -81,9 +64,7 @@ export function OperatorSecurityPage() {
   const pushWired = Boolean(pushQ.data?.wired);
   const enableUnavailableReason = !browserPushOk
     ? "This browser does not support Web Push. Use the Approve inbox manually."
-    : demoMode
-      ? null
-      : !pushWired
+    : !pushWired
         ? "Operator push is not wired on this node (optional). Inbox remains source of truth."
         : !vapidKey
           ? "No VAPID application-server key is configured on this node, so a real PushManager.subscribe() cannot run. Inbox remains source of truth."
@@ -103,10 +84,7 @@ export function OperatorSecurityPage() {
         setMsg("Push denied or dismissed — full manual inbox still works. Operator push is opt-in only.");
         return;
       }
-      if (demoMode) {
-        setMsg("Demo: push permission granted (no server subscribe).");
-        return;
-      }
+      
       if (enableUnavailableReason) {
         setMsg(enableUnavailableReason);
         return;
@@ -144,10 +122,7 @@ export function OperatorSecurityPage() {
     setMsg(null);
     setPushBusy(true);
     try {
-      if (demoMode) {
-        setMsg("Demo: push disabled locally.");
-        return;
-      }
+      
       const subs = pushQ.data?.subscriptions ?? [];
       if (subs.length === 0) {
         try {
@@ -268,7 +243,7 @@ export function OperatorSecurityPage() {
           {pushQ.data?.subscriptions.length ?? 0}
           {vapidKey ? " · VAPID: configured" : " · VAPID: not configured"}
         </p>
-        {enableUnavailableReason && !demoMode ? (
+        {enableUnavailableReason  ? (
           <p className="muted" data-testid="operator-push-unavailable">
             Enable unavailable: {enableUnavailableReason}
           </p>
@@ -277,7 +252,7 @@ export function OperatorSecurityPage() {
           <button
             type="button"
             className="btn primary"
-            disabled={pushBusy || Boolean(enableUnavailableReason && !demoMode)}
+            disabled={pushBusy || Boolean(enableUnavailableReason )}
             title={enableUnavailableReason ?? undefined}
             onClick={() => void onEnablePush()}
           >

@@ -19,11 +19,9 @@ import {
   postRetire,
 } from "../../lib/money.js";
 import { isPackEnabled, loadEnabledPacks } from "../../lib/packs.js";
-import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 export function DestinationsPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const qc = useQueryClient();
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -37,17 +35,17 @@ export function DestinationsPage() {
   const [manualSig, setManualSig] = useState("");
 
   const q = useQuery({
-    queryKey: ["destinations", demoMode],
+    queryKey: ["destinations"],
     queryFn: async () => {
-      if (demoMode) return { live: false as const, data: [] as const };
+      
       return listDestinationsInventory();
     },
   });
 
   const deviceKeys = useQuery({
-    queryKey: ["device-keys", demoMode],
+    queryKey: ["device-keys"],
     queryFn: listDeviceKeys,
-    enabled: showBless && !demoMode,
+    enabled: showBless ,
   });
   const selectedDeviceKeyId = deviceKeyId || deviceKeys.data?.[0]?.id || "";
 
@@ -172,9 +170,7 @@ export function DestinationsPage() {
         <h1>Destinations</h1>
         <div className="toolbar">
           <span className="muted" style={{ fontSize: 12.5 }}>
-            {demoMode
-              ? "No fixtures — log in for live"
-              : loading
+            {loading
                 ? "Loading…"
                 : live
                   ? "Live"
@@ -182,11 +178,9 @@ export function DestinationsPage() {
             {" · "}
             <Link to="/devices">Devices</Link>
           </span>
-          {!demoMode ? (
-            <button type="button" className="pill primary" onClick={() => setShowBless((v) => !v)}>
-              Bless destination
-            </button>
-          ) : null}
+          <button type="button" className="pill primary" onClick={() => setShowBless((v) => !v)}>
+            Bless destination
+          </button>
         </div>
       </div>
 
@@ -204,7 +198,7 @@ export function DestinationsPage() {
         </div>
       ) : null}
 
-      {showBless && !demoMode ? (
+      {showBless  ? (
         <form
           className="card form-card"
           style={{ marginBottom: 16 }}
@@ -367,7 +361,7 @@ export function DestinationsPage() {
       ) : null}
 
       <div className="card form-card">
-        {!demoMode && !loading && !live ? (
+        {!loading && !live ? (
           <>
             <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
               <code className="mono">GET /admin/v1/destinations</code> unavailable.
@@ -376,11 +370,7 @@ export function DestinationsPage() {
             <ApiErrorNote error={q.data?.error} />
           </>
         ) : null}
-        {demoMode ? (
-          <div className="empty" style={{ paddingTop: 28 }}>
-            No fixtures — log in for a live session to view destinations.
-          </div>
-        ) : loading ? (
+        {loading ? (
           <div className="empty" style={{ paddingTop: 28 }}>
             Loading…
           </div>
@@ -416,7 +406,7 @@ export function DestinationsPage() {
                       {d.move_eligible === true ? "yes" : d.move_eligible === false ? "no" : "—"}
                     </td>
                     <td>
-                      {!demoMode && d.state === "BLESSED" ? (
+                      {d.state === "BLESSED" ? (
                         <button
                           type="button"
                           className="mini-btn danger"
@@ -429,7 +419,7 @@ export function DestinationsPage() {
                         >
                           Retire
                         </button>
-                      ) : !demoMode && d.state === "PENDING" ? (
+                      ) : d.state === "PENDING" ? (
                         <button
                           type="button"
                           className="mini-btn"

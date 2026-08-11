@@ -47,8 +47,9 @@ const MAP: Record<string, string> = {
 };
 
 export function StatusTag({ status }: { status: string }) {
-  const key = status.toLowerCase().replace(/\s+/g, "_");
+  const raw = typeof status === "string" && status.length > 0 ? status : "unknown";
+  const key = raw.toLowerCase().replace(/\s+/g, "_");
   const cls = MAP[key] ?? "muted";
-  const label = status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return <span className={`tag ${cls}`}>{label}</span>;
 }

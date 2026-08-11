@@ -50,16 +50,91 @@ async function expectNoAxeViolations(container: Element) {
 
 function demoSession() {
   useAuth.setState({
-    demoMode: true,
     user: { userId: "demo", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "x" },
   });
 }
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: { userId: "u1", role: "admin", mustEnrolTotp: false, mustChangePassword: false, csrfToken: "csrf" },
   });
+}
+
+function emptyLiveFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/admin/v1/settings") || url.endsWith("/settings")) {
+        return new Response(
+          JSON.stringify({
+            public_base_url: "https://node.example",
+            node_id: "00000000-0000-4000-8000-000000000001",
+            gateway_hosts: ["gw.example"],
+            version: "test",
+            backup_schedule_enabled: false,
+            push_configured: false,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("needs-attention")) {
+        return new Response(
+          JSON.stringify({
+            operations: [],
+            summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/health/ready")) {
+        return new Response(
+          JSON.stringify({
+            status: "ready",
+            version: "test",
+            timestamp: new Date().toISOString(),
+            checks: [],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/wallets/") && !url.rstrip("/").endswith("/wallets")) {
+        return new Response(
+          JSON.stringify({
+            wallet_id: "w1",
+            public_key: "zkz1qe2e",
+            balance_zkz: "0",
+            state: "AVAILABLE",
+            purpose: "POOL",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/operations/") || url.includes("/external-sends/")) {
+        return new Response(
+          JSON.stringify({ error: { code: "not_found", message: "missing" } }),
+          { status: 404 },
+        );
+      }
+      if (
+        url.includes("/operations")
+        || url.includes("/wallets")
+        || url.includes("/audit")
+        || url.includes("/api-keys")
+        || url.includes("/reporting-keys")
+        || url.includes("/destinations")
+      ) {
+        return new Response(
+          JSON.stringify({ object: "list", data: [], keys: [], has_more: false, next_cursor: null }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({ error: { code: "not_found", message: "missing" } }),
+        { status: 404 },
+      );
+    }),
+  );
 }
 
 function renderShell(ui: import("react").ReactElement) {
@@ -109,7 +184,8 @@ function renderRoutedPage(
 
 describe("axe smoke — App shell (Overview)", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderShell(<OverviewPage />);
     await screen.findByRole("complementary", { name: "Primary" });
     await expectNoAxeViolations(container);
@@ -187,7 +263,8 @@ describe("axe smoke — tables (WalletsPage)", () => {
 
 describe("axe smoke — Operations workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<OperationsPage />);
     await expectNoAxeViolations(container);
   });
@@ -252,7 +329,8 @@ describe("axe smoke — Approve inbox", () => {
 
 describe("axe smoke — Transfers workflow (list)", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<TransfersPage />);
     await expectNoAxeViolations(container);
   });
@@ -260,7 +338,8 @@ describe("axe smoke — Transfers workflow (list)", () => {
 
 describe("axe smoke — Audit workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<AuditPage />);
     await expectNoAxeViolations(container);
   });
@@ -268,7 +347,8 @@ describe("axe smoke — Audit workflow", () => {
 
 describe("axe smoke — Backup workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<BackupPage />);
     await expectNoAxeViolations(container);
   });
@@ -276,7 +356,8 @@ describe("axe smoke — Backup workflow", () => {
 
 describe("axe smoke — Settings workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<SettingsPage />);
     await expectNoAxeViolations(container);
   });
@@ -288,9 +369,10 @@ describe("axe smoke — Settings workflow", () => {
 // genuine blocker, only a gap in this file. Covers both the demo-mode empty state and a
 // live row with the revoke control, so the action-column <th> and the issue/revoke pills
 // are exercised, not just the page shell.
-describe("axe smoke — Keys workflow (ApiKeysPage, demo)", () => {
+describe("axe smoke — Keys workflow (ApiKeysPage, empty live)", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderPage(<ApiKeysPage />);
     await expectNoAxeViolations(container);
   });
@@ -333,7 +415,8 @@ describe("axe smoke — Keys workflow (ApiKeysPage, live row)", () => {
 // main.tsx without axe coverage remains visible in the workflow census.
 describe("axe smoke — Wallet detail workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderRoutedPage(
       <WalletDetailPage />,
       "/wallets/zkz1qe2e",
@@ -346,33 +429,35 @@ describe("axe smoke — Wallet detail workflow", () => {
 
 describe("axe smoke — Transfer detail workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderRoutedPage(
       <TransferDetailPage />,
       "/transfers/op-e2e",
       "/transfers/:id",
     );
-    await screen.findByRole("heading", { name: /Transfer op-e2e/ });
+    await screen.findByRole("heading", { name: /Transfer/ });
     await expectNoAxeViolations(container);
   });
 });
 
 describe("axe smoke — Operation detail workflow", () => {
   it("has no axe violations", async () => {
-    demoSession();
+    liveSession();
+    emptyLiveFetch();
     const { container } = renderRoutedPage(
       <OperationDetailPage />,
       "/operations/op-e2e",
       "/operations/:id",
     );
-    await screen.findByRole("heading", { name: /Operation op-e2e/ });
+    await screen.findByRole("heading", { name: /Operation/ });
     await expectNoAxeViolations(container);
   });
 });
 
 describe("axe smoke — Login workflow", () => {
   it("has no axe violations", async () => {
-    useAuth.setState({ demoMode: false, user: null });
+    useAuth.setState({ user: null });
     const { container } = renderRoutedPage(<LoginPage />, "/login", "/login");
     await screen.findByRole("heading", { name: "Zu Node" });
     await expectNoAxeViolations(container);
@@ -382,7 +467,6 @@ describe("axe smoke — Login workflow", () => {
 describe("axe smoke — Setup workflow", () => {
   it("has no axe violations", async () => {
     useAuth.setState({
-      demoMode: false,
       user: {
         userId: "u1",
         role: "admin",

@@ -5,14 +5,12 @@ import { CopyButton } from "../../components/CopyButton.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { listWalletsInventory } from "../../lib/money.js";
-import { useAuth } from "../../store/auth.js";
 
 export function WalletsPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const q = useQuery({
-    queryKey: ["wallets-inventory", demoMode],
+    queryKey: ["wallets-inventory"],
     queryFn: listWalletsInventory,
-    refetchInterval: demoMode ? false : 30_000,
+    refetchInterval: 30_000,
   });
   const live = q.data?.live === true;
   const loading = q.isLoading;
@@ -27,9 +25,7 @@ export function WalletsPage() {
         <h1>Wallets</h1>
         <div className="toolbar">
           <span className="filter-btn" style={{ pointerEvents: "none" }}>
-            {demoMode
-              ? "No fixtures — log in for live"
-              : loading
+            {loading
                 ? "Loading…"
                 : live
                   ? `Live inventory · ${rows.length}`
@@ -40,7 +36,7 @@ export function WalletsPage() {
           </button>
         </div>
       </div>
-      {!demoMode && !loading && !live ? (
+      {!loading && !live ? (
         <>
           <p className="muted">Wallet inventory API did not answer — refusing to show demo equity.</p>
           <ApiErrorNote error={q.data?.error} />
@@ -93,9 +89,7 @@ export function WalletsPage() {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">
-                  {demoMode
-                    ? "No fixtures — log in for live"
-                    : loading
+                  {loading
                       ? "Loading…"
                       : live
                         ? "No wallets"

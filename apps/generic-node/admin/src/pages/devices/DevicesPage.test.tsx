@@ -11,7 +11,6 @@ import { DevicesPage } from "./DevicesPage.js";
 
 function liveSession() {
   useAuth.setState({
-    demoMode: false,
     user: {
       userId: "u1",
       username: "op",
@@ -50,14 +49,6 @@ describe("DevicesPage", () => {
   });
   afterEach(() => {
     cleanup();
-  });
-
-  it("demo mode never fetches device inventory", () => {
-    useAuth.setState({ demoMode: true });
-    const spy = vi.spyOn(money, "listDeviceKeys");
-    renderPage();
-    expect(screen.getByText(/No fixtures/i)).toBeInTheDocument();
-    expect(spy).not.toHaveBeenCalled();
   });
 
   it("lists server inventory and offers revoke", async () => {

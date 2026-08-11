@@ -46,8 +46,6 @@ import {
   POOL_CAP_CEILING,
   POOL_CAP_DEFAULT,
   POOL_FLOOR,
-  PROOF_ACCESS_WINDOW_DEFAULT_SECONDS,
-  PROOF_ACCESS_WINDOW_MIN_SECONDS,
   RECEIVE_QUEUE_MAX_WAIT_DEFAULT_SECONDS,
   RECEIVE_QUEUE_MAX_WAIT_MAX_SECONDS,
   RECEIVE_QUEUE_MAX_WAIT_MIN_SECONDS,
@@ -190,11 +188,7 @@ export const CONFIG_FIELD_SCHEMAS = {
     .default("observe"),
 
   // Initial admin bootstrap — gates irreversible genesis state; first-boot only.
-  INITIAL_ADMIN_USERNAME: z
-    .string()
-    .trim()
-    .min(3, "INITIAL_ADMIN_USERNAME must be at least 3 characters")
-    .default("admin"),
+  // Username is fixed to 'admin' in genesis; only the password is env-configured (ZTR-1166).
   INITIAL_ADMIN_PASSWORD: z
     .string()
     .min(12, "INITIAL_ADMIN_PASSWORD must be at least 12 characters when set")
@@ -307,15 +301,8 @@ export const CONFIG_FIELD_SCHEMAS = {
     RECEIVE_TTL_MAX_SECS_DEFAULT,
   ),
 
-  // TTLs and proof windows.
-  PROOF_ACCESS_WINDOW_SECONDS: z.coerce
-    .number()
-    .int("PROOF_ACCESS_WINDOW_SECONDS must be an integer")
-    .min(
-      PROOF_ACCESS_WINDOW_MIN_SECONDS,
-      `PROOF_ACCESS_WINDOW_SECONDS must be at least ${PROOF_ACCESS_WINDOW_MIN_SECONDS} (one hour)`,
-    )
-    .default(PROOF_ACCESS_WINDOW_DEFAULT_SECONDS),
+  // Proof-access window is a frozen default in node-core (DEFAULT_PROOF_ACCESS_WINDOW_MS);
+  // not an env knob (ZTR-1166).
   // Metrics scrape auth — optional for boot. Absent means the /metrics route
   // is NOT mounted (fail-closed-by-non-mounting); never "absent means
   // an open unauthenticated route".
@@ -369,18 +356,6 @@ export const CONFIG_FIELD_SCHEMAS = {
     .min(1, "GATEWAY_READ_FAILURE_BUDGET must be between 1 and 100")
     .max(100, "GATEWAY_READ_FAILURE_BUDGET must be between 1 and 100")
     .default(3),
-  WORKER_CLAIM_TTL_MS: z.coerce
-    .number()
-    .int("WORKER_CLAIM_TTL_MS must be an integer")
-    .min(5000, "WORKER_CLAIM_TTL_MS must be between 5000 and 300000")
-    .max(300000, "WORKER_CLAIM_TTL_MS must be between 5000 and 300000")
-    .default(30000),
-  RECONCILIATION_POLL_INTERVAL_MS: z.coerce
-    .number()
-    .int("RECONCILIATION_POLL_INTERVAL_MS must be an integer")
-    .min(1000, "RECONCILIATION_POLL_INTERVAL_MS must be between 1000 and 300000")
-    .max(300000, "RECONCILIATION_POLL_INTERVAL_MS must be between 1000 and 300000")
-    .default(15000),
 
   // Prolonged-wait WARN threshold for the boot-lane signer-leadership
   // handover (ZPAY-252). Acquisition itself is NOT capped by this value —

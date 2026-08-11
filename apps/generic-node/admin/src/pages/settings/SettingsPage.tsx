@@ -1,8 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
-import { apiOrDemo } from "../../lib/api.js";
-import { useAuth } from "../../store/auth.js";
+import { apiSoftRead } from "../../lib/api.js";
 
 /** Wire shape for GET /admin/v1/settings (allowlisted; never an env dump). */
 export interface EffectiveConfig {
@@ -14,17 +13,17 @@ export interface EffectiveConfig {
   readonly push_configured: boolean;
 }
 
-const DEMO_SETTINGS: EffectiveConfig = {
-  public_base_url: "https://demo-node.example",
-  node_id: "00000000-0000-4000-8000-000000000001",
-  gateway_hosts: ["gw-demo.splitchain.example"],
-  version: "demo",
+const SETTINGS_FALLBACK: EffectiveConfig = {
+  public_base_url: "",
+  node_id: "",
+  gateway_hosts: [],
+  version: "",
   backup_schedule_enabled: false,
   push_configured: false,
 };
 
 export async function fetchEffectiveConfig() {
-  return apiOrDemo<EffectiveConfig>("/settings", DEMO_SETTINGS);
+  return apiSoftRead<EffectiveConfig>("/settings", SETTINGS_FALLBACK);
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -57,9 +56,8 @@ function BoolTag({ value }: { value: boolean }) {
 
 /** Read-only Settings / About — secret-safe effective config only. */
 export function SettingsPage() {
-  const demoMode = useAuth((s) => s.demoMode);
   const q = useQuery({
-    queryKey: ["effective-config", demoMode],
+    queryKey: ["effective-config"],
     queryFn: fetchEffectiveConfig,
     staleTime: 30_000,
   });
@@ -81,7 +79,7 @@ export function SettingsPage() {
           VAPID private keys, gateway credentials) are never shown here.
         </p>
 
-        {!demoMode && result && !result.live ? <ApiErrorNote error={result.error} /> : null}
+        {result && !result.live ? <ApiErrorNote error={result.error} /> : null}
 
         {q.isLoading && !data && <p className="muted">Loading…</p>}
 
@@ -124,11 +122,7 @@ export function SettingsPage() {
             fields) — this page never accepts edits.
           </p>
         )}
-        {demoMode && (
-          <p className="muted" style={{ fontSize: 12, marginTop: 14 }}>
-            Demo fixture — not a live node.
-          </p>
-        )}
+        
       </div>
     </div>
   );

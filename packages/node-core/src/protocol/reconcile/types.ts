@@ -93,7 +93,13 @@ export type ReconcileIndeterminateReason =
   // fold into WAITING instead of leaving as INDETERMINATE — every other reason here
   // is a positive fault/anomaly/contradiction and stays INDETERMINATE for every operation
   // kind, including send.
-  | { readonly source: "NO_SUCCESSOR_OBSERVED" };
+  | { readonly source: "NO_SUCCESSOR_OBSERVED" }
+  // Gateway response failed structural validation — not interpretable as evidence (ZTR-1147).
+  | { readonly source: "GATEWAY_RESPONSE_INVALID" }
+  // Consecutive gateway reads exhausted GATEWAY_READ_FAILURE_BUDGET (ZTR-1147).
+  | { readonly source: "GATEWAY_UNAVAILABLE_BEYOND_BUDGET" }
+  // Operator deliberately parked the operation pending investigation (ZTR-1147).
+  | { readonly source: "OPERATOR_PARKED" };
 
 // Why a reconcile computation reached INVARIANT_BREACH:
 // "Stored phases/bytes/leases cannot arise under the contract" — automatic effect: "Stop money
@@ -113,7 +119,9 @@ export type ReconcileInvariantBreachReason =
   // ACTIVE — reconcile evidence observed while a lease has already been RELEASED contradicts
   // that invariant outright (the lease-axis cell 06-operation-flows.md/09-operations-recovery.md
   // never populate because it cannot arise under the guarded release sequence).
-  | { readonly source: "LEASE_NOT_ACTIVE_DURING_RECONCILE" };
+  | { readonly source: "LEASE_NOT_ACTIVE_DURING_RECONCILE" }
+  // Destination retired / un-blessed mid-operation (ZTR-1147).
+  | { readonly source: "DESTINATION_NO_LONGER_BLESSED" };
 
 // The closed `attention_reason` vocabulary (imported, never retyped) is the
 // operational diagnostic apps/node persists; this maps every reconcile-specific reason above
@@ -163,6 +171,14 @@ export function toAttentionReason(
       return "SIGNING_OUTCOME_AMBIGUOUS";
     case "LEASE_NOT_ACTIVE_DURING_RECONCILE":
       return "LEASE_INVARIANT_VIOLATION";
+    case "GATEWAY_RESPONSE_INVALID":
+      return "GATEWAY_RESPONSE_INVALID";
+    case "GATEWAY_UNAVAILABLE_BEYOND_BUDGET":
+      return "GATEWAY_UNAVAILABLE_BEYOND_BUDGET";
+    case "OPERATOR_PARKED":
+      return "OPERATOR_PARKED";
+    case "DESTINATION_NO_LONGER_BLESSED":
+      return "DESTINATION_NO_LONGER_BLESSED";
     default:
       return assertUnreachable(reason);
   }

@@ -47,6 +47,7 @@ const schemaFile = (name: string): string =>
   readFileSync(resolve(here, "../src/schema", name), "utf8");
 
 const baseEnumsSql = schemaFile("base-enums-domains.sql");
+const attentionReasonEnumSql = schemaFile("attention-reason-enum.sql");
 const registrySql = schemaFile("node-implementer-registry.sql");
 const signingKeysSql = schemaFile("signing-key-registry.sql");
 const custodySql = schemaFile("custody-eligibility.sql");
@@ -77,6 +78,17 @@ const operationStatusEnum = frozenDeclaration(
   baseEnumsSql,
   "CREATE TYPE operation_status AS ENUM",
 );
+const walletLeaseRoleEnum = frozenDeclaration(
+  baseEnumsSql,
+  "CREATE TYPE wallet_lease_role AS ENUM",
+);
+// ZTR-1147: PERSIST_MOVE_OUTCOME binds $3::attention_reason into the enum column. The
+// CREATE TYPE is lifted from the frozen pack slice so a text-typed stub cannot greenwash a
+// cast that production rejects after attention-reason-enum.sql applies.
+const attentionReasonEnum = frozenDeclaration(
+  attentionReasonEnumSql,
+  "CREATE TYPE attention_reason AS ENUM",
+);
 const walletActiveLeasesDdl = frozenDeclaration(custodySql, "CREATE TABLE wallet_active_leases (");
 // signing-key-registry.sql re-declares the domain node-implementer-registry.sql already
 // declares (each frozen slice is self-contained). Layering them needs the duplicate dropped —
@@ -98,7 +110,7 @@ const OPERATIONS_STUB = `CREATE TABLE operations (
   status operation_status NOT NULL,
   row_version bigint NOT NULL DEFAULT 1 CHECK (row_version > 0),
   attention_required boolean NOT NULL DEFAULT false,
-  attention_reason text,
+  attention_reason attention_reason,
   attention_detail text,
   source_wallet_id uuid REFERENCES wallets(id),
   verification_material_available_until timestamptz,
@@ -413,6 +425,8 @@ describe.skipIf(databaseUrl === undefined)(
           [
             operationKindEnum,
             operationStatusEnum,
+            walletLeaseRoleEnum,
+            attentionReasonEnum,
             registrySql,
             layeredSigningKeysSql,
             "CREATE TABLE wallets (id uuid PRIMARY KEY, wallet_id uuid NOT NULL UNIQUE);",
@@ -489,7 +503,7 @@ describe.skipIf(databaseUrl === undefined)(
       expect(
         await scalar(
           `SELECT status || ' ' || row_version || ' ' || attention_required || ' ' ||
-                  coalesce(attention_reason, '-') || ' ' ||
+                  coalesce(attention_reason::text, '-') || ' ' ||
                   (terminal_at IS NOT NULL) || ' ' ||
                   to_char(verification_material_available_until AT TIME ZONE 'UTC', 'YYYY-MM-DD')
            FROM operations WHERE id = '${move.operationId}'`,
@@ -594,7 +608,7 @@ describe.skipIf(databaseUrl === undefined)(
       expect(result).toEqual({ kind: "PERSISTED", state: "INTERNAL_MOVE_LANDED", rowVersion: 2 });
       expect(
         await scalar(
-          `SELECT attention_required || ' ' || coalesce(attention_reason, '-')
+          `SELECT attention_required || ' ' || coalesce(attention_reason::text, '-')
            FROM operations WHERE id = '${move.operationId}'`,
         ),
       ).toBe("false -");

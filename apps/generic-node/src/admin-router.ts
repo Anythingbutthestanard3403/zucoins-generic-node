@@ -19,6 +19,7 @@ import {
   disengageHalt,
   engageHalt,
   executeAttentionRetraction,
+  executeOperatorPark,
   gateMoneyMutation,
   handleAdminChangePassword,
   handleAdminConfirmTotp,
@@ -47,6 +48,7 @@ import {
   type ApprovalChallengeStore,
   type ApprovalOperationSnapshot,
   type AttentionRetractionStore,
+  type OperatorParkStore,
   type AuthRequest,
   type AuthHttpResult,
   type BreakGlassAuthorityStore,
@@ -439,6 +441,36 @@ function parseAttentionRetractionBody(
     body: { reason: raw.reason, expected_row_version: raw.expected_row_version, superseded_by: supersededBy },
   };
 }
+
+// POST /admin/v1/operations/:operation_id/operator-park body (ZTR-1147).
+// {note: string, expected_row_version: number}
+function parseOperatorParkBody(
+  raw: unknown,
+): ParseOk<{ note: string; expected_row_version: number }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (typeof raw.note !== "string" || raw.note.trim().length === 0) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "note non-empty string required" };
+  }
+  if (raw.note.length > 2000) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "note max 2000 chars" };
+  }
+  if (typeof raw.expected_row_version !== "number" || !Number.isInteger(raw.expected_row_version)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "expected_row_version integer required" };
+  }
+  const known = new Set(["note", "expected_row_version"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return {
+    ok: true,
+    body: { note: raw.note.trim(), expected_row_version: raw.expected_row_version },
+  };
+}
+
 
 function parseHaltBody(
   raw: unknown,
@@ -1016,6 +1048,7 @@ export interface AdminRouteDeps {
   readonly recoveryActionStore: RecoveryActionStore;
   /** Audited attention-flag retraction. Omitted routes fail closed (503). */
   readonly attentionRetractionStore?: AttentionRetractionStore;
+  readonly operatorParkStore?: OperatorParkStore;
   readonly destinationService: DestinationService;
   /** Inventory reads; empty when omitted. */
   readonly inventoryStore?: AdminInventoryStore;
@@ -3529,7 +3562,74 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
-    // --- operator halt POST (session+CSRF+fresh TOTP) ---
+    
+    // --- operator-park POST (session+CSRF+fresh TOTP) — OPERATOR_PARKED (ZTR-1147) ---
+    {
+      const m = pathname.match(/^\/admin\/v1\/operations\/([^/]+)\/operator-park$/);
+      if (m) {
+        if (deps.operatorParkStore === undefined) {
+          return fail(503, "service_unavailable", "operator park not wired", requestId);
+        }
+        const store = deps.operatorParkStore;
+        const operationId = m[1]!;
+        const guarded = await runGuardedAdminMutation({
+          sessions,
+          request: authReq,
+          csrf,
+          totp: labTotpOrNull(totp),
+          userStore: deps.userStore,
+          totpLog,
+          nodeId,
+          rawBody: parsedBody,
+          validateBody: parseOperatorParkBody,
+          nowMs: nowMs(),
+          mutate: async ({ body, user }) => {
+            const outcome = await executeOperatorPark(store, {
+              operationId,
+              note: body.note,
+              expectedRowVersion: body.expected_row_version,
+              actorId: user.id,
+              csrfValidated: true,
+            });
+            if (outcome.status === "rejected") {
+              const status =
+                outcome.reason === "operation_not_found" ? 404 :
+                outcome.reason === "conflict" ? 409 :
+                outcome.reason === "already_flagged" || outcome.reason === "note_required" ? 422 : 401;
+              throw Object.assign(new Error(outcome.reason), {
+                code: outcome.reason,
+                status,
+              });
+            }
+            return outcome.body;
+          },
+        });
+        if (!guarded.ok) {
+          const nestedStatus =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "status" in guarded.error &&
+            typeof (guarded.error as { status: unknown }).status === "number"
+              ? (guarded.error as { status: number }).status
+              : guarded.status;
+          const nestedCode =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "code" in guarded.error &&
+            typeof (guarded.error as { code: unknown }).code === "string"
+              ? (guarded.error as { code: string }).code
+              : guarded.code;
+          return fail(nestedStatus, nestedCode, guarded.message, requestId);
+        }
+        return ok(200, guarded.result);
+      }
+    }
+
+// --- operator halt POST (session+CSRF+fresh TOTP) ---
 
     if (verb === "POST" && pathname === "/admin/v1/halt") {
       if (deps.halt === undefined) {
@@ -4630,6 +4730,7 @@ export function createLiveAdminRouteDeps(
     readonly recoveryActionStore?: RecoveryActionStore;
     readonly recoveryInspectionStore?: RecoveryInspectionStore;
     readonly attentionRetractionStore?: AttentionRetractionStore;
+    readonly operatorParkStore?: OperatorParkStore;
   },
 ): AdminRouteDeps {
   const failClosed = createFailClosedAdminRouteDeps(base);
@@ -4646,6 +4747,9 @@ export function createLiveAdminRouteDeps(
       : {}),
     ...(money.attentionRetractionStore !== undefined
       ? { attentionRetractionStore: money.attentionRetractionStore }
+      : {}),
+    ...(money.operatorParkStore !== undefined
+      ? { operatorParkStore: money.operatorParkStore }
       : {}),
   };
 }

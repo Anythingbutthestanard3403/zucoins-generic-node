@@ -371,6 +371,7 @@ export function anomalyKindForBreachReason(
     case "EXPECTED_BYTES_MISSING_WITH_SIGNER_AUDIT":
     case "SIGNER_AUDIT_CONTRADICTS_DURABLE_RECORD":
     case "LEASE_NOT_ACTIVE_DURING_RECONCILE":
+    case "DESTINATION_NO_LONGER_BLESSED":
       return "UNEXPLAINED_JUMP";
     default:
       return assertUnreachable(reason);

@@ -6,6 +6,11 @@ import {
   ATTENTION_REASONS,
   FORBIDDEN_EVENT_ALIASES,
 } from "./events.contract.ts";
+import {
+  assertAttentionReasonCensusComplete,
+  attentionReasonCoverage,
+  ATTENTION_REASON_DISPOSITIONS,
+} from "./attention-reason-setters.ts";
 
 describe("events census", () => {
   it("freezes the durable public event set at exactly nine values, in sequence", () => {
@@ -27,6 +32,17 @@ describe("events census", () => {
     expect(ATTENTION_REASONS).toHaveLength(15);
     expect(new Set(ATTENTION_REASONS).size).toBe(ATTENTION_REASONS.length);
     expect(ATTENTION_REASONS).toContain("POST_EXPIRY_RECONCILING");
+  });
+
+  it("every ATTENTION_REASONS value has a production setter or a recorded disposition (ZTR-1147)", () => {
+    expect(assertAttentionReasonCensusComplete()).toEqual([]);
+    expect(attentionReasonCoverage("DESTINATION_NO_LONGER_BLESSED")).toBe("SETTER");
+    expect(attentionReasonCoverage("OPERATOR_PARKED")).toBe("SETTER");
+    expect(attentionReasonCoverage("GATEWAY_RESPONSE_INVALID")).toBe("DISPOSITION");
+    expect(attentionReasonCoverage("GATEWAY_UNAVAILABLE_BEYOND_BUDGET")).toBe("DISPOSITION");
+    expect(ATTENTION_REASON_DISPOSITIONS.GATEWAY_RESPONSE_INVALID?.coupledTickets).toContain(
+      "ZTR-1127",
+    );
   });
 
   it("freezes the forbidden event-alias list", () => {

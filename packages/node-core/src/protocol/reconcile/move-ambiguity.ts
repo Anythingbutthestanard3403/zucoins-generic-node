@@ -432,6 +432,11 @@ function pickEvidenceKind(args: {
     case "RELEASE_PREDICATE_UNSATISFIED":
     case "PROOF_INTAKE_REJECTED":
       return "CHANGED_HEAD";
+    // Non-observation park sources (ZTR-1147): operator/gateway parks never unlock rebuild.
+    case "GATEWAY_RESPONSE_INVALID":
+    case "GATEWAY_UNAVAILABLE_BEYOND_BUDGET":
+    case "OPERATOR_PARKED":
+      return "OPERATOR_ACTION";
     default:
       return assertUnreachable(args.reason);
   }

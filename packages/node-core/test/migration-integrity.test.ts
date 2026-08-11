@@ -198,6 +198,8 @@ const SCHEMA_FILES = [
   // ZTR-1139 fix-forward: preflight dangling lease ownership rows, then add the six
   // deferred NO ACTION FKs after operations + lease foundation exist. ALTER/DO only.
   "lease-operation-foreign-keys.sql",
+  // operations.attention_reason text → attention_reason enum (ZTR-1147). ALTER/CREATE TYPE only.
+  "attention-reason-enum.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -218,6 +220,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "lease-role-enum.sql",
   "transaction-material-byte-immutability.sql",
   "lease-operation-foreign-keys.sql",
+  "attention-reason-enum.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -495,6 +498,10 @@ const GREENFIELD: Record<
     applies: false,
     missingRelation: "wallet_active_leases",
   },
+  "attention-reason-enum.sql": {
+    // CREATE TYPE is unconditional when missing; column ALTERs no-op without tables.
+    applies: true,
+  },
 };
 
 const sqlText = (file: string): string => readFileSync(resolve(schemaDir, file), "utf8");
@@ -638,7 +645,7 @@ describe("greenfield migration integrity — frozen schema contracts", () => {
           expect(Object.keys(tables).length, `${file} must declare no tables`).toBe(0);
           const active = sqlText(file).replace(/--[^\n]*/g, "");
           expect(active, file).toMatch(
-            /ALTER\s+TABLE\b|CREATE\s+INDEX\b|CREATE\s+CONSTRAINT\s+TRIGGER\b|CREATE\s+TRIGGER\b|CREATE\s+FUNCTION\b/i,
+            /ALTER\s+TABLE\b|CREATE\s+INDEX\b|CREATE\s+CONSTRAINT\s+TRIGGER\b|CREATE\s+(OR\s+REPLACE\s+)?FUNCTION\b|CREATE\s+TRIGGER\b|CREATE\s+TYPE\b|\bDO\s+\$/i,
           );
           expect(active, `${file} must not dual-CREATE`).not.toMatch(
             /CREATE\s+TABLE\s+move_observation_evidence\b/i,

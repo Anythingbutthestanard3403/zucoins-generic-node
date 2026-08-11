@@ -276,10 +276,12 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     );
     const labelIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-label");
     const roleIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-role-enum");
+    const attentionIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("attention-reason-enum");
     const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
     expect(adjIdx).toBeGreaterThan(lineageIdx);
     expect(labelIdx).toBeGreaterThan(adjIdx);
     expect(roleIdx).toBeGreaterThan(labelIdx);
+    expect(attentionIdx).toBeGreaterThan(roleIdx);
     const files = loadMoneySchemaMigrations();
     expect(files[adjIdx]!.sql).toMatch(
       /CREATE TABLE observation_relationship_adjudications\b/,

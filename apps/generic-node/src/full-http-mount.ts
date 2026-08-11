@@ -42,6 +42,7 @@ import {
   DEFERRED_HALT_ROUTE,
   LIVE_HALT_ROUTES,
   LIVE_ATTENTION_RETRACTION_ROUTES,
+  LIVE_OPERATOR_PARK_ROUTES,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
   InMemoryVaultAccessAuditLog,
@@ -105,6 +106,7 @@ import {
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
 import { createSqlRecoveryActionStore, createSqlRecoveryInspectionStore } from "./operations/sql-recovery-store.js";
 import { createSqlAttentionRetractionStore } from "./operations/sql-attention-retraction-store.js";
+import { createSqlOperatorParkStore } from "./operations/sql-operator-park-store.js";
 import { createSqlFreshHeadReader } from "./money-workers/sql-fresh-head-reader.js";
 import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "./config/constants.js";
 import {
@@ -188,6 +190,8 @@ export const LIVE_ADMIN_MONEY_ENGINES = Object.freeze({
     "createSqlRecoveryActionStore — live",
   attentionRetractionStore:
     "createSqlAttentionRetractionStore — live",
+  operatorParkStore:
+    "createSqlOperatorParkStore — live",
   ticket:
     "challenge + send-decision live; TOTP from enrol/confirm or ADMIN_TOTP_LAB_MODE",
 } as const);
@@ -250,6 +254,7 @@ export {
   DEFERRED_HALT_ROUTE,
   LIVE_HALT_ROUTES,
   LIVE_ATTENTION_RETRACTION_ROUTES,
+  LIVE_OPERATOR_PARK_ROUTES,
   requiredProductionRouteKeys,
   routeKeyOf,
   createFailClosedAdminRouteDeps,
@@ -454,6 +459,7 @@ export interface ProductionRouteSurface {
   readonly deferredHalt: typeof DEFERRED_HALT_ROUTE;
   /** Live attention-retraction surface — always mounted on admin router. */
   readonly liveAttentionRetractionRoutes: typeof LIVE_ATTENTION_RETRACTION_ROUTES;
+  readonly liveOperatorParkRoutes: typeof LIVE_OPERATOR_PARK_ROUTES;
   readonly deferredAdminMoney: typeof LIVE_ADMIN_MONEY_ENGINES;
   /** True when challenge + send-decision SQL stores are live (always on this surface). */
   readonly adminMoneyLive: boolean;
@@ -907,6 +913,10 @@ export function createProductionRouteSurface(
       attentionRetractionStore: createSqlAttentionRetractionStore(config.pool, {
         moneyPathStatementTimeoutMs,
       }),
+      // Live operator-park store (OPERATOR_PARKED — ZTR-1147).
+      operatorParkStore: createSqlOperatorParkStore(config.pool, {
+        moneyPathStatementTimeoutMs,
+      }),
     },
   );
 
@@ -1036,6 +1046,7 @@ export function createProductionRouteSurface(
     liveHaltRoutes: LIVE_HALT_ROUTES,
     deferredHalt: DEFERRED_HALT_ROUTE,
     liveAttentionRetractionRoutes: LIVE_ATTENTION_RETRACTION_ROUTES,
+    liveOperatorParkRoutes: LIVE_OPERATOR_PARK_ROUTES,
     deferredAdminMoney: LIVE_ADMIN_MONEY_ENGINES,
     adminMoneyLive: true,
     adminTotpLabBound: labTotp !== null,

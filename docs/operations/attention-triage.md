@@ -13,22 +13,27 @@ the ten that do not exist are listed in [`incidents.md`](incidents.md).
 and time does not clear attention. Every one of these is resolved by an operator or not at
 all. That is deliberate: the flag exists because a machine could not safely decide.
 
-## Reasons with no shipped writer
+## Reasons with deferred writers
 
-Four values are in the frozen vocabulary and in the database CHECK constraint, but **no code
-path in this repository ever writes them**: `GATEWAY_RESPONSE_INVALID`,
-`GATEWAY_UNAVAILABLE_BEYOND_BUDGET`, `DESTINATION_NO_LONGER_BLESSED`, `OPERATOR_PARKED`.
+Two values are in the frozen vocabulary and the `attention_reason` Postgres ENUM, but have
+**no production setter yet** (recorded disposition in
+`packages/generic-node-contracts/src/operations/attention-reason-setters.ts`):
+`GATEWAY_RESPONSE_INVALID`, `GATEWAY_UNAVAILABLE_BEYOND_BUDGET`.
 
-They cannot appear on a live node today. Their entries below describe what the value means so
-that an operation carrying one — from an older release, or after the writer lands — is
-readable. If you see one on a node running this code, that is itself the incident: escalate
-rather than triage.
+They become reachable once non-verified gateway reads and anomalies are bound to operations
+(ZTR-1127 / ZTR-1128). The mapper already accepts them; the observation→operation binder does
+not. If you see one on a node running this code before those tickets land, escalate rather
+than triage.
+
+`DESTINATION_NO_LONGER_BLESSED` is set when move baseline recheck finds the destination no
+longer blessed. `OPERATOR_PARKED` is set by
+`POST /admin/v1/operations/:operation_id/operator-park`.
 
 ---
 
 ## GATEWAY_RESPONSE_INVALID
 
-**No shipped writer.** See above.
+**Deferred writer** (disposition ZTR-1147). See above.
 
 **Would mean.** A gateway response failed structural validation — it was not a response this
 node can interpret as evidence at all.
@@ -41,7 +46,7 @@ including of non-landing.
 
 ## GATEWAY_UNAVAILABLE_BEYOND_BUDGET
 
-**No shipped writer.** See above. The live symptom of the same condition is
+**Deferred writer** (disposition ZTR-1147). See above. The live symptom of the same condition is
 `gn_observation_degraded == 1` plus a rising `gn_t0_read_failures_total`.
 
 **Would mean.** Gateway reads exhausted `GATEWAY_READ_FAILURE_BUDGET` consecutive failures.
@@ -104,7 +109,8 @@ it — the contradiction is the point.
 
 ## DESTINATION_NO_LONGER_BLESSED
 
-**No shipped writer.** See above.
+**Caused by.** Move baseline recheck (`captureAndBindMoveBaselines`) finds the destination is
+no longer `BLESSED` (retired or pending) while the move is in flight.
 
 **Would mean.** The destination an operation was formed against is no longer in the blessed
 set.
@@ -194,13 +200,15 @@ chain is byte-exact.
 
 ## OPERATOR_PARKED
 
-**No shipped writer.** See above.
+**Caused by.** An operator deliberately parked the operation via
+`POST /admin/v1/operations/:operation_id/operator-park` (session + CSRF + fresh TOTP).
 
 **Would mean.** An operator deliberately parked the operation pending investigation.
 
-**Resolved by.** The operator who parked it, once the investigation concludes. Today, use
+**Resolved by.** The operator who parked it, once the investigation concludes. Use
 `ACKNOWLEDGE_KEEP_PINNED` to record acknowledgement — it bumps the row version for
-single-winner semantics and changes neither public status nor leases.
+single-winner semantics and changes neither public status nor leases. Clear a false-positive
+flag with attention-retraction, not park.
 
 ## POST_EXPIRY_RECONCILING
 

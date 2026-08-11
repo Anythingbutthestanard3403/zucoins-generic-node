@@ -52,6 +52,7 @@ import {
   type ReceiveLandingStore,
   type RetainedPathBody,
   type RetainedPathBodySource,
+  toAttentionReason,
 } from "@zucoins/node-core";
 
 /**
@@ -146,17 +147,78 @@ export interface ReceiveLandingStepDeps {
  * schema CHECK `attention_required = (attention_reason IS NOT NULL)` requires both to be set
  * in the same statement. The receiver lease is never touched.
  */
+
+/**
+ * Map a non-APPLIED receive-landing outcome onto the frozen attention_reason vocabulary
+ * via the single reconcile mapper (ZTR-1147). Free-text detail stays in attention_detail.
+ */
+function attentionReasonForLandingOutcome(
+  outcome: CommitReceiveLandingOutcome,
+): ReturnType<typeof toAttentionReason> {
+  if (outcome.outcome === "APPLIED") {
+    // Caller never parks APPLIED.
+    return toAttentionReason({ source: "NO_SUCCESSOR_OBSERVED" });
+  }
+  if (outcome.outcome === "CONFLICT") {
+    switch (outcome.reason) {
+      case "STATUS_GUARD_MISMATCH":
+      case "ALREADY_LANDED":
+        return toAttentionReason({ source: "PATH_DISAGREEMENT" });
+      case "LEASE_MISSING":
+        return toAttentionReason({ source: "LEASE_NOT_ACTIVE_DURING_RECONCILE" });
+      case "PATH_INCOMPLETE":
+        return toAttentionReason({
+          source: "LANDING_PROOF_INCOMPLETE",
+          fault: "GAP",
+        });
+    }
+  }
+  if (outcome.outcome === "REJECTED") {
+    switch (outcome.reason) {
+      case "PROOF_NOT_POSITIVE":
+        return toAttentionReason({
+          source: "LANDING_PROOF_INCOMPLETE",
+          fault: "GAP",
+        });
+      case "PATH_BODY_UNVERIFIED":
+        return toAttentionReason({
+          source: "LANDING_PROOF_INCOMPLETE",
+          fault: "MALFORMED_BODY",
+        });
+      case "WALLET_MISMATCH":
+        return toAttentionReason({ source: "LEASE_NOT_ACTIVE_DURING_RECONCILE" });
+      case "PATH_DEPTH_MISMATCH":
+      case "PATH_EXPECTED_ANCHOR_MISMATCH":
+      case "PATH_HEAD_ANCHOR_MISMATCH":
+      case "PATH_BACKLINK_BROKEN":
+        return toAttentionReason({
+          source: "LANDING_PROOF_INCOMPLETE",
+          fault: "ANOMALOUS_OR_CONTRADICTORY",
+        });
+    }
+  }
+  return toAttentionReason({
+    source: "LANDING_PROOF_INCOMPLETE",
+    fault: "ANOMALOUS_OR_CONTRADICTORY",
+  });
+}
+
 async function setAttentionForIndeterminate(
   pool: Pool,
   operationId: string,
-  reason: string,
+  reason: ReturnType<typeof toAttentionReason>,
+  detail: string,
   dualChain?: {
     readonly nodeId: string;
     readonly eventSigner: NodeEventSigner | null;
     readonly eventQuota?: DualChainEventQuota;
   },
 ): Promise<void> {
-  const dataText = JSON.stringify({ reason, at: new Date().toISOString() });
+  const dataText = JSON.stringify({
+    attention_reason: reason,
+    detail,
+    at: new Date().toISOString(),
+  });
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -231,6 +293,7 @@ async function setAttentionForIndeterminate(
     client.release();
   }
 }
+
 
 export interface ReceiveLandingStepResult {
   readonly landed: readonly string[];
@@ -551,6 +614,10 @@ export async function runReceiveLandingStep(
         await setAttentionForIndeterminate(
           deps.pool,
           candidate.operationId,
+          toAttentionReason({
+            source: "LANDING_PROOF_INCOMPLETE",
+            fault: "ANOMALOUS_OR_CONTRADICTORY",
+          }),
           `INDETERMINATE: ${err instanceof Error ? err.message : "landing attempt failed"}`,
           {
             nodeId: deps.nodeId,
@@ -595,6 +662,7 @@ export async function runReceiveLandingStep(
       await setAttentionForIndeterminate(
         deps.pool,
         candidate.operationId,
+        attentionReasonForLandingOutcome(outcome),
         `${outcome.outcome}/${outcome.reason}: ${outcome.detail}`,
         {
           nodeId: deps.nodeId,

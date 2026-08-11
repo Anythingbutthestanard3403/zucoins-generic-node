@@ -1,7 +1,7 @@
 # ZTR-1228 implementer evidence
 
-**PR:** (filled after create)
-**Head SHA:** `04235566e166f8edcc7a2352f436e8402060e9b3`
+**PR:** #80
+**Head SHA:** `774e38321f681c2b102aa44a292bb22a2fbf2eef`
 **Branch:** `ztr-1228-vitest-contracts-resolve`
 **Base:** `origin/main` @ `b66163ed845b3bdd5105c2b50bff0148e4522804`
 
@@ -29,7 +29,7 @@ No `docs/decisions/D*` entry required (test harness resolve only). Spec path: ti
    - `@zucoins/consumer-example`: 2 files / 3 tests passed
 4. **Satisfied** — mirrors ZTR-1149 pattern (same helper already used for node-core).
 
-## Verification (at head `04235566e166f8edcc7a2352f436e8402060e9b3`)
+## Verification (at head `774e38321f681c2b102aa44a292bb22a2fbf2eef`)
 
 ```
 CI=true pnpm install

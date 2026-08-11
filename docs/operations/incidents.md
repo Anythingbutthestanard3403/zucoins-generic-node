@@ -43,7 +43,13 @@ than a dangerous one:
 `NODE_SUBMIT_EXTERNAL_SEND` · `DELETE_EVIDENCE` · `SKIP_VERIFICATION`
 
 `REBUILD_INTERNAL_MOVE` is the only action that authorizes a new attempt number, and it is
-halt-gated. It archives the old attempt unchanged and never resubmits it.
+halt-gated. It archives the old attempt unchanged and never resubmits it. It remains
+RESERVED at launch.
+
+`CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` is live under ZTR-1226 (option b): protocol expired
+plus the aging margin **and** either `freshHeadEqualsSourceT0` or
+`completePathExclusionProved`. Timer-only expiry does not license the close. There is still
+no generic PROVEN_NOT_LANDED oracle (D9.6).
 
 ## halt
 

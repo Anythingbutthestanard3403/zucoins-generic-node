@@ -278,8 +278,9 @@ export async function postRecoveryAction(
 }
 
 /**
- * Reserved at launch — admitted in the frozen catalog but not grantable without a
- * positive non-landing oracle. Re-exported from the contract so the SPA cannot drift.
+ * Still reserved at launch (REBUILD_INTERNAL_MOVE). CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED
+ * was promoted live under ZTR-1226's bounded oracle. Re-exported from the contract so the
+ * SPA cannot drift.
  */
 export const RESERVED_RECOVERY_ACTIONS = CONTRACT_RESERVED_RECOVERY_ACTIONS;
 
@@ -339,7 +340,7 @@ export function partitionRecoveryActions(permitted: readonly string[]): {
     } else if (isReservedRecoveryAction(action)) {
       unavailable.push({
         action,
-        reason: "Reserved until positive non-landing proof is available.",
+        reason: "Reserved — REBUILD_INTERNAL_MOVE is not grantable at launch.",
       });
     } else {
       unavailable.push({

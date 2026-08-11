@@ -80,11 +80,15 @@ describe("halt semantics census (kill-switch rule)", () => {
     expect(new Set(OPERATOR_RECOVERY_ACTIONS).size).toBe(9);
   });
 
-  it("freezes the two reserved catalog actions (no generic PROVEN_NOT_LANDED oracle)", () => {
+  it("freezes REBUILD_INTERNAL_MOVE as the sole reserved catalog action (CLOSE authorized ZTR-1226)", () => {
     assertFieldOrder(RESERVED_RECOVERY_ACTIONS, [
-      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
       "REBUILD_INTERNAL_MOVE",
     ]);
+    // CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED left RESERVED under ZTR-1129; ZTR-1226 (b) promotes
+    // it to live under the bounded path/head oracle. D9.6 still forbids a generic oracle.
+    expect(RESERVED_RECOVERY_ACTIONS as readonly string[]).not.toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
     // Reserved actions stay IN the catalog census — being RESERVED is a launch-grantability
     // status, not a removal from the catalog.
     for (const action of RESERVED_RECOVERY_ACTIONS) {

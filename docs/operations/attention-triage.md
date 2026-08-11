@@ -116,7 +116,10 @@ no longer `BLESSED` (retired or pending) while the move is in flight.
 set.
 
 **Resolved by.** `CLOSE_NEVER_STARTED_EXTERNAL_SEND` when the send provably never started, or
-`CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` when complete-path exclusion proved non-landing.
+`CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` when complete-path exclusion proved non-landing
+(ZTR-1226: authorized under the bounded oracle — protocol expired + aging margin AND
+(freshHeadEqualsSourceT0 OR completePathExclusionProved); not timer-only; no generic
+PROVEN_NOT_LANDED oracle).
 
 **Never.** `CHANGE_DESTINATION`. It does not exist. A send is formed against one destination
 and that is the only destination it can ever have. Boot does not auto-accept a new

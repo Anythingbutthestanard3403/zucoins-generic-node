@@ -1050,19 +1050,13 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     );
   }
   //
-  // SEND_NON_LANDING_CLOSE_ACTIVATED is a compile-time `false` in sql-recovery-store.ts, and
-  // nothing else stands between the exclusion oracle's positives and a RESERVED action that
-  // rejects an operation and releases a source-wallet lease. The pure predicate drill
-  // (node-core/test/recovery-actions.test.ts) proves derivePermittedActions withholds the
-  // close when both facts are false — it cannot notice the store deciding to set them.
-  //
-  // This drill makes the flag itself the thing under test. It stages the single cheapest
-  // genuine positive the oracle can return — a genesis Ts0 binding under a genesis head, which
-  // proveSendNonLanding answers FRESH_HEAD_EQUALS_T0 on two reads with no path walk — and
-  // asserts the oracle really did produce it (the manifest line) while both predicates, the
-  // classification and the permitted-action set stay exactly where the freeze puts them.
-  // Flipping the constant to true turns this test red, which is the whole point of it.
-  it("freeze tripwire: a real FRESH_HEAD_EQUALS_T0 positive never reaches the RESERVED close through the SQL store", async () => {
+  // SEND_NON_LANDING_CLOSE_ACTIVATED is compile-time `true` (ZTR-1226 option b). The pure
+  // predicate drill (node-core/test/recovery-actions.test.ts) proves derivePermittedActions
+  // withholds CLOSE when both facts are false and admits it when either arm holds. This
+  // drill makes the flag itself the thing under test on the SQL path: a genesis Ts0 under a
+  // genesis head yields FRESH_HEAD_EQUALS_T0, and the positive must reach the close
+  // predicates, classification, and permitted-action set.
+  it("ZTR-1226 activation: a real FRESH_HEAD_EQUALS_T0 positive admits CLOSE through the SQL store", async () => {
     const sourceWalletId = await insertWallet();
     const publicKey = await walletPublicKey(sourceWalletId);
     const operationId = await seedSendOperation({
@@ -1139,15 +1133,14 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(sourceHead).toHaveLength(1);
     expect(sourceHead[0]!.summary).toContain("FRESH_HEAD_EQUALS_T0");
 
-    // The freeze: the positive stops at the manifest. Both predicates stay false, the
-    // classification never becomes PROVEN_NOT_LANDED, and the RESERVED close is not offered.
-    expect(facts!.send!.freshHeadEqualsSourceT0).toBe(false);
+    // ZTR-1226: the positive is admitted to the close predicates under the bounded oracle.
+    expect(facts!.send!.freshHeadEqualsSourceT0).toBe(true);
     expect(facts!.send!.completePathExclusionProved).toBe(false);
     const permitted = derivePermittedActions(facts!);
-    expect(permitted.classification).not.toBe("PROVEN_NOT_LANDED");
-    expect(permitted.permittedActions).not.toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
-    // The manifest says so out loud, so an operator reading evidence sees why.
-    expect(sourceHead[0]!.summary).toContain("RESERVED: not admitted to the close predicates");
+    expect(permitted.classification).toBe("PROVEN_NOT_LANDED");
+    expect(permitted.permittedActions).toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
+    // Manifest records the positive without the old RESERVED withhold marker.
+    expect(sourceHead[0]!.summary).not.toContain("RESERVED: not admitted to the close predicates");
   });
 
   // The companion half of the tripwire: the listing must not pay for the oracle at all. The

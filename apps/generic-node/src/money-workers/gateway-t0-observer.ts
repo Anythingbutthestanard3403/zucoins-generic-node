@@ -27,6 +27,7 @@ import {
   type GatewayExchangeTransport,
   type MetricsHooks,
   type ObservationRowProjection,
+  RECEIVE_T0_OBSERVATION_ROLE,
   type ReceiveT0Observation,
   type ReceiveT0Observer,
   type WalletStateProjection,
@@ -108,7 +109,10 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
   const bootPriors = deps.bootPriorRawByStreamKey;
 
   return {
-    async observe(walletPublicKey: string): Promise<ReceiveT0Observation> {
+    async observe(
+      walletPublicKey: string,
+      _role: typeof RECEIVE_T0_OBSERVATION_ROLE,
+    ): Promise<ReceiveT0Observation> {
       let rawBytes: Uint8Array;
       let httpStatus: number | null;
       let endpointFingerprint: string;

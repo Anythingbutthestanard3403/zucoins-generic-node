@@ -77,7 +77,7 @@ function fakeResponse(): FakeResponse {
         headers = nextHeaders;
       },
       end: (nextBody) => {
-        body = nextBody;
+        body = (nextBody ?? body) as Uint8Array<ArrayBuffer>;
       },
     },
   };

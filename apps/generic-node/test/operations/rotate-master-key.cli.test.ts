@@ -349,7 +349,6 @@ describe("runRotateMasterKeyCli", () => {
         countWalletVaultRows: async () => 0,
         loadPushSecretsCensus: { rows: [] },
         loadTotpSecretsCensus: { rows: [] },
-        countTotpSecretRows: async () => 0,
         nodeId: "11111111-1111-4111-8111-111111111111",
         loadBootCanaryCensus: { envelope: null },
         countBootCanaryRows: async () => 0,

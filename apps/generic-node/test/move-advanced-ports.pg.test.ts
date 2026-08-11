@@ -1470,7 +1470,7 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
         const { vault } = seeded;
 
         // Never called yet: boot recovery must not report a call that has not happened.
-        const before = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+        const before = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
         expect(before.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(false);
 
         await seedActiveLease({
@@ -1499,7 +1499,7 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
         // Called-before-persist is now provable through the same signer_audit_present check
         // recovery already trusted for RECEIVE — no boot-recovery code changed, only the
         // production wiring that used to leave this row unwritten for MOVE.
-        const after = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+        const after = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
         expect(after.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(true);
       },
     );
@@ -1525,7 +1525,7 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
         expect(audit[0]).toMatchObject({ node_id: seeded.nodeId, outcome: "FAILED", purpose: "STEP_1" });
 
         // A rejected signer call is still a call: recovery must see it, not just successes.
-        const after = await createSqlBootRecovery(pool, logger).store.listNonterminalOperations();
+        const after = await createSqlBootRecovery(pool, logger, {} as never).store.listNonterminalOperations();
         expect(after.find((o) => o.operationId === seeded.operationId)?.signerAuditIndicatesCall).toBe(true);
       },
     );

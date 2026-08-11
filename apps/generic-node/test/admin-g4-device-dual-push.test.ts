@@ -101,7 +101,6 @@ function makeRouter(opts?: {
       windowSteps: 1,
     },
     totpLog: new TotpConsumptionLog(),
-    nodeId: NODE_ID,
     challengeStore,
     loadOperation,
     // The approve route runs inside the required atomic idempotency transaction;
@@ -160,7 +159,7 @@ function makeRouter(opts?: {
       store: createInMemoryOperatorHaltStore(RUNNING),
       evidence: createInMemoryHaltEvidenceRecorder(),
     },
-  });
+  } as never);
 
   return {
     router,
@@ -248,7 +247,6 @@ async function login(
   const password = "correct-horse-battery-staple";
   const user: AdminUser = {
     id: randomUUID(),
-    nodeId: NODE_ID,
     username: "admin",
     passwordHash: await hashPassword(password),
     role: "admin",
@@ -1252,7 +1250,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
         store: createInMemoryOperatorHaltStore(RUNNING),
         evidence: createInMemoryHaltEvidenceRecorder(),
       },
-    });
+    } as never);
     const auth = await login(router, userStore);
     const res = await router("GET", "/admin/v1/device-signature-policy", new Uint8Array(), {
       cookie: auth.cookie,

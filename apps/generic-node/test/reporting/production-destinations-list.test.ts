@@ -23,7 +23,6 @@ import {
   REPORTING_ROUTE_IDS,
   type DestinationService,
   type ProofBodyStore,
-  type VerificationAccessWindowStore,
 } from "@zucoins/node-core";
 
 import {
@@ -56,7 +55,7 @@ const stubPool = () =>
 // mirror the lightweight fakes in reporting/durable-security-ports.pg.test.ts rather than wiring
 // real SQL-backed instances.
 const fakeProofBodyStore = { findByPathProof: async () => [] } as unknown as ProofBodyStore;
-const fakeVerificationAccessStore = {} as VerificationAccessWindowStore;
+const fakeVerificationAccessStore = {} as never;
 
 /** Only `list` is exercised; the write ports throw so an accidental mutation is loud. */
 function serviceOverPool(pool: Pool): DestinationService {
@@ -112,6 +111,7 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 describe("destinations_list composition census (no PG)", () => {
   it("AC3: engine is absent from the census while the route maps to fail-closed", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
@@ -128,6 +128,7 @@ describe("destinations_list composition census (no PG)", () => {
 
   it("AC3: engine appears once a real DestinationService is composed", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
@@ -174,6 +175,7 @@ describe("destinations_list composition census (no PG)", () => {
 
   it("the credential gate still holds: unsigned GET /v1/destinations is 401", async () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_A,
       pool: stubPool(),
@@ -210,7 +212,8 @@ describe("destinations_list composition census (no PG)", () => {
         retire: async () => { throw new Error("unused"); },
       } as never,
     });
-    const handler = liveReads.handlers[REPORTING_ROUTE_IDS.destinationsList] as never;
+    const handler = liveReads.handlers[REPORTING_ROUTE_IDS.destinationsList];
+    if (typeof handler !== "function") throw new Error("missing destinations_list handler");
     const response = await handler(verifiedRequest(NODE_A, "/v1/destinations") as never);
     expect(response.response.status).toBe(500);
     expect(JSON.parse(decode(response.response.bodyBytes)).error.code).toBe("internal_error");
@@ -234,7 +237,8 @@ describe("destinations_list composition census (no PG)", () => {
         retire: async () => { throw new Error("unused"); },
       } as never,
     });
-    const handler = liveReads.handlers[REPORTING_ROUTE_IDS.destinationsList] as never;
+    const handler = liveReads.handlers[REPORTING_ROUTE_IDS.destinationsList];
+    if (typeof handler !== "function") throw new Error("missing destinations_list handler");
     // limit=0 is invalid (must be 1-100)
     const resp1 = await handler(verifiedRequest(NODE_A, "/v1/destinations?limit=0") as never);
     expect(resp1.response.status).toBeGreaterThanOrEqual(400);

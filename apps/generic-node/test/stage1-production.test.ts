@@ -203,11 +203,13 @@ describe("Stage-1 production composition", () => {
     const fakeScheduler: BackupSchedulerHandle = {
       start: started,
       stop: stopped,
+      drain: async () => {},
       runOnce: async () => {
         throw new Error("not used");
       },
       status: () => ({
         enabled: true,
+        ownership: "owner" as const,
         running: false,
         lastSuccessAtMs: null,
         lastFailureAtMs: null,

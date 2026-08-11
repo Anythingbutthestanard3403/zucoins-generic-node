@@ -629,6 +629,7 @@ describe.skipIf(!PG_AVAILABLE)("money workers fundable path (disposable PG)", ()
           nonce: randomUUID() as Uuid,
           issuedAt: new Date().toISOString(),
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          deviceKeyId: randomUUID() as Uuid,
         });
         expect(bless.status).toBe("authorization_rejected");
 

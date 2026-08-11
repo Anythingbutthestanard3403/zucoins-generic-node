@@ -111,6 +111,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
 
   it("production surface exposes mount keys + live halt", async () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -144,6 +145,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
 
   it("admin money challenge+send+recovery-action+attention-retraction all live", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -170,6 +172,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
       "POST /admin/v1/operations/:operation_id/operator-park",
     );
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -184,6 +187,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
       "POST /admin/v1/operations/:operation_id/attention-retraction",
     );
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -195,6 +199,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
   it("ADMIN_TOTP_SECRET alone does not lab-bind (explicit flag required)", () => {
     const secretHex = Buffer.alloc(20, 7).toString("hex");
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -211,6 +216,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
   it("lab mode + secret arms process TOTP (undurable)", () => {
     const secretHex = Buffer.alloc(20, 7).toString("hex");
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -242,6 +248,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     } })).toBeNull();
 
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -282,6 +289,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     ).toEqual(["https://node.merchant.example", "http://localhost:5174"]);
 
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -310,6 +318,7 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     expect(src).toMatch(/createPoolAdminSessionExecutor/);
 
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }) } as never,
@@ -338,6 +347,7 @@ describe("durable reporting PG store on custody production surface", () => {
 
   it("AC1/AC2: composition binds DurableReportingRequestStore (durable-pg kind)", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: "11111111-1111-4111-8111-111111111111",
       pool: { query: async () => ({ rows: [] }), connect: async () => ({}) } as never,
@@ -381,6 +391,7 @@ describe("ZTR-1134 B3 vaultRootKey composition", () => {
   it("throws when defaulting SqlAdminUserStore without vaultRootKey", () => {
     expect(() =>
       createProductionRouteSurface({
+    dualControlMode: "single_operator",
         nodeId: "11111111-1111-4111-8111-111111111111",
         pool: { query: async () => ({ rows: [] }) } as never,
       }),
@@ -390,6 +401,7 @@ describe("ZTR-1134 B3 vaultRootKey composition", () => {
   it("throws on all-zero vaultRootKey", () => {
     expect(() =>
       createProductionRouteSurface({
+    dualControlMode: "single_operator",
         nodeId: "11111111-1111-4111-8111-111111111111",
         pool: { query: async () => ({ rows: [] }) } as never,
         vaultRootKey: Buffer.alloc(32, 0),

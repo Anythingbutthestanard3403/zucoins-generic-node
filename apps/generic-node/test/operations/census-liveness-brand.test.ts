@@ -57,6 +57,7 @@ describe("behavioural liveness census (brand, not reference identity)", () => {
 
   it("the production surface still reports the 5 live routes (brand does not drop existing liveness)", () => {
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_FOR_STUB,
       pool: stubPool(),

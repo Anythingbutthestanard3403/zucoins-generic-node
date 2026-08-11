@@ -14,7 +14,7 @@ import { Client, Pool } from "pg";
 
 import { ensureNodeRow } from "../src/bootstrap/genesis.js";
 
-import { DURABLE_EVENTS } from "../../../packages/generic-node-contracts/src/operations/events.contract.ts";
+import { DURABLE_EVENTS } from "@zucoins/generic-node-contracts/operations/events";
 import {
   appendDurableDualChainEvent,
   createPgImplementerEventLog,

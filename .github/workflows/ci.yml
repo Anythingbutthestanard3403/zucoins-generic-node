@@ -64,6 +64,8 @@ jobs:
         run: pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres
       - name: Build
         run: pnpm build
+      - name: Typecheck generic-node tests
+        run: pnpm --filter @zucoins/generic-node typecheck:tests
       - name: Lint
         run: pnpm lint
       - name: Contracts suite

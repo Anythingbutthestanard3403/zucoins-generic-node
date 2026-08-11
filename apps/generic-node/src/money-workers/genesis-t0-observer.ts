@@ -10,6 +10,7 @@ import {
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   GENESIS_PROJECTION,
   withSerializationRetry,
+  RECEIVE_T0_OBSERVATION_ROLE,
   type ReceiveT0Observer,
   type ReceiveT0Observation,
 } from "@zucoins/node-core";
@@ -136,7 +137,10 @@ export function createGenesisT0Observer(deps: {
   readonly moneyPathStatementTimeoutMs?: number;
 }): ReceiveT0Observer {
   return {
-    async observe(walletPublicKey: string): Promise<ReceiveT0Observation> {
+    async observe(
+      walletPublicKey: string,
+      _role: typeof RECEIVE_T0_OBSERVATION_ROLE,
+    ): Promise<ReceiveT0Observation> {
       try {
         return await withSerializationRetry(DEFAULT_SERIALIZATION_RETRY_POLICY, () =>
           captureGenesisObservation(deps, walletPublicKey),

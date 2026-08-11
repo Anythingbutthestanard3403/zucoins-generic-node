@@ -263,6 +263,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-key enrol → ARM RELEASED offline e2e
     expect(joined).toContain(outcome.publicKey);
 
     surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool,
@@ -681,6 +682,7 @@ describe.skipIf(!PG_AVAILABLE)("FAIL-fix: OUT-before-COMMIT + restore_hold hold"
     expect(hold.rows[0]?.restore_hold).toBe(true);
 
     const surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: heldNode,
       pool,
@@ -1092,6 +1094,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-key re-enrolment after genesis seed lo
     signingKey = privateKeyFromSeedHex(recovered.seed_hex);
 
     surface = createProductionRouteSurface({
+    dualControlMode: "single_operator",
       vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
       nodeId: NODE_ID,
       pool,

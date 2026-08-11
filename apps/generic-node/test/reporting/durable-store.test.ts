@@ -563,7 +563,7 @@ describe("DurableReportingRequestStore.commitMutationWithCompletedIdempotency", 
     // satisfy the UoW assertions above. This probe pins that the oracle is non-vacuous.
     const calls: { text: string }[] = [];
     const broken = {
-      query: async (text: string) => {
+      query: async (text: string, _params?: readonly unknown[]) => {
         calls.push({ text });
         return [] as const;
       },

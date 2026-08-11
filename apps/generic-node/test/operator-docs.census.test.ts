@@ -25,13 +25,22 @@ import { describe, expect, it } from "vitest";
 import * as nodeCore from "@zucoins/node-core";
 import { ATTENTION_REASONS } from "@zucoins/generic-node-contracts/api-schema";
 
-import {
+// Plain .mjs generator — pin the named surface via a single-module import cast.
+// @ts-expect-error plain .mjs has no emitted declarations
+import * as operatorAlertDocs from "../../../scripts/gen-operator-alert-docs.mjs";
+const {
   ALERT_REFERENCE_PATH,
   ESCALATION_MATRIX_PATH,
   SIGNAL_WIRING,
   renderAlertReference,
   renderEscalationMatrix,
-} from "../../../scripts/gen-operator-alert-docs.mjs";
+} = operatorAlertDocs as {
+  ALERT_REFERENCE_PATH: string;
+  ESCALATION_MATRIX_PATH: string;
+  SIGNAL_WIRING: Record<string, { readonly bound: boolean; readonly [k: string]: unknown }>;
+  renderAlertReference: (core: unknown, script?: string) => string;
+  renderEscalationMatrix: (core: unknown, script?: string) => string;
+};
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -157,7 +166,7 @@ describe("committed Prometheus rules", () => {
 
   it("carries a rule for every signal whose reading is live", () => {
     const signals = new Set(labelValues("signal"));
-    for (const [signal, wiring] of Object.entries(SIGNAL_WIRING)) {
+    for (const [signal, wiring] of Object.entries(SIGNAL_WIRING) as Array<[string, { bound: boolean }]>) {
       if (!wiring.bound) continue;
       expect(signals, `no committed alert rule for live signal ${signal}`).toContain(signal);
     }

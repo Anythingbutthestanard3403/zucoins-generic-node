@@ -492,7 +492,7 @@ describe("admin recovery-pack prove", () => {
   it("wrong pack secret does not start ceremony; generic error", async () => {
     const { fileBytes } = createRecoveryPack({
       vaultMasterKey: MASTER,
-      passcode: "111111",
+      secret: PACK_SECRET,
     });
     const { router, userStore } = makeRouter({});
     await enrolAdmin(userStore, "pw-good-enough-12");

@@ -35,6 +35,29 @@ pnpm test                  # root vitest across every projects entry
 pnpm test:boundaries       # architecture gates only
 ```
 
+### PostgreSQL for tests (`TEST_DATABASE_URL`)
+
+Real-Postgres suites (`*.pg.test.ts`) need a reachable TCP Postgres. `vitest.global-setup.ts`
+(wired from `packages/node-core` and `apps/generic-node`) provisions a hermetic per-run
+scratch database and assigns `TEST_DATABASE_URL` when unset.
+
+- **CI** sets `PG_REQUIRED=1` and fails closed if provisioning cannot complete.
+- **Local multi-lane machines** (several checkouts running `pnpm test` against one Postgres)
+  should **pin a dedicated database per lane** so CREATE/DROP contention cannot starve
+  siblings:
+
+  ```bash
+  createdb ztr_lane_a   # once
+  export TEST_DATABASE_URL="postgresql://$USER@127.0.0.1:5432/ztr_lane_a"
+  pnpm test
+  ```
+
+  Prefer leaving `TEST_DATABASE_URL` **unset** for the default auto-provision path. Pin only a
+  non-empty URL. An empty export (`TEST_DATABASE_URL=`) is **not** a pin — auto-provision still
+  runs (same as unset).
+- Transient `ETIMEDOUT` / "too many clients" during provision is retried with backoff; exhaustion
+  fails the run instead of silently skipping money-path suites (ZTR-1204).
+
 `CLAUDE.md` is the working guide for this repository: commands, layout, the architectural
 invariants the test suite enforces, and the conventions a change is expected to match.
 

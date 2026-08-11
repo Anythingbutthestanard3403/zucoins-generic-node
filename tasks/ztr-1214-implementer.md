@@ -1,7 +1,7 @@
 # ZTR-1214 — Dual-control policy guarded DB mutation (implementer)
 
-**PR:** (filled after open)  
-**HEAD:** (filled after push)  
+**PR:** #77  
+**HEAD:**   
 **Governing:** doc 01 §4.2 dual-control; deferred criterion from ZTR-1148; CONVENTIONS §1 SERIALIZABLE admin mutation TX; pattern peer ZTR-1143 device-signature policy.
 
 ## Acceptance

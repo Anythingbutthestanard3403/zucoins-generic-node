@@ -27,7 +27,7 @@ secrets no longer seal. SPA mirror matches; last-resort weak emit removed.
 4. **Satisfied** — unit / HTTP / SPA tests accept strong / reject residual weak.
 
 ## Head SHA
-(see git after commit)
+`c12fb1c82a1036f779b57610c6b5f12802ac7866`
 
 ## Verification (at head)
 ```

@@ -104,4 +104,17 @@ describe("createCandidateIntakeInbox — bounded, lane-separated intake (ZTR-118
     expect(() => createCandidateIntakeInbox(-1)).toThrow(/maxPerSource/);
     expect(() => createCandidateIntakeInbox(1.5)).toThrow(/maxPerSource/);
   });
+
+  it("reports per-source depth for the backlog gauge (ZTR-1216)", () => {
+    const inbox = createCandidateIntakeInbox(CAP);
+    fill(inbox, "relay", 3);
+    fill(inbox, "push", 2);
+    expect(inbox.sizeBySource("relay")).toBe(3);
+    expect(inbox.sizeBySource("push")).toBe(2);
+    expect(inbox.size()).toBe(5);
+    // take prefers push (2) then fills remaining budget from relay (INTAKE_BATCH_LIMIT - 2).
+    inbox.take(INTAKE_BATCH_LIMIT);
+    expect(inbox.sizeBySource("push")).toBe(0);
+    expect(inbox.sizeBySource("relay")).toBe(3 - (INTAKE_BATCH_LIMIT - 2));
+  });
 });

@@ -139,6 +139,14 @@ export {
   consumeLoginAttempt,
 } from "./login-rate-limit.js";
 
+// Per-source-IP origin-relay volume throttle (anonymous candidate-intake lane).
+export {
+  ORIGIN_RELAY_RATE_MAX_REQUESTS,
+  ORIGIN_RELAY_RATE_WINDOW_MS,
+  _resetOriginRelayRateLimitForTests,
+  consumeOriginRelayAttempt,
+} from "./origin-relay-rate-limit.js";
+
 export {
   gateMoneyMutation,
   isUsableLabTotp,

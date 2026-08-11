@@ -263,6 +263,7 @@ export type MetricCandidateIntakeSource = (typeof METRIC_CANDIDATE_INTAKE_SOURCE
  */
 export const METRIC_CANDIDATE_INTAKE_REFUSALS = [
   "inbox_full",
+  "rate_limited",
   "malformed_body",
   "wrong_action",
   "decode_failed",
@@ -458,6 +459,11 @@ export interface NodeMetrics {
   readonly authTotal: CounterMetric;
   readonly idempotencyTotal: CounterMetric;
   readonly candidateIntakeRefused: CounterMetric;
+  /**
+   * In-memory candidate-intake backlog depth by producer lane (ZTR-1216).
+   * Process-local: set on enqueue/take; not restart-safe (see ops note).
+   */
+  readonly candidateIntakeBacklog: GaugeMetric;
   /** Inbound Web Push VAPID gate outcomes (ZTR-1161). */
   readonly pushVapid: CounterMetric;
   /**
@@ -565,6 +571,11 @@ export function createNodeMetrics(): NodeMetrics {
     "gn_candidate_intake_refused_total",
     "Candidate-intake deposits refused before enqueue, by producer lane and reason.",
     ["source", "reason"],
+  );
+  const candidateIntakeBacklog = createGauge(
+    "gn_candidate_intake_backlog",
+    "In-memory candidate-intake inbox depth by producer lane (process-local).",
+    ["source"],
   );
   const pushVapid = createCounter(
     "gn_push_vapid_total",
@@ -729,6 +740,7 @@ export function createNodeMetrics(): NodeMetrics {
     authTotal,
     idempotencyTotal,
     candidateIntakeRefused,
+    candidateIntakeBacklog,
     pushVapid,
     pushReceiveTotal,
     pushNoTransferCodeStreak,
@@ -835,6 +847,7 @@ export function createNodeMetrics(): NodeMetrics {
       authTotal.reset();
       idempotencyTotal.reset();
       candidateIntakeRefused.reset();
+      candidateIntakeBacklog.reset();
       pushVapid.reset();
       pushReceiveTotal.reset();
       pushNoTransferCodeStreak.reset();
@@ -960,6 +973,7 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderCounter(metrics.authTotal),
     renderCounter(metrics.idempotencyTotal),
     renderCounter(metrics.candidateIntakeRefused),
+    renderGauge(metrics.candidateIntakeBacklog),
     renderCounter(metrics.pushVapid),
     renderCounter(metrics.pushReceiveTotal),
     renderGauge(metrics.pushNoTransferCodeStreak),
@@ -1018,6 +1032,8 @@ export interface MetricsHooks {
     source: MetricCandidateIntakeSource,
     reason: MetricCandidateIntakeRefusal,
   ): void;
+  /** Publish current in-memory candidate-intake backlog depth for one producer lane. */
+  setCandidateIntakeBacklog(source: MetricCandidateIntakeSource, depth: number): void;
   /** Inbound push VAPID gate outcome (ZTR-1161). */
   onPushVapid(outcome: MetricPushVapidOutcome): void;
   /**
@@ -1074,6 +1090,9 @@ export function createMetricsHooks(metrics: NodeMetrics): MetricsHooks {
     },
     onCandidateIntakeRefused(source, reason) {
       metrics.candidateIntakeRefused.inc({ source, reason });
+    },
+    setCandidateIntakeBacklog(source, depth) {
+      metrics.candidateIntakeBacklog.set({ source }, depth);
     },
     onPushVapid(outcome) {
       metrics.pushVapid.inc({ outcome });

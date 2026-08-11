@@ -21,6 +21,7 @@ import {
   apiErrorResponse,
   buildTransportHardeningConfig,
   CachedDbProbe,
+  consumeOriginRelayAttempt,
   createDestinationsRouter,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
@@ -211,9 +212,11 @@ export interface NodeRuntimeListenerDeps {
   /** SSE subscription route deps (subscription_handle auth). */
   readonly subscribeDeps?: OperationSubscribeRouteDeps;
   /**
-   * fire-and-forget receiver-channel deposit (origin-relay; the endpoint id is the credential).
+   * fire-and-forget receiver-channel deposit (origin-relay; anonymous lane).
    * Internal adapter into money-workers candidate intake; not a ROUTE_POLICIES
    * public money-op. When omitted the path is absent (same as disabled flag).
+   * The listener rate-limits this route per socket peer before calling the hook
+   * (ZTR-1216); the hook only sees deposits that cleared the volume throttle.
    */
   readonly onReceiverChannelDeposit?: (rawBody: unknown) => void;
   /**
@@ -719,9 +722,10 @@ export function createNodeRuntimeListener(
     // internal receiver-channel deposit (origin-relay). Not in ROUTE_POLICIES, and unlike the
     // Web Push delivery route below it carries no endpoint id, so there is no credential to
     // check here — every deposit is instead re-verified against the chain before it can credit
-    // anything. Resource exhaustion is bounded upstream by the per-lane inbox cap, not here.
-    // 204 whether the deposit was enqueued or refused; malformed/disabled/refused all look
-    // like absent, so the response leaks nothing about whether the channel is configured.
+    // anything. Volume is throttled per socket peer (ZTR-1216); memory is bounded by the
+    // per-lane inbox cap (ZTR-1188). 204 whether throttled, enqueued, or refused —
+    // malformed/disabled/refused/throttled all look like absent, so the response leaks nothing
+    // about whether the channel is configured or which control fired.
     if (
       pathname === "/v1/receivers/origin-relay" &&
       (request.method ?? "").toUpperCase() === "POST" &&
@@ -729,6 +733,18 @@ export function createNodeRuntimeListener(
     ) {
       void (async () => {
         try {
+          // Socket peer only — never X-Forwarded-For. A client-settable key would let an
+          // attacker rotate the throttle bucket at will.
+          const peer = request.socket?.remoteAddress ?? null;
+          if (!consumeOriginRelayAttempt(peer)) {
+            // Count the shed without decoding: throttle is decided before body work so a
+            // flood cannot trade a CPU DoS for a 204 oracle. Same wire answer as every other
+            // path (non-oracular).
+            deps.metricsHooks?.onCandidateIntakeRefused("relay", "rate_limited");
+            response.writeHead(204);
+            response.end();
+            return;
+          }
           const bodyBytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
           let parsed: unknown;
           try {

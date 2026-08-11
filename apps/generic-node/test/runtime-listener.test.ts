@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   buildNodeIdentityDocument,
@@ -13,6 +13,8 @@ import {
   CredentialService,
   createMetricsHooks,
   createNodeMetrics,
+  ORIGIN_RELAY_RATE_MAX_REQUESTS,
+  _resetOriginRelayRateLimitForTests,
   type OperationRouteStore,
   type ReceiveResponse,
 } from "@zucoins/node-core";
@@ -178,6 +180,7 @@ function mockRequest(
   headers: Record<string, string>,
   body?: string,
   rawHeaders?: string[],
+  remoteAddress: string | null = "127.0.0.1",
 ): IncomingMessage {
   const chunks = body === undefined ? [] : [new TextEncoder().encode(body)];
   // Mirror node: rawHeaders is the flat [name, value, …] occurrence array. When a test
@@ -189,6 +192,7 @@ function mockRequest(
     url,
     headers,
     rawHeaders: raw,
+    socket: { remoteAddress },
     async *[Symbol.asyncIterator]() {
       for (const chunk of chunks) yield chunk;
     },
@@ -203,6 +207,7 @@ function invoke(
   headers: Record<string, string> = {},
   body?: string,
   rawHeaders?: string[],
+  remoteAddress: string | null = "127.0.0.1",
 ): Promise<Captured> {
   const listener = createNodeRuntimeListener(deps);
   return new Promise<Captured>((resolve) => {
@@ -217,7 +222,7 @@ function invoke(
         resolve(captured);
       },
     } as unknown as ServerResponse;
-    listener(mockRequest(method, url, headers, body, rawHeaders), response);
+    listener(mockRequest(method, url, headers, body, rawHeaders, remoteAddress), response);
   });
 }
 
@@ -909,9 +914,10 @@ describe("operationPathClass + sanitizeFailureCause", () => {
     expect(out.cause_message).toMatch(/\[redacted/);
   });
 });
-// ZTR-1188 — the origin-relay route is anonymous by design; the bound lives in the inbox,
-// and the HTTP answer must stay 204 either way so the response leaks nothing.
-describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188)", () => {
+// ZTR-1188 / ZTR-1216 — the origin-relay route is anonymous by design; the bound lives in
+// the inbox + per-IP volume throttle, and the HTTP answer must stay 204 either way so the
+// response leaks nothing (non-oracular).
+describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188/1216)", () => {
   const RELAY_CAP = 4;
   const RECEIVER_PUBKEY = "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=";
 
@@ -929,26 +935,36 @@ describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188)",
     });
   }
 
-  // Same wiring shape main.ts ships: real inbox, real producer, metrics hook on refusal.
+  // Same wiring shape main.ts ships: real inbox, real producer, metrics hook on refusal + backlog.
   function relayDeps(): {
     deps: NodeRuntimeListenerDeps;
     inbox: ReturnType<typeof createCandidateIntakeInbox>;
     metrics: ReturnType<typeof createNodeMetrics>;
+    metricsHooks: ReturnType<typeof createMetricsHooks>;
   } {
     const inbox = createCandidateIntakeInbox(RELAY_CAP);
     const metrics = createNodeMetrics();
     const metricsHooks = createMetricsHooks(metrics);
     const deps: NodeRuntimeListenerDeps = {
       ...makeSuccessDeps(),
+      metricsHooks,
       onReceiverChannelDeposit: (rawBody) => {
         const result = enqueueReceiverChannelDeposit(inbox, rawBody, "relay");
+        metricsHooks.setCandidateIntakeBacklog("relay", inbox.sizeBySource("relay"));
         if (!result.enqueued) {
           metricsHooks.onCandidateIntakeRefused("relay", result.reason ?? "malformed_body");
         }
       },
     };
-    return { deps, inbox, metrics };
+    return { deps, inbox, metrics, metricsHooks };
   }
+
+  beforeEach(() => {
+    _resetOriginRelayRateLimitForTests();
+  });
+  afterEach(() => {
+    _resetOriginRelayRateLimitForTests();
+  });
 
   it("a burst cannot grow the inbox past the cap, and every POST still answers 204", async () => {
     const { deps, inbox, metrics } = relayDeps();
@@ -964,6 +980,7 @@ describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188)",
     expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "inbox_full" })).toBe(
       burst - RELAY_CAP,
     );
+    expect(metrics.candidateIntakeBacklog.get({ source: "relay" })).toBe(RELAY_CAP);
   });
 
   it("answers 204 and counts the reason when the body never decodes", async () => {
@@ -975,5 +992,52 @@ describe("POST /v1/receivers/origin-relay — bounded, non-oracular (ZTR-1188)",
     expect(inbox.size()).toBe(0);
     expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "malformed_body" })).toBe(1);
     expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "wrong_action" })).toBe(1);
+  });
+
+  it("rate-limits a single peer and still answers 204 (non-oracular) (ZTR-1216)", async () => {
+    const { deps, inbox, metrics } = relayDeps();
+    const peer = "203.0.113.77";
+
+    // Spend the full volume budget; each deposit still looks like every other outcome.
+    for (let i = 0; i < ORIGIN_RELAY_RATE_MAX_REQUESTS; i++) {
+      const captured = await invoke(
+        deps,
+        "POST",
+        "/v1/receivers/origin-relay",
+        {},
+        relayBody(`ok-${i}`),
+        undefined,
+        peer,
+      );
+      expect(captured.status, `in-budget ${i}`).toBe(204);
+    }
+    // Past the volume ceiling: still 204, counted as rate_limited, body never enqueued.
+    const sizeBefore = inbox.size();
+    const shed = await invoke(
+      deps,
+      "POST",
+      "/v1/receivers/origin-relay",
+      {},
+      relayBody("shed"),
+      undefined,
+      peer,
+    );
+    expect(shed.status).toBe(204);
+    expect(shed.body).toBe("");
+    expect(inbox.size()).toBe(sizeBefore);
+    expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "rate_limited" })).toBe(1);
+
+    // A different peer keeps its own budget — isolation, not a global freeze.
+    const other = await invoke(
+      deps,
+      "POST",
+      "/v1/receivers/origin-relay",
+      {},
+      relayBody("other-peer"),
+      undefined,
+      "203.0.113.78",
+    );
+    expect(other.status).toBe(204);
+    expect(metrics.candidateIntakeRefused.get({ source: "relay", reason: "rate_limited" })).toBe(1);
   });
 });

@@ -49,22 +49,31 @@ export const RECOVERY_PACK_TAG_BYTES = 16;
  * Entropy floor for the pack secret, enforced at creation. 128 bits is the
  * conventional infeasible-search level and matches the rest of the envelope
  * (AES-256-GCM tag, ≥128-bit salt); Argon2id per-guess cost is on top of it.
- * This is a floor on *entropy*, not on length — a 40-digit PIN is refused.
+ * Creation no longer trusts a charset×length proxy (ZTR-1220): the secret must
+ * be exactly the generated shape — Crockford base32 × 26 chars (≥130 bits when
+ * drawn i.i.d.) — plus structure guards against tiled / monotone draws.
  */
 export const RECOVERY_PACK_MIN_ENTROPY_BITS = 128;
 /**
- * Degenerate-input guard. Any charset-based estimator overstates a repeating
- * string ("ababab…" scores as full-alphabet), so require the secret to actually
- * use a spread of characters. Deliberately loose: the sanctioned path is
- * generateRecoverySecret(), and an operator-supplied phrase is a documented
- * escape hatch whose true entropy no dependency-free estimator can know.
+ * Degenerate-input guard. Even inside the sanctioned alphabet a short cycle
+ * ("ABABAB…") or a narrow character set is not a CSPRNG draw — require spread.
  */
 export const RECOVERY_PACK_MIN_DISTINCT_CHARS = 10;
-/** Bound on secret length accepted anywhere (create and open). */
+/**
+ * Reject pure period-tilings and long monotone runs inside the alphabet. A real
+ * CSPRNG draw almost never trips these; a hand-rolled "ABCDEF…" or
+ * "ABCDABCD…" always does.
+ */
+export const RECOVERY_PACK_MAX_MONOTONE_RUN = 8;
+/** Bound on secret length accepted on the *open* path (create is fixed-length). */
 export const RECOVERY_PACK_SECRET_MAX_CHARS = 1024;
 
-/** Crockford base32 — 32 symbols, no I/L/O/U, so transcription is unambiguous. */
-const SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+/**
+ * Crockford base32 — 32 symbols, no I/L/O/U, so transcription is unambiguous.
+ * Creation accepts only this alphabet (exact case); generateRecoverySecret draws
+ * from it. Exported so callers / tests pin the same set the node enforces.
+ */
+export const RECOVERY_PACK_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** 26 × log2(32) = 130 bits, drawn one symbol at a time. */
 export const RECOVERY_PACK_GENERATED_SECRET_CHARS = 26;
 
@@ -120,11 +129,14 @@ export class RecoveryPackError extends Error {
 }
 
 const DIGITS_ONLY_RE = /^\d+$/;
+const SECRET_ALPHABET_RE = new RegExp(
+  `^[${RECOVERY_PACK_SECRET_ALPHABET.replace(/[-\\]/g, "\\$&")}]{${RECOVERY_PACK_GENERATED_SECRET_CHARS}}$`,
+);
 
 /**
  * Conservative charset estimate: length × log2(observed character-class union).
- * Never used to *accept* an operator phrase as strong — only to reject one that
- * cannot reach the floor under even this generous model.
+ * Kept for diagnostics / tests. Creation acceptance is the alphabet×length
+ * shape check below — this proxy alone is not an accept path (ZTR-1220).
  */
 export function estimateRecoverySecretEntropyBits(secret: string): number {
   if (secret.length === 0) return 0;
@@ -136,9 +148,43 @@ export function estimateRecoverySecretEntropyBits(secret: string): number {
   return secret.length * Math.log2(pool);
 }
 
+/** True when `secret` is an exact tiling of a shorter non-empty unit. */
+function isPeriodicTiling(secret: string): boolean {
+  const n = secret.length;
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    if (n % period !== 0) continue;
+    const unit = secret.slice(0, period);
+    if (unit.repeat(n / period) === secret) return true;
+  }
+  return false;
+}
+
+/**
+ * True when ≥ RECOVERY_PACK_MAX_MONOTONE_RUN consecutive symbols step by ±1
+ * through the Crockford alphabet (e.g. "0123456789AB").
+ */
+function hasMonotoneAlphabetRun(secret: string): boolean {
+  const indexOf = (c: string): number => RECOVERY_PACK_SECRET_ALPHABET.indexOf(c);
+  let up = 1;
+  let down = 1;
+  for (let i = 1; i < secret.length; i++) {
+    const delta = indexOf(secret[i]!) - indexOf(secret[i - 1]!);
+    up = delta === 1 ? up + 1 : 1;
+    down = delta === -1 ? down + 1 : 1;
+    if (up >= RECOVERY_PACK_MAX_MONOTONE_RUN || down >= RECOVERY_PACK_MAX_MONOTONE_RUN) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Named reason the secret is unfit to seal a pack, or null when it passes.
  * The message names the rule that failed — it says nothing about any pack.
+ *
+ * Creation accepts only the generateRecoverySecret() shape (ZTR-1220): the
+ * charset×length proxy that previously cleared long patterned / dictionary
+ * phrases is not an accept path.
  */
 export function recoverySecretWeakness(secret: string): string | null {
   if (secret.length === 0) return "recovery secret is required";
@@ -148,10 +194,21 @@ export function recoverySecretWeakness(secret: string): string | null {
   if (DIGITS_ONLY_RE.test(secret)) {
     return "recovery secret must not be digits only — a numeric passcode is enumerable offline against the pack";
   }
+  if (!SECRET_ALPHABET_RE.test(secret)) {
+    return `recovery secret must be exactly ${RECOVERY_PACK_GENERATED_SECRET_CHARS} characters from the Crockford base32 alphabet (0-9 A-Z except I L O U) — use generateRecoverySecret()`;
+  }
   if (new Set(secret).size < RECOVERY_PACK_MIN_DISTINCT_CHARS) {
     return `recovery secret must use at least ${RECOVERY_PACK_MIN_DISTINCT_CHARS} distinct characters`;
   }
-  const bits = estimateRecoverySecretEntropyBits(secret);
+  if (isPeriodicTiling(secret)) {
+    return "recovery secret must not be a repeated substring";
+  }
+  if (hasMonotoneAlphabetRun(secret)) {
+    return "recovery secret must not contain a long sequential run";
+  }
+  // Belt: i.i.d. Crockford×26 is 130 bits; keep the named floor so a future
+  // alphabet shrink cannot silently drop below it.
+  const bits = RECOVERY_PACK_GENERATED_SECRET_CHARS * Math.log2(RECOVERY_PACK_SECRET_ALPHABET.length);
   if (bits < RECOVERY_PACK_MIN_ENTROPY_BITS) {
     return `recovery secret must carry at least ${RECOVERY_PACK_MIN_ENTROPY_BITS} bits of entropy (estimated ${Math.floor(bits)})`;
   }
@@ -169,12 +226,12 @@ export function isAcceptableRecoverySecretShape(secret: string): boolean {
  * agrees exactly with the true entropy (130 bits).
  */
 export function generateRecoverySecret(): string {
-  // A draw can in principle land under the distinct-character guard; redraw
-  // rather than emit a secret the creation path would then refuse.
+  // A draw can in principle land under the distinct-character / structure
+  // guards; redraw rather than emit a secret the creation path would refuse.
   for (let attempt = 0; attempt < 8; attempt++) {
     let out = "";
     for (let i = 0; i < RECOVERY_PACK_GENERATED_SECRET_CHARS; i++) {
-      out += SECRET_ALPHABET[randomInt(0, SECRET_ALPHABET.length)];
+      out += RECOVERY_PACK_SECRET_ALPHABET[randomInt(0, RECOVERY_PACK_SECRET_ALPHABET.length)];
     }
     if (recoverySecretWeakness(out) === null) return out;
   }

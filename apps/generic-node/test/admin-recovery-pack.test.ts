@@ -354,10 +354,11 @@ describe("admin recovery-pack create", () => {
     expect(res.body).not.toContain("pack_file_b64");
   });
 
-  it("refuses a sub-entropy-floor secret at creation", async () => {
+  it("refuses a non-shape / low-entropy secret at creation (ZTR-1220)", async () => {
     const { router, userStore } = makeRouter({});
     await enrolAdmin(userStore, "pw-good-enough-12");
     const { cookie, csrf } = await login(router, "pw-good-enough-12");
+    // Free-form phrase previously cleared the charset×length proxy.
     const res = await router(
       "POST",
       "/admin/v1/recovery-pack/create",
@@ -367,8 +368,23 @@ describe("admin recovery-pack create", () => {
     expect(res.status).toBe(400);
     const err = JSON.parse(res.body) as { error: { code: string; message: string } };
     expect(err.error.code).toBe("weak_recovery_secret");
-    expect(err.error.message).toMatch(/128 bits of entropy/);
+    expect(err.error.message).toMatch(/Crockford base32 alphabet|128 bits of entropy/);
     expect(res.body).not.toContain("pack_file_b64");
+
+    // Ticket false-accept: repeated substring with ≥10 distinct under old proxy.
+    const tiled = await router(
+      "POST",
+      "/admin/v1/recovery-pack/create",
+      Buffer.from(
+        JSON.stringify({
+          recovery_secret: "abcdefghij".repeat(3),
+          vault_master_key: MASTER,
+        }),
+      ),
+      authHeaders(cookie, csrf, nowMs + 30_000),
+    );
+    expect(tiled.status).toBe(400);
+    expect(JSON.parse(tiled.body).error.code).toBe("weak_recovery_secret");
   });
 
   it("re-issues a pack from an existing one without the operator handling the master", async () => {

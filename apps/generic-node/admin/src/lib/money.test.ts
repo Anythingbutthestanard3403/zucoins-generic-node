@@ -654,6 +654,49 @@ describe("recovery action UI honesty", () => {
   });
 });
 
+describe("generateRecoveryPackSecret (ZTR-1220)", () => {
+  it("emits 26 Crockford-base32 chars the node alphabet accepts", async () => {
+    const { generateRecoveryPackSecret } = await import("./money.js");
+    const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    for (let i = 0; i < 40; i++) {
+      const s = generateRecoveryPackSecret();
+      expect(s).toHaveLength(26);
+      expect(new Set(s).size).toBeGreaterThanOrEqual(10);
+      for (const c of s) expect(alphabet).toContain(c);
+    }
+  });
+
+  it("redraws rather than returning a fixed tiled mock draw", async () => {
+    const { generateRecoveryPackSecret } = await import("./money.js");
+    const real = globalThis.crypto;
+    let calls = 0;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues: (arr: Uint8Array) => {
+          calls += 1;
+          // First draw: pure period-1 tiling (all '0') — structure guard must reject.
+          // Later draws: stepping values so the fold is well-spread.
+          if (calls === 1) {
+            arr.fill(0);
+            return arr;
+          }
+          for (let i = 0; i < arr.length; i++) arr[i] = (i * 7 + calls * 3) & 0xff;
+          return arr;
+        },
+      },
+    });
+    try {
+      const s = generateRecoveryPackSecret();
+      expect(s).toHaveLength(26);
+      expect(s).not.toBe("0".repeat(26));
+      expect(calls).toBeGreaterThan(1);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
+    }
+  });
+});
+
 describe("newIdempotencyKey (ZTR-1168)", () => {
   it("returns a string without throwing when randomUUID is absent", async () => {
     const { newIdempotencyKey } = await import("./money.js");

@@ -931,24 +931,70 @@ export interface RecoveryPackProveResponse {
 
 /**
  * Crockford base32 — the same 32 symbols the node generates with, chosen so a
- * secret can be transcribed off a screen without I/L/O/U ambiguity.
+ * secret can be transcribed off a screen without I/L/O/U ambiguity. Must stay
+ * byte-identical to RECOVERY_PACK_SECRET_ALPHABET on the node (ZTR-1220).
  */
 const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /** 26 × log2(32) = 130 bits, over the node's 128-bit creation floor. */
 const RECOVERY_SECRET_CHARS = 26;
+/** Mirror of node RECOVERY_PACK_MIN_DISTINCT_CHARS — redraw if a draw lands under. */
+const RECOVERY_SECRET_MIN_DISTINCT = 10;
+const RECOVERY_SECRET_MAX_MONOTONE_RUN = 8;
+
+function recoveryPackSecretStructureOk(secret: string): boolean {
+  if (secret.length !== RECOVERY_SECRET_CHARS) return false;
+  if (new Set(secret).size < RECOVERY_SECRET_MIN_DISTINCT) return false;
+  // Periodic tiling (ABAB… / unit.repeat).
+  for (let period = 1; period <= Math.floor(secret.length / 2); period++) {
+    if (secret.length % period !== 0) continue;
+    if (secret.slice(0, period).repeat(secret.length / period) === secret) return false;
+  }
+  // Monotone ±1 run through the Crockford alphabet.
+  let up = 1;
+  let down = 1;
+  for (let i = 1; i < secret.length; i++) {
+    const delta =
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!) -
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i - 1]!);
+    up = delta === 1 ? up + 1 : 1;
+    down = delta === -1 ? down + 1 : 1;
+    if (up >= RECOVERY_SECRET_MAX_MONOTONE_RUN || down >= RECOVERY_SECRET_MAX_MONOTONE_RUN) {
+      return false;
+    }
+  }
+  for (const c of secret) {
+    if (!RECOVERY_SECRET_ALPHABET.includes(c)) return false;
+  }
+  return true;
+}
 
 /**
  * Generate the secret a new pack is sealed under. The operator never chooses it:
  * the pack is designed to leave the host, so its seal key has to be beyond
  * offline search. Drawn from the platform CSPRNG, shown once, never stored — the
- * node re-checks the entropy floor at creation regardless of what is sent.
+ * node re-checks the same shape + structure floor at creation (ZTR-1220).
+ * Redraws on the rare structure-guard miss so the SPA never posts a secret the
+ * node would answer 400 weak_recovery_secret for (symmetry with
+ * generateRecoverySecret on the node).
  */
 export function generateRecoveryPackSecret(): string {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
+    crypto.getRandomValues(draws);
+    let out = "";
+    for (const d of draws) {
+      // 256 % 32 === 0, so the byte-to-symbol fold stays uniform.
+      out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
+    }
+    if (recoveryPackSecretStructureOk(out)) return out;
+  }
+  // Last-resort emit: node will still refuse if somehow weak; better than throw
+  // in the SPA render path. Probability of 8 consecutive structure misses is
+  // negligible for a 32-symbol CSPRNG draw.
   const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
   crypto.getRandomValues(draws);
   let out = "";
   for (const d of draws) {
-    // 256 % 32 === 0, so the byte-to-symbol fold stays uniform.
     out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
   }
   return out;

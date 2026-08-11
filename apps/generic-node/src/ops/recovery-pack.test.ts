@@ -53,14 +53,43 @@ describe("recovery secret entropy floor", () => {
     expect(recoverySecretWeakness("0".repeat(40) + "1".repeat(40))).toMatch(/digits only/);
   });
 
-  it("refuses a secret under the floor, and reports the floor not a length", () => {
-    const weak = recoverySecretWeakness("Ab3Kq9ZtWm");
-    expect(weak).toMatch(/at least 128 bits of entropy/);
-    expect(weak).not.toMatch(/character(s)? long|length/);
+  it("refuses a non-alphabet / wrong-length secret (ZTR-1220 shape)", () => {
+    // Former charset×length accept path — dictionary / mixed-case phrases.
+    expect(recoverySecretWeakness("Ab3Kq9ZtWm")).toMatch(/Crockford base32 alphabet/);
+    expect(recoverySecretWeakness("Tr0ub4dor&3")).toMatch(/Crockford base32 alphabet/);
+    expect(recoverySecretWeakness("correct horse battery staple zz")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    expect(recoverySecretWeakness("qwertyuiopasdfghjklzxcvbnm1234")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    // 28-digit PIN + letter — long enough for the old proxy, wrong alphabet.
+    expect(recoverySecretWeakness("1".repeat(28) + "A")).toMatch(/Crockford base32 alphabet/);
+    // Wrong length inside the alphabet.
+    expect(recoverySecretWeakness("9F3KQ2XW7HB4TMZ0RCJ8PNVA5")).toMatch(
+      /Crockford base32 alphabet/,
+    );
+    expect(recoverySecretWeakness(SECRET + "0")).toMatch(/Crockford base32 alphabet/);
   });
 
-  it("refuses a long but repetitive secret", () => {
-    expect(recoverySecretWeakness("abab".repeat(20))).toMatch(/distinct characters/);
+  it("refuses a tiled substring even with ≥10 distinct chars (ZTR-1220)", () => {
+    // Period-2 with only 2 distinct — distinct-char guard fires first.
+    expect(recoverySecretWeakness("AB".repeat(13))).toMatch(/distinct characters/);
+    // Exact tiling of a 13-char unit (2×13=26) with ≥10 distinct — the case the
+    // old distinct-char guard alone missed (ticket: "abcdefghij".repeat(3)).
+    const periodTiling = "0123456789ABC".repeat(2);
+    expect(periodTiling).toHaveLength(26);
+    expect(new Set(periodTiling).size).toBeGreaterThanOrEqual(10);
+    expect(recoverySecretWeakness(periodTiling)).toMatch(/repeated substring/);
+    // Ticket lowercase phrase still refused (alphabet), not accepted via proxy.
+    expect(recoverySecretWeakness("abcdefghij".repeat(3))).toMatch(/Crockford base32 alphabet/);
+  });
+
+  it("refuses a long sequential alphabet run", () => {
+    // 26-char monotone run through Crockford — full distinct set, exact length.
+    const run = "0123456789ABCDEFGHJKMNPQRS";
+    expect(run).toHaveLength(26);
+    expect(recoverySecretWeakness(run)).toMatch(/sequential run/);
   });
 
   it("accepts the generated secret", () => {
@@ -97,13 +126,30 @@ describe("entropy floor is enforced at creation", () => {
     }
   });
 
-  it("refuses to build a pack under a sub-floor secret", () => {
+  it("refuses to build a pack under a sub-floor / non-shape secret", () => {
     try {
       createRecoveryPack({ vaultMasterKey: MASTER, secret: "Tr0ub4dor&3" });
       expect.unreachable("sub-floor secret must not seal a pack");
     } catch (e) {
       expect((e as RecoveryPackError).code).toBe("weak_secret");
-      expect((e as RecoveryPackError).message).toMatch(/128 bits of entropy/);
+      expect((e as RecoveryPackError).message).toMatch(
+        /Crockford base32 alphabet|128 bits of entropy/,
+      );
+    }
+  });
+
+  it("refuses the ZTR-1220 charset×length false-accept cases at seal time", () => {
+    const falseAccepts = [
+      "abcdefghij".repeat(3),
+      "qwertyuiopasdfghjklzxcvbnm1234",
+      "correct horse battery staple zz",
+      "1".repeat(28) + "A",
+      "0123456789ABC".repeat(2),
+    ];
+    for (const secret of falseAccepts) {
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
     }
   });
 

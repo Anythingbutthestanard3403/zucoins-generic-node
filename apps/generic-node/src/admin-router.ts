@@ -778,8 +778,9 @@ function haltWire(
  */
 /**
  * POST /admin/v1/recovery-pack/create body.
- * `recovery_secret` seals the pack and must clear the entropy floor at creation —
- * the operator PWA generates it; a digit passcode is refused here, not at prove.
+ * `recovery_secret` seals the pack and must be the generateRecoverySecret() shape
+ * at creation (Crockford×26 + structure guards, ZTR-1220) — the operator PWA
+ * generates it; a digit passcode or free-form phrase is refused here, not at prove.
  * Master source is one of: `vault_master_key`, pending show-once plaintext, or a
  * `from_pack` re-issue (`from_pack` + `from_pack_secret`, which never exposes the
  * master). The secret itself is never persisted: it stays in the request body,

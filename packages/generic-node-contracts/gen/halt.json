@@ -72,7 +72,6 @@
     "REBUILD_INTERNAL_MOVE": "MOVE_INTERNAL"
   },
   "RESERVED_RECOVERY_ACTIONS": [
-    "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
     "REBUILD_INTERNAL_MOVE"
   ],
   "SOURCE": "operator-kill-switch; scale-to-zero (exclusion only); operations recovery; guarded CAS mutation"

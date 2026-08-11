@@ -15,6 +15,8 @@ export {
   generateAuthSecret,
   generateEcdhKeypair,
   ecdhFromPrivateKeyBytes,
+  padP256PrivateKeyBytes,
+  P256_PRIVATE_KEY_LENGTH,
   type EcdhKeypair,
 } from "./crypto.js";
 

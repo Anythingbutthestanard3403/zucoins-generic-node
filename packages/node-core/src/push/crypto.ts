@@ -20,6 +20,13 @@ const CURVE = "prime256v1";
 /** RFC 8291 the `auth` secret is exactly 16 bytes. */
 const AUTH_SECRET_LENGTH = 16;
 
+/**
+ * P-256 private scalar field size. `ecdh.getPrivateKey()` returns a *minimal-length*
+ * big-endian encoding, so ~1/256 scalars drop the leading zero (31 bytes). Callers
+ * seal and length-check a fixed 32-byte field — always left-pad before seal/use.
+ */
+export const P256_PRIVATE_KEY_LENGTH = 32;
+
 export interface EcdhKeypair {
   /**
    * Raw uncompressed P-256 public point (65 bytes: `0x04 || X || Y`), base64url with no
@@ -34,13 +41,35 @@ export interface EcdhKeypair {
   readonly privateKeyBytes: Buffer;
 }
 
+/**
+ * Left-pad a P-256 private scalar to the 32-byte field size.
+ * OpenSSL/`createECDH` serialises scalars minimal-length; fixed-width is required for
+ * seal envelopes and downstream length assertions.
+ */
+export function padP256PrivateKeyBytes(privateKeyBytes: Buffer): Buffer {
+  if (privateKeyBytes.length === P256_PRIVATE_KEY_LENGTH) {
+    return privateKeyBytes;
+  }
+  if (privateKeyBytes.length > P256_PRIVATE_KEY_LENGTH) {
+    throw new Error(
+      `P-256 private scalar must be at most ${P256_PRIVATE_KEY_LENGTH} bytes, got ${privateKeyBytes.length}`,
+    );
+  }
+  if (privateKeyBytes.length === 0) {
+    throw new Error("P-256 private scalar must not be empty");
+  }
+  const padded = Buffer.alloc(P256_PRIVATE_KEY_LENGTH);
+  privateKeyBytes.copy(padded, P256_PRIVATE_KEY_LENGTH - privateKeyBytes.length);
+  return padded;
+}
+
 /** Generate a fresh P-256 ECDH keypair for one wallet's push subscription. */
 export function generateEcdhKeypair(): EcdhKeypair {
   const ecdh = createECDH(CURVE);
   ecdh.generateKeys();
   return {
     publicKeyB64url: ecdh.getPublicKey().toString("base64url"),
-    privateKeyBytes: ecdh.getPrivateKey(),
+    privateKeyBytes: padP256PrivateKeyBytes(ecdh.getPrivateKey()),
   };
 }
 
@@ -53,9 +82,12 @@ export function generateAuthSecret(): Buffer {
  * Rebuild a `crypto.ECDH` from stored raw private-key bytes. This is the shape an ECE
  * decryptor needs (it calls `.computeSecret` on the sender's ephemeral key), and is
  * only ever constructed after the sealed private half has been opened.
+ *
+ * Short (minimal-length) scalars from older seals are left-padded to 32 bytes so
+ * OpenSSL and length-sensitive callers see a fixed field size.
  */
 export function ecdhFromPrivateKeyBytes(privateKeyBytes: Buffer): ReturnType<typeof createECDH> {
   const ecdh = createECDH(CURVE);
-  ecdh.setPrivateKey(privateKeyBytes);
+  ecdh.setPrivateKey(padP256PrivateKeyBytes(privateKeyBytes));
   return ecdh;
 }

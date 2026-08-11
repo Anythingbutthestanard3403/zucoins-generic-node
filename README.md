@@ -57,6 +57,9 @@ scratch database and assigns `TEST_DATABASE_URL` when unset.
   runs (same as unset).
 - Transient `ETIMEDOUT` / "too many clients" during provision is retried with backoff; exhaustion
   fails the run instead of silently skipping money-path suites (ZTR-1204).
+- Full-suite PG files run serialized (`vitest.pg.config.ts` + `singleFork`); targeted suites
+  remain the lane-level bar. Quiet-machine full runs for merge evidence:
+  [`docs/operations/full-suite-test-runs.md`](docs/operations/full-suite-test-runs.md).
 
 `CLAUDE.md` is the working guide for this repository: commands, layout, the architectural
 invariants the test suite enforces, and the conventions a change is expected to match.

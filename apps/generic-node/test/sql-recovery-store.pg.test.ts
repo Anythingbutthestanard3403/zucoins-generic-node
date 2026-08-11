@@ -67,6 +67,11 @@ const PACK_SLICES = [
   "transaction-material",
   "submit-attempts",
   "audit-log",
+  // Sole owner of operation_expected_artifacts (ZTR-1208). receive-codes FKs it;
+  // move-baseline-binding references it only. Must precede both.
+  // node_signing_keys FK target is stubbed in FK_TARGET_STUBS (full signing-key-registry
+  // also creates implementer_reporting_keys, already owned by reporting-persistence).
+  "expected-artifacts",
   "move-baseline-binding",
   // Fact-gatherer queries hit receive_codes and gateway_observations directly
   // (SQL_RECEIVE_CODE_STATUS / SQL_OBSERVATION_BY_ID) — observation-ledger creates
@@ -152,7 +157,10 @@ async function applySchema(target: Pool, sql: string): Promise<void> {
   }
 }
 
-const FK_TARGET_STUBS = ["operation_approvals"]
+// operation_approvals: approval-stores slice not packed here.
+// node_signing_keys: expected-artifacts.signing_key_id FK (registry slice co-declares
+// implementer_reporting_keys already created by reporting-persistence).
+const FK_TARGET_STUBS = ["operation_approvals", "node_signing_keys"]
   .map((t) => `CREATE TABLE ${t} (id uuid PRIMARY KEY);`)
   .join("\n");
 
@@ -1428,13 +1436,16 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     const preimageText = `zp-receive-expected-v1\n${operationId}`;
     const preimageSha = sha256(preimageText);
     const artifactId = randomUUID();
+    const signingKeyId = randomUUID();
+    // FK target is the stubbed node_signing_keys (id-only) from FK_TARGET_STUBS.
+    await pool.query(`INSERT INTO node_signing_keys (id) VALUES ($1::uuid)`, [signingKeyId]);
     await pool.query(
       `INSERT INTO operation_expected_artifacts
          (id, operation_id, purpose, canonical_version, signing_key_id,
           preimage_text, preimage_sha256, signature, created_at)
        VALUES ($1::uuid, $2::uuid, 'zp-receive-expected-v1', 1, $3::uuid,
                $4, $5, $6, now())`,
-      [artifactId, operationId, randomUUID(), preimageText, preimageSha, signature()],
+      [artifactId, operationId, signingKeyId, preimageText, preimageSha, signature()],
     );
     await pool.query(
       `INSERT INTO signer_audit

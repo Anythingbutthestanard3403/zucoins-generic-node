@@ -4,8 +4,13 @@ export default defineConfig({
   test: {
     projects: [
       "packages/generic-node-contracts",
-      "packages/node-core",
-      "apps/generic-node",
+      // unit + pg are sibling projects (not nested): Vitest only expands projects from the
+      // root config. PG projects use poolOptions.forks.singleFork so *.pg.test.ts files never
+      // run multi-file-parallel against one scratch Postgres (ZTR-1209).
+      "packages/node-core/vitest.unit.config.ts",
+      "packages/node-core/vitest.pg.config.ts",
+      "apps/generic-node/vitest.unit.config.ts",
+      "apps/generic-node/vitest.pg.config.ts",
       // The two consumer packages were declared inline here, which inherited neither their own
       // setupFiles (network containment) nor any resolve.alias — so the one suite proving the
       // consumer trust boundary ran unguarded, against a stale dist/. Referencing the packages'

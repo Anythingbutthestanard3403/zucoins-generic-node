@@ -76,7 +76,11 @@ const GATEWAY_A = "https://gateway-a.test.invalid/";
 // per-test cloned database; PG_USER (the admin/migration connection) is superuser-equivalent in
 // this harness, so REVOKE against it would be a no-op — this role is the only way to prove a
 // genuine 42501 permission-denied fault.
-const DEGRADED_LOWPRIV_ROLE = "degraded_lowpriv";
+//
+// Name is per-process unique: a concurrent lane running this same file used to DROP the
+// fixed name mid-run (ZTR-1209). PG role identifiers are unquoted folded to lowercase; keep
+// the suffix alphanumeric so CREATE ROLE needs no quoting.
+const DEGRADED_LOWPRIV_ROLE = `degraded_lowpriv_${process.pid}_${Date.now().toString(36)}`;
 const DEGRADED_LOWPRIV_PASSWORD = "degraded-lowpriv-pw";
 
 const GEN_DIR = new URL(

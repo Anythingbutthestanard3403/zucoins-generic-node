@@ -74,6 +74,8 @@ import {
   ipForDb,
   resolveClientIp,
   trustProxyOptionsFromEnv,
+  consumeLoginAttempt,
+  LOGIN_RATE_WINDOW_MS,
   extractSessionIdFromCookie,
   requireSessionCsrf,
   // Second-device enrol, dual-control policy, operator push
@@ -1669,6 +1671,19 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
 
     // Session bootstrap (not frozen in ROUTE_POLICIES — login is CSRF-exempt).
     if (verb === "POST" && pathname === "/admin/v1/login") {
+      // Volume throttle sits HERE — one pre-decode chokepoint — so malformed JSON
+      // bodies spend the same per-IP budget as well-formed ones (ZTR-1218). A second
+      // limiter instance would violate ZTR-1201 AC5; handleAdminLogin must not
+      // re-consume.
+      // Rate-limit key remains socket-peer only (ZTR-1192 / ZTR-1201 / ZTR-1218 AC3);
+      // lockout/session IP below uses resolveAdminLockoutIp (ZTR-1210) and may peel
+      // XFF only when TRUST_PROXY_HOPS is set.
+      const loginRateIp = ipForDb(remoteAddress ?? null);
+      if (!consumeLoginAttempt(loginRateIp)) {
+        return fail(429, "rate_limited", "too many login attempts", requestId, {
+          "retry-after": String(LOGIN_RATE_WINDOW_MS / 1000),
+        });
+      }
       try {
         const body = decodeBody(rawBody) as { username?: string; password?: string };
         // Shared lockout IP (login + confirm-TOTP). Default = socket peer;

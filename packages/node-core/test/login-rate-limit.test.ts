@@ -1,8 +1,13 @@
 /**
- * POST /admin/v1/login request-volume throttle (ZTR-1201).
+ * POST /admin/v1/login request-volume throttle (ZTR-1201 / ZTR-1218).
  *
  * Subject under test is production code only:
  *   packages/node-core/src/http/{login-rate-limit,admin-auth-handlers,ip-lockout}.ts
+ *
+ * Production admits each attempt at the app-router pre-decode chokepoint
+ * (`consumeLoginAttempt`) and then calls `handleAdminLogin` without re-consuming.
+ * The `login()` helper below mirrors that contract so these cases stay faithful
+ * to the live path without pulling the generic-node router into node-core.
  *
  * The throttle is the spray-facing complement to the per-(IP, username) failure
  * lockout ZTR-1192 landed in ip-lockout.ts. These tests pin the three properties that
@@ -70,12 +75,24 @@ async function seedAdmin(): Promise<{
   return { store: users, lookups, sessions };
 }
 
+/**
+ * Mirrors the production admit-then-handle order (admin-router pre-decode
+ * chokepoint → handleAdminLogin). Sheds with the same 429 envelope the router
+ * returns when the budget is exhausted.
+ */
 function login(
   deps: { store: AdminUserStore; sessions: ReturnType<typeof createAdminSessionService> },
   ip: string,
   username: string,
   password: string,
 ): Promise<AuthHttpResult> {
+  if (!consumeLoginAttempt(ip)) {
+    return Promise.resolve({
+      status: 429,
+      headers: { "retry-after": String(LOGIN_RATE_WINDOW_MS / 1000) },
+      body: { error: { code: "rate_limited", message: "too many login attempts" } },
+    });
+  }
   return handleAdminLogin(
     { userStore: deps.store, sessions: deps.sessions, ip },
     { username, password },
@@ -90,7 +107,7 @@ const envelopeBytes = (result: AuthHttpResult): string =>
  * Driving the bulk of the budget here rather than through 30 real logins keeps every
  * case to a couple of bcrypt compares — 30 real logins is ~10s idle and >30s under a
  * loaded suite, which times the case out and leaves its orphaned loop spending the
- * next case's budget. The "handleAdminLogin actually spends a unit per request" claim
+ * next case's budget. The "login() admits via consumeLoginAttempt per request" claim
  * is proved at the boundary by the first case below, not by volume.
  */
 function spendBudget(ip: string, units: number = LOGIN_RATE_MAX_REQUESTS): void {
@@ -116,8 +133,9 @@ describe("login volume throttle — per source IP", () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const deps = await seedAdmin();
 
-    // One unit left. handleAdminLogin must spend it — this is the assertion that bites
-    // if it ever stops calling consumeLoginAttempt: the shed below would come back 401.
+    // One unit left. login() must spend it via consumeLoginAttempt (the production
+    // pre-decode chokepoint) before handleAdminLogin runs — if admit is skipped the
+    // shed below would come back 401.
     spendBudget(IP_A, LOGIN_RATE_MAX_REQUESTS - 1);
 
     const lastInsideBudget = await login(deps, IP_A, "spray-last", "wrong");

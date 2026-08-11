@@ -46,7 +46,6 @@ import {
   isIpPairLocked,
   registerIpFailure,
 } from "./ip-lockout.js";
-import { consumeLoginAttempt, LOGIN_RATE_WINDOW_MS } from "./login-rate-limit.js";
 import { DUMMY_PASSWORD_HASH, hashPassword, needsPasswordRehash, verifyPassword } from "./password.js";
 import {
   verifyTotp,
@@ -121,20 +120,12 @@ export async function handleAdminLogin(
   const { username, password } = body;
   const ip = deps.ip ?? null;
 
-  // Request-volume throttle, decided FIRST and keyed on the source IP alone
-  // (login-rate-limit.ts). Placing it ahead of every other branch is what makes the
-  // 429 credential-blind: it is chosen before the body is inspected and before any
-  // user lookup, so it is byte-identical for a real username, an unknown username,
-  // and no username at all. It cannot become an existence oracle.
-  //
-  // It deliberately does NOT call registerIpFailure: a shed request attempted no
-  // password, so it must not consume the per-(IP, username) lockout budget below.
-  // The two controls stay independent and neither double-counts the other.
-  if (!consumeLoginAttempt(ip)) {
-    return errorJson(429, "rate_limited", "too many login attempts", {
-      "retry-after": String(LOGIN_RATE_WINDOW_MS / 1000),
-    });
-  }
+  // Request-volume throttle lives at the app-router pre-decode chokepoint
+  // (admin-router POST /admin/v1/login → consumeLoginAttempt) so malformed JSON
+  // bodies spend the same per-IP budget. This handler must not re-consume — a
+  // second call would double-count every well-formed request (ZTR-1201 AC5 /
+  // ZTR-1218). Callers that invoke handleAdminLogin outside the router are
+  // responsible for admitting the attempt first when they need the throttle.
 
   if (typeof username !== "string" || username.length === 0) {
     return errorJson(400, "validation_error", "username required");

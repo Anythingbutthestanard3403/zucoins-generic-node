@@ -249,7 +249,7 @@ emitted (no orphan eligibility functions). Multi-slice tables today:
 | Table | First owner | Later | Resolution |
 |---|---|---|---|
 | `wallet_active_leases` | custody-eligibility (`wallet_id→wallets`) | lease-foundation (`membership_id`/`lease_group_id` FKs) | strip + FK wire-up; trigger = `custody_reject_ineligible_lease` |
-| `operation_expected_artifacts` | expected-artifacts (stronger FKs) | move-baseline-binding | strip later CREATE (first is FK superset); insert-only trigger from later kept |
+| `operation_expected_artifacts` | expected-artifacts (sole owner; stronger FKs + insert-only trigger) | — | one-slice-one-contract; move-baseline-binding references only |
 | `operator_device_keys` | device-keys | approval-stores | strip later (bodies equivalent) |
 
 **Journal identity (cold-first):** pack versions are `100 + index` into

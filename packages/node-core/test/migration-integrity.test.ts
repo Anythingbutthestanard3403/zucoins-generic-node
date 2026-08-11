@@ -350,10 +350,10 @@ const GREENFIELD: Record<
     applies: false,
     missingRelation: "external_send_sign_intents",
   },
-  // self-contained by construction. It re-declares the three data-model domains its
-  // columns use and carries every out-of-slice reference (operations, node_signing_keys,
-  // gateway_observations) as a bare uuid — the deferred FKs are inventoried in
-  // move-baseline-binding.contract.ts and added by the assembly phase.
+  // self-contained by construction for bindings/evidence. It re-declares the domains its
+  // columns use and carries out-of-slice references (operations, gateway_observations) as
+  // bare uuid — deferred FKs inventoried in move-baseline-binding.contract.ts.
+  // operation_expected_artifacts is owned solely by expected-artifacts.sql.
   "move-baseline-binding.sql": { applies: true },
   // device_enrollment_challenges uses approval_challenge_status (base-enums)
   // and REFERENCES nodes(id). Applied alone the first miss is the enum type (quoted

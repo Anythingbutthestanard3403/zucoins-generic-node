@@ -58,7 +58,7 @@ describe("expected-artifacts schema census", () => {
 
   it("mutation negative: dropping the purpose CHECK is caught", () => {
     const removed = sql.replace(
-      "CHECK (purpose IN (\n    'zp-receive-expected-v1',\n    'zp-move-internal-expected-v1',\n    'zp-send-external-expected-v1'\n  )),",
+      "CONSTRAINT operation_expected_artifacts_purpose_check CHECK (purpose IN (\n    'zp-receive-expected-v1',\n    'zp-move-internal-expected-v1',\n    'zp-send-external-expected-v1'\n  )),",
       "CHECK (purpose IN (\n    'zp-receive-expected-v1'\n  )),",
     );
     const missing = EXPECTED_ARTIFACTS_INVARIANTS.filter(
@@ -92,6 +92,11 @@ describe("expected-artifacts schema census", () => {
     for (const obligation of SCHEMA_EXPECTED_ARTIFACTS_OBLIGATIONS) {
       expect(obligation.length).toBeGreaterThan(20);
     }
+  });
+
+  it("owns the insert-only byte-immutability trigger", () => {
+    expect(sql).toContain("BEFORE UPDATE OR DELETE ON operation_expected_artifacts");
+    expect(sql).toContain("expected_artifact_reject_mutation");
   });
 
   it("file hygiene: pure ASCII, no BOM, no CRLF, final non-whitespace char is ';'", () => {

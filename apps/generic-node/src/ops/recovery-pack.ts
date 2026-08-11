@@ -67,10 +67,21 @@ export const RECOVERY_PACK_MIN_DISTINCT_CHARS = 10;
  */
 export const RECOVERY_PACK_MAX_MONOTONE_RUN = 6;
 /**
+ * Reject when this many adjacent pairs share one nonzero alphabet delta, even
+ * with breaks (broken step-k walks like every-5th-symbol progressions). CSPRNG
+ * E[count per delta] ≈ 25/32; ≥10 is effectively zero FPR at n=26.
+ */
+export const RECOVERY_PACK_MAX_SAME_DELTA_PAIRS = 10;
+/**
  * Reject long same-symbol runs ("AAAA…"). Distinct from step-k monotone — a
  * constant symbol is step 0, not ±1.
  */
 export const RECOVERY_PACK_MAX_SAME_RUN = 4;
+/**
+ * Reject ≥ this many distinct doubled-letter blocks (AA…BB…CC…) even when each
+ * run is only length 2 — paired-double patterns with digit noise.
+ */
+export const RECOVERY_PACK_MAX_PAIRED_DOUBLES = 4;
 /**
  * Reject a stretch of consecutive A–Z letters (digits break the run). Catches
  * Crockford-mapped dictionary phrases that otherwise look high-spread
@@ -100,9 +111,15 @@ export const RECOVERY_PACK_MAX_CLASS_ALTERNATION_RUN = 10;
  */
 export const RECOVERY_PACK_MAX_CLASS_PAIR_RUN = 6;
 /**
- * Keyboard-row substring length that is not an i.i.d. draw (QWERTY / 12345 / …).
+ * Keyboard-row / column / diagonal substring length that is not an i.i.d. draw
+ * (QWERTY / 12345 / 1QAZ… column walks).
  */
 export const RECOVERY_PACK_MAX_KEYBOARD_RUN = 5;
+/**
+ * Strided constant-delta run length (every s-th symbol, s≥2). Catches
+ * BP1CQ2DR3… style broken step-k that continuous monotone misses.
+ */
+export const RECOVERY_PACK_MAX_STRIDED_MONOTONE_RUN = 6;
 /** Bound on secret length accepted on the *open* path (create is fixed-length). */
 export const RECOVERY_PACK_SECRET_MAX_CHARS = 1024;
 
@@ -234,20 +251,53 @@ function hasRepeatedStructure(secret: string): boolean {
  * True when ≥ RECOVERY_PACK_MAX_MONOTONE_RUN consecutive symbols step by a
  * constant non-zero alphabet delta (any step k, not only ±1).
  * e.g. "01234567" (k=+1), "02468ACE" (k=+2).
+ *
+ * Also rejects broken step-k: ≥ MAX_SAME_DELTA_PAIRS adjacent pairs sharing
+ * one nonzero delta even with interruptions (5AFMS49E… every-5 walk).
  */
 function hasMonotoneAlphabetRun(secret: string): boolean {
   const indexOf = (c: string): number => RECOVERY_PACK_SECRET_ALPHABET.indexOf(c);
   // Track run length for each observed constant delta.
   let run = 1;
   let prevDelta: number | null = null;
+  const deltaPairCounts = new Map<number, number>();
   for (let i = 1; i < secret.length; i++) {
     const delta = indexOf(secret[i]!) - indexOf(secret[i - 1]!);
+    if (delta !== 0) {
+      deltaPairCounts.set(delta, (deltaPairCounts.get(delta) ?? 0) + 1);
+    }
     if (delta !== 0 && delta === prevDelta) {
       run += 1;
       if (run >= RECOVERY_PACK_MAX_MONOTONE_RUN) return true;
     } else {
       run = 1;
       prevDelta = delta === 0 ? null : delta;
+    }
+  }
+  for (const count of deltaPairCounts.values()) {
+    if (count >= RECOVERY_PACK_MAX_SAME_DELTA_PAIRS) return true;
+  }
+  // Strided constant-delta (every s-th symbol) — continuous monotone misses
+  // digit-broken arithmetic walks like BP1CQ2DR3ES4FT5…
+  for (let stride = 2; stride <= 4; stride++) {
+    for (let offset = 0; offset < stride; offset++) {
+      let strideRun = 1;
+      let stridePrev: number | null = null;
+      let prevIdx: number | null = null;
+      for (let i = offset; i < secret.length; i += stride) {
+        const idx = indexOf(secret[i]!);
+        if (prevIdx !== null) {
+          const delta = idx - prevIdx;
+          if (delta !== 0 && delta === stridePrev) {
+            strideRun += 1;
+            if (strideRun >= RECOVERY_PACK_MAX_STRIDED_MONOTONE_RUN) return true;
+          } else {
+            strideRun = 1;
+            stridePrev = delta === 0 ? null : delta;
+          }
+        }
+        prevIdx = idx;
+      }
     }
   }
   return false;
@@ -275,7 +325,20 @@ function hasLongSameRun(secret: string): boolean {
       run = 1;
     }
   }
-  return blocks >= 2;
+  if (blocks >= 2) return true;
+  // Paired doubles with noise (AA1BB2CC3DD4…) — each run is only length 2, so
+  // the triple-block and MAX_SAME_RUN guards miss it.
+  let doubles = 0;
+  for (let i = 0; i < secret.length - 1; ) {
+    if (secret[i] === secret[i + 1]) {
+      doubles += 1;
+      if (doubles >= RECOVERY_PACK_MAX_PAIRED_DOUBLES) return true;
+      i += 2;
+    } else {
+      i += 1;
+    }
+  }
+  return false;
 }
 
 /**
@@ -350,34 +413,111 @@ function hasClassPairRun(secret: string): boolean {
 }
 
 /**
- * Keyboard rows (and reverse) restricted to the Crockford alphabet. A
- * contiguous substring of length ≥ MAX_KEYBOARD_RUN is not an i.i.d. draw.
+ * Physical QWERTY layout (digit row + three letter rows). Used to build
+ * column walks (1QAZ / 2WSX / …) and diagonals the row-only list missed.
+ * Symbols outside Crockford are dropped when materialising walks.
  */
-const KEYBOARD_ROWS_CROCKFORD: readonly string[] = [
-  "0123456789",
-  "9876543210",
+const KEYBOARD_LAYOUT_ROWS: readonly string[] = [
+  "1234567890",
   "QWERTYUIOP",
-  "POIUYTREWQ",
   "ASDFGHJKL",
-  "LKJHGFDSA",
   "ZXCVBNM",
-  "MNBVCXZ",
-  // Row-stitch patterns operators type across the home block.
-  "QWERTYASDFGHZXCVBN",
-  "NBVCXZHGFDSAYTREWQ",
-].map((row) =>
-  [...row].filter((c) => RECOVERY_PACK_SECRET_ALPHABET.includes(c)).join(""),
-);
+];
+
+/**
+ * Keyboard rows, columns, diagonals, and multi-column stitches (and reverse)
+ * restricted to the Crockford alphabet. A contiguous substring of length
+ * ≥ MAX_KEYBOARD_RUN is not an i.i.d. draw.
+ */
+function buildKeyboardWalks(): readonly string[] {
+  const filterCrock = (s: string): string =>
+    [...s].filter((c) => RECOVERY_PACK_SECRET_ALPHABET.includes(c)).join("");
+  const walks = new Set<string>();
+  const add = (raw: string): void => {
+    const s = filterCrock(raw);
+    if (s.length >= RECOVERY_PACK_MAX_KEYBOARD_RUN) {
+      walks.add(s);
+      walks.add([...s].reverse().join(""));
+    }
+  };
+
+  // Horizontal rows + reverse (incl. home-block stitch).
+  for (const row of KEYBOARD_LAYOUT_ROWS) add(row);
+  add("QWERTYASDFGHZXCVBN");
+  add("0123456789");
+
+  // Vertical columns (1QAZ, 2WSX, …) and reverse-each-column (ZAQ1, XSW2, …).
+  const maxCol = Math.max(...KEYBOARD_LAYOUT_ROWS.map((r) => r.length));
+  const columns: string[] = [];
+  for (let c = 0; c < maxCol; c++) {
+    let col = "";
+    for (const row of KEYBOARD_LAYOUT_ROWS) {
+      if (c < row.length) col += row[c]!;
+    }
+    columns.push(col);
+    add(col);
+  }
+
+  // Multi-column stitches: operators type whole columns left-to-right
+  // (1QAZ2WSX3EDC…) or reverse-column (ZAQ1XSW2…) or reverse column-order.
+  const colVariants: readonly (readonly string[])[] = [
+    columns,
+    columns.map((col) => [...col].reverse().join("")),
+  ];
+  for (const cols of colVariants) {
+    for (let start = 0; start < cols.length; start++) {
+      let acc = "";
+      for (let end = start; end < cols.length; end++) {
+        acc += cols[end]!;
+        add(acc);
+      }
+      // Reverse column-order stitch from this start.
+      let racc = "";
+      for (let end = start; end >= 0; end--) {
+        racc += cols[end]!;
+        add(racc);
+      }
+    }
+  }
+
+  // Diagonals down-right and down-left.
+  for (let r0 = 0; r0 < KEYBOARD_LAYOUT_ROWS.length; r0++) {
+    for (let c0 = 0; c0 < maxCol; c0++) {
+      let dr = "";
+      let dl = "";
+      for (
+        let r = r0, c = c0;
+        r < KEYBOARD_LAYOUT_ROWS.length && c < KEYBOARD_LAYOUT_ROWS[r]!.length;
+        r++, c++
+      ) {
+        dr += KEYBOARD_LAYOUT_ROWS[r]![c]!;
+      }
+      for (
+        let r = r0, c = c0;
+        r < KEYBOARD_LAYOUT_ROWS.length && c >= 0 && c < KEYBOARD_LAYOUT_ROWS[r]!.length;
+        r++, c--
+      ) {
+        dl += KEYBOARD_LAYOUT_ROWS[r]![c]!;
+      }
+      add(dr);
+      add(dl);
+    }
+  }
+
+  return [...walks];
+}
+
+const KEYBOARD_WALKS_CROCKFORD: readonly string[] = buildKeyboardWalks();
 
 function hasKeyboardRowRun(secret: string): boolean {
   const letterSkeleton = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
-  for (const row of KEYBOARD_ROWS_CROCKFORD) {
-    if (row.length < RECOVERY_PACK_MAX_KEYBOARD_RUN) continue;
-    for (let len = RECOVERY_PACK_MAX_KEYBOARD_RUN; len <= row.length; len++) {
-      for (let i = 0; i <= row.length - len; i++) {
-        const sub = row.slice(i, i + len);
+  for (const walk of KEYBOARD_WALKS_CROCKFORD) {
+    if (walk.length < RECOVERY_PACK_MAX_KEYBOARD_RUN) continue;
+    for (let len = RECOVERY_PACK_MAX_KEYBOARD_RUN; len <= walk.length; len++) {
+      for (let i = 0; i <= walk.length - len; i++) {
+        const sub = walk.slice(i, i + len);
         if (secret.includes(sub)) return true;
-        // Digit-broken keyboard rows: match on the letter-only skeleton too.
+        // Digit-broken keyboard walks: match on the letter-only skeleton too.
         if (/^[A-Z]+$/.test(sub) && letterSkeleton.includes(sub)) return true;
       }
     }
@@ -386,9 +526,9 @@ function hasKeyboardRowRun(secret: string): boolean {
 }
 
 /**
- * Common English / password-corpus tokens ≥5 letters, Crockford-legal only
- * (no I/L/O/U). Matched against the letter skeleton and a leet-folded skeleton
- * so digit-broken dictionary phrases ("C0RRECT…", "P1EASE…") still hit.
+ * Common English / media / password-corpus tokens ≥5 letters, Crockford-legal
+ * only (no I/L/O/U). Matched against the letter skeleton, leet-folded skeleton,
+ * and their reverses so digit-broken and reversed phrases still hit.
  */
 const DICTIONARY_TOKENS_MIN5: readonly string[] = [
   "CORRECT",
@@ -444,12 +584,66 @@ const DICTIONARY_TOKENS_MIN5: readonly string[] = [
   "OPERATOR",
   "APPLE",
   "LETMIN",
+  // Media / pangram / song / ticket mnemonics (Review B r3 residual class).
+  "QVICK",
+  "BROWN",
+  "JUMPS",
+  "STRANGER",
+  "STRANGE",
+  "THINGS",
+  "PLANET",
+  "HACKTHE",
+  "JACKDAW",
+  "FROZEN",
+  "HEISENBERG",
+  "BREAKING",
+  "YELLOW",
+  "MARINE",
+  "SVBMARINE",
+  "HEAVEN",
+  "STAIRWAY",
+  "BOHEMIAN",
+  "RHAPSODY",
+  "FOOBAR",
+  "BELIEVE",
+  "BELIEVIN",
+  "SHALL",
+  "ENTROPY",
+  "FLOOR",
+  "WORKAND",
+  "NOPLAY",
+  "LOREM",
+  "IPSVM",
+  "MORPH",
+  "ONCEVPON",
+  "VPONATIME",
+  "YODASHALL",
+  "DONTSTOP",
+  "HOWNOW",
+  "COWFARM",
 ];
 
 /**
- * Short custody / password tokens (exactly 4). A single hit is too common in
- * CSPRNG letter skeletons; ≥2 distinct hits marks a wordy constructed secret.
+ * Short custody / password tokens (exactly 4). Generic English shorts need
+ * ≥2 distinct hits (too common alone in CSPRNG letter skeletons). The custody
+ * shortlist below rejects on a single hit — operators paste NODE/PASS/CODE as
+ * the whole mnemonic core (Review B r3 MANP1N…NODE…).
  */
+const DICTIONARY_TOKENS_LEN4_CUSTODY: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "ROOT",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "KEYS",
+  "KEYX",
+  "PINX",
+];
 const DICTIONARY_TOKENS_LEN4: readonly string[] = [
   "CODE",
   "PASS",
@@ -495,6 +689,15 @@ const DICTIONARY_TOKENS_LEN4: readonly string[] = [
   "HEAD",
   "MIND",
   "SOUL",
+  "ONCE",
+  "VPON",
+  "YODA",
+  "DONT",
+  "STOP",
+  "HACK",
+  "JACK",
+  "FARM",
+  "KEYS",
 ];
 
 /** Leet fold used only for dictionary skeleton matching (1→I, 0→O, …). */
@@ -523,21 +726,74 @@ function letterSkeleton(secret: string, leet: boolean): string {
 }
 
 /**
- * True when the letter skeleton (raw or leet-folded) embeds a ≥5-letter
- * dictionary token, or ≥2 distinct 4-letter tokens. Catches digit-broken
+ * True when the letter skeleton (raw or leet-folded, forward or reversed)
+ * embeds a ≥5-letter dictionary token, a single custody 4-letter token, or
+ * ≥2 distinct generic 4-letter tokens. Catches digit-broken and reversed
  * dictionary phrases the letter-run threshold alone misses.
  */
 function hasDictionarySkeleton(secret: string): boolean {
-  for (const sk of [letterSkeleton(secret, false), letterSkeleton(secret, true)]) {
+  const bases = [letterSkeleton(secret, false), letterSkeleton(secret, true)];
+  const skeletons: string[] = [];
+  for (const sk of bases) {
+    skeletons.push(sk);
+    if (sk.length > 0) skeletons.push([...sk].reverse().join(""));
+  }
+  for (const sk of skeletons) {
     for (const token of DICTIONARY_TOKENS_MIN5) {
       if (sk.includes(token)) return true;
+      // Token reversed inside a forward skeleton (partial reverse phrase).
+      if (sk.includes([...token].reverse().join(""))) return true;
+    }
+    for (const token of DICTIONARY_TOKENS_LEN4_CUSTODY) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
+        return true;
+      }
     }
     let shortHits = 0;
     for (const token of DICTIONARY_TOKENS_LEN4) {
-      if (sk.includes(token)) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
         shortHits += 1;
         if (shortHits >= 2) return true;
       }
+    }
+  }
+  return false;
+}
+
+/**
+ * True when a run of ≥5 consecutive digits is a Fibonacci sequence
+ * (each digit = sum of the prior two, exact or mod 10). Catches 112358…
+ * offline-searchable prefixes the step-k alphabet walk misses.
+ */
+function hasFibonacciDigitRun(secret: string): boolean {
+  const isFib = (digits: readonly number[]): boolean => {
+    if (digits.length < 5) return false;
+    let exact = true;
+    let mod = true;
+    for (let i = 2; i < digits.length; i++) {
+      const sum = digits[i - 1]! + digits[i - 2]!;
+      if (digits[i] !== sum) exact = false;
+      if (digits[i] !== sum % 10) mod = false;
+      if (!exact && !mod) return false;
+    }
+    return exact || mod;
+  };
+  let run: number[] = [];
+  const flush = (): boolean => {
+    for (let s = 0; s < run.length; s++) {
+      for (let e = s + 5; e <= run.length; e++) {
+        if (isFib(run.slice(s, e))) return true;
+      }
+    }
+    run = [];
+    return false;
+  };
+  for (let i = 0; i <= secret.length; i++) {
+    const c = secret[i];
+    if (c !== undefined && c >= "0" && c <= "9") {
+      run.push(Number(c));
+    } else if (flush()) {
+      return true;
     }
   }
   return false;
@@ -550,9 +806,10 @@ function hasDictionarySkeleton(secret: string): boolean {
  * Creation accepts only the generateRecoverySecret() shape (ZTR-1220): the
  * charset×length proxy that previously cleared long patterned / dictionary
  * phrases is not an accept path. Structure guards cover near-period tiles,
- * same-symbol blocks, step-k monotone runs, long letter runs, class
- * alternation / pair sequences, keyboard rows, and digit-broken dictionary
- * skeletons — not only exact divisor tilings and ±1 sequences.
+ * same-symbol / paired-double blocks, step-k and strided monotone runs, long
+ * letter runs, class alternation / pair sequences, keyboard rows/columns/
+ * diagonals, and digit-broken + reversed dictionary skeletons — not only
+ * exact divisor tilings and ±1 sequences.
  */
 export function recoverySecretWeakness(secret: string): string | null {
   if (secret.length === 0) return "recovery secret is required";
@@ -575,6 +832,9 @@ export function recoverySecretWeakness(secret: string): string | null {
     return "recovery secret must not contain a long same-character run";
   }
   if (hasMonotoneAlphabetRun(secret)) {
+    return "recovery secret must not contain a long sequential run";
+  }
+  if (hasFibonacciDigitRun(secret)) {
     return "recovery secret must not contain a long sequential run";
   }
   if (hasLongLetterRun(secret)) {

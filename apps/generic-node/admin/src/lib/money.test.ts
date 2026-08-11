@@ -668,6 +668,9 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
 
   it("redraws rather than returning a fixed tiled mock draw", async () => {
     const { generateRecoveryPackSecret } = await import("./money.js");
+    const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    // Known-good CSPRNG-shaped secret (passes node recoverySecretWeakness).
+    const good = "9F3KQ2XW7HB4TMZ0RCJ8PNVA5D";
     const real = globalThis.crypto;
     let calls = 0;
     Object.defineProperty(globalThis, "crypto", {
@@ -676,12 +679,15 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
         getRandomValues: (arr: Uint8Array) => {
           calls += 1;
           // First draw: pure period-1 tiling (all '0') — structure guard must reject.
-          // Later draws: stepping values so the fold is well-spread.
+          // Later draws: emit a known-good alphabet index stream (tighter r4 floor
+          // rejects simple arithmetic mock streams the r2 test used).
           if (calls === 1) {
             arr.fill(0);
             return arr;
           }
-          for (let i = 0; i < arr.length; i++) arr[i] = (i * 7 + calls * 3) & 0xff;
+          for (let i = 0; i < arr.length; i++) {
+            arr[i] = alphabet.indexOf(good[i % good.length]!);
+          }
           return arr;
         },
       },
@@ -690,6 +696,7 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
       const s = generateRecoveryPackSecret();
       expect(s).toHaveLength(26);
       expect(s).not.toBe("0".repeat(26));
+      expect(s).toBe(good);
       expect(calls).toBeGreaterThan(1);
     } finally {
       Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
@@ -735,6 +742,30 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
       expect(recoveryPackSecretStructureOk(secret)).toBe(false);
     }
     // Known-good still passes the SPA mirror.
+    expect(recoveryPackSecretStructureOk("9F3KQ2XW7HB4TMZ0RCJ8PNVA5D")).toBe(true);
+  });
+
+  it("SPA structure floor rejects Review B r3 residual class (parity with node)", async () => {
+    const { recoveryPackSecretStructureOk } = await import("./money.js");
+    const residuals = [
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "TCERR0CESR0HYRETTABE1PATS2",
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
+      "5AFMS49EKRX8DJQW1CHPV05GNT",
+      "D0NTST0PBE1EV1N2024KEYABCX",
+      "0NCEVP0NAT1ME1N20241ANDXXX",
+      "MANP1NXG3TXKEYN0DE2024ABC2",
+      "112358DN2QSG9S2VXRND2FH0HH",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(recoveryPackSecretStructureOk(secret)).toBe(false);
+    }
     expect(recoveryPackSecretStructureOk("9F3KQ2XW7HB4TMZ0RCJ8PNVA5D")).toBe(true);
   });
 });

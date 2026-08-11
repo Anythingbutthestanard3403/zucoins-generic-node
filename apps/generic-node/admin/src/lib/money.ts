@@ -939,9 +939,11 @@ const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const RECOVERY_SECRET_CHARS = 26;
 /** Mirror of node RECOVERY_PACK_MIN_DISTINCT_CHARS — redraw if a draw lands under. */
 const RECOVERY_SECRET_MIN_DISTINCT = 10;
-/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B/r3). */
+/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B/r4). */
 const RECOVERY_SECRET_MAX_MONOTONE_RUN = 6;
+const RECOVERY_SECRET_MAX_SAME_DELTA_PAIRS = 10;
 const RECOVERY_SECRET_MAX_SAME_RUN = 4;
+const RECOVERY_SECRET_MAX_PAIRED_DOUBLES = 4;
 const RECOVERY_SECRET_MAX_LETTER_RUN = 14;
 const RECOVERY_SECRET_MAX_LAG_MATCH_RUN = 6;
 const RECOVERY_SECRET_MAX_LAG_MATCH_FRAC = 0.4;
@@ -949,21 +951,88 @@ const RECOVERY_SECRET_MAX_REPEATED_SUBSTRING = 4;
 const RECOVERY_SECRET_MAX_CLASS_ALTERNATION_RUN = 10;
 const RECOVERY_SECRET_MAX_CLASS_PAIR_RUN = 6;
 const RECOVERY_SECRET_MAX_KEYBOARD_RUN = 5;
+const RECOVERY_SECRET_MAX_STRIDED_MONOTONE_RUN = 6;
 /** Hard redraw ceiling — throw rather than emit a structure-failing secret. */
 const RECOVERY_SECRET_MAX_DRAW_ATTEMPTS = 64;
 
-const RECOVERY_SECRET_KEYBOARD_ROWS: readonly string[] = [
-  "0123456789",
-  "9876543210",
+const RECOVERY_SECRET_KEYBOARD_LAYOUT: readonly string[] = [
+  "1234567890",
   "QWERTYUIOP",
-  "POIUYTREWQ",
   "ASDFGHJKL",
-  "LKJHGFDSA",
   "ZXCVBNM",
-  "MNBVCXZ",
-  "QWERTYASDFGHZXCVBN",
-  "NBVCXZHGFDSAYTREWQ",
-].map((row) => [...row].filter((c) => RECOVERY_SECRET_ALPHABET.includes(c)).join(""));
+];
+
+function buildRecoverySecretKeyboardWalks(): readonly string[] {
+  const filterCrock = (s: string): string =>
+    [...s].filter((c) => RECOVERY_SECRET_ALPHABET.includes(c)).join("");
+  const walks = new Set<string>();
+  const add = (raw: string): void => {
+    const s = filterCrock(raw);
+    if (s.length >= RECOVERY_SECRET_MAX_KEYBOARD_RUN) {
+      walks.add(s);
+      walks.add([...s].reverse().join(""));
+    }
+  };
+  for (const row of RECOVERY_SECRET_KEYBOARD_LAYOUT) add(row);
+  add("QWERTYASDFGHZXCVBN");
+  add("0123456789");
+  const maxCol = Math.max(...RECOVERY_SECRET_KEYBOARD_LAYOUT.map((r) => r.length));
+  const columns: string[] = [];
+  for (let c = 0; c < maxCol; c++) {
+    let col = "";
+    for (const row of RECOVERY_SECRET_KEYBOARD_LAYOUT) {
+      if (c < row.length) col += row[c]!;
+    }
+    columns.push(col);
+    add(col);
+  }
+  const colVariants: readonly (readonly string[])[] = [
+    columns,
+    columns.map((col) => [...col].reverse().join("")),
+  ];
+  for (const cols of colVariants) {
+    for (let start = 0; start < cols.length; start++) {
+      let acc = "";
+      for (let end = start; end < cols.length; end++) {
+        acc += cols[end]!;
+        add(acc);
+      }
+      let racc = "";
+      for (let end = start; end >= 0; end--) {
+        racc += cols[end]!;
+        add(racc);
+      }
+    }
+  }
+  for (let r0 = 0; r0 < RECOVERY_SECRET_KEYBOARD_LAYOUT.length; r0++) {
+    for (let c0 = 0; c0 < maxCol; c0++) {
+      let dr = "";
+      let dl = "";
+      for (
+        let r = r0, c = c0;
+        r < RECOVERY_SECRET_KEYBOARD_LAYOUT.length &&
+        c < RECOVERY_SECRET_KEYBOARD_LAYOUT[r]!.length;
+        r++, c++
+      ) {
+        dr += RECOVERY_SECRET_KEYBOARD_LAYOUT[r]![c]!;
+      }
+      for (
+        let r = r0, c = c0;
+        r < RECOVERY_SECRET_KEYBOARD_LAYOUT.length &&
+        c >= 0 &&
+        c < RECOVERY_SECRET_KEYBOARD_LAYOUT[r]!.length;
+        r++, c--
+      ) {
+        dl += RECOVERY_SECRET_KEYBOARD_LAYOUT[r]![c]!;
+      }
+      add(dr);
+      add(dl);
+    }
+  }
+  return [...walks];
+}
+
+const RECOVERY_SECRET_KEYBOARD_WALKS: readonly string[] = buildRecoverySecretKeyboardWalks();
 
 const RECOVERY_SECRET_DICT_MIN5: readonly string[] = [
   "CORRECT",
@@ -1019,8 +1088,59 @@ const RECOVERY_SECRET_DICT_MIN5: readonly string[] = [
   "OPERATOR",
   "APPLE",
   "LETMIN",
+  "QVICK",
+  "BROWN",
+  "JUMPS",
+  "STRANGER",
+  "STRANGE",
+  "THINGS",
+  "PLANET",
+  "HACKTHE",
+  "JACKDAW",
+  "FROZEN",
+  "HEISENBERG",
+  "BREAKING",
+  "YELLOW",
+  "MARINE",
+  "SVBMARINE",
+  "HEAVEN",
+  "STAIRWAY",
+  "BOHEMIAN",
+  "RHAPSODY",
+  "FOOBAR",
+  "BELIEVE",
+  "BELIEVIN",
+  "SHALL",
+  "ENTROPY",
+  "FLOOR",
+  "WORKAND",
+  "NOPLAY",
+  "LOREM",
+  "IPSVM",
+  "MORPH",
+  "ONCEVPON",
+  "VPONATIME",
+  "YODASHALL",
+  "DONTSTOP",
+  "HOWNOW",
+  "COWFARM",
 ];
 
+const RECOVERY_SECRET_DICT_LEN4_CUSTODY: readonly string[] = [
+  "CODE",
+  "PASS",
+  "NODE",
+  "PACK",
+  "ROOT",
+  "LOCK",
+  "SAFE",
+  "OPEN",
+  "TEST",
+  "DEMO",
+  "KEYS",
+  "KEYX",
+  "PINX",
+];
 const RECOVERY_SECRET_DICT_LEN4: readonly string[] = [
   "CODE",
   "PASS",
@@ -1066,6 +1186,15 @@ const RECOVERY_SECRET_DICT_LEN4: readonly string[] = [
   "HEAD",
   "MIND",
   "SOUL",
+  "ONCE",
+  "VPON",
+  "YODA",
+  "DONT",
+  "STOP",
+  "HACK",
+  "JACK",
+  "FARM",
+  "KEYS",
 ];
 
 const RECOVERY_SECRET_LEET_FOLD: Readonly<Record<string, string>> = {
@@ -1123,7 +1252,7 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
     }
   }
 
-  // Same-symbol run + multi-triple blocks.
+  // Same-symbol run + multi-triple blocks + paired doubles.
   let sameRun = 1;
   let tripleBlocks = 0;
   let blockRun = 1;
@@ -1139,20 +1268,92 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
     }
   }
   if (tripleBlocks >= 2) return false;
+  let doubles = 0;
+  for (let i = 0; i < n - 1; ) {
+    if (secret[i] === secret[i + 1]) {
+      doubles += 1;
+      if (doubles >= RECOVERY_SECRET_MAX_PAIRED_DOUBLES) return false;
+      i += 2;
+    } else {
+      i += 1;
+    }
+  }
 
-  // Constant-step (any k ≠ 0) monotone run through the alphabet.
+  // Constant-step (any k ≠ 0) monotone + broken same-delta + strided monotone.
   let stepRun = 1;
   let prevDelta: number | null = null;
+  const deltaPairCounts = new Map<number, number>();
   for (let i = 1; i < n; i++) {
     const delta =
       RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!) -
       RECOVERY_SECRET_ALPHABET.indexOf(secret[i - 1]!);
+    if (delta !== 0) {
+      deltaPairCounts.set(delta, (deltaPairCounts.get(delta) ?? 0) + 1);
+    }
     if (delta !== 0 && delta === prevDelta) {
       stepRun += 1;
       if (stepRun >= RECOVERY_SECRET_MAX_MONOTONE_RUN) return false;
     } else {
       stepRun = 1;
       prevDelta = delta === 0 ? null : delta;
+    }
+  }
+  for (const count of deltaPairCounts.values()) {
+    if (count >= RECOVERY_SECRET_MAX_SAME_DELTA_PAIRS) return false;
+  }
+  for (let stride = 2; stride <= 4; stride++) {
+    for (let offset = 0; offset < stride; offset++) {
+      let strideRun = 1;
+      let stridePrev: number | null = null;
+      let prevIdx: number | null = null;
+      for (let i = offset; i < n; i += stride) {
+        const idx = RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!);
+        if (prevIdx !== null) {
+          const delta = idx - prevIdx;
+          if (delta !== 0 && delta === stridePrev) {
+            strideRun += 1;
+            if (strideRun >= RECOVERY_SECRET_MAX_STRIDED_MONOTONE_RUN) return false;
+          } else {
+            strideRun = 1;
+            stridePrev = delta === 0 ? null : delta;
+          }
+        }
+        prevIdx = idx;
+      }
+    }
+  }
+
+  // Fibonacci digit runs (112358…) — exact or mod-10 recurrence.
+  {
+    const isFib = (digits: readonly number[]): boolean => {
+      if (digits.length < 5) return false;
+      let exact = true;
+      let mod = true;
+      for (let i = 2; i < digits.length; i++) {
+        const sum = digits[i - 1]! + digits[i - 2]!;
+        if (digits[i] !== sum) exact = false;
+        if (digits[i] !== sum % 10) mod = false;
+        if (!exact && !mod) return false;
+      }
+      return exact || mod;
+    };
+    let run: number[] = [];
+    const flush = (): boolean => {
+      for (let s = 0; s < run.length; s++) {
+        for (let e = s + 5; e <= run.length; e++) {
+          if (isFib(run.slice(s, e))) return true;
+        }
+      }
+      run = [];
+      return false;
+    };
+    for (let i = 0; i <= n; i++) {
+      const c = secret[i];
+      if (c !== undefined && c >= "0" && c <= "9") {
+        run.push(Number(c));
+      } else if (flush()) {
+        return false;
+      }
     }
   }
 
@@ -1205,21 +1406,21 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
     }
   }
 
-  // Keyboard-row substrings (raw + letter skeleton).
+  // Keyboard row/column/diagonal walks (raw + letter skeleton).
   const letterSk = [...secret].filter((c) => c >= "A" && c <= "Z").join("");
-  for (const row of RECOVERY_SECRET_KEYBOARD_ROWS) {
-    if (row.length < RECOVERY_SECRET_MAX_KEYBOARD_RUN) continue;
-    for (let len = RECOVERY_SECRET_MAX_KEYBOARD_RUN; len <= row.length; len++) {
-      for (let i = 0; i <= row.length - len; i++) {
-        const sub = row.slice(i, i + len);
+  for (const walk of RECOVERY_SECRET_KEYBOARD_WALKS) {
+    if (walk.length < RECOVERY_SECRET_MAX_KEYBOARD_RUN) continue;
+    for (let len = RECOVERY_SECRET_MAX_KEYBOARD_RUN; len <= walk.length; len++) {
+      for (let i = 0; i <= walk.length - len; i++) {
+        const sub = walk.slice(i, i + len);
         if (secret.includes(sub)) return false;
         if (/^[A-Z]+$/.test(sub) && letterSk.includes(sub)) return false;
       }
     }
   }
 
-  // Dictionary / digit-broken passphrase skeleton (leet fold + multi short tokens).
-  const skeletons: string[] = [letterSk];
+  // Dictionary / digit-broken / reversed passphrase skeleton.
+  const bases: string[] = [letterSk];
   let leetSk = "";
   for (const c of secret) {
     if (c >= "A" && c <= "Z") leetSk += c;
@@ -1228,14 +1429,25 @@ export function recoveryPackSecretStructureOk(secret: string): boolean {
       if (folded !== undefined) leetSk += folded;
     }
   }
-  skeletons.push(leetSk);
+  bases.push(leetSk);
+  const skeletons: string[] = [];
+  for (const sk of bases) {
+    skeletons.push(sk);
+    if (sk.length > 0) skeletons.push([...sk].reverse().join(""));
+  }
   for (const sk of skeletons) {
     for (const token of RECOVERY_SECRET_DICT_MIN5) {
       if (sk.includes(token)) return false;
+      if (sk.includes([...token].reverse().join(""))) return false;
+    }
+    for (const token of RECOVERY_SECRET_DICT_LEN4_CUSTODY) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
+        return false;
+      }
     }
     let shortHits = 0;
     for (const token of RECOVERY_SECRET_DICT_LEN4) {
-      if (sk.includes(token)) {
+      if (sk.includes(token) || sk.includes([...token].reverse().join(""))) {
         shortHits += 1;
         if (shortHits >= 2) return false;
       }

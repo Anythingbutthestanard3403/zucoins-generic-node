@@ -188,6 +188,65 @@ describe("recovery secret entropy floor", () => {
     }
   });
 
+  it("refuses Review B r3 residual keyboard-column / media / reverse-dict / broken-step class", () => {
+    // Opposed bar from tasks/ztr-1220-review-B-r3.md — class still open at r3 tip.
+    const residualWant =
+      /dictionary|keyboard-row|alternation|pair sequence|letter-only run|repeated substring|sequential run|same-character/;
+    const residuals = [
+      // Keyboard columns (vertical 1QAZ/2WSX/…) and reverse stitches.
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "1QAZ2WSX3EDC4RFV5TGB6YHN7V",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "P0MJV7NHY6BGT5VFR4CDE3XSW2",
+      // Off-list English / media / song mnemonics (Crockford-mapped).
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "QV1CKBR0WNF0XJVMPS0VER2024",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "BR4K1NGB4DHE1SENBERG2024XX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "JACKD4WSAXEMYFR0ZENV0WABXX",
+      "H0WZVBR0WNDC0WF4RMSXYZ01XX",
+      "A11W0RKANDN0P1AY2024ABCDXX",
+      "0NCEVP0NAT1ME1N20241ANDXXX",
+      "Y0DASH411N0TP4SS2024KEYXXX",
+      "F00BARBAZQVXM0RPH2024KEYXX",
+      "D0NTST0PBE1EV1N2024KEYABCX",
+      "YE110WSVBMAR1NE2024KEYABCX",
+      "STA1RW4YT0HE4VEN2024KEYXXX",
+      "B0HEM1ANRHAPS0DY2024KEYXXX",
+      "10REM1PSVMT0RPH2024KEYABCD",
+      // Reversed dictionary skeleton (CORRECT HORSE BATTERY STAPLE).
+      "TCERR0CESR0HYRETTABE1PATS2",
+      // Ticket / structured-id mnemonic.
+      "ZTR1220ENTR0PYF100R2024AB2",
+      // Broken step-k / high-structure walks.
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "5AFMS49EKRX8DJQW1CHPV05GNT",
+      // Paired doubles + digit noise.
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
+      // Wordy single-LEN4 + media pad.
+      "MANP1NXG3TXKEYN0DE2024ABC2",
+      // Fibonacci digit-prefix walk.
+      "112358DN2QSG9S2VXRND2FH0HH",
+    ];
+    for (const secret of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      const weakness = recoverySecretWeakness(secret);
+      expect(weakness, `accepted residual: ${secret}`).toBeTypeOf("string");
+      expect(weakness).toMatch(residualWant);
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`r3 residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
   it("accepts the generated secret", () => {
     expect(recoverySecretWeakness(SECRET)).toBeNull();
     for (let i = 0; i < 25; i++) {
@@ -256,6 +315,15 @@ describe("entropy floor is enforced at creation", () => {
       "0A1B2C3D4E5F6G7H8J9KMNPRST",
       "A1B2C3D4E5F6G7H8J9K0M1N2P3",
       "MANC0DE7P1NGETP1NPASS4N0DE",
+      // Review B r3 residual class (columns / media / reverse-dict / broken-step).
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "TCERR0CESR0HYRETTABE1PATS2",
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
     ];
     for (const secret of falseAccepts) {
       expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(

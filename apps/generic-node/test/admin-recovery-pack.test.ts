@@ -402,6 +402,15 @@ describe("admin recovery-pack create", () => {
       "0A1B2C3D4E5F6G7H8J9KMNPRST",
       "A1B2C3D4E5F6G7H8J9K0M1N2P3",
       "MANC0DE7P1NGETP1NPASS4N0DE",
+      // Review B r3 residual: columns / media / reverse-dict / broken-step.
+      "1QAZ2WSX3EDC4RFV5TGB6YHN0P",
+      "ZAQ1XSW2CDE3VFR4BGT5NHY6MJ",
+      "THEQV1CKBR0WNFXJVMPS2024AX",
+      "STR4NGERTH1NGS2024KEYABCXX",
+      "HACKTHEP1ANET2024KEYM0RPHX",
+      "TCERR0CESR0HYRETTABE1PATS2",
+      "BP1CQ2DR3ES4FT5GV6HW7JX8KY",
+      "AA1BB2CC3DD4EE5FF6GG7HH8JJ",
     ];
     for (let i = 0; i < residuals.length; i++) {
       const resR = await router(

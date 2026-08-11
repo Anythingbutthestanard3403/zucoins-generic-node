@@ -47,6 +47,11 @@ export const FIXTURE_IDS = {
 export const SEND_PARTIAL_STEP_1_PREIMAGE =
   '{"type":"unique_combinable","version":"2","unix_time_secs":"1784332800.125","signer_steps":2,"step_1_signer":"sender","step_2_signer":"receiver","step_1_key_public__base64urlsafe":"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=","step_2_key_public__base64urlsafe":"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=","step_1_state":{"amount":"7.75"},"step_2_state":{"amount":"2.25"},"previous_step_1_state_signature":"","previous_step_2_state_signature":"","expiry__unix_time_secs":"1784336400","message":"zp1:33333333-3333-4333-8333-333333333333:ord_7YQ3"}' as const;
 
+// Exact A.8.0 step-2 preimage string (JSON.stringify({inner, step_1_signature})).
+// Asserted as a full string — never regenerated via parse→stringify in tests (A.8.0 / ZTR-1174).
+export const SEND_PARTIAL_STEP_2_PREIMAGE =
+  '{"inner":{"type":"unique_combinable","version":"2","unix_time_secs":"1784332800.125","signer_steps":2,"step_1_signer":"sender","step_2_signer":"receiver","step_1_key_public__base64urlsafe":"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=","step_2_key_public__base64urlsafe":"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=","step_1_state":{"amount":"7.75"},"step_2_state":{"amount":"2.25"},"previous_step_1_state_signature":"","previous_step_2_state_signature":"","expiry__unix_time_secs":"1784336400","message":"zp1:33333333-3333-4333-8333-333333333333:ord_7YQ3"},"step_1_signature":"Rq6Oyn7HEISIb1t3dRuSv-czb33rsWAUmiZe2YmBTK813iHOfNXGF8fIzenv_UENGqUzKJl6f1iTpeAMfnHeAA=="}' as const;
+
 export const SEND_PARTIAL_DIGESTS = {
   step_1_sha256: "f0e12e993cc4d6b452162cd49b2699b9f912d7a2bf3d8ddd418e3a29c6bbf0b7",
   step_1_signature: "Rq6Oyn7HEISIb1t3dRuSv-czb33rsWAUmiZe2YmBTK813iHOfNXGF8fIzenv_UENGqUzKJl6f1iTpeAMfnHeAA==",
@@ -54,6 +59,20 @@ export const SEND_PARTIAL_DIGESTS = {
   step_2_signature: "glzeHcjv9PxEj-oLH-HDKZb5elh1XSb1e5NpPBw7WFcGD-EcBy10bsRX9V6i4JI9G7qO7JtE-ZHXZH4RPUYpDQ==",
   full_tx_sha256: "942d83e5cd973ae50db0496d2e2836411db902ec855490d570dd423baf410d47",
   transfer_code_sha256: "4b3e384d7c1774a450fdf9f74d338d1c6802a1057b2fd49e23c78244912c18f4",
+} as const;
+
+// --- A.8.3 SEND_EXTERNAL redemption golden (ZTR-149 / GN-016.3 / ZTR-1174) ---
+// Byte-for-byte A.8.0 inner except expiry__unix_time_secs = "1784333100"
+// (= floor(formation) 1784332800 + SEND_REDEMPTION_WINDOW_SECS 300). Tier-3 raw bytes also
+// live under goldens/send-redemption/ (no trailing newline); digest pinned below.
+export const SEND_REDEMPTION_STEP_1_PREIMAGE =
+  '{"type":"unique_combinable","version":"2","unix_time_secs":"1784332800.125","signer_steps":2,"step_1_signer":"sender","step_2_signer":"receiver","step_1_key_public__base64urlsafe":"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=","step_2_key_public__base64urlsafe":"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=","step_1_state":{"amount":"7.75"},"step_2_state":{"amount":"2.25"},"previous_step_1_state_signature":"","previous_step_2_state_signature":"","expiry__unix_time_secs":"1784333100","message":"zp1:33333333-3333-4333-8333-333333333333:ord_7YQ3"}' as const;
+
+export const SEND_REDEMPTION_DIGESTS = {
+  step_1_sha256: "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d",
+  step_1_signature: "KKyZRQpHR7Xt3QhUXe0eki2iJC9sGYJ13tDzMN5lpQXA3ets0_7PPHZgOmbxDq2R9Hd7TPN_8Su-QVkuLcFyBA==",
+  /** SHA-256 of the on-disk golden file bytes (must equal step_1_sha256 — file carries the preimage only). */
+  preimage_file_sha256: "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d",
 } as const;
 
 // --- A.8.1 SplitChain RECEIVE golden (predecessor transaction) ---

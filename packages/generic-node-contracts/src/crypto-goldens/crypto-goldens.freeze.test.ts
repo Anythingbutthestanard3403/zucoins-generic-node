@@ -10,6 +10,8 @@
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
+import { readGoldenText, sha256OfGolden } from "../testkit/byteGolden.ts";
+
 import {
   COMPAT_LITERALS,
   EVENT_HASH_CHAIN,
@@ -19,6 +21,9 @@ import {
   SEED_PUBLIC_KEYS,
   SEND_PARTIAL_DIGESTS,
   SEND_PARTIAL_STEP_1_PREIMAGE,
+  SEND_PARTIAL_STEP_2_PREIMAGE,
+  SEND_REDEMPTION_DIGESTS,
+  SEND_REDEMPTION_STEP_1_PREIMAGE,
   SUITE_GOLDEN_OUTPUTS,
   SUITE_GOLDEN_PREIMAGES,
   TARGET_DIGESTS,
@@ -100,10 +105,16 @@ describe("the crypto-goldens freeze A.8.0 SEND transfer-code golden inner (the r
   });
 
   it("reproduces the step-2 preimage, digest, and signature", () => {
-    const inner = JSON.parse(SEND_PARTIAL_STEP_1_PREIMAGE) as Record<string, unknown>;
-    const step2Preimage = JSON.stringify({ inner, step_1_signature: SEND_PARTIAL_DIGESTS.step_1_signature });
-    expect(sha256Hex(step2Preimage)).toBe(SEND_PARTIAL_DIGESTS.step_2_sha256);
-    expect(edSign(step2Preimage, receiverKey)).toBe(SEND_PARTIAL_DIGESTS.step_2_signature);
+    // Full-string pin (A.8.0): never parse→stringify the expected bytes inside the golden test.
+    expect(SEND_PARTIAL_STEP_2_PREIMAGE).toBe(
+      '{"inner":' +
+        SEND_PARTIAL_STEP_1_PREIMAGE +
+        ',"step_1_signature":"' +
+        SEND_PARTIAL_DIGESTS.step_1_signature +
+        '"}',
+    );
+    expect(sha256Hex(SEND_PARTIAL_STEP_2_PREIMAGE)).toBe(SEND_PARTIAL_DIGESTS.step_2_sha256);
+    expect(edSign(SEND_PARTIAL_STEP_2_PREIMAGE, receiverKey)).toBe(SEND_PARTIAL_DIGESTS.step_2_signature);
   });
 
   it("reproduces the full-tx settled digest", () => {
@@ -118,6 +129,44 @@ describe("the crypto-goldens freeze A.8.0 SEND transfer-code golden inner (the r
 
   it("reproduces the transfer-code digest from the exact string", () => {
     expect(sha256Hex(FIXTURE_IDS.transfer_code)).toBe(SEND_PARTIAL_DIGESTS.transfer_code_sha256);
+  });
+});
+
+// --- A.8.3 SEND_EXTERNAL redemption golden (D9.14 expiry) ---
+describe("the crypto-goldens freeze A.8.3 SEND_EXTERNAL redemption golden", () => {
+  it("pins the A.8.3 step-1 digest and signature from the exact preimage bytes", () => {
+    expect(sha256Hex(SEND_REDEMPTION_STEP_1_PREIMAGE)).toBe(SEND_REDEMPTION_DIGESTS.step_1_sha256);
+    expect(edSign(SEND_REDEMPTION_STEP_1_PREIMAGE, senderKey)).toBe(SEND_REDEMPTION_DIGESTS.step_1_signature);
+    expect(edVerify(SEND_REDEMPTION_STEP_1_PREIMAGE, SEND_REDEMPTION_DIGESTS.step_1_signature, senderKey)).toBe(true);
+  });
+
+  it("matches the tier-3 on-disk golden bytes (no trailing newline) and pinned file digest", () => {
+    const disk = readGoldenText("send-redemption/a83-send-external-redemption.step1.preimage.txt");
+    expect(disk).toBe(SEND_REDEMPTION_STEP_1_PREIMAGE);
+    expect(disk.endsWith("\n")).toBe(false);
+    expect(sha256OfGolden("send-redemption/a83-send-external-redemption.step1.preimage.txt")).toBe(
+      SEND_REDEMPTION_DIGESTS.preimage_file_sha256,
+    );
+    expect(readGoldenText("send-redemption/a83-send-external-redemption.step1.sig.b64")).toBe(
+      SEND_REDEMPTION_DIGESTS.step_1_signature,
+    );
+  });
+
+  it("differs from A.8.0 only in expiry__unix_time_secs (redemption window 300s)", () => {
+    expect(SEND_REDEMPTION_STEP_1_PREIMAGE).toContain('"expiry__unix_time_secs":"1784333100"');
+    expect(SEND_PARTIAL_STEP_1_PREIMAGE).toContain('"expiry__unix_time_secs":"1784336400"');
+    expect(SEND_REDEMPTION_DIGESTS.step_1_sha256).not.toBe(SEND_PARTIAL_DIGESTS.step_1_sha256);
+    expect(SEND_REDEMPTION_DIGESTS.step_1_sha256).toMatch(/^46ba7528/);
+    expect(SEND_REDEMPTION_DIGESTS.step_1_signature).toMatch(/^KKyZRQ/);
+  });
+});
+
+describe("the crypto-goldens freeze A.8.0 step-2 full-string disk pin", () => {
+  it("on-disk step-2 preimage equals the frozen full string and pinned digest", () => {
+    const disk = readGoldenText("split-chain/a80-send-partial.step2.preimage.txt");
+    expect(disk).toBe(SEND_PARTIAL_STEP_2_PREIMAGE);
+    expect(disk.endsWith("\n")).toBe(false);
+    expect(sha256Hex(disk)).toBe(SEND_PARTIAL_DIGESTS.step_2_sha256);
   });
 });
 

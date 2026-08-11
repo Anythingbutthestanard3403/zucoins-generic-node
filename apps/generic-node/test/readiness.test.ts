@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { NodeReadiness } from "../src/boot/readiness.js";
+import {
+  CachedRestoreHoldProbe,
+  NodeReadiness,
+  stampRestoreHoldFromDb,
+} from "../src/boot/readiness.js";
 
 describe("NodeReadiness — readiness gating (schema ∧ vault ∧ observation)", () => {
   it("starts fully not-ready and opens when gating stamps pass (leadership + EVENT_SIGNING optional)", () => {
@@ -33,6 +37,7 @@ describe("NodeReadiness — readiness gating (schema ∧ vault ∧ observation)"
       leadership: true,
       gateway: true,
       eventSigner: true,
+      restoreHoldClear: true,
     });
   });
 
@@ -175,5 +180,67 @@ describe("NodeReadiness — shutdown", () => {
     expect(snapshot.ready).toBe(false);
     expect(snapshot.stopping).toBe(true);
     expect(snapshot.degraded).toBe(false);
+  });
+});
+
+
+describe("CachedRestoreHoldProbe — live dual-gate release restamp (ZTR-1172)", () => {
+  it("restamps clear after durable restore_hold flips false without process restart", async () => {
+    const readiness = new NodeReadiness(3);
+    readiness.markSchemaChecksPassed();
+    readiness.setVaultAvailable(true);
+    readiness.recordGatewayReadSuccess();
+
+    let held = true;
+    const db = {
+      query: async () => ({
+        rows: held ? [{ restore_hold: true }] : [{ restore_hold: false }],
+      }),
+    };
+    const probe = new CachedRestoreHoldProbe(readiness, db, "11111111-1111-1111-1111-111111111111", 0);
+
+    const first = await probe.refresh();
+    expect(first.restoreHoldClear).toBe(false);
+    expect(readiness.snapshot().ready).toBe(false);
+    expect(readiness.snapshot().checks.restoreHoldClear).toBe(false);
+
+    held = false;
+    probe.invalidate();
+    const second = await probe.refresh();
+    expect(second.restoreHoldClear).toBe(true);
+    expect(readiness.snapshot().checks.restoreHoldClear).toBe(true);
+    expect(readiness.snapshot().ready).toBe(true);
+  });
+
+  it("fail-closes the conjunct on unexpected query errors", async () => {
+    const readiness = new NodeReadiness(3);
+    readiness.markSchemaChecksPassed();
+    readiness.setVaultAvailable(true);
+    readiness.recordGatewayReadSuccess();
+    readiness.setRestoreHoldClear(true);
+    expect(readiness.snapshot().ready).toBe(true);
+
+    const db = {
+      query: async () => {
+        throw Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+      },
+    };
+    const probe = new CachedRestoreHoldProbe(readiness, db, "11111111-1111-1111-1111-111111111111", 0);
+    const result = await probe.refresh();
+    expect(result.restoreHoldClear).toBe(false);
+    expect(readiness.snapshot().checks.restoreHoldClear).toBe(false);
+    expect(readiness.snapshot().ready).toBe(false);
+  });
+
+  it("stampRestoreHoldFromDb treats missing table as greenfield clear", async () => {
+    const readiness = new NodeReadiness(3);
+    const db = {
+      query: async () => {
+        throw Object.assign(new Error("undefined_table"), { code: "42P01" });
+      },
+    };
+    const stamp = await stampRestoreHoldFromDb(readiness, db, "11111111-1111-1111-1111-111111111111");
+    expect(stamp).toEqual({ restoreHoldClear: true, rowPresent: false });
+    expect(readiness.snapshot().checks.restoreHoldClear).toBe(true);
   });
 });

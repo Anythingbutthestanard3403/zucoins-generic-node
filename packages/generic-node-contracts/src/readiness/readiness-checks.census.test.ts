@@ -7,6 +7,7 @@ import {
   NON_GATING_CHECK_IDS,
   READINESS_LEADERSHIP_SEPARATION,
   RECONCILIATION,
+  RESTORE_HOLD_READINESS,
 } from "./readiness-checks.contract.ts";
 import { verifyReadinessCheckRegistry } from "./verifiers.ts";
 
@@ -31,6 +32,7 @@ describe("readiness-check registry is frozen and unambiguous (the readiness conc
       "database_reachable",
       "vault_available",
       "observation_read_capable",
+      "restore_hold_clear",
     ]);
     assertClosedSet(NON_GATING_CHECK_IDS, ["signer_leadership"]);
     const leadership = READINESS_CHECKS.find((check) => check.id === "signer_leadership");
@@ -52,6 +54,15 @@ describe("readiness-check registry is frozen and unambiguous (the readiness conc
   it("records the draft clauses the readiness-leadership decoupling rule supersedes", () => {
     expect(RECONCILIATION.canonical).toBe("startup-sequence");
     expect(RECONCILIATION.supersedes_draft_clauses.length).toBe(3);
+  });
+
+  it("records the ZTR-1172 restore_hold readiness decision as machine-readable data", () => {
+    expect(RESTORE_HOLD_READINESS.restore_hold_gates_readiness).toBe(true);
+    expect(RESTORE_HOLD_READINESS.check_id).toBe("restore_hold_clear");
+    expect(GATING_CHECK_IDS).toContain("restore_hold_clear");
+    const check = READINESS_CHECKS.find((c) => c.id === "restore_hold_clear");
+    expect(check?.gating).toBe(true);
+    expect(check?.stampingAuthority).toBe("RESTORE_HOLD_PROBE");
   });
 
   it("rejects a check with no stamping authority (negative path)", () => {

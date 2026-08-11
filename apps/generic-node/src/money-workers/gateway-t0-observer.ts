@@ -63,6 +63,8 @@ export interface GatewayT0ObserverDeps {
    * on every outcome. Absent → bare readGatewayAction (unit tests).
    */
   readonly readGatewayAction?: typeof readGatewayAction;
+  /** ZTR-1172 §7.7 boot seed priors for first post-restart consecutive-dedup. */
+  readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
 }
 
 function genesisProjection(): WalletStateProjection {
@@ -103,6 +105,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
       "createGatewayT0Observer requires at least one gateway URL (no silent genesis stub)",
     );
   }
+  const bootPriors = deps.bootPriorRawByStreamKey;
 
   return {
     async observe(walletPublicKey: string): Promise<ReceiveT0Observation> {
@@ -125,6 +128,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
                 await persistSqlObservation({
                   pool: deps.pool,
                   nodeId: deps.nodeId,
+                  ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
                   walletPublicKey,
                   moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
                   endpointFingerprint: observation.endpointFingerprint,
@@ -175,6 +179,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
         await persistSqlObservation({
           pool: deps.pool,
           nodeId: deps.nodeId,
+                  ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
           walletPublicKey,
           moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
           endpointFingerprint,
@@ -250,6 +255,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
           await persistSqlObservation({
             pool: deps.pool,
             nodeId: deps.nodeId,
+                  ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
             walletPublicKey,
             moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
             endpointFingerprint,
@@ -290,6 +296,7 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
         const persisted = await persistSqlObservation({
           pool: deps.pool,
           nodeId: deps.nodeId,
+                  ...(bootPriors !== undefined ? { bootPriorRawByStreamKey: bootPriors } : {}),
           walletPublicKey,
           moneyPathStatementTimeoutMs: deps.moneyPathStatementTimeoutMs,
           endpointFingerprint,

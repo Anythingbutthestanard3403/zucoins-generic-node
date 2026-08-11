@@ -4,6 +4,10 @@
 // Call sites: restore-hold force + dual-gate restore path. Hold semantics stay
 // injected; this module owns client lifecycle and the common
 // "table exists → resolve IDs → apply per node" skeleton.
+//
+// ZTR-1172: an absent hold table is a restore FAILURE, never a silent pass.
+// Destroy/restore drills and production restores both require the reporting
+// schema; a green force with applied:false previously hid missing DDL.
 
 import type { Client, QueryResult, QueryResultRow } from "pg";
 
@@ -42,6 +46,8 @@ export const DISCOVER_RESTORE_NODE_IDS_SQL = `
 
 export interface FailClosedPerNodeHoldInput {
   readonly tableExistsSql: string;
+  /** Human-readable table name for the absent-schema error. */
+  readonly requiredTableName: string;
   readonly explicitNodeId?: string;
   readonly discoverNodeIdsSql: string;
   readonly applyPerNode: (client: HoldDbClient, nodeId: string) => Promise<void>;
@@ -52,10 +58,23 @@ export interface FailClosedPerNodeHoldResult {
   readonly nodeIds: readonly string[];
 }
 
+export class ReportingSchemaAbsentError extends Error {
+  readonly tableName: string;
+
+  constructor(tableName: string) {
+    super(
+      `reporting schema absent: required table ${tableName} is missing; refuse hold force (ZTR-1172)`,
+    );
+    this.name = "ReportingSchemaAbsentError";
+    this.tableName = tableName;
+  }
+}
+
 /**
- * If the hold table is absent → no-op (`applied: false`).
+ * If the hold table is absent → throw {@link ReportingSchemaAbsentError}.
  * If present → resolve explicit or discovered/deduped node IDs, apply per node.
  * Any error while the table exists propagates (fail-closed).
+ * Empty discovery after a present table returns applied:false (no nodes to hold).
  */
 export async function runFailClosedPerNodeHold(
   client: HoldDbClient,
@@ -63,7 +82,7 @@ export async function runFailClosedPerNodeHold(
 ): Promise<FailClosedPerNodeHoldResult> {
   const exists = await client.query(input.tableExistsSql);
   if (exists.rowCount === 0) {
-    return { applied: false, nodeIds: [] };
+    throw new ReportingSchemaAbsentError(input.requiredTableName);
   }
 
   const nodeIds: string[] = [];

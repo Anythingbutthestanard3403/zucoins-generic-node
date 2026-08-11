@@ -236,6 +236,12 @@ export interface PersistSqlObservationInput {
     ObservationRowProjection,
     "endpointFingerprint" | "walletId" | "httpStatus" | "observedAt"
   >;
+  /**
+   * ZTR-1172 §7.7 boot seed map (observerId:walletPublicKey → prior raw bytes).
+   * Threaded into createSqlStreamWriterEffects so first post-restart loadPrior
+   * consumes boot-hydrated exact bytes.
+   */
+  readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
 }
 
 export interface PersistSqlObservationResult {
@@ -281,6 +287,9 @@ export async function persistSqlObservation(
         allocatedObservationId = randomUUID();
         return allocatedObservationId;
       },
+      ...(input.bootPriorRawByStreamKey !== undefined
+        ? { bootPriorRawByStreamKey: input.bootPriorRawByStreamKey }
+        : {}),
       onAnomalyRequired: async (args) => {
         // Evidence first: anomaly row must land even if the action layer cannot mutate.
         await recordAnomaly(args);

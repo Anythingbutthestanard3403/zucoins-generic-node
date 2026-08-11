@@ -35,6 +35,7 @@ function baseState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessStat
     vaultKeyRingLoaded: true,
     vaultCensusVerified: true,
     observationReadCapable: true,
+    restoreHoldClear: true,
     leadershipLockHeld: true,
     eventSignerAvailable: true,
     halted: false,
@@ -82,13 +83,23 @@ describe("liveness — zero dependency", () => {
 });
 
 describe("readiness gating", () => {
-  it("gates on the four frozen checks only", () => {
+  it("gates on the five frozen checks (incl. restore_hold_clear / ZTR-1172)", () => {
     expect([...GATING_READINESS_CHECK_IDS]).toEqual([
       "schema_migrated",
       "database_reachable",
       "vault_available",
       "observation_read_capable",
+      "restore_hold_clear",
     ]);
+  });
+
+  it("returns 503 when restore_hold is held", () => {
+    const verdict = evaluateReadinessFromProbes(
+      baseState({ restoreHoldClear: false }),
+      true,
+    );
+    expect(verdict.ready).toBe(false);
+    expect(verdict.failing).toContain("restore_hold_clear");
   });
 
   it("returns ready when every gating check passes (leadership optional)", () => {
@@ -111,6 +122,7 @@ describe("readiness gating", () => {
       { schemaMigrated: false },
       { vaultKeyRingLoaded: false },
       { observationReadCapable: false },
+      { restoreHoldClear: false },
     ] as const) {
       const verdict = evaluateReadinessFromProbes(baseState(override), true);
       expect(verdict.ready).toBe(false);

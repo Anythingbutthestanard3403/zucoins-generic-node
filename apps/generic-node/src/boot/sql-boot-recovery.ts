@@ -298,9 +298,20 @@ function createSqlBootRecoveryStore(
   };
 }
 
+export interface BootRecoverySeedState {
+  /** streamKey → prior raw bytes (null = empty prior / fail-closed). */
+  readonly reconcileCursorPriors: ReadonlyMap<string, Uint8Array | null>;
+  /** CREATED receive operation ids observed at boot rebuild. */
+  readonly receiveAdmissionQueue: readonly string[];
+}
+
 function createSqlBootRecoveryActions(
   pool: Pool,
   logger: { info(message: string): void; error(message: string, err?: unknown): void },
+  seedState: {
+    reconcileCursorPriors: Map<string, Uint8Array | null>;
+    receiveAdmissionQueue: string[];
+  },
 ): BootRecoveryActions {
   return {
     async quarantineWallet(walletId: string, reason: string): Promise<void> {
@@ -364,18 +375,28 @@ function createSqlBootRecoveryActions(
     },
 
     async seedReconcileCursor(streamKey: string, priorRawBytes: Uint8Array | null): Promise<void> {
-      // The observation cursor is seeded by the stream writer on first read.
-      // Boot recovery seeds it from the last recorded raw bytes to enable the
-      // consecutive-dedup comparison. For now, this is a no-op — the
-      // stream writer handles cursor initialization on the first post-restart read.
-      logger.info(`boot-recovery: seed cursor stream=${streamKey} bytes=${priorRawBytes ? priorRawBytes.length : 0}`);
+      // ZTR-1172 / doc 09 §7.7: hydrate process-local prior raw bytes so the first
+      // post-restart consecutive-dedup comparison does not rest on an unproven
+      // "stream writer will load it" assumption. Durable truth remains
+      // wallet_observation_cursors + gateway_observations; this seed is the
+      // boot-time handoff of exact bytes already proven loadable.
+      if (priorRawBytes === null) {
+        seedState.reconcileCursorPriors.set(streamKey, null);
+      } else {
+        seedState.reconcileCursorPriors.set(streamKey, new Uint8Array(priorRawBytes));
+      }
+      logger.info(
+        `boot-recovery: seed cursor stream=${streamKey} bytes=${priorRawBytes ? priorRawBytes.length : 0}`,
+      );
     },
 
     async rebuildReceiveAdmissionQueue(operationIds: readonly string[]): Promise<void> {
-      // The receive admission queue is derived from durable state (operations WHERE
-      // kind='RECEIVE_EXTERNAL' AND status='CREATED'). The queue promoter re-reads
-      // durable state each tick, so no explicit rebuild is needed — the next tick
-      // picks up the queued operations automatically.
+      // ZTR-1172 / doc 09 §7.7: materialise the boot-time CREATED receive set into
+      // a process-local queue snapshot. Workers still re-derive from durable
+      // state each tick; the snapshot proves boot saw the same set and is the
+      // first-tick handoff for admission depth.
+      seedState.receiveAdmissionQueue.length = 0;
+      seedState.receiveAdmissionQueue.push(...operationIds);
       logger.info(`boot-recovery: rebuild queue count=${operationIds.length}`);
     },
 
@@ -392,9 +413,25 @@ export function createSqlBootRecovery(
   pool: Pool,
   logger: { info(message: string): void; error(message: string, err?: unknown): void },
   vault: EncryptedWalletKeyStore,
-): { store: BootRecoveryStore; actions: BootRecoveryActions } {
+): {
+  store: BootRecoveryStore;
+  actions: BootRecoveryActions;
+  /** Process-local boot seeds — inspectable by tests and first-tick handoff. */
+  seeds: BootRecoverySeedState;
+} {
+  const reconcileCursorPriors = new Map<string, Uint8Array | null>();
+  const receiveAdmissionQueue: string[] = [];
+  const seedState = { reconcileCursorPriors, receiveAdmissionQueue };
   return {
     store: createSqlBootRecoveryStore(pool, vault),
-    actions: createSqlBootRecoveryActions(pool, logger),
+    actions: createSqlBootRecoveryActions(pool, logger, seedState),
+    seeds: {
+      get reconcileCursorPriors() {
+        return reconcileCursorPriors;
+      },
+      get receiveAdmissionQueue() {
+        return receiveAdmissionQueue;
+      },
+    },
   };
 }

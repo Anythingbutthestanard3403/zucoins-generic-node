@@ -167,6 +167,15 @@ export interface StartMoneyWorkersDeps {
   readonly logger: MoneyWorkerLogger;
   readonly moneyPathGates: WorkerMoneyPathGates;
   /**
+   * ZTR-1172 §7.7 process-local boot seeds from createSqlBootRecovery.
+   * Prior raw bytes feed the observation stream writer; receiveAdmissionQueue is
+   * asserted against durable CREATED depth on the first money tick.
+   */
+  readonly bootRecoverySeeds?: {
+    readonly reconcileCursorPriors: ReadonlyMap<string, Uint8Array | null>;
+    readonly receiveAdmissionQueue: readonly string[];
+  };
+  /**
    * Transaction-local statement_timeout for money-path worker TXs (ZTR-1156).
    * Defaults to MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT; production main passes
    * the validated config value. Never applied as a pool-wide default.
@@ -996,6 +1005,7 @@ export function resolveMoneyPathT0Observer(deps: {
   readonly allowGenesisT0Stub?: boolean;
   readonly metricsHooks?: MetricsHooks;
   readonly moneyPathStatementTimeoutMs?: number;
+  readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
 }): { readonly observer: ReceiveT0Observer; readonly kind: "gateway" | "genesis_stub" | "injected" } {
   if (deps.t0Observer !== undefined) {
     return { observer: deps.t0Observer, kind: "injected" };
@@ -1022,6 +1032,9 @@ export function resolveMoneyPathT0Observer(deps: {
           : {}),
         ...(deps.readGatewayAction !== undefined
           ? { readGatewayAction: deps.readGatewayAction }
+          : {}),
+        ...(deps.bootPriorRawByStreamKey !== undefined
+          ? { bootPriorRawByStreamKey: deps.bootPriorRawByStreamKey }
           : {}),
       }),
       kind: "gateway",
@@ -1075,7 +1088,11 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     allowGenesisT0Stub: deps.config.allowGenesisT0Stub,
     ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
     moneyPathStatementTimeoutMs: statementTimeoutMs,
+    ...(deps.bootRecoverySeeds !== undefined
+      ? { bootPriorRawByStreamKey: deps.bootRecoverySeeds.reconcileCursorPriors }
+      : {}),
   });
+  let bootReceiveQueueAsserted = deps.bootRecoverySeeds === undefined;
   const observer = resolved.observer;
   deps.logger.info(
     `money-workers: T0 observer kind=${resolved.kind}` +
@@ -1597,6 +1614,37 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
         `money-workers: tick skipped — money not admitted (${err instanceof Error ? err.message : "closed"})`,
       );
       return;
+    }
+
+    // ZTR-1172 §7.7: first admitted tick proves boot receive queue matches durable CREATED set.
+    if (!bootReceiveQueueAsserted && deps.bootRecoverySeeds !== undefined) {
+      try {
+        const durable = await deps.pool.query<{ operation_id: string }>(
+          `SELECT id::text AS operation_id
+             FROM operations
+            WHERE kind = 'RECEIVE_EXTERNAL' AND status = 'CREATED'
+            ORDER BY created_at ASC -- contract-allow:order:frozen structural vocabulary
+          `,
+        );
+        const durableIds = durable.rows.map((r) => r.operation_id);
+        const seeded = deps.bootRecoverySeeds.receiveAdmissionQueue;
+        if (
+          durableIds.length !== seeded.length ||
+          durableIds.some((id, i) => id !== seeded[i])
+        ) {
+          deps.logger.error(
+            `money-workers: boot receive queue mismatch seeded=${seeded.length} durable=${durableIds.length}`,
+          );
+        } else {
+          deps.logger.info(
+            `money-workers: boot receive queue matched durable CREATED count=${seeded.length}`,
+          );
+        }
+        bootReceiveQueueAsserted = true;
+      } catch (err) {
+        deps.logger.error("money-workers: boot receive queue assert failed", err);
+        bootReceiveQueueAsserted = true;
+      }
     }
 
     try {

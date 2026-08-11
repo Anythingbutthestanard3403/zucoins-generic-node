@@ -77,6 +77,17 @@
         ]
       },
       {
+        "id": "restore_hold_clear",
+        "gating": true,
+        "stampingAuthority": "RESTORE_HOLD_PROBE",
+        "asserts": "reporting restore_hold is false for this node (or no restore_hold row exists yet)",
+        "doesNotAssert": [
+          "signer leadership is held by this instance",
+          "lifecycle auth_hold is clear on every head",
+          "implementer traffic is admitted"
+        ]
+      },
+      {
         "id": "signer_leadership",
         "gating": false,
         "stampingAuthority": "LEADERSHIP_LOCK_MANAGER",
@@ -91,7 +102,8 @@
       "schema_migrated",
       "database_reachable",
       "vault_available",
-      "observation_read_capable"
+      "observation_read_capable",
+      "restore_hold_clear"
     ],
     "NON_GATING_CHECK_IDS": [
       "signer_leadership"
@@ -110,8 +122,23 @@
         "operations-recovery draft boot step: report readiness only when exactly one signer leader is active",
         "operations-recovery draft degraded mode: readiness is false when the signer is unavailable"
       ],
-      "resolution": "readiness gates on schema, database, vault, and observation checks only; signer_leadership is a reported non-gating check",
+      "resolution": "readiness gates on schema, database, vault, observation, and restore_hold_clear; signer_leadership is a reported non-gating check",
       "reason": "coupling readiness to leadership re-introduces the overlap-deploy deadlock the decoupling rule fixed"
+    },
+    "RESTORE_HOLD_READINESS": {
+      "restore_hold_gates_readiness": true,
+      "check_id": "restore_hold_clear",
+      "stamping_authority": "RESTORE_HOLD_PROBE",
+      "canonical": "operations-recovery §7.1",
+      "supersedes_draft_clauses": [
+        "prior shell: restore_hold is admission-only and /health/ready stays 200 under a held restore"
+      ],
+      "resolution": "restore_hold_clear is a gating readiness check; a held restore forces /health/ready 503 while money-path four-mode partition is unchanged",
+      "reason": "a green ready on a node that refuses every implementer request misleads orchestrators and dashboards",
+      "does_not_gate": [
+        "signer_leadership",
+        "lifecycle auth_hold (admission conjunction remains restore_hold ∧ auth_hold)"
+      ]
     }
   },
   "failClosed": {

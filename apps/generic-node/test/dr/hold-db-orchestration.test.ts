@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DISCOVER_RESTORE_NODE_IDS_SQL,
+  ReportingSchemaAbsentError,
   runFailClosedPerNodeHold,
   type HoldDbClient,
 } from "../../src/dr/hold-db-orchestration.js";
@@ -38,6 +39,7 @@ describe("runFailClosedPerNodeHold", () => {
 
     const result = await runFailClosedPerNodeHold(client, {
       tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
       explicitNodeId: "  aaa-bbb  ",
       discoverNodeIdsSql: "DISCOVER",
       applyPerNode: async (_c, nodeId) => {
@@ -69,6 +71,7 @@ describe("runFailClosedPerNodeHold", () => {
 
     const result = await runFailClosedPerNodeHold(client, {
       tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
       discoverNodeIdsSql: "DISCOVER",
       applyPerNode: async (_c, nodeId) => {
         applied.push(nodeId);
@@ -89,6 +92,7 @@ describe("runFailClosedPerNodeHold", () => {
 
     const result = await runFailClosedPerNodeHold(client, {
       tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
       explicitNodeId: "   ",
       discoverNodeIdsSql: "DISCOVER",
       applyPerNode: async (_c, nodeId) => {
@@ -100,22 +104,23 @@ describe("runFailClosedPerNodeHold", () => {
     expect(applied).toEqual(["discovered"]);
   });
 
-  it("absent table is a no-op (missing-schema)", async () => {
+  it("absent table throws ReportingSchemaAbsentError (ZTR-1172)", async () => {
     const applied: string[] = [];
     const { client, calls } = mockClient(async (sql) => {
       if (sql === "EXISTS") return { rowCount: 0, rows: [] };
       throw new Error(`unexpected sql: ${sql}`);
     });
 
-    const result = await runFailClosedPerNodeHold(client, {
-      tableExistsSql: "EXISTS",
-      discoverNodeIdsSql: "DISCOVER",
-      applyPerNode: async (_c, nodeId) => {
-        applied.push(nodeId);
-      },
-    });
-
-    expect(result).toEqual({ applied: false, nodeIds: [] });
+    await expect(
+      runFailClosedPerNodeHold(client, {
+        tableExistsSql: "EXISTS",
+        requiredTableName: "reporting_restore_state",
+        discoverNodeIdsSql: "DISCOVER",
+        applyPerNode: async (_c, nodeId) => {
+          applied.push(nodeId);
+        },
+      }),
+    ).rejects.toBeInstanceOf(ReportingSchemaAbsentError);
     expect(applied).toEqual([]);
     expect(calls).toHaveLength(1);
   });
@@ -130,6 +135,7 @@ describe("runFailClosedPerNodeHold", () => {
     await expect(
       runFailClosedPerNodeHold(client, {
         tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
         discoverNodeIdsSql: "DISCOVER",
         applyPerNode: async () => {
           throw new Error("must not apply");
@@ -148,6 +154,7 @@ describe("runFailClosedPerNodeHold", () => {
     await expect(
       runFailClosedPerNodeHold(client, {
         tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
         discoverNodeIdsSql: "DISCOVER",
         applyPerNode: async () => undefined,
       }),
@@ -167,6 +174,7 @@ describe("runFailClosedPerNodeHold", () => {
     await expect(
       runFailClosedPerNodeHold(client, {
         tableExistsSql: "EXISTS",
+      requiredTableName: "reporting_restore_state",
         discoverNodeIdsSql: "DISCOVER",
         applyPerNode: async (_c, nodeId) => {
           applied.push(nodeId);

@@ -40,6 +40,7 @@ function readyState(overrides: Partial<ReadinessStateInputs> = {}): ReadinessSta
     vaultKeyRingLoaded: true,
     vaultCensusVerified: true,
     observationReadCapable: true,
+    restoreHoldClear: true,
     leadershipLockHeld: true,
     eventSignerAvailable: true,
     halted: false,

@@ -41,6 +41,7 @@ const ALL_GATING_TRUE: NodeReadinessState = {
   vaultKeyRingLoaded: true,
   vaultCensusVerified: true,
   observationReadCapable: true,
+    restoreHoldClear: true,
   leadershipLockHeld: true,
 };
 

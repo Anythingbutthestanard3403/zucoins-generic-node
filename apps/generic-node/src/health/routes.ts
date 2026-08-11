@@ -6,8 +6,8 @@
 //
 // Liveness: zero-dependency, always 200 while the event loop runs.
 // Readiness: gates on schema_migrated ∧ database_reachable ∧ vault_available ∧
-// observation_read_capable. signer_leadership, halt, and
-// storage_pressure are reported but non-gating. DB probe is TTL-cached so the
+// observation_read_capable ∧ restore_hold_clear (ZTR-1172). signer_leadership,
+// halt, and storage_pressure are reported but non-gating. DB probe is TTL-cached so the
 // unauthenticated route cannot be flooded into pool exhaustion.
 //
 // Transport: raw node:http — packages/node-core/test/boundaries.test.ts

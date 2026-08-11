@@ -337,7 +337,9 @@ describe("production source guards — write-latency pressure mount", () => {
     expect(mainSrc).toMatch(/createProductionStoragePressureWiring\s*\(/);
     expect(mainSrc).toMatch(/createHostEvidenceRuntimeMetricsCollector\s*\(/);
     expect(mainSrc).toMatch(/createStatfsDiskUtilization\s*\(/);
-    expect(mainSrc).toMatch(/onBeforeEvaluate:\s*storagePressure\.onBeforeEvaluate/);
+    expect(mainSrc).toMatch(/CachedRestoreHoldProbe/);
+    expect(mainSrc).toMatch(/composeReadinessOnBeforeEvaluate/);
+    expect(mainSrc).toMatch(/onBeforeEvaluate,/);
     expect(mainSrc).toMatch(/storageBackpressure:\s*storagePressure\.storageBackpressure/);
     expect(mainSrc).toMatch(/createNodeRuntimeListener\s*\(/);
     // Must not leave production on the zero-signal stub mount alone.

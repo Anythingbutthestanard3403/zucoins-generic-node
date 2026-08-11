@@ -2,7 +2,7 @@
 //
 // Readiness gating is frozen as:
 // GATING: schema_migrated, database_reachable, vault_available,
-// observation_read_capable
+// observation_read_capable, restore_hold_clear (ZTR-1172)
 // NON-GATING (reported): signer_leadership
 //
 // Readiness deliberately does not gate on signer leadership: coupling the two
@@ -41,6 +41,7 @@ export const GATING_READINESS_CHECK_IDS = [
   "database_reachable",
   "vault_available",
   "observation_read_capable",
+  "restore_hold_clear",
 ] as const;
 
 export type GatingReadinessCheckId = (typeof GATING_READINESS_CHECK_IDS)[number];
@@ -120,6 +121,7 @@ export function evaluateReadinessFromProbes(
     database_reachable: databaseReachable,
     vault_available: vaultAvailable,
     observation_read_capable: state.observationReadCapable,
+    restore_hold_clear: state.restoreHoldClear,
     // Non-gating: true means "this instance holds leadership" / "healthy".
     signer_leadership: state.leadershipLockHeld,
     // Non-gating detail: ready=true means "not halted" / "no storage pressure".
@@ -132,6 +134,7 @@ export function evaluateReadinessFromProbes(
     database_reachable: true,
     vault_available: true,
     observation_read_capable: true,
+    restore_hold_clear: true,
     signer_leadership: false,
     halt: false,
     storage_pressure: false,

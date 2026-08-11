@@ -15,6 +15,7 @@ const LEADER: NodeReadinessState = {
   vaultKeyRingLoaded: true,
   vaultCensusVerified: true,
   observationReadCapable: true,
+    restoreHoldClear: true,
   leadershipLockHeld: true,
 };
 const FOLLOWER: NodeReadinessState = { ...LEADER, leadershipLockHeld: false };

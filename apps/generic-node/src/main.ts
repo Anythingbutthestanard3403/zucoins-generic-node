@@ -7,7 +7,7 @@
 //      secret-free error BEFORE the HTTP server starts and BEFORE any
 //      migration can run (review indicator 2).
 //   1. Health server starts — liveness 200 immediately, readiness 503 until
-// the readiness gating checks pass (schema ∧ DB ∧ vault ∧ observation;
+// the readiness gating checks pass (schema ∧ DB ∧ vault ∧ observation ∧ restore_hold_clear;
 // leadership + EVENT_SIGNING are reported/money-only, non-gating — ZPAY-252).
 //   2. Graceful stop installed — a SIGTERM at ANY later phase is clean.
 //   3. runBootLane — migrations → privilege readiness → genesis bootstrap →
@@ -111,6 +111,9 @@ import {
   installFatalExceptionHandler,
   installGracefulStop,
   NodeReadiness,
+  stampRestoreHoldFromDb,
+  CachedRestoreHoldProbe,
+  composeReadinessOnBeforeEvaluate,
   runBootLane,
   type BootLogger,
   type SignerLeadershipHandle,
@@ -373,6 +376,19 @@ async function main(): Promise<void> {
       );
     },
   });
+
+  // ZTR-1172: live RESTORE_HOLD_PROBE — dual-gate release mutates Postgres; this
+  // restamps restore_hold_clear on ready polls / keep-warm so ready re-opens
+  // without process restart (CLI `dr markers release` included).
+  const restoreHoldProbe = new CachedRestoreHoldProbe(readiness, pool, config.NODE_ID);
+  const onBeforeEvaluate = composeReadinessOnBeforeEvaluate({
+    storagePressureOnBeforeEvaluate: storagePressure.onBeforeEvaluate,
+    restoreHoldProbe,
+  });
+  const restoreHoldKeepWarm = setInterval(() => {
+    void restoreHoldProbe.refresh().catch(() => {});
+  }, 2_000);
+  restoreHoldKeepWarm.unref();
 
   // Operator halt — fail-closed gate until restore completes.
   const haltGate: HaltGate = createHaltGate("HALTED");
@@ -929,7 +945,7 @@ async function main(): Promise<void> {
       operationStore,
       operationAuth,
       newRequestId: (): string => randomUUID(),
-      onBeforeEvaluate: storagePressure.onBeforeEvaluate,
+      onBeforeEvaluate,
       storageBackpressure: storagePressure.storageBackpressure,
       metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
       metrics,
@@ -1015,11 +1031,11 @@ async function main(): Promise<void> {
   const leadershipPool = createLeadershipPool(pool);
 
   // SQL-backed boot recovery store + actions (real inventory, not greenfield-only).
-  const { store: bootStore, actions: bootActions } = createSqlBootRecovery(
-    pool,
-    logger,
-    vaultKeyStore,
-  );
+  const {
+    store: bootStore,
+    actions: bootActions,
+    seeds: bootRecoverySeeds,
+  } = createSqlBootRecovery(pool, logger, vaultKeyStore);
 
   const result = await runBootLane({
     readiness,
@@ -1045,6 +1061,15 @@ async function main(): Promise<void> {
       // migrate.ts don't exist yet — readiness must not flip before schema is complete.
       await assertSchemaCompleteness(pool);
       await assertPrivilegeReadiness(pool);
+      // ZTR-1172: stamp restore_hold_clear from durable state so /health/ready
+      // is 503 while a post-restore hold is active (RESTORE_HOLD_READINESS).
+      const holdStamp = await stampRestoreHoldFromDb(readiness, pool, config.NODE_ID);
+      // Align live probe cache with boot stamp so first ready poll is coherent.
+      restoreHoldProbe.invalidate();
+      await restoreHoldProbe.refresh();
+      logger.info(
+        `boot: restore_hold_clear=${holdStamp.restoreHoldClear} rowPresent=${holdStamp.rowPresent}`,
+      );
       // Money workers read isDatabaseReachable before any external health probe may have
       // refreshed the shared verdict — arm it once the pool is proven writable. refresh(),
       // not probe(): the keep-warm timer is already running by now, so a single failed tick
@@ -1416,6 +1441,7 @@ async function main(): Promise<void> {
           await requireActivePushSubscriptionOrRefuse(push, walletId);
         },
         moneyPathGates: moneyPathPorts,
+        bootRecoverySeeds,
         // The settle step co-signs under this latch and submits to
         // the first configured gateway. Submit is never spread across the endpoint list.
         leadership: shutdownRegistry.authority,

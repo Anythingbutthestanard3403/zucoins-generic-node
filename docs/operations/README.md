@@ -13,7 +13,7 @@ under pressure. Before you change anything at 3am, read this:
 | A submit returned nothing / timed out | `INDETERMINATE`. The chain may or may not hold it | Retrying the submit can land the transaction twice |
 | Shutdown hung and the process still holds the signer lock | Correct. A failed flush deliberately exits holding the lock | Force-releasing lets another instance sign into an unflushed state |
 | The gateway acknowledged the submit with `status:true` | Receipt only. Settlement is asserted **only** from a fresh verified chain read | Marking the operation landed on an acknowledgement |
-| The node boots clean after a restore and `/health/ready` returns 200 | It is still holding `restore_hold` **and** `auth_hold`. Reporting is refused | See [`restore.md`](restore.md) — and note the release path is **not shipped** |
+| The node boots clean after a restore and `/health/ready` returns 200 | `restore_hold` still held → ready is 503 (ZTR-1172); `auth_hold` still held → reporting refused even after ready | See [`restore.md`](restore.md); release via `dr markers release` (ZTR-1135) |
 
 ## The documents
 

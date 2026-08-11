@@ -353,7 +353,7 @@ describe("G4 dual-control policy", () => {
 
     it("refuses the challenge issuer with its own code", async () => {
       const res = await challengeThenApprove({});
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(401);
       expect(res.body.error.code).toBe("same_operator_both_sides");
     });
 

@@ -73,9 +73,9 @@ import {
   extractSessionIdFromCookie,
   requireSessionCsrf,
   // Second-device enrol, dual-control policy, operator push
+  APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
   APPROVAL_POLICY_DENIAL_CODE,
   APPROVAL_FACTOR_FAILURE_CODE,
-  APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
   DUAL_CONTROL_COPY,
   DEVICE_SIGNATURE_POLICY_COPY,
   combineDeviceSignatureRequirement,
@@ -3197,14 +3197,22 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                 return {
                   outcome: "abort",
                   response: fail(
-                    403,
+                    APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
                     APPROVAL_POLICY_DENIAL_CODE,
                     DUAL_CONTROL_COPY.two_human.long,
                     requestId,
                   ),
                 };
               }
-              return { outcome: "abort", response: fail(APPROVAL_FACTOR_FAILURE_HTTP_STATUS, APPROVAL_FACTOR_FAILURE_CODE, "approval rejected", requestId) };
+              return {
+                outcome: "abort",
+                response: fail(
+                  APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
+                  APPROVAL_FACTOR_FAILURE_CODE,
+                  "approval rejected",
+                  requestId,
+                ),
+              };
             }
             if (deps.challengeIssuerStore !== undefined) {
               await deps.challengeIssuerStore.clear(m[1]!);
@@ -3286,12 +3294,40 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                 });
                 if (outcome.status === "not_found") throw Object.assign(new Error("not found"), { code: "not_found", status: 404 });
                 if (outcome.status === "authorization_rejected" || outcome.status === "invalid_transition" || outcome.status === "wallet_not_node_generated") {
-                  throw Object.assign(new Error(outcome.status), { code: "approval_rejected", status: 403 });
+                  throw Object.assign(new Error(outcome.status), {
+                    code: "approval_rejected",
+                    status: APPROVAL_FACTOR_FAILURE_HTTP_STATUS,
+                  });
                 }
                 return outcome.destination;
               },
             });
-            if (!guarded.ok) return { outcome: "abort", response: fail(guarded.status, guarded.code, guarded.message, requestId) };
+            if (!guarded.ok) {
+              // Surface mutate-thrown status/code (authorization_rejected → 401 approval_rejected;
+              // not_found → 404). runGuardedAdminMutation otherwise collapses mutation_threw to 500.
+              const nestedStatus =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "status" in guarded.error &&
+                typeof (guarded.error as { status: unknown }).status === "number"
+                  ? (guarded.error as { status: number }).status
+                  : guarded.status;
+              const nestedCode =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "code" in guarded.error &&
+                typeof (guarded.error as { code: unknown }).code === "string"
+                  ? (guarded.error as { code: string }).code
+                  : guarded.code;
+              return {
+                outcome: "abort",
+                response: fail(nestedStatus, nestedCode, guarded.message, requestId),
+              };
+            }
             return { outcome: "commit", status: 200, responseBody: guarded.result };
           },
         });
@@ -4196,7 +4232,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           });
           if (!result.ok) {
             const status =
-              result.code === "AUTHORIZER_UNKNOWN" || result.code === "DUPLICATE_KEY" ? 403 : 400;
+              result.code === "AUTHORIZER_UNKNOWN" || result.code === "DUPLICATE_KEY" ? 401 : 400;
             throw Object.assign(new Error(result.detail), {
               code: result.code.toLowerCase(),
               status,
@@ -4221,9 +4257,27 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           };
         },
       });
-      if (!guarded.ok) {
-        return fail(guarded.status, guarded.code, guarded.message, requestId);
-      }
+        if (!guarded.ok) {
+          const nestedStatus =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "status" in guarded.error &&
+            typeof (guarded.error as { status: unknown }).status === "number"
+              ? (guarded.error as { status: number }).status
+              : guarded.status;
+          const nestedCode =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "code" in guarded.error &&
+            typeof (guarded.error as { code: unknown }).code === "string"
+              ? (guarded.error as { code: string }).code
+              : guarded.code;
+          return fail(nestedStatus, nestedCode, guarded.message, requestId);
+        }
       // Best-effort idempotency record (no money-tx ports).
       if (deps.adminIdempotencyStore !== undefined) {
         try {
@@ -4274,7 +4328,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             if (authorizer === null || authorizer.nodeId !== nodeId || authorizer.revokedAt !== null) {
               throw Object.assign(new Error("authorizing device unknown or revoked"), {
                 code: "authorizer_unknown",
-                status: 403,
+                status: 401,
               });
             }
             // PoP: authorizing device signs a fixed revoke preimage (not a money tuple).
@@ -4315,7 +4369,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             if (!result.ok) {
               throw Object.assign(new Error(result.detail), {
                 code: result.code.toLowerCase(),
-                status: result.code === "TARGET_UNKNOWN" ? 404 : 403,
+                status: result.code === "TARGET_UNKNOWN" ? 404 : 401,
               });
             }
             if (typeof store.revokeDurable === "function") {
@@ -4330,7 +4384,25 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           },
         });
         if (!guarded.ok) {
-          return fail(guarded.status, guarded.code, guarded.message, requestId);
+          const nestedStatus =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "status" in guarded.error &&
+            typeof (guarded.error as { status: unknown }).status === "number"
+              ? (guarded.error as { status: number }).status
+              : guarded.status;
+          const nestedCode =
+            guarded.reason === "mutation_threw" &&
+            guarded.error !== undefined &&
+            typeof guarded.error === "object" &&
+            guarded.error !== null &&
+            "code" in guarded.error &&
+            typeof (guarded.error as { code: unknown }).code === "string"
+              ? (guarded.error as { code: string }).code
+              : guarded.code;
+          return fail(nestedStatus, nestedCode, guarded.message, requestId);
         }
         if (deps.adminIdempotencyStore !== undefined) {
           try {

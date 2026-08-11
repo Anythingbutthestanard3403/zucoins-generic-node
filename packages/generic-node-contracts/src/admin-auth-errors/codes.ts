@@ -46,7 +46,7 @@ export const ADMIN_ERROR_CODES = [
 
   // Approvals / money mutations.
   { code: "approval_rejected", http: 401 },
-  { code: "same_operator_both_sides", http: 403 },
+  { code: "same_operator_both_sides", http: 401 },
   { code: "operation_conflict", http: 409 },
   { code: "authorizer_unknown", http: 404 },
   { code: "signature_invalid", http: 400 },
@@ -111,7 +111,7 @@ export const ADMIN_ERROR_CODES = [
   { code: "window_too_long", http: 400 },
   { code: "window_non_positive", http: 400 },
   { code: "enrolment_expired", http: 409 },
-  { code: "authorizer_revoked", http: 403 },
+  { code: "authorizer_revoked", http: 401 },
   { code: "authorizer_key_id_mismatch", http: 400 },
   { code: "pop_invalid", http: 400 },
   { code: "challenge_not_issued", http: 409 },
@@ -120,21 +120,21 @@ export const ADMIN_ERROR_CODES = [
   { code: "challenge_not_bound", http: 409 },
   { code: "break_glass_unsupported", http: 400 },
   { code: "break_glass_authority_unknown", http: 404 },
-  { code: "break_glass_authority_revoked", http: 403 },
+  { code: "break_glass_authority_revoked", http: 401 },
   { code: "break_glass_key_id_mismatch", http: 400 },
   { code: "digest_mismatch", http: 400 },
   { code: "host_attestation_required", http: 400 },
   { code: "invalid_label", http: 400 },
   { code: "duplicate_authority", http: 409 },
   { code: "authority_unknown", http: 404 },
-  { code: "authority_revoked", http: 403 },
+  { code: "authority_revoked", http: 401 },
   { code: "authority_id_mismatch", http: 400 },
   { code: "ceremony_expired", http: 409 },
   { code: "target_unknown", http: 404 },
   { code: "store_failure", http: 503 },
   { code: "unknown_device", http: 404 },
-  { code: "device_revoked", http: 403 },
-  { code: "not_authorized", http: 403 },
+  { code: "device_revoked", http: 401 },
+  { code: "not_authorized", http: 401 },
 ] as const satisfies readonly AdminErrorCodeEntry[];
 
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[number]["code"];

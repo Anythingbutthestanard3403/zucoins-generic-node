@@ -2517,12 +2517,17 @@ The obligations frozen in `packages/node-core/src/schema/proof-body-store.contra
 phase against a real PostgreSQL: the append-only `BEFORE UPDATE`/`DELETE` guards, the counter-increment
 atomicity proof, the domain and CHECK negatives, and the cross-tenant idempotency positive.
 
-One residual is documented rather than claimed closed. The store port exposes no transaction boundary, so
-the composition root MUST serialise the find-then-insert idempotency critical section under a lock scoped
-to the `(tenant_id, operation_id, idempotency_key)` tuple, and MUST separately serialise the per-tenant cap
-check-then-increment. Without both, the per-tenant sighting cap is a soft bound that concurrent same-tenant
-submissions can overshoot by up to the concurrency factor, and a raced idempotency-key insert surfaces as
-`DIGEST_COLLISION` rather than `IDEMPOTENCY_CONFLICT`. Both reasons are terminal either way.
+`SqlProofBodyStore` (with a composition-root transaction runner) takes
+`pg_advisory_xact_lock(hashtextextended(path_proof_id::text, 0))` as the first statement inside each
+`persistProofBody` transaction, serialising the per-`path_proof_id` cap-read / insert / increment sequence
+(ZTR-1211). That closes the per-slot `MAX_SIGHTINGS_PER_BODY` overshoot under concurrent same-path persists.
+
+One residual remains documented rather than claimed closed: a lock scoped to the
+`(tenant_id, operation_id, idempotency_key)` tuple and a separate per-tenant-cap lock are not taken.
+Without those, the per-tenant sighting cap is a soft bound that concurrent same-tenant submissions at
+different `path_proof_id` values can overshoot by up to the concurrency factor, and a raced
+idempotency-key insert surfaces as `DIGEST_COLLISION` rather than `IDEMPOTENCY_CONFLICT`. Both reasons
+are terminal either way.
 
 Traces to GN-102 (`.1` intake, `.2` bounded persistence), the ZTR-424 cross-tenant idempotency remediation,
 and the ZTR-710 frozen schema contract.

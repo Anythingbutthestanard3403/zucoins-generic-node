@@ -26,11 +26,13 @@ import type { ProofBodyWalletRole } from "./types.js";
 // non-authority: the store persists candidate evidence only. It has no method and
 // issues no statement that sets a verdict, records a landing, or releases a lease.
 //
-// Cross-call atomicity: the frozen port exposes no transaction seam, so serializability of
-// the persist.ts cap-read / insert / increment sequence is the composition root's
-// responsibility (one transaction per persistProofBody under a per-(path_proof_id) advisory
-// lock; see the proof-body-store.contract.ts obligations). The store faithfully issues the
-// statements; it does not open transactions it cannot see the boundaries of.
+// Cross-call atomicity: the frozen port exposes no transaction seam. When a composition-root
+// SqlTransactionRunner is supplied, persistProofBody opens one transaction and this store
+// takes pg_advisory_xact_lock keyed on path_proof_id as the first statement inside that
+// transaction (lockPathProofId) so the cap-read / insert / increment sequence for one
+// path_proof_id serializes. See proof-body-store.contract.ts obligations for the residual
+// races a per-path_proof_id lock alone does not close (tenant-wide cap, cross-path
+// idempotency-tuple).
 
 // The narrow node-postgres-shaped query surface the store depends on. `pg.Pool` and
 // `pg.PoolClient` both satisfy it structurally; a test double implements it in-process.
@@ -80,6 +82,9 @@ const CANDIDATE_INSERT_PLACEHOLDERS = CANDIDATE_COLUMNS.map((_, i) => `$${i + 1}
 // statement change here that the executor does not model fails the suite loudly rather than
 // drifting silently.
 export const STATEMENTS = {
+  // Transaction-scoped lock for one path_proof_id. hashtextextended yields a stable bigint
+  // from the uuid text (same shape as atomic-admin-mutation / observation capture locks).
+  ADVISORY_LOCK_PATH_PROOF: `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`,
   INSERT_CANDIDATE: `INSERT INTO proof_channel_candidate_bodies (${CANDIDATE_COLUMNS.join(
     ", ",
   )}) VALUES (${CANDIDATE_INSERT_PLACEHOLDERS})`,
@@ -168,9 +173,16 @@ export class SqlProofBodyStore implements ProofBodyStore {
     transactionRunner?: SqlTransactionRunner,
   ) {
     if (transactionRunner !== undefined) {
+      // Nested store is constructed WITHOUT a runner so persistProofBody cannot nest TXs;
+      // the outer runner already pinned the client for BEGIN…COMMIT.
       this.transaction = (body) =>
         transactionRunner.transaction((txSql) => body(new SqlProofBodyStore(txSql)));
     }
+  }
+
+  /** Transaction-scoped per-path_proof_id fence for persistProofBody's critical section. */
+  async lockPathProofId(pathProofId: string): Promise<void> {
+    await this.sql.query(STATEMENTS.ADVISORY_LOCK_PATH_PROOF, [pathProofId]);
   }
 
   async findByPathProofAndIndex(

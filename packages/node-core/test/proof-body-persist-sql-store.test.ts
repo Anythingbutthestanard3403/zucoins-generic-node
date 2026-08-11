@@ -87,6 +87,9 @@ class InProcessSqlExecutor implements SqlExecutor {
 
   private run(text: string, params: readonly unknown[]): unknown[] {
     switch (text) {
+      case STATEMENTS.ADVISORY_LOCK_PATH_PROOF:
+        // No-op fence: in-process double has no concurrency; statement must be recognized.
+        return [];
       case STATEMENTS.INSERT_CANDIDATE: {
         if (this.pendingInsertError !== undefined) {
           const err = this.pendingInsertError;
@@ -453,6 +456,27 @@ describe("persistProofBody against the durable SqlProofBodyStore", () => {
         expect(key.toLowerCase()).not.toContain(word);
       }
     }
+  });
+
+  it("ZTR-1211: lockPathProofId is the first statement inside a transactional persist", async () => {
+    const exec = new InProcessSqlExecutor();
+    const seen: string[] = [];
+    const tracking: SqlExecutor = {
+      async query<R>(text: string, params: readonly unknown[]) {
+        seen.push(text);
+        return exec.query<R>(text, params);
+      },
+    };
+    const runner = {
+      async transaction<T>(body: (sql: SqlExecutor) => Promise<T>): Promise<T> {
+        return body(tracking);
+      },
+    };
+    const store = new SqlProofBodyStore(tracking, runner);
+    const result = await persistProofBody(store, makeRequest());
+    expect(result.persisted).toBe(true);
+    expect(seen[0]).toBe(STATEMENTS.ADVISORY_LOCK_PATH_PROOF);
+    expect(seen.filter((t) => t === STATEMENTS.ADVISORY_LOCK_PATH_PROOF)).toHaveLength(1);
   });
 
   // --- regressions, re-run against the durable store ---

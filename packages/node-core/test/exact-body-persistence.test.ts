@@ -174,6 +174,8 @@ class InProcessSqlExecutor implements SqlExecutor {
 
   private run(text: string, params: readonly unknown[]): unknown[] {
     switch (text) {
+      case STATEMENTS.ADVISORY_LOCK_PATH_PROOF:
+        return [];
       case STATEMENTS.INSERT_CANDIDATE: {
         const record: Record<string, string> = {};
         CANDIDATE_COLUMNS.forEach((col, i) => {

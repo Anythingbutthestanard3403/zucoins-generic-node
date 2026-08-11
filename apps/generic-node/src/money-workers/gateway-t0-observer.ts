@@ -58,6 +58,11 @@ export interface GatewayT0ObserverDeps {
   readonly metricsHooks?: MetricsHooks;
   /** Transaction-local money-path statement_timeout (ZTR-1156). */
   readonly moneyPathStatementTimeoutMs?: number;
+  /**
+   * ZTR-1162: production injects createObservedGatewayRead so readiness is stamped
+   * on every outcome. Absent → bare readGatewayAction (unit tests).
+   */
+  readonly readGatewayAction?: typeof readGatewayAction;
 }
 
 function genesisProjection(): WalletStateProjection {
@@ -104,8 +109,9 @@ export function createGatewayT0Observer(deps: GatewayT0ObserverDeps): ReceiveT0O
       let rawBytes: Uint8Array;
       let httpStatus: number | null;
       let endpointFingerprint: string;
+      const read = deps.readGatewayAction ?? readGatewayAction;
       const readOnce = (): Promise<Awaited<ReturnType<typeof readGatewayAction>>> =>
-        readGatewayAction(
+        read(
           "get_transaction__v1",
           // Canonical codec — shared with the other three wallet-head readers so the
           // field name cannot drift again.

@@ -6,17 +6,13 @@
 // relationship anomaly inserts a permanent observation row plus a permanent anomaly
 // row").
 //
-// The concrete, DDL-backed recorder that writes an `observation_anomalies` row is
-// DEFERRED to. That table is deliberately NOT transcribed in
-// packages/node-core/src/schema/observation-ledger.sql yet — see that file's header:
-// "the remainder of the observation ledger (wallet_observation_cursors, observation_anomalies,
-// operation_landing_proofs, lineage_path_proofs, lineage_path_bodies,
-// observation_relationship_adjudications) belongs to the observation-verification and
-// landing-oracle lanes and is deliberately not transcribed here." Until
-// lands the schema and its persistence adapter, the disagreement/halt safety logic in
-// failover.ts is exercised against this injected port with an in-memory recorder in
-// tests; production wiring of a DDL-backed AnomalyRecorder is a BLOCKING dependency on
-// and must not be satisfied by minting a stand-in table here.
+// The `observation_anomalies` table now ships (observation-anomaly-indexes.sql) and
+// money-path relationship anomalies use createSqlAnomalyRecorder. This gateway
+// AnomalyRecorder port (recordDisagreement for EndpointDisagreementAnomaly) is a
+// DIFFERENT shape — adapting it and wiring createEndpointFailoverService in the
+// composition root is a follow-on slice (ZTR-1162 deliberately does not absorb it).
+// Until then, failover.ts is exercised against this injected port with an
+// in-memory recorder in tests only; production does not construct the service.
 
 // One endpoint-disagreement anomaly. Plain data (no database coupling) so the halt
 // logic is testable now without minting frozen observation_anomalies DDL.

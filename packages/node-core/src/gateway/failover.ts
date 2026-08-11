@@ -22,8 +22,23 @@
 // INDETERMINATE, and does NOT adopt the backup ("two independent gateway
 // endpoints disagree → halt affected wallet/operation → INDETERMINATE; oracle incident").
 // A compromised or forked secondary endpoint therefore cannot be accepted on failover
-// without a halt. The concrete DDL-backed AnomalyRecorder (an observation_anomalies row)
-// is deferred to — see anomaly.ts.
+// without a halt.
+//
+// ZTR-1162 PRODUCTION STATUS (2026-08-11): createEndpointFailoverService is NOT
+// constructed in the generic-node composition root. Runtime reads call
+// readGatewayAction directly (multi-endpoint iteration inside the bounded read
+// primitive only — no cross-call active-endpoint memory, no disagreement halt).
+// Compensating controls today:
+//   1. Every complete response is Ed25519-verified byte-exact before credit
+//      (a hostile/forked endpoint cannot forge a credit).
+//   2. observation_anomalies DDL exists (observation-anomaly-indexes.sql) and
+//      relationship anomalies on the money path are recorded via
+//      createSqlAnomalyRecorder; the gateway AnomalyRecorder port
+//      (recordDisagreement) is a different shape and is not yet adapted.
+//   3. Sustained read failure is now stamped into readiness (degraded /
+//      observation_read_capable) via apps/generic-node createObservedGatewayRead.
+// Wiring createEndpointFailoverService with a real AnomalyRecorder adapter is a
+// follow-on slice — sized separately; do not absorb here.
 //
 // The never-blind-retry rule is preserved structurally: the only read entry point takes a
 // GatewayReadActionName (the submit action is absent from that union at compile time) and

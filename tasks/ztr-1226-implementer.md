@@ -1,8 +1,8 @@
 # ZTR-1226 implementer
 
 - **Decision:** (b) AUTHORIZE bounded `CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` (Riley lock)
-- **PR:** (filled after open)
-- **Head:** (filled after push)
+- **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/95
+- **Head:** `205e9643e3bc9d2a90d336ea5004cc50fbc3e794`
 
 ## Changes
 

@@ -35,9 +35,12 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-# Operator SPA then node packages. UI dist is served by runtime-listener from
-# apps/generic-node/admin/dist (see src/admin-spa.ts).
-RUN pnpm --filter @zucoins/generic-node-ui build \
+# Contracts/dist must exist before the operator SPA vite build — admin imports
+# @zucoins/generic-node-contracts/* package exports that resolve to dist/*.
+# UI dist is served by runtime-listener from apps/generic-node/admin/dist
+# (see src/admin-spa.ts). Then build the node package graph.
+RUN pnpm -r --filter @zucoins/generic-node-contracts... build \
+ && pnpm --filter @zucoins/generic-node-ui build \
  && pnpm -r --filter @zucoins/generic-node... build
 
 # Prod-slim the runtime: compiled dist/ output already exists on disk, so

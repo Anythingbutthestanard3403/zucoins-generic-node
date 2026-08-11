@@ -20,6 +20,25 @@ const MIME: Record<string, string> = {
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
+/** Asset (hashed) cache policy — single canonical value for SPA static files. */
+export const ADMIN_SPA_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+/** HTML / service worker / webmanifest — must revalidate; never no-store prefix. */
+export const ADMIN_SPA_SHELL_CACHE_CONTROL = "no-cache";
+
+/**
+ * Collapse a header bag to lowercase keys so overrides cannot leave dual
+ * case-variant names (Node merges header names case-insensitively; JS objects do not).
+ */
+export function lowerHeaderBag(
+  input: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    out[key.toLowerCase()] = value;
+  }
+  return out;
+}
+
 export function resolveAdminSpaDist(): string | null {
   const here = fileURLToPath(new URL(".", import.meta.url));
   // dist/ dev: apps/generic-node/dist -> ../admin/dist
@@ -103,14 +122,17 @@ export function tryServeAdminSpa(
     ext === ".webmanifest" ||
     filePath.endsWith(`${sep}sw.js`) ||
     filePath.endsWith("/sw.js");
-  // Single definition of admin header set (ZTR-1166) — cache-control overridden
-  // for hashed assets (immutable) vs HTML/SW (no-cache).
+  // Single definition of admin header set (ZTR-1166). Normalize security headers
+  // to lowercase keys first, then set one Cache-Control — never dual case variants
+  // (Title-Case from computeSecurityHeaders + lowercase override merged by Node).
   const sec = computeSecurityHeaders("admin");
   const headers: Record<string, string> = {
-    ...sec.headers,
+    ...lowerHeaderBag(sec.headers),
     "content-type": type,
     "content-length": String(stat.size),
-    "cache-control": noCache ? "no-cache" : "public, max-age=31536000, immutable",
+    "cache-control": noCache
+      ? ADMIN_SPA_SHELL_CACHE_CONTROL
+      : ADMIN_SPA_ASSET_CACHE_CONTROL,
   };
   response.writeHead(200, headers);
   if (method === "HEAD") {

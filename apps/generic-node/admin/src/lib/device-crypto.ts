@@ -159,7 +159,7 @@ export async function deleteLocalDeviceRecord(id: string): Promise<void> {
 }
 
 /**
- * Build zp-destination-bless-v1 preimage with field insertion sequence matching
+ * Build zp-destination-bless-v1 preimage with field insertion order matching
  * the suite registry (purpose, canonical_version, node_id, destination_id,
  * wallet_id, wallet_pubkey, nonce, issued_at, expires_at).
  * Callers MUST use server-issued timestamps within 300s.
@@ -189,7 +189,7 @@ export function buildDestinationBlessPreimage(fields: {
 
 /**
  * Build zp-device-enrol-v1 preimage. Server rebuilds from the same challenge
- * fields — keep insertion sequence identical to suite registry.
+ * fields — keep insertion order identical to suite registry.
  */
 export function buildDeviceEnrolPreimage(fields: {
   readonly node_id: string;

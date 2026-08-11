@@ -21,7 +21,7 @@ const MAP: Record<string, string> = {
   awaiting_release: "warn",
   awaiting_arm: "warn",
   allocated: "warn",
-  consolidating: "warn",
+  sweeping: "warn",
   created: "warn",
   pending: "warn",
   waiting: "warn",

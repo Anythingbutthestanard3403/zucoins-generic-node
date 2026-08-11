@@ -55,7 +55,7 @@ describe("enabled_packs normalize + combinations", () => {
     expect(normalizeEnabledPacks(["T", "P"])).toEqual(["T", "P"]);
     expect(normalizeEnabledPacks(["M", "T", "P"])).toEqual(["M", "T", "P"]);
     expect(normalizeEnabledPacks(["X", "M", "x", "m"])).toEqual(["M"]);
-    expect(normalizeEnabledPacks(["Z", "Ord" + "ers", "Sessions"])).toEqual([]); // contract-allow:order:negative-pack-id
+    expect(normalizeEnabledPacks(["Z", "Orders", "Sessions"])).toEqual([]);
   });
 
   it("none → X semantics; X always effective", () => {
@@ -115,8 +115,8 @@ describe("Home pack checklist hooks", () => {
     expect(bless?.href).toBe("/destinations");
     expect(bless?.detail).toMatch(/Bless/i);
     expect(bless?.detail).toMatch(/No CLI required/i);
-    expect(rows.some((r) => /\bsweeps product\b/i.test(r.title + r.detail))).toBe(false); // contract-allow:sweep:negative-copy
-    expect(rows.some((r) => r.title === ("Swe" + "eps") || r.href === ("/swe" + "eps"))).toBe(false); // contract-allow:sweep:negative-nav-citation
+    expect(rows.some((r) => /\bsweeps product\b/i.test(r.title + r.detail))).toBe(false);
+    expect(rows.some((r) => r.title === "Sweeps" || r.href === "/sweeps")).toBe(false);
   });
 
   it("emits Pack P dual-control teaching when P enabled", () => {
@@ -132,8 +132,8 @@ describe("Home pack checklist hooks", () => {
     const rows = packChecklistRowsForEnabled(["M", "T", "P"]);
     const blob = rows.map((r) => `${r.title} ${r.detail}`).join("\n");
     expect(blob).not.toMatch(/\brefund\b/i);
-    expect(blob).not.toMatch(/\bcheckout\b/i); // contract-allow:checkout:negative-copy
-    expect(blob).not.toMatch(/\bOrders\b/); // contract-allow:order:negative-copy
+    expect(blob).not.toMatch(/\bcheckout\b/i);
+    expect(blob).not.toMatch(/\bOrders\b/);
     expect(rows.length).toBeGreaterThan(10);
   });
 });
@@ -158,7 +158,7 @@ describe("kit generator extension point", () => {
     const t = buildPackGuideText("treasury_move_guide", "https://node.example");
     expect(t).toMatch(/MOVE_INTERNAL/);
     expect(t).toMatch(/Bless/);
-    expect(t).toMatch(/No retired product chrome/i);
+    expect(t).toMatch(/No sweeps product/i);
     expect(t).not.toMatch(/\bpaid\b/i);
 
     const p = buildPackGuideText("payout_dual_control_guide", "https://node.example");
@@ -169,12 +169,12 @@ describe("kit generator extension point", () => {
     const x = buildPackGuideText("headless_openapi", "https://node.example");
     expect(x).toMatch(/\.well-known\/zupay-node/);
     expect(x).toMatch(/generic-node-consumer/);
-    expect(x).not.toMatch(/storefront|checkout order/i); // contract-allow:checkout,order:negative-copy
+    expect(x).not.toMatch(/storefront|checkout order/i);
   });
 });
 
 describe("hard invariant: packs never add forbidden nav", () => {
-  it("production nav census stays free of retired product-projection chrome", () => {
+  it("production nav census stays free of Sessions/Sweeps/Webhooks/Orders", () => {
     expect(() =>
       assertPacksPreserveNavInvariant(PRODUCTION_NAV_LABELS, PRODUCTION_NAV_PATHS),
     ).not.toThrow();
@@ -184,8 +184,8 @@ describe("hard invariant: packs never add forbidden nav", () => {
     for (const f of FORBIDDEN_NAV_PATHS) {
       expect([...PRODUCTION_NAV_PATHS]).not.toContain(f);
     }
-    expect(PRODUCTION_NAV_LABELS).not.toContain("Ord" + "ers"); // contract-allow:order:negative-nav-citation
-    expect(PRODUCTION_NAV_PATHS).not.toContain("/ord" + "ers"); // contract-allow:order:negative-nav-citation
+    expect(PRODUCTION_NAV_LABELS).not.toContain("Orders");
+    expect(PRODUCTION_NAV_PATHS).not.toContain("/orders");
   });
 
   it("enabling every pack combination does not mutate nav arrays", () => {
@@ -216,8 +216,8 @@ describe("hard invariant: packs never add forbidden nav", () => {
       assertPacksPreserveNavInvariant(["Overview", "Sessions"], ["/"]),
     ).toThrow(/Sessions/);
     expect(() =>
-      assertPacksPreserveNavInvariant(["Overview"], ["/", "/ord" + "ers"]), // contract-allow:order:negative-path-citation
-    ).toThrow(/orders/); // contract-allow:order:negative-path-citation
+      assertPacksPreserveNavInvariant(["Overview"], ["/", "/orders"]),
+    ).toThrow(/orders/);
   });
 });
 
@@ -227,7 +227,7 @@ describe("in-product three-ops composition copy", () => {
     expect(THREE_OPS_COMPOSITION_COPY).toMatch(/Internal transfer \(MOVE_INTERNAL\)/);
     expect(THREE_OPS_COMPOSITION_COPY).toMatch(/Outgoing \(SEND_EXTERNAL/);
     expect(THREE_OPS_COMPOSITION_COPY).toMatch(/No fourth verb/);
-    expect(THREE_OPS_COMPOSITION_COPY).toMatch(/retired product-projection chrome/);
+    expect(THREE_OPS_COMPOSITION_COPY).toMatch(/Sessions/);
     expect(ALL_PACK_IDS).toEqual(["M", "T", "P", "X"]);
   });
 });

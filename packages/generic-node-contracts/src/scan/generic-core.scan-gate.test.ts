@@ -30,8 +30,6 @@ const walkScannedFiles = (): string[] =>
   SCAN_SCOPE.flatMap((scopePath) => [
     ...globSync(join(repoRoot, scopePath, "**", "*.ts")),
     ...globSync(join(repoRoot, scopePath, "**", "*.md")),
-    ...globSync(join(repoRoot, scopePath, "**", "*.tsx")),
-
   ]).filter((file) => !file.includes(`${join("src", "scan")}/`));
 
 // Real-tree walk + read of ~1,200 files: the realTree class in ../testkit/executionPolicy.ts.

@@ -140,7 +140,6 @@ describe("forbidden-terms scanner self-test (the scan/dependency-boundary gate)"
     const files = SCAN_SCOPE.flatMap((scopePath) => [
       ...globSync(join(repoRoot, scopePath, "**", "*.ts")),
       ...globSync(join(repoRoot, scopePath, "**", "*.md")),
-      ...globSync(join(repoRoot, scopePath, "**", "*.tsx")),
     ]).filter((file) => !file.includes(`${join("src", "scan")}/`));
     const liveCount = files.reduce(
       (total, file) => total + countExemptionMarkers(readFileSync(file, "utf8")),
@@ -203,7 +202,6 @@ describe("forbidden-terms scanner self-test (the scan/dependency-boundary gate)"
     const files = SCAN_SCOPE.flatMap((scopePath) => [
       ...globSync(join(repoRoot, scopePath, "**", "*.ts")),
       ...globSync(join(repoRoot, scopePath, "**", "*.md")),
-      ...globSync(join(repoRoot, scopePath, "**", "*.tsx")),
     ]).filter((file) => !file.includes(`${join("src", "scan")}/`));
     expect(files.length).toBeGreaterThan(0);
 

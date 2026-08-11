@@ -102,7 +102,7 @@ describe("App shell", () => {
     for (const f of FORBIDDEN_NAV_LABELS) {
       expect(labels).not.toContain(f);
     }
-    expect(labels).not.toContain("Ord" + "ers"); // contract-allow:order:negative-nav-citation
+    expect(labels).not.toContain("Orders");
   });
 
   it("production nav is the closed generic model set", () => {
@@ -149,11 +149,11 @@ describe("App shell", () => {
     expect(sides.length).toBeGreaterThan(0);
     const labels = [...sides[0]!.querySelectorAll("a.nav .lbl")].map((el) => el.textContent?.trim());
     expect(labels).toEqual([...PRODUCTION_NAV_LABELS]);
-    for (const forbidden of ["Sessions", "Swe" + "eps", "Webhooks"] as const) { // contract-allow:sweep:negative-nav-citation
+    for (const forbidden of ["Sessions", "Sweeps", "Webhooks"] as const) {
       expect(labels).not.toContain(forbidden);
     }
     expect(container.textContent).not.toMatch(/\bSessions\b/);
-    expect(container.textContent).not.toMatch(/\bSweeps\b/); // contract-allow:sweep:negative-nav-citation
+    expect(container.textContent).not.toMatch(/\bSweeps\b/);
     expect(container.textContent).not.toMatch(/\bWebhooks\b/);
   });
 });
@@ -174,7 +174,7 @@ describe("sidebar reachable without hover", () => {
 });
 
 describe("Overview product boundary", () => {
-  it("shows three ops + wallets + attention — not product-projection sessions chrome", () => {
+  it("shows three ops + wallets + attention  not checkout sessions chrome", () => {
     authenticateDemo();
     renderShell(<OverviewPage />);
     expect(screen.getByTestId("three-ops-stats")).toBeInTheDocument();
@@ -300,20 +300,20 @@ describe("node health chrome — real /health/ready, no hard-coded Healthy", () 
   });
 });
 
-describe("router source boundary (no v1 product-projection routes)", () => {
-  it("main.tsx does not register sessions/retired/webhooks routes", () => {
+describe("router source boundary (no v1 checkout routes)", () => {
+  it("main.tsx does not register sessions/sweeps/webhooks routes", () => {
     const main = readFileSync(join(adminSrc, "main.tsx"), "utf8");
     for (const path of FORBIDDEN_NAV_PATHS) {
       expect(main).not.toMatch(new RegExp(`path=["']${path.replace("/", "\\/")}`));
     }
-    expect(main).not.toMatch(/SessionsPage|SweepsPage|WebhookDeliveriesPage/); // contract-allow:sweep:negative-page-citation
-    expect(main).not.toMatch(/pages\/sessions|pages\/sweeps|pages\/webhooks/); // contract-allow:sweep:negative-path-citation
+    expect(main).not.toMatch(/SessionsPage|SweepsPage|WebhookDeliveriesPage/);
+    expect(main).not.toMatch(/pages\/sessions|pages\/sweeps|pages\/webhooks/);
   });
 
-  it("product-projection chrome page modules are not present", () => {
+  it("checkout chrome page modules are not present", () => {
     for (const rel of [
       "pages/sessions/SessionsPage.tsx",
-      "pages/swe" + "eps/Swe" + "epsPage.tsx", // contract-allow:sweep:negative-module-path
+      "pages/sweeps/SweepsPage.tsx",
       "pages/webhooks/WebhookDeliveriesPage.tsx",
     ]) {
       let exists = true;

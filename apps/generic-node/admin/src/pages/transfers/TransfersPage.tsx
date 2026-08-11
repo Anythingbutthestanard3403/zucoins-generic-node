@@ -62,7 +62,7 @@ export function TransfersPage() {
           data-testid="pack-p-dual-control"
           style={{ marginBottom: 16 }}
         >
-          <strong>Pack P — External sends.</strong> Someone requests SEND via implementer API
+          <strong>Pack P — External payouts.</strong> Someone requests SEND via implementer API
           (server-side). Approver uses this inbox with TOTP + device sign. The node does{" "}
           <em>not</em> chain-submit SEND. After approve, status may be waiting for recipient to
           finish — approve alone is not paid. Observe-land is separate.

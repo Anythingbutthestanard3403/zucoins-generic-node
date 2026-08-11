@@ -291,8 +291,8 @@ describe("ApproveInboxPage", () => {
       const body = document.body.textContent ?? "";
       expect(body).toMatch(/never submits SEND_EXTERNAL/);
       expect(body).toMatch(/Approve ≠ redeemed ≠ paid|not paid yet/i);
-      expect(body).not.toMatch(/order paid/i); // contract-allow:order:negative-copy-assertion
-      expect(body).not.toMatch(/payment settled/i); // contract-allow:payment:negative-copy-assertion
+      expect(body).not.toMatch(/order paid/i);
+      expect(body).not.toMatch(/payment settled/i);
     });
   });
 

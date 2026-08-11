@@ -84,7 +84,7 @@ type Workflow = {
 const workflows: Workflow[] = [
   { name: "Overview", path: "/", heading: "Overview", authenticated: true, critical: (p) => p.getByRole("button", { name: "Toggle theme" }) },
   // `critical` is asserted visible AND tabbed to, so it has to be a focusable control:
-  // a <p>/<li>/<h1> can never enter the tab sequence, which is why the honesty note, the send
+  // a <p>/<li>/<h1> can never enter the tab order, which is why the honesty note, the send
   // card and the Transfers heading could not pass. Each now names the page's real control.
   { name: "Approve inbox", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("link", { name: "Transfers", exact: true }).last() },
   { name: "Approve inbox pending SEND", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("button", { name: "Review & decide" }) },
@@ -114,7 +114,7 @@ test.describe("every-workflow Chromium route matrix (320px)", () => {
       await expectReflowAt320(page);
 
       // getByRole/getByLabel resolves the real Chromium accessible name. Forward Tab (not
-      // locator.focus()) proves the critical control participates in keyboard tab sequence.
+      // locator.focus()) proves the critical control participates in keyboard tab order.
       const critical = workflow.critical(page);
       await expect(critical).toBeVisible();
       await tabTo(page, critical);

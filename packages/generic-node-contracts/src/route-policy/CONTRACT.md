@@ -24,8 +24,9 @@ equal `AUTH_CHECK_ORDER` in sequence.
   failure posture. The three implementer-facing classes (`IMPLEMENTER_BEARER`,
   `REPORTING_CREDENTIAL`, `SUBSCRIPTION_HANDLE`) are the multi-tenant surface where credentials
   are probed; their full collapse is frozen — credential/scope failure → `invalid_api_key` (401),
-  cross-tenant/absent object → `not_found` (404), never 403. `OPERATOR_SESSION` freezes only the
-  status invariant (401, never 403); its specific admin-auth code taxonomy is deferred to the
+  cross-tenant/absent object → `not_found` (404), never 403. `OPERATOR_SESSION` freezes
+  authFailureStatus=401 (never 403 for auth denial) plus `nonAuthorizationStatuses` for closed
+  non-auth gates; its specific admin-auth code taxonomy is deferred to the
   operation-schemas concern. `PUBLIC` never authenticates.
 - **`routes.ts` — `ROUTE_POLICIES`.** Every launch route with its auth class, scope,
   tenant-scoping, and idempotency requirement. `FORBIDDEN_ROUTE_PREFIXES` records the retired
@@ -49,8 +50,8 @@ absent object. **Fail-closed rule:** a tenant-scoped route — the multi-impleme
 surface — must resolve through a class whose full non-oracular collapse is *frozen*;
 `isRoutePolicyNonOracular` rejects a tenant-scoped route backed by a `nonOracularFrozen:false`
 class rather than free-passing it (its credential/tenant codes are deferred and cannot be asserted
-non-oracular). Non-tenant-scoped admin/public routes legitimately ride the partial "never 403"
-freeze (see judgment call J2). The freeze test proves the census (no route is oracular or
+non-oracular). Non-tenant-scoped admin/public routes legitimately ride the partial freeze
+(auth denial never 403; see judgment call J2 for the nonAuthorizationStatuses carve-out). The freeze test proves the census (no route is oracular or
 forbidden) and the mandatory negatives (a 403 auth class, a per-class bespoke credential code, a
 retired forbidden route, and a tenant-scoped route on an unfrozen class are each rejected).
 
@@ -77,9 +78,12 @@ retired forbidden route, and a tenant-scoped route on an unfrozen class are each
   Per-class 401 code names, if wanted, are an additive refinement there — the verifier
   deliberately rejects a per-class code swap today (negative test) to keep the collapse
   single-code until then.
-- **J2 — `OPERATOR_SESSION` partial freeze.** Only the "401, never 403" status is frozen for the
-  admin surface; its codes are deferred. The admin surface is a different threat model (operator
-  login) than the implementer credential-probing this concern targets.
+- **J2 — `OPERATOR_SESSION` partial freeze.** Auth/scope denial freezes to status 401 (never 403
+  as `authFailureStatus`). A closed non-authorization carve-out lives in
+  `nonAuthorizationStatuses: [403]` for CSRF origin policy and first-login password-change posture
+  only — authorization/factor failures (approve, bless, device enrol/revoke) collapse to 401
+  (ZTR-1191). Wider admin-auth codes remain deferred. The admin surface is a different threat
+  model (operator login) than the implementer credential-probing this concern targets.
 - **J3 — `tenantScoped` = the cross-implementer boundary.** Implementer/reporting/handle routes
   are tenant-scoped (multi-implementer node); admin/public are not (the operator sees the whole
   node). A missing object on any route still 404s; only the tenant-collapse dimension differs.

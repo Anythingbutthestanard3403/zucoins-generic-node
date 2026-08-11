@@ -123,8 +123,16 @@ describe("route-policy non-oracularity verifier (mandatory negative path)", () =
       authFailureCode: "forbidden",
       tenantResolutionCode: "not_found",
       nonOracularFrozen: true,
+      nonAuthorizationStatuses: [],
     };
     expect(isAuthClassNonOracular(oracle403)).toBe(false);
+  });
+
+  it("ACCEPTS OPERATOR_SESSION nonAuthorizationStatuses carve-out without treating it as authFailureStatus (ZTR-1191)", () => {
+    const policy = AUTH_CLASS_POLICY.OPERATOR_SESSION;
+    expect(policy.authFailureStatus).toBe(401);
+    expect(policy.nonAuthorizationStatuses).toContain(403);
+    expect(isAuthClassNonOracular(policy)).toBe(true);
   });
 
   it("REJECTS a frozen class that swaps in a bespoke credential code", () => {
@@ -133,6 +141,7 @@ describe("route-policy non-oracularity verifier (mandatory negative path)", () =
       authFailureCode: "invalid_reporting_key",
       tenantResolutionCode: "not_found",
       nonOracularFrozen: true,
+      nonAuthorizationStatuses: [],
     };
     expect(isAuthClassNonOracular(bespoke)).toBe(false);
   });

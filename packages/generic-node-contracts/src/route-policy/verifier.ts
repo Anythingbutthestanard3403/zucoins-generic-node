@@ -19,19 +19,25 @@ import { AUTH_CLASS_POLICY, type AuthClass, type AuthClassPolicy } from "./auth-
 import { FORBIDDEN_ROUTE_PREFIXES, routeAuthClasses, type RoutePolicy } from "./routes.js";
 
 // The single forbidden HTTP status for an auth/scope denial. Any auth-class or route that would
-// emit this is an oracle and is rejected by the verifiers below.
+// emit this as `authFailureStatus` is an oracle and is rejected by the verifiers below.
+// OPERATOR_SESSION may list 403 under `nonAuthorizationStatuses` for closed non-auth gates
+// (CSRF origin, password-change posture) — that carve-out is not an authFailureStatus (ZTR-1191).
 export const FORBIDDEN_AUTH_STATUS = 403 as const;
 
 // True iff an auth class satisfies the non-oracularity invariants that apply to it. The 403 ban
-// applies to EVERY class, frozen or not. A `nonOracularFrozen:false` class (OPERATOR_SESSION,
-// PUBLIC) proves only that hard invariant here: its full credential/tenant code taxonomy is
-// legitimately deferred to a later owner (the admin-auth concern — a different threat model), so
-// this class-level check cannot assert its full collapse. It is NOT a free pass to non-oracularity —
-// a tenant-scoped route on such a class is caught by isRoutePolicyNonOracular below, which is where
-// the probing surface is known. A `nonOracularFrozen:true` class must additionally use exactly
-// the canonical auth-error codes.
+// on authFailureStatus applies to EVERY class, frozen or not. A status listed only in
+// `nonAuthorizationStatuses` is not an auth/scope denial and does not fail this check.
+// A `nonOracularFrozen:false` class (OPERATOR_SESSION, PUBLIC) proves only that hard invariant
+// here: its full credential/tenant code taxonomy is legitimately deferred to a later owner (the
+// admin-auth concern — a different threat model), so this class-level check cannot assert its
+// full collapse. It is NOT a free pass to non-oracularity — a tenant-scoped route on such a
+// class is caught by isRoutePolicyNonOracular below, which is where the probing surface is known.
+// A `nonOracularFrozen:true` class must additionally use exactly the canonical auth-error codes.
 export function isAuthClassNonOracular(policy: AuthClassPolicy): boolean {
   if (policy.authFailureStatus === FORBIDDEN_AUTH_STATUS) return false;
+  // nonAuthorizationStatuses may include FORBIDDEN_AUTH_STATUS only as a non-auth carve-out;
+  // the field is data the served-surface gate reads — no special-case here beyond the
+  // authFailureStatus check above.
   if (!policy.nonOracularFrozen) return true;
   if (policy.authFailureStatus !== 401) return false;
   if (policy.authFailureCode !== CANONICAL_AUTH_FAILURE_CODE) return false;

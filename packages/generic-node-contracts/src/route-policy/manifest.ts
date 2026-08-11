@@ -44,6 +44,7 @@ export function buildRoutePolicyManifest() {
       authFailureCode: AUTH_CLASS_POLICY[name].authFailureCode,
       tenantResolutionCode: AUTH_CLASS_POLICY[name].tenantResolutionCode,
       nonOracularFrozen: AUTH_CLASS_POLICY[name].nonOracularFrozen,
+      nonAuthorizationStatuses: [...AUTH_CLASS_POLICY[name].nonAuthorizationStatuses],
     })),
     routes: ROUTE_POLICIES.map((r: RoutePolicy) => ({
       method: r.method,
@@ -88,7 +89,7 @@ export const ROUTE_POLICY_CONCERN_MANIFEST = defineConcernManifest({
   goldenRefs: [
     {
       path: "src/route-policy/gen/route-policy.json",
-      sha256: "24584ee08db10a88d682f973d17fb9333711ed16085e66fc5b94077137b8fd35",
+      sha256: "3ffb407268b2f8c4c3cefacd3bd46b4090df6f39bab0384c73c7bebdd9a6bc22",
     },
   ],
   scanRules: [

@@ -66,14 +66,17 @@ export const SEND_APPROVE_ROUTE = "/admin/v1/external-sends/:operation_id/approv
 
 // Opaque factor-failure envelope. Every non-success path the HTTP layer may surface
 // collapses to this single shape so body-diffing across failure modes reveals nothing.
+// Status is 401 (never 403): authorization/factor refusal is not a scope oracle, and the
+// frozen OPERATOR_SESSION authFailureStatus is 401 (ZTR-1191).
 export const APPROVAL_FACTOR_FAILURE_CODE = "approval_rejected" as const;
 // Factor failures are authentication-class (wrong TOTP, bad device sig, stale
 // challenge). 401 matches OPERATOR_SESSION never-403 and lets the SPA treat the
-// envelope as a re-promptable step-up challenge (ZTR-1194). Body stays opaque.
+// envelope as a re-promptable step-up challenge (ZTR-1194 / ZTR-1191). Body stays opaque.
 export const APPROVAL_FACTOR_FAILURE_HTTP_STATUS = 401 as const;
-// Doc 01 §4.2: deployment-policy denial stays distinguishable and is not a
-// re-promptable factor challenge — keep 403.
-export const APPROVAL_POLICY_DENIAL_HTTP_STATUS = 403 as const;
+// Doc 01 §4.2: deployment-policy denial stays distinguishable by *code* (and long copy).
+// HTTP status is still 401 — never-403 for authorization/policy refusal on OPERATOR_SESSION
+// (ZTR-1191 Option 2). Carve-out 403s are origin/password-posture only.
+export const APPROVAL_POLICY_DENIAL_HTTP_STATUS = 401 as const;
 
 // Deployment-policy denial. Doc 01 §4.2 requires optional node policy to stay
 // distinguishable from protocol validity, so a dual-control refusal carries its own
@@ -264,9 +267,10 @@ export function toOpaqueApprovalFailure(reason: ApprovalRejectReason): {
     | typeof APPROVAL_FACTOR_FAILURE_HTTP_STATUS
     | typeof APPROVAL_POLICY_DENIAL_HTTP_STATUS;
 } {
-  // Policy denial is distinguishable (§4.2) and keeps 403; every FACTOR reason
-  // still collapses to one 401 envelope so body-diffing cannot reveal which
-  // factor failed (ZTR-1194).
+  // Policy denial is distinguishable by code (§4.2); HTTP status is 401 for both
+  // policy and factor paths so OPERATOR_SESSION never-403 holds (ZTR-1191). Factor
+  // reasons still collapse to one opaque envelope so body-diffing cannot reveal
+  // which factor failed (ZTR-1194).
   if (reason === APPROVAL_POLICY_DENIAL_CODE) {
     return {
       code: APPROVAL_POLICY_DENIAL_CODE,

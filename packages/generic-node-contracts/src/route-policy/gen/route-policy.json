@@ -12,35 +12,42 @@
       "authFailureStatus": 401,
       "authFailureCode": "invalid_api_key",
       "tenantResolutionCode": "not_found",
-      "nonOracularFrozen": true
+      "nonOracularFrozen": true,
+      "nonAuthorizationStatuses": []
     },
     {
       "name": "REPORTING_CREDENTIAL",
       "authFailureStatus": 401,
       "authFailureCode": "invalid_api_key",
       "tenantResolutionCode": "not_found",
-      "nonOracularFrozen": true
+      "nonOracularFrozen": true,
+      "nonAuthorizationStatuses": []
     },
     {
       "name": "SUBSCRIPTION_HANDLE",
       "authFailureStatus": 401,
       "authFailureCode": "invalid_api_key",
       "tenantResolutionCode": "not_found",
-      "nonOracularFrozen": true
+      "nonOracularFrozen": true,
+      "nonAuthorizationStatuses": []
     },
     {
       "name": "OPERATOR_SESSION",
       "authFailureStatus": 401,
       "authFailureCode": null,
       "tenantResolutionCode": "not_found",
-      "nonOracularFrozen": false
+      "nonOracularFrozen": false,
+      "nonAuthorizationStatuses": [
+        403
+      ]
     },
     {
       "name": "PUBLIC",
       "authFailureStatus": null,
       "authFailureCode": null,
       "tenantResolutionCode": null,
-      "nonOracularFrozen": false
+      "nonOracularFrozen": false,
+      "nonAuthorizationStatuses": []
     }
   ],
   "routes": [
@@ -319,7 +326,7 @@
     "resolve_object_with_tenant_predicate"
   ],
   "pipelineInvariants": [
-    "every response — 2xx and non-2xx — carries the request_id assigned at stage 1",
+    "every response \u2014 2xx and non-2xx \u2014 carries the request_id assigned at stage 1",
     "authorization (scope) runs before any object lookup, so an unauthorized caller cannot probe object existence",
     "every non-2xx body is rendered through the canonical error envelope; no route emits a bespoke error shape",
     "no stage emits a 403 for a scope denial; scope denial is the generic 401",

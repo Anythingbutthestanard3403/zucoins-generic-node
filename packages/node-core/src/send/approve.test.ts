@@ -679,12 +679,18 @@ describe("opaque factor failure", () => {
   // Doc 01 §4.2: optional policy stays distinguishable from protocol validity.
   // The exception is exactly one reason wide, and it names the deployment's policy
   // rather than a factor — a caller still cannot tell TOTP from device from nonce.
-  it("policy denial is the one distinguishable code, at 403 (not the factor 401)", () => {
+  it("policy denial is the one distinguishable code (same 401 status as factor; code differs)", () => {
+    // ZTR-1191: authorization/policy refusal collapses to 401 (never 403). Doc 01 §4.2
+    // distinguishability is the code + long copy, not a separate HTTP status.
     const policy = toOpaqueApprovalFailure(APPROVAL_POLICY_DENIAL_CODE);
+    const factor = toOpaqueApprovalFailure("totp_invalid");
     expect(policy.code).toBe(APPROVAL_POLICY_DENIAL_CODE);
     expect(policy.code).not.toBe(APPROVAL_FACTOR_FAILURE_CODE);
+    expect(factor.code).toBe(APPROVAL_FACTOR_FAILURE_CODE);
     expect(policy.httpStatus).toBe(APPROVAL_POLICY_DENIAL_HTTP_STATUS);
-    expect(policy.httpStatus).not.toBe(APPROVAL_FACTOR_FAILURE_HTTP_STATUS);
+    expect(policy.httpStatus).toBe(401);
+    expect(factor.httpStatus).toBe(APPROVAL_FACTOR_FAILURE_HTTP_STATUS);
+    expect(factor.httpStatus).toBe(401);
   });
 });
 

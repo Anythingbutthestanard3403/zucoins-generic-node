@@ -1,7 +1,8 @@
 # ZTR-1160 implementer
 
 - **PR:** #52 (https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/52)
-- **Head SHA:** `90926a5179e21c2e9869f72d056325ac3c4e109a`
+- **Head SHA:** `b20e9147b57f233b23d2557e7d9ed049a9f703b8`
+- **Product fix SHA:** `90926a5179e21c2e9869f72d056325ac3c4e109a`
 - **Branch:** `ztr-1160-sign-under-lease-toctou`
 - **Claim:** released → QA Review (run=07db18b8-b869-45a7-a54b-3259548f53dc)
 

@@ -4,7 +4,7 @@
 - Branch: `ztr-1166-dead-code`
 - PR: https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/91
 - Freeze-fix commit: `0a0e5fe2442b12590e51e1ccdbe84e2249bd9681`
-- PR head: whatever is tip of `ztr-1166-dead-code` after this handoff lands (gh pr view 91 --json headRefOid)
+- This handoff documents freeze `0a0e5fe2442b12590e51e1ccdbe84e2249bd9681`; PR tip after push is the commit that contains this file.
 
 ## Problem
 Dual A+B PASSed at `d0098202`, but Contracts CI failed on freeze drift from dead-code removal:
@@ -29,10 +29,7 @@ After rebase onto main (`76170994`), SCAN_SCOPE includes `apps/generic-node/admi
 
 ## Verification (local)
 ```
-pnpm --filter @zucoins/generic-node-contracts exec vitest run \
-  --config vitest.config.ts \
-  src/scan/forbidden-terms.test.ts \
-  src/scan/coupling-exceptions.manifest.test.ts
+pnpm --filter @zucoins/generic-node-contracts exec vitest run   --config vitest.config.ts   src/scan/forbidden-terms.test.ts   src/scan/coupling-exceptions.manifest.test.ts
 # → 30/30 pass
 ```
 

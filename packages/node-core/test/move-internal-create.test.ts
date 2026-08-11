@@ -145,6 +145,7 @@ class ConstraintStore implements MoveCreateStore {
       destinationId: op.destinationId,
       destinationWalletId: op.destinationWalletId,
       amountZkz: op.amountZkz,
+      clientReference: op.clientReference,
       spawnedFromOperationId: op.spawnedFromOperationId,
       leaseGroupId,
       idempotencyKey: op.idempotencyKey,

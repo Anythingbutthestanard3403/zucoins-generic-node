@@ -1,5 +1,5 @@
 /**
- * Consumer-owned cursor / snapshot persistence (product-neutral; part of the installable SDK).
+ * Consumer-owned cursor / snapshot persistence (product-neutral; part of the consumer SDK surface).
  *
  * Resume always uses the consumer's own watermark_seq — never a node-supplied
  * cache (the `next_after_implementer_seq` cursor is consumer-owned). In-memory reference

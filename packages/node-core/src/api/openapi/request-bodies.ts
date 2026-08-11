@@ -125,7 +125,8 @@ const landingProof: JsonSchema = {
 const walletEvidence: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["wallet_id", "role", "t0", "terminal", "landing_proof"],
+  // landing_proof required only when parent verdict is VERIFIED (enforced by Zod superRefine).
+  required: ["wallet_id", "role", "t0", "terminal"],
   properties: {
     wallet_id: uuid,
     role: { type: "string", enum: ["RECEIVER", "SOURCE", "DESTINATION"] },
@@ -183,6 +184,7 @@ export const CREATE_INTERNAL_MOVE_BODY: JsonSchema = {
     source_wallet_id: uuid,
     destination_id: uuid,
     amount_zkz: positiveZkz,
+    client_reference: { type: "string", maxLength: 256 },
   },
 };
 

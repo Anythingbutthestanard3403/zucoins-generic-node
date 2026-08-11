@@ -52,7 +52,7 @@ export const PUBLIC_OPERATION_SCHEMA_SURFACE = [
     path: moveRoute.path,
     requestSchema: "MoveInternalRequestSchema",
     responseSchema: "MoveInternalResponseSchema",
-    requestFields: ["source_wallet_id", "destination_id", "amount_zkz"],
+    requestFields: ["source_wallet_id", "destination_id", "amount_zkz", "client_reference"],
     responseStatuses: [201],
     responseFields: [
       "operation",

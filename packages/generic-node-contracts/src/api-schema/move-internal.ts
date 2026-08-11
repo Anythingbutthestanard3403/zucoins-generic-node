@@ -4,13 +4,14 @@ import {
   ExpectedArtifactSchema,
   MoveInternalOperationSchema,
 } from "./common-operation.ts";
-import { PositiveZkzAmountSchema, UuidSchema } from "./scalars.ts";
+import { ClientReferenceSchema, PositiveZkzAmountSchema, UuidSchema } from "./scalars.ts";
 
 export const MoveInternalRequestSchema = z
   .object({
     source_wallet_id: UuidSchema,
     destination_id: UuidSchema,
     amount_zkz: PositiveZkzAmountSchema,
+    client_reference: ClientReferenceSchema.optional(),
   })
   .strict();
 

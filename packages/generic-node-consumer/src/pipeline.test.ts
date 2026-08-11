@@ -1,5 +1,5 @@
 /**
- * Independent verification pipeline scenarios. Packaged into the installable SDK
+ * Independent verification pipeline scenarios. Packaged into the consumer SDK surface
  * (originally shipped in the consumer-example package).
  *
  * Offline fixture gateway responses only (no live ZKZ). Covers:
@@ -70,6 +70,7 @@ import {
   type DirectGatewayObservation,
   type NodeEventWake,
   type VerificationMaterialWire,
+  NodeStateDriftError,
 } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -410,7 +411,7 @@ function materialFor(
   return {
     operation_id: operationId,
     operation_type: "SEND_EXTERNAL",
-    state: "SEND_LANDED",
+    state: "EXTERNAL_SEND_LANDED",
     expected_artifact: {
       key_id: artifact.key_id,
       preimage_text: artifact.preimage_text,
@@ -611,7 +612,7 @@ describe("composition: external_distribution (SEND_EXTERNAL)", () => {
     expect(op.kind).toBe("send");
 
     const wake = makeEventWake(OP_ID, {
-      claimState: "SEND_LANDED",
+      claimState: "EXTERNAL_SEND_LANDED",
       eventType: "external_send.landed",
     });
     const triggered = ingestEventWake(op, wake, NODE_KEY, "events_poll", NOW);
@@ -978,7 +979,7 @@ describe("verification-complete acknowledgement", () => {
     if ("error" in req) return;
     expect(req.verdict).toBe("VERIFIED");
     expect(req.expected_row_version).toBe(7);
-    expect(req.wallet_evidence[0]?.landing_proof.classification).toBe("EXPECTED_AT_HEAD");
+    expect(req.wallet_evidence[0]?.landing_proof?.classification).toBe("EXPECTED_AT_HEAD");
 
     const acked = applyVerificationComplete(op, {
       operation_id: op.operationId,
@@ -991,37 +992,58 @@ describe("verification-complete acknowledgement", () => {
     expect(acked.status).toBe("ACKNOWLEDGED");
   });
 
-  it("refuses to submit an INDETERMINATE verdict rather than fabricate landing_proof", () => {
-    // The server's .strict() WalletEvidence schema requires landing_proof on
-    // every entry unconditionally, but a non-VERIFIED OperationProofVerdict carries no
-    // independently-derived projection/signature to build one from (no fresh head was
-    // ever confirmed). Known open gap: INDETERMINATE/REJECTED acknowledgement still
-    // needs its own protocol answer — this builder must never fabricate the field to make
-    // that gap disappear (never blind-retry, never fabricate a submit).
-    let op = openConsumerOperation({
+  it("builds a non-VERIFIED acknowledgement without landing_proof (never fabricates one)", () => {
+    const opBase = openConsumerOperation({
       operationId: "55555555-5555-4555-8555-555555555561",
       compositionLabel: "deposit",
-      rowVersion: 7,
+      rowVersion: 3,
     });
-    op = {
-      ...op,
+    const artifact = buildReceiveArtifact(opBase.operationId, "2.25");
+    const material = materialFor(opBase.operationId, "RECEIVE_EXTERNAL", artifact);
+    const withIndeterminate: ConsumerOperation = {
+      ...opBase,
+      status: "INDETERMINATE",
       operationVerified: {
         verdict: "INDETERMINATE",
         kind: "receive",
         stage: "delta",
         reason: "endpoint_disagreement",
       },
-      status: "INDETERMINATE",
     };
-    const artifact = buildReceiveArtifact(op.operationId, "2.25");
-    const material = materialFor(op.operationId, "RECEIVE_EXTERNAL", artifact);
     const req = buildVerificationCompleteRequest({
-      operation: op,
+      operation: withIndeterminate,
       material,
-      consumedCursor: "1051",
+      consumedCursor: "100",
     });
-    expect("error" in req).toBe(true);
-    if (!("error" in req)) return;
-    expect(req.error).toMatch(/no_independent_head_for_role/);
+    expect("error" in req).toBe(false);
+    if ("error" in req) return;
+    expect(req.verdict).toBe("INDETERMINATE");
+    expect(req.wallet_evidence.length).toBeGreaterThan(0);
+    for (const row of req.wallet_evidence) {
+      expect(row.landing_proof).toBeUndefined();
+    }
+  });
+
+  it("rejects unknown node_claim_state with NodeStateDriftError (never stores it)", () => {
+    const op = openConsumerOperation({
+      operationId: "55555555-5555-4555-8555-555555555562",
+      compositionLabel: "deposit",
+    });
+    const wake: NodeEventWake = {
+      event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa01",
+      implementer_seq: "1",
+      operation_id: op.operationId,
+      event_type: "receive.landed",
+      node_claim_state: "NOT_A_REAL_STATE",
+      artifact: {
+        key_id: KEY_ID,
+        preimage_text: "t",
+        preimage_sha256: "a".repeat(64),
+        signature: "s",
+      },
+    };
+    expect(() => ingestEventWake(op, wake, NODE_KEY, "events_poll", NOW)).toThrow(
+      NodeStateDriftError,
+    );
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Product-neutral consumer integration types (part of the installable SDK).
+ * Product-neutral consumer integration types (consumer SDK surface).
  *
  * Composition vocabulary is only the three public operations. No product-layer
  * states (no PAID / fulfilment / webhook vocabulary). `node_claim` and
@@ -90,6 +90,7 @@ export interface NodeEventWake {
 
 /** Node claim retained separately from the consumer's own verdict. */
 export interface NodeClaimRecord {
+  /** Closed Layer-1 operation state — never an unknown or forbidden alias. */
   readonly state: string;
   readonly eventType: string;
   readonly authenticated: boolean;
@@ -203,10 +204,10 @@ export interface DirectGatewayObservation {
 }
 
 /**
- * `wallet_evidence[].landing_proof`. Required by the server's `.strict()`
- * `WalletEvidence` schema on every entry — the consumer supplies `fresh_head_step_2_signature`
- * and `path_manifest_sha256` only after independently reading a fresh gateway head and
- * verifying every manifest hop; see `deriveLandingProof` in `landing-proof.ts`.
+ * `wallet_evidence[].landing_proof`. Required when verdict is VERIFIED — the consumer supplies
+ * `fresh_head_step_2_signature` and `path_manifest_sha256` only after independently reading a
+ * fresh gateway head and verifying every manifest hop; see `deriveLandingProof` in
+ * `landing-proof.ts`. Omitted for REJECTED / INDETERMINATE acknowledgements.
  */
 export interface LandingProofWire {
   readonly classification: "EXPECTED_AT_HEAD" | "EXPECTED_ANCESTOR";
@@ -231,7 +232,7 @@ export interface VerificationCompleteRequest {
       readonly observation_id: string;
       readonly projection: { readonly s: string; readonly p: string; readonly b_zkz: string };
     };
-    readonly landing_proof: LandingProofWire;
+    readonly landing_proof?: LandingProofWire;
   }[];
 }
 

@@ -9,7 +9,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -21,7 +21,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -35,7 +35,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -47,7 +47,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -59,7 +59,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -71,7 +71,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -83,7 +83,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     },
     {
@@ -95,7 +95,7 @@
         ],
         "driftAuditStatus": "residual-open",
         "sourceDoc": "foundational rule register",
-        "note": "Supersedable delegated rule — issued under a standing delegation, not first-party canonical law."
+        "note": "Supersedable delegated rule \u2014 issued under a standing delegation, not first-party canonical law."
       }
     }
   ],
@@ -263,7 +263,7 @@
       "goldenRefs": [
         {
           "path": "src/api-schema/gen/api-schema.json",
-          "sha256": "f30dd07bdd5e5ae63c41d47a461c94ef5a28546eb55bd047bd4c86ca1c366fc7"
+          "sha256": "6230bbef6b738a06814bb75e60b7ac60ba863289031ec03f65b8b72e2725eca4"
         }
       ]
     },
@@ -1031,7 +1031,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "data-model destinations DDL; api-contract destination endpoints",
-        "note": "DESTINATION_STATES (PENDING/BLESSED/RETIRED) agree across the data model's destination_state DDL and the api contract's state filter. The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes."
+        "note": "DESTINATION_STATES (PENDING/BLESSED/RETIRED) agree across the data model's destination_state DDL and the api contract's state filter. The `label` property the api contract accepts and returns had no column in the destinations DDL \u2014 a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes."
       }
     },
     {
@@ -1044,7 +1044,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "state-event reference terminal column; data-model operations tables",
-        "note": "The state-event reference's Terminal column and the frozen TERMINAL_RECEIVE_STATES are the same two-value set (EXPIRED, RECEIVE_LANDED). The terminal timestamp is named `terminal_at` on operations and `terminal_observation_id` on operation_wallets throughout the data model — one spelling each, no competing field."
+        "note": "The state-event reference's Terminal column and the frozen TERMINAL_RECEIVE_STATES are the same two-value set (EXPIRED, RECEIVE_LANDED). The terminal timestamp is named `terminal_at` on operations and `terminal_observation_id` on operation_wallets throughout the data model \u2014 one spelling each, no competing field."
       }
     },
     {
@@ -1082,7 +1082,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "observation-verification verdict vocabulary; canonical-fields settled-body table; data-model attempt_phase domain",
-        "note": "Settled-body bytes are clean: the ledger text sequence {inner, step_1_signature, step_2_signature} is identical in SPLITCHAIN_SETTLED_TEXT_FIELD_SEQUENCE and the canonical-fields appendix, and observation-verification carries the frozen complete-path verdict vocabulary — byte-contract material read, never rewritten. Phase half: OPERATION_TRANSACTION_PHASES deep-equals the data model's attempt_phase CHECK domain in sequence and borrows no public execution_phase values (NOT_STARTED/SUBMITTED/LANDED)."
+        "note": "Settled-body bytes are clean: the ledger text sequence {inner, step_1_signature, step_2_signature} is identical in SPLITCHAIN_SETTLED_TEXT_FIELD_SEQUENCE and the canonical-fields appendix, and observation-verification carries the frozen complete-path verdict vocabulary \u2014 byte-contract material read, never rewritten. Phase half: OPERATION_TRANSACTION_PHASES deep-equals the data model's attempt_phase CHECK domain in sequence and borrows no public execution_phase values (NOT_STARTED/SUBMITTED/LANDED)."
       }
     },
     {
@@ -1094,7 +1094,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "api-contract idempotency rules; data-model idempotency_key CHECKs",
-        "note": "IDEMPOTENCY_KEY_CONTRACT (16–255, code points 0x21–0x7e) matches the api contract and the data model's `^[!-~]{16,255}$`. The operations table carried the weaker `length(idempotency_key) BETWEEN 1 AND 255` — a schema that accepted keys the wire contract rejects; reconciled to the canonical regex. Every POST in ROUTE_POLICIES requires an Idempotency-Key."
+        "note": "IDEMPOTENCY_KEY_CONTRACT (16\u2013255, code points 0x21\u20130x7e) matches the api contract and the data model's `^[!-~]{16,255}$`. The operations table carried the weaker `length(idempotency_key) BETWEEN 1 AND 255` \u2014 a schema that accepted keys the wire contract rejects; reconciled to the canonical regex. Every POST in ROUTE_POLICIES requires an Idempotency-Key."
       }
     },
     {
@@ -1132,7 +1132,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "signing-custody-security signer boundary; data-model audit_log",
-        "note": "SIGNER_BOUNDARY's two signing purposes (SPLITCHAIN_STEP_1/STEP_2) and its never-returns-private-key rule appear in the signing-custody-security spec; the audit surface is the single append-only `audit_log` of the data model — no second signer-audit table or field spelling exists."
+        "note": "SIGNER_BOUNDARY's two signing purposes (SPLITCHAIN_STEP_1/STEP_2) and its never-returns-private-key rule appear in the signing-custody-security spec; the audit surface is the single append-only `audit_log` of the data model \u2014 no second signer-audit table or field spelling exists."
       }
     },
     {
@@ -1171,7 +1171,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "api-contract auth scopes",
-        "note": "All eight IMPLEMENTER_SCOPES and all six BEARER_KEY_EXCLUSIONS resolve in the api contract's scope list; every scope named by a frozen route policy is one of the eight, and no bearer-scoped route reaches an excluded capability. Handles are stored hashed and the operator surface is session+CSRF — three distinct storage rules, no overlap."
+        "note": "All eight IMPLEMENTER_SCOPES and all six BEARER_KEY_EXCLUSIONS resolve in the api contract's scope list; every scope named by a frozen route policy is one of the eight, and no bearer-scoped route reaches an excluded capability. Handles are stored hashed and the operator surface is session+CSRF \u2014 three distinct storage rules, no overlap."
       }
     },
     {
@@ -1184,7 +1184,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "api-contract auth step-up; api-contract admin routes",
-        "note": "The admin routes whose frozen authMode requires TOTP are exactly the api-contract bullets that require `X-ZP-TOTP`/fresh TOTP (approve, reject, bless, recovery-actions); destination retire requires neither, in both. TOTP_HEADER_NAME matches the api contract, which states the burn is consumed atomically and does not sign bytes — the TOTP-never-signs invariant is intact."
+        "note": "The admin routes whose frozen authMode requires TOTP are exactly the api-contract bullets that require `X-ZP-TOTP`/fresh TOTP (approve, reject, bless, recovery-actions); destination retire requires neither, in both. TOTP_HEADER_NAME matches the api contract, which states the burn is consumed atomically and does not sign bytes \u2014 the TOTP-never-signs invariant is intact."
       }
     },
     {
@@ -1197,7 +1197,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "data-model retention matrix; observation-verification retention rules",
-        "note": "The data model's canonical-wallet-ledger row is `permanent, verbatim` / `append-only`, matching RETENTION_RULE.append_only and observation-verification's permanent list (canonical settled transaction text). Proof-access expiry revokes access only in both — the separation of evidence from access holds."
+        "note": "The data model's canonical-wallet-ledger row is `permanent, verbatim` / `append-only`, matching RETENTION_RULE.append_only and observation-verification's permanent list (canonical settled transaction text). Proof-access expiry revokes access only in both \u2014 the separation of evidence from access holds."
       }
     },
     {

@@ -200,7 +200,7 @@ export function composePush(deps: ComposePushDeps): PushComposition {
 
   // ZTR-1154: consecutive no_transfer_code streak (shape-break detector). Process-local;
   // threshold rationale is on DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD.
-  // Gauge publish runs after observe (createPushReceiveMetricsPort order) so Prom
+  // Gauge publish runs after observe (createPushReceiveMetricsPort sequence) so Prom
   // sees the post-increment streak at the threshold event.
   const noCodeStreak = createPushNoTransferCodeStreakTracker({
     threshold: DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,

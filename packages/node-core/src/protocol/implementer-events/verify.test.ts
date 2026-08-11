@@ -1,6 +1,6 @@
 // Verifier negatives for zp-implementer-event-v1 / -checkpoint-v1 / -keyrotation-v1.
 // Proves purpose-before-signature, key-class enforcement, byte-exact preimage binding,
-// and rejection of wrong purpose / wrong key class / mutated order / whitespace / sig.
+// and rejection of wrong purpose / wrong key class / mutated field sequence / whitespace / sig.
 import { Buffer } from "node:buffer";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -130,7 +130,7 @@ describe("verifyImplementerEvent — negatives", () => {
     }
   });
 
-  it("rejects mutated field order (non-canonical bytes)", () => {
+  it("rejects mutated field sequence (non-canonical bytes)", () => {
     const { purpose, canonical_version, ...rest } = IMPLEMENTER_EVENT_GOLDEN_A;
     const reordered = `${IMPLEMENTER_EVENT_PURPOSE}\n${JSON.stringify({ canonical_version, purpose, ...rest })}`;
     const sig = sign(null, Buffer.from(reordered, "utf8"), GOLDEN_PRIV);

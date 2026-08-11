@@ -10,7 +10,7 @@
 //
 // Ordering contract (Review B / ZTR-1174 r2): assertNoGoldenFixtureKeysAtBoot MUST run on
 // the ensure result BEFORE identity.sign / sendSignerHolder install / identityEnsured=true
-// and BEFORE installEventSigner arms EVENT_SIGNING. Helpers below encode that order so
+// and BEFORE installEventSigner arms EVENT_SIGNING. Helpers below encode that sequence so
 // unit tests can prove the probe never runs when the key is golden.
 
 import {

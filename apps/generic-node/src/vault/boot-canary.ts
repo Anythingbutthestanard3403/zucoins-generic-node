@@ -423,7 +423,7 @@ export function rewrapVaultBootCanary(
   assertRootKey(input.newRootKey);
   assertNodeId(input.nodeId);
 
-  // Writer-first (new), then retained old — same order as orderEntriesForOpen.
+  // Writer-first (new), then retained old — same sequence as orderEntriesForOpen.
   let openedUnder: "new" | "old" | null = null;
   let opened: Buffer | null = null;
 

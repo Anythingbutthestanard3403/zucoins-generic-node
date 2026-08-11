@@ -939,31 +939,103 @@ const RECOVERY_SECRET_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const RECOVERY_SECRET_CHARS = 26;
 /** Mirror of node RECOVERY_PACK_MIN_DISTINCT_CHARS — redraw if a draw lands under. */
 const RECOVERY_SECRET_MIN_DISTINCT = 10;
-const RECOVERY_SECRET_MAX_MONOTONE_RUN = 8;
+/** Mirrors node RECOVERY_PACK_MAX_* structure thresholds (ZTR-1220 Review B). */
+const RECOVERY_SECRET_MAX_MONOTONE_RUN = 6;
+const RECOVERY_SECRET_MAX_SAME_RUN = 4;
+const RECOVERY_SECRET_MAX_LETTER_RUN = 14;
+const RECOVERY_SECRET_MAX_LAG_MATCH_RUN = 6;
+const RECOVERY_SECRET_MAX_LAG_MATCH_FRAC = 0.4;
+const RECOVERY_SECRET_MAX_REPEATED_SUBSTRING = 4;
+/** Hard redraw ceiling — throw rather than emit a structure-failing secret. */
+const RECOVERY_SECRET_MAX_DRAW_ATTEMPTS = 64;
 
+/**
+ * Mirror of node `recoverySecretWeakness` structure floor (post-alphabet).
+ * Keep byte-identical rejection class so the SPA never posts a secret the node
+ * would answer 400 weak_recovery_secret for.
+ */
 function recoveryPackSecretStructureOk(secret: string): boolean {
   if (secret.length !== RECOVERY_SECRET_CHARS) return false;
-  if (new Set(secret).size < RECOVERY_SECRET_MIN_DISTINCT) return false;
-  // Periodic tiling (ABAB… / unit.repeat).
-  for (let period = 1; period <= Math.floor(secret.length / 2); period++) {
-    if (secret.length % period !== 0) continue;
-    if (secret.slice(0, period).repeat(secret.length / period) === secret) return false;
+  for (const c of secret) {
+    if (!RECOVERY_SECRET_ALPHABET.includes(c)) return false;
   }
-  // Monotone ±1 run through the Crockford alphabet.
-  let up = 1;
-  let down = 1;
-  for (let i = 1; i < secret.length; i++) {
-    const delta =
-      RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!) -
-      RECOVERY_SECRET_ALPHABET.indexOf(secret[i - 1]!);
-    up = delta === 1 ? up + 1 : 1;
-    down = delta === -1 ? down + 1 : 1;
-    if (up >= RECOVERY_SECRET_MAX_MONOTONE_RUN || down >= RECOVERY_SECRET_MAX_MONOTONE_RUN) {
+  if (new Set(secret).size < RECOVERY_SECRET_MIN_DISTINCT) return false;
+
+  const n = secret.length;
+  // Exact tilings + near-period lag runs / match fraction + repeated substring.
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    if (n % period === 0 && secret.slice(0, period).repeat(n / period) === secret) {
       return false;
     }
   }
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    let match = 0;
+    let run = 0;
+    let maxRun = 0;
+    for (let i = period; i < n; i++) {
+      if (secret[i] === secret[i - period]) {
+        match += 1;
+        run += 1;
+        if (run > maxRun) maxRun = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (maxRun >= RECOVERY_SECRET_MAX_LAG_MATCH_RUN) return false;
+    if (match / (n - period) >= RECOVERY_SECRET_MAX_LAG_MATCH_FRAC) return false;
+  }
+  const maxLen = Math.min(RECOVERY_SECRET_MAX_REPEATED_SUBSTRING + 9, Math.floor(n / 2));
+  for (let len = RECOVERY_SECRET_MAX_REPEATED_SUBSTRING; len <= maxLen; len++) {
+    const seen = new Set<string>();
+    for (let i = 0; i <= n - len; i++) {
+      const sub = secret.slice(i, i + len);
+      if (seen.has(sub)) return false;
+      seen.add(sub);
+    }
+  }
+
+  // Same-symbol run + multi-triple blocks.
+  let sameRun = 1;
+  let tripleBlocks = 0;
+  let blockRun = 1;
+  for (let i = 1; i <= n; i++) {
+    if (i < n && secret[i] === secret[i - 1]) {
+      sameRun += 1;
+      blockRun += 1;
+      if (sameRun >= RECOVERY_SECRET_MAX_SAME_RUN) return false;
+    } else {
+      if (blockRun >= 3) tripleBlocks += 1;
+      sameRun = 1;
+      blockRun = 1;
+    }
+  }
+  if (tripleBlocks >= 2) return false;
+
+  // Constant-step (any k ≠ 0) monotone run through the alphabet.
+  let stepRun = 1;
+  let prevDelta: number | null = null;
+  for (let i = 1; i < n; i++) {
+    const delta =
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i]!) -
+      RECOVERY_SECRET_ALPHABET.indexOf(secret[i - 1]!);
+    if (delta !== 0 && delta === prevDelta) {
+      stepRun += 1;
+      if (stepRun >= RECOVERY_SECRET_MAX_MONOTONE_RUN) return false;
+    } else {
+      stepRun = 1;
+      prevDelta = delta === 0 ? null : delta;
+    }
+  }
+
+  // Long letter-only run (digits break it) — dictionary-phrase class.
+  let letterRun = 0;
   for (const c of secret) {
-    if (!RECOVERY_SECRET_ALPHABET.includes(c)) return false;
+    if (c >= "A" && c <= "Z") {
+      letterRun += 1;
+      if (letterRun >= RECOVERY_SECRET_MAX_LETTER_RUN) return false;
+    } else {
+      letterRun = 0;
+    }
   }
   return true;
 }
@@ -973,12 +1045,11 @@ function recoveryPackSecretStructureOk(secret: string): boolean {
  * the pack is designed to leave the host, so its seal key has to be beyond
  * offline search. Drawn from the platform CSPRNG, shown once, never stored — the
  * node re-checks the same shape + structure floor at creation (ZTR-1220).
- * Redraws on the rare structure-guard miss so the SPA never posts a secret the
- * node would answer 400 weak_recovery_secret for (symmetry with
- * generateRecoverySecret on the node).
+ * Redraws on the rare structure-guard miss; throws rather than last-resort-emit
+ * a secret the node would answer 400 weak_recovery_secret for.
  */
 export function generateRecoveryPackSecret(): string {
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < RECOVERY_SECRET_MAX_DRAW_ATTEMPTS; attempt++) {
     const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
     crypto.getRandomValues(draws);
     let out = "";
@@ -988,16 +1059,9 @@ export function generateRecoveryPackSecret(): string {
     }
     if (recoveryPackSecretStructureOk(out)) return out;
   }
-  // Last-resort emit: node will still refuse if somehow weak; better than throw
-  // in the SPA render path. Probability of 8 consecutive structure misses is
-  // negligible for a 32-symbol CSPRNG draw.
-  const draws = new Uint8Array(RECOVERY_SECRET_CHARS);
-  crypto.getRandomValues(draws);
-  let out = "";
-  for (const d of draws) {
-    out += RECOVERY_SECRET_ALPHABET[d % RECOVERY_SECRET_ALPHABET.length];
-  }
-  return out;
+  throw new Error(
+    "recovery pack secret generation failed structure floor — refuse weak emit",
+  );
 }
 
 export async function postRecoveryPackCreate(

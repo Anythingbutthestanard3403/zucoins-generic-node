@@ -60,11 +60,35 @@ export const RECOVERY_PACK_MIN_ENTROPY_BITS = 128;
  */
 export const RECOVERY_PACK_MIN_DISTINCT_CHARS = 10;
 /**
- * Reject pure period-tilings and long monotone runs inside the alphabet. A real
- * CSPRNG draw almost never trips these; a hand-rolled "ABCDEF…" or
- * "ABCDABCD…" always does.
+ * Reject long constant-step runs through the alphabet (any step k ≠ 0, not only
+ * ±1). A real CSPRNG draw almost never hits a run of this length; hand-rolled
+ * "ABCDEF…" / step-2 sequences always do. Threshold calibrated so CSPRNG FPR
+ * is ~0 at n=26 / alphabet=32.
  */
-export const RECOVERY_PACK_MAX_MONOTONE_RUN = 8;
+export const RECOVERY_PACK_MAX_MONOTONE_RUN = 6;
+/**
+ * Reject long same-symbol runs ("AAAA…"). Distinct from step-k monotone — a
+ * constant symbol is step 0, not ±1.
+ */
+export const RECOVERY_PACK_MAX_SAME_RUN = 4;
+/**
+ * Reject a stretch of consecutive A–Z letters (digits break the run). Catches
+ * Crockford-mapped dictionary phrases that otherwise look high-spread
+ * (CORRECTHORSE…, MASTERKEY…). Threshold 14: CSPRNG redraw rate ~2–3% at n=26.
+ */
+export const RECOVERY_PACK_MAX_LETTER_RUN = 14;
+/**
+ * Near-period: a lag-p match run this long (or a match fraction this high) is
+ * not an i.i.d. draw — covers "UNITUNITUNIT…" even when period does not divide
+ * the secret length.
+ */
+export const RECOVERY_PACK_MAX_LAG_MATCH_RUN = 6;
+export const RECOVERY_PACK_MAX_LAG_MATCH_FRAC = 0.4;
+/**
+ * Any substring of this length appearing twice is a structure fail (covers
+ * near-tiles and short-cycle pads the exact-tiling check misses).
+ */
+export const RECOVERY_PACK_MAX_REPEATED_SUBSTRING = 4;
 /** Bound on secret length accepted on the *open* path (create is fixed-length). */
 export const RECOVERY_PACK_SECRET_MAX_CHARS = 1024;
 
@@ -148,31 +172,111 @@ export function estimateRecoverySecretEntropyBits(secret: string): number {
   return secret.length * Math.log2(pool);
 }
 
-/** True when `secret` is an exact tiling of a shorter non-empty unit. */
-function isPeriodicTiling(secret: string): boolean {
+/**
+ * True when `secret` is an exact tiling of a shorter unit, OR shows near-period
+ * structure (long lag-p match run / high match fraction / repeated substring).
+ * Exact `n % period === 0` tiling alone missed "UNITUNITUNIT…" pads whose period
+ * does not divide 26 (Review B residual class).
+ */
+function hasRepeatedStructure(secret: string): boolean {
   const n = secret.length;
+  // Exact full tilings (period divides n).
   for (let period = 1; period <= Math.floor(n / 2); period++) {
     if (n % period !== 0) continue;
     const unit = secret.slice(0, period);
     if (unit.repeat(n / period) === secret) return true;
   }
+  // Near-period: lag-p consecutive matches / match fraction.
+  for (let period = 1; period <= Math.floor(n / 2); period++) {
+    let match = 0;
+    let run = 0;
+    let maxRun = 0;
+    for (let i = period; i < n; i++) {
+      if (secret[i] === secret[i - period]) {
+        match += 1;
+        run += 1;
+        if (run > maxRun) maxRun = run;
+      } else {
+        run = 0;
+      }
+    }
+    if (maxRun >= RECOVERY_PACK_MAX_LAG_MATCH_RUN) return true;
+    if (match / (n - period) >= RECOVERY_PACK_MAX_LAG_MATCH_FRAC) return true;
+  }
+  // Any substring of length ≥ MAX_REPEATED_SUBSTRING appearing twice.
+  const maxLen = Math.min(RECOVERY_PACK_MAX_REPEATED_SUBSTRING + 9, Math.floor(n / 2));
+  for (let len = RECOVERY_PACK_MAX_REPEATED_SUBSTRING; len <= maxLen; len++) {
+    const seen = new Set<string>();
+    for (let i = 0; i <= n - len; i++) {
+      const sub = secret.slice(i, i + len);
+      if (seen.has(sub)) return true;
+      seen.add(sub);
+    }
+  }
   return false;
 }
 
 /**
- * True when ≥ RECOVERY_PACK_MAX_MONOTONE_RUN consecutive symbols step by ±1
- * through the Crockford alphabet (e.g. "0123456789AB").
+ * True when ≥ RECOVERY_PACK_MAX_MONOTONE_RUN consecutive symbols step by a
+ * constant non-zero alphabet delta (any step k, not only ±1).
+ * e.g. "01234567" (k=+1), "02468ACE" (k=+2).
  */
 function hasMonotoneAlphabetRun(secret: string): boolean {
   const indexOf = (c: string): number => RECOVERY_PACK_SECRET_ALPHABET.indexOf(c);
-  let up = 1;
-  let down = 1;
+  // Track run length for each observed constant delta.
+  let run = 1;
+  let prevDelta: number | null = null;
   for (let i = 1; i < secret.length; i++) {
     const delta = indexOf(secret[i]!) - indexOf(secret[i - 1]!);
-    up = delta === 1 ? up + 1 : 1;
-    down = delta === -1 ? down + 1 : 1;
-    if (up >= RECOVERY_PACK_MAX_MONOTONE_RUN || down >= RECOVERY_PACK_MAX_MONOTONE_RUN) {
-      return true;
+    if (delta !== 0 && delta === prevDelta) {
+      run += 1;
+      if (run >= RECOVERY_PACK_MAX_MONOTONE_RUN) return true;
+    } else {
+      run = 1;
+      prevDelta = delta === 0 ? null : delta;
+    }
+  }
+  return false;
+}
+
+/** True when ≥ RECOVERY_PACK_MAX_SAME_RUN identical symbols sit in a row. */
+function hasLongSameRun(secret: string): boolean {
+  let run = 1;
+  for (let i = 1; i < secret.length; i++) {
+    if (secret[i] === secret[i - 1]) {
+      run += 1;
+      if (run >= RECOVERY_PACK_MAX_SAME_RUN) return true;
+    } else {
+      run = 1;
+    }
+  }
+  // Multiple triple-or-longer same-symbol blocks (AAABBBCCC…) — not i.i.d.
+  let blocks = 0;
+  run = 1;
+  for (let i = 1; i <= secret.length; i++) {
+    if (i < secret.length && secret[i] === secret[i - 1]) {
+      run += 1;
+    } else {
+      if (run >= 3) blocks += 1;
+      run = 1;
+    }
+  }
+  return blocks >= 2;
+}
+
+/**
+ * True when ≥ RECOVERY_PACK_MAX_LETTER_RUN consecutive A–Z letters appear
+ * (digits break the run). Crockford-mapped dictionary phrases concentrate
+ * letters; CSPRNG draws interleave digits.
+ */
+function hasLongLetterRun(secret: string): boolean {
+  let run = 0;
+  for (const c of secret) {
+    if (c >= "A" && c <= "Z") {
+      run += 1;
+      if (run >= RECOVERY_PACK_MAX_LETTER_RUN) return true;
+    } else {
+      run = 0;
     }
   }
   return false;
@@ -184,7 +288,9 @@ function hasMonotoneAlphabetRun(secret: string): boolean {
  *
  * Creation accepts only the generateRecoverySecret() shape (ZTR-1220): the
  * charset×length proxy that previously cleared long patterned / dictionary
- * phrases is not an accept path.
+ * phrases is not an accept path. Structure guards cover near-period tiles,
+ * same-symbol blocks, step-k monotone runs, and long letter runs — not only
+ * exact divisor tilings and ±1 sequences.
  */
 export function recoverySecretWeakness(secret: string): string | null {
   if (secret.length === 0) return "recovery secret is required";
@@ -200,17 +306,27 @@ export function recoverySecretWeakness(secret: string): string | null {
   if (new Set(secret).size < RECOVERY_PACK_MIN_DISTINCT_CHARS) {
     return `recovery secret must use at least ${RECOVERY_PACK_MIN_DISTINCT_CHARS} distinct characters`;
   }
-  if (isPeriodicTiling(secret)) {
+  if (hasRepeatedStructure(secret)) {
     return "recovery secret must not be a repeated substring";
+  }
+  if (hasLongSameRun(secret)) {
+    return "recovery secret must not contain a long same-character run";
   }
   if (hasMonotoneAlphabetRun(secret)) {
     return "recovery secret must not contain a long sequential run";
   }
-  // Belt: i.i.d. Crockford×26 is 130 bits; keep the named floor so a future
-  // alphabet shrink cannot silently drop below it.
-  const bits = RECOVERY_PACK_GENERATED_SECRET_CHARS * Math.log2(RECOVERY_PACK_SECRET_ALPHABET.length);
-  if (bits < RECOVERY_PACK_MIN_ENTROPY_BITS) {
-    return `recovery secret must carry at least ${RECOVERY_PACK_MIN_ENTROPY_BITS} bits of entropy (estimated ${Math.floor(bits)})`;
+  if (hasLongLetterRun(secret)) {
+    return "recovery secret must not contain a long letter-only run";
+  }
+  // Non-vacuous floor: i.i.d. Crockford×26 is 130 bits. Reject if the named
+  // constants ever shrink the theoretical maximum below the floor — this is a
+  // compile-time belt on the alphabet/length pair, not a per-secret estimate.
+  // (estimateRecoverySecretEntropyBits stays diagnostics-only.)
+  if (
+    RECOVERY_PACK_GENERATED_SECRET_CHARS * Math.log2(RECOVERY_PACK_SECRET_ALPHABET.length) <
+    RECOVERY_PACK_MIN_ENTROPY_BITS
+  ) {
+    return `recovery secret alphabet×length is below the ${RECOVERY_PACK_MIN_ENTROPY_BITS}-bit floor`;
   }
   return null;
 }
@@ -228,7 +344,9 @@ export function isAcceptableRecoverySecretShape(secret: string): boolean {
 export function generateRecoverySecret(): string {
   // A draw can in principle land under the distinct-character / structure
   // guards; redraw rather than emit a secret the creation path would refuse.
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // 64 attempts: letter-run redraw rate is a few percent; 8 was too tight after
+  // the Review B structure floor tightened (near-period / step-k / letter-run).
+  for (let attempt = 0; attempt < 64; attempt++) {
     let out = "";
     for (let i = 0; i < RECOVERY_PACK_GENERATED_SECRET_CHARS; i++) {
       out += RECOVERY_PACK_SECRET_ALPHABET[randomInt(0, RECOVERY_PACK_SECRET_ALPHABET.length)];

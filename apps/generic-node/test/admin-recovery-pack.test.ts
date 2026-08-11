@@ -385,6 +385,31 @@ describe("admin recovery-pack create", () => {
     );
     expect(tiled.status).toBe(400);
     expect(JSON.parse(tiled.body).error.code).toBe("weak_recovery_secret");
+
+    // Review B residual: Crockford×26 near-tile / dictionary / step-k still 400.
+    const residuals = [
+      "C0RRECTH0RSEBATTERYSTAP1E0",
+      "1ETME1N1ETME1N1ETME1NABCD0",
+      "AAABBBCCCDDDEEEFFFGGGHHHJK",
+      "02468ACEGJMPRTWY02468ACEGJ",
+      "PACKSECRETPACKSECRETPACK01",
+    ];
+    for (let i = 0; i < residuals.length; i++) {
+      const resR = await router(
+        "POST",
+        "/admin/v1/recovery-pack/create",
+        Buffer.from(
+          JSON.stringify({
+            recovery_secret: residuals[i],
+            vault_master_key: MASTER,
+          }),
+        ),
+        authHeaders(cookie, csrf, nowMs + 60_000 + i * 30_000),
+      );
+      expect(resR.status).toBe(400);
+      expect(JSON.parse(resR.body).error.code).toBe("weak_recovery_secret");
+      expect(resR.body).not.toContain("pack_file_b64");
+    }
   });
 
   it("re-issues a pack from an existing one without the operator handling the master", async () => {

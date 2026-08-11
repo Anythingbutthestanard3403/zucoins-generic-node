@@ -117,9 +117,11 @@ The pack is designed to leave the host, so it must survive hostile hands. Two th
   Argon2id. v1 packs still open through an explicit legacy opt-in so you can migrate. Re-issue
   as v2 and destroy the v1 copy (ZTR-1126).
 
-Use `generateRecoverySecret()` — the sanctioned path. Creation accepts only that shape:
-exactly 26 Crockford-base32 characters (0-9 A-Z except I/L/O/U), with structure guards
-against tiled substrings and long sequential runs (ZTR-1220). A free-form passphrase is
+Use `generateRecoverySecret()` — the sanctioned path. The operator never chooses the seal
+key. Creation accepts only that shape: exactly 26 Crockford-base32 characters
+(0-9 A-Z except I/L/O/U), with structure guards against exact and near-period tiles,
+same-character blocks, constant-step (any k) sequential runs, and long letter-only runs
+(ZTR-1220). A free-form passphrase — including Crockford-mapped dictionary phrases — is
 refused at create; do not invent one.
 
 Store the pack the way you would store a wallet backup, and store the vault root KDF salt

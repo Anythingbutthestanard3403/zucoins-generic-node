@@ -92,6 +92,59 @@ describe("recovery secret entropy floor", () => {
     expect(recoverySecretWeakness(run)).toMatch(/sequential run/);
   });
 
+  it("refuses Review B residual low-entropy Crockford×26 secrets", () => {
+    // Named residuals that cleared the prior exact-tiling / ±1-only floor.
+    const residuals: Array<{ secret: string; want: RegExp }> = [
+      {
+        // Crockford-mapped "correct horse battery staple".
+        secret: "C0RRECTH0RSEBATTERYSTAP1E0",
+        want: /letter-only run|repeated substring|sequential run|same-character/,
+      },
+      {
+        // Near-tile "letmein" ×3 + pad — period 7 does not divide 26.
+        secret: "1ETME1N1ETME1N1ETME1NABCD0",
+        want: /repeated substring/,
+      },
+      {
+        secret: "HVNTER2HVNTER2HVNTER2AB012",
+        want: /repeated substring/,
+      },
+      {
+        secret: "PACKSECRETPACKSECRETPACK01",
+        want: /repeated substring|letter-only run/,
+      },
+      {
+        // Triple-letter blocks — same-symbol structure, not ±1 monotone.
+        secret: "AAABBBCCCDDDEEEFFFGGGHHHJK",
+        want: /same-character run|letter-only run|repeated substring/,
+      },
+      {
+        // Arithmetic step-2 through the alphabet (not ±1).
+        secret: "02468ACEGJMPRTWY02468ACEGJ",
+        want: /sequential run|repeated substring/,
+      },
+      {
+        // Human mnemonic-ish letter run.
+        secret: "MYVAV1TMASTERKEYBACKP20240",
+        want: /letter-only run|repeated substring/,
+      },
+    ];
+    for (const { secret, want } of residuals) {
+      expect(secret).toHaveLength(26);
+      expect(new Set(secret).size).toBeGreaterThanOrEqual(10);
+      expect(recoverySecretWeakness(secret)).toMatch(want);
+      expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(
+        RecoveryPackError,
+      );
+      try {
+        createRecoveryPack({ vaultMasterKey: MASTER, secret });
+        expect.unreachable(`residual must not seal: ${secret}`);
+      } catch (e) {
+        expect((e as RecoveryPackError).code).toBe("weak_secret");
+      }
+    }
+  });
+
   it("accepts the generated secret", () => {
     expect(recoverySecretWeakness(SECRET)).toBeNull();
     for (let i = 0; i < 25; i++) {
@@ -145,6 +198,12 @@ describe("entropy floor is enforced at creation", () => {
       "correct horse battery staple zz",
       "1".repeat(28) + "A",
       "0123456789ABC".repeat(2),
+      // Review B residual class (Crockford×26 that previously sealed).
+      "C0RRECTH0RSEBATTERYSTAP1E0",
+      "1ETME1N1ETME1N1ETME1NABCD0",
+      "AAABBBCCCDDDEEEFFFGGGHHHJK",
+      "02468ACEGJMPRTWY02468ACEGJ",
+      "PACKSECRETPACKSECRETPACK01",
     ];
     for (const secret of falseAccepts) {
       expect(() => createRecoveryPack({ vaultMasterKey: MASTER, secret })).toThrow(

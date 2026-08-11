@@ -695,6 +695,26 @@ describe("generateRecoveryPackSecret (ZTR-1220)", () => {
       Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
     }
   });
+
+  it("throws rather than last-resort-emitting a structure-failing secret", async () => {
+    const { generateRecoveryPackSecret } = await import("./money.js");
+    const real = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues: (arr: Uint8Array) => {
+          // Every draw is period-1 tiling — structure floor must never emit.
+          arr.fill(0);
+          return arr;
+        },
+      },
+    });
+    try {
+      expect(() => generateRecoveryPackSecret()).toThrow(/structure floor|generation failed/);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", { configurable: true, value: real });
+    }
+  });
 });
 
 describe("newIdempotencyKey (ZTR-1168)", () => {

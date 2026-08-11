@@ -22,8 +22,8 @@
     {
       "id": "purposes/deferred-tuple-as-frozen",
       "category": "purposes",
-      "mutation": "a C4-deferred implementer tuple is treated as a frozen verification target",
-      "rejectionReason": "zp-implementer-* field sequences and goldens are deferred (C4); only architecture exists",
+      "mutation": "an implementer continuity purpose is injected into the ten-purpose suite serializer census",
+      "rejectionReason": "zp-implementer-* purposes are frozen under the implementer-events concern, not the suite serializer registry; the suite census stays the closed set of ten Appendix A purposes",
       "specCitation": "A.6"
     },
     {

@@ -21,6 +21,7 @@ export {
   CEREMONY_WINDOW_RULE,
   REPORT_REQUEST_WINDOW_MAX_SECONDS,
   DEFERRED_IMPLEMENTER_TUPLES,
+  FROZEN_IMPLEMENTER_TUPLES,
 } from "./suite-tuples.contract.ts";
 export type { SuiteTupleFieldType, SuiteTupleFieldDescriptor } from "./suite-tuples.contract.ts";
 export {

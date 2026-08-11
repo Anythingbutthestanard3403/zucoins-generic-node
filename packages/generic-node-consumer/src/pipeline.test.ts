@@ -15,7 +15,7 @@
  */
 
 import { Buffer } from "node:buffer";
-import { generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto";
+import { createHash, generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,6 @@ import { describe, expect, it } from "vitest";
 import {
   GENESIS_PROJECTION,
   buildMoveInternalExpectedArtifact,
-  buildNodeEvent,
   buildReceiveExpectedArtifact,
   buildSendExternalExpectedArtifact,
   parseEd25519Signature,
@@ -33,6 +32,11 @@ import {
   parseUuid,
   parseWalletPublicKey,
 } from "@zucoins/node-core";
+import {
+  buildImplementerEventPreimage,
+  IMPLEMENTER_EVENT_CANONICAL_VERSION,
+  IMPLEMENTER_EVENT_PURPOSE,
+} from "@zucoins/generic-node-contracts/implementer-events";
 import {
   deriveBaseline,
   type ArtifactEnvelope,
@@ -278,19 +282,27 @@ function makeEventWake(
     readonly eventType?: "receive.landed" | "internal_move.landed" | "external_send.landed";
   } = {},
 ): NodeEventWake {
+  // Build the purpose GET /v1/events actually serves (zp-implementer-event-v1),
+  // not the operator-only zp-node-event-v1 the prior fixture used (ZTR-1145).
   const signer = opts.signer ?? NODE.privateKey;
   const eventType = opts.eventType ?? "receive.landed";
-  const preimage = buildNodeEvent({
-    node_id: parseUuid(NODE_ID),
-    event_id: parseUuid("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-    seq: opts.seq ?? "42",
-    operation_id: parseUuid(operationId),
+  const preimageText = buildImplementerEventPreimage({
+    purpose: IMPLEMENTER_EVENT_PURPOSE,
+    canonical_version: IMPLEMENTER_EVENT_CANONICAL_VERSION,
+    node_id: NODE_ID,
+    implementer_id: IMPLEMENTER_ID,
+    event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    implementer_seq: opts.seq ?? "42",
+    operation_id: operationId,
     wallet_id: null,
     event_type: eventType,
-    data_sha256: parseSha256Hex("c".repeat(64)),
-    previous_event_hash: null,
+    data_sha256: "c".repeat(64),
+    node_event_hash: "d".repeat(64),
+    implementer_previous_event_hash: null,
     created_at: "2026-07-15T10:30:00.000Z",
   });
+  const preimageBytes = Buffer.from(preimageText, "utf8");
+  const preimageSha256 = createHash("sha256").update(preimageBytes).digest("hex");
   return {
     event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     implementer_seq: opts.seq ?? "42",
@@ -299,12 +311,13 @@ function makeEventWake(
     node_claim_state: opts.claimState ?? "RECEIVE_LANDED",
     artifact: {
       key_id: KEY_ID,
-      preimage_text: preimage.preimageText,
-      preimage_sha256: preimage.sha256 as string,
-      signature: signPreimage(preimage.preimageBytes, signer),
+      preimage_text: preimageText,
+      preimage_sha256: preimageSha256,
+      signature: signPreimage(preimageBytes, signer),
     },
   };
 }
+
 
 function materialFor(
   operationId: string,

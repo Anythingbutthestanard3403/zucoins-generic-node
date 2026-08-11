@@ -12,6 +12,12 @@ import {
   buildSendExternalExpectedArtifact,
 } from "../../protocol/suite/builders.js";
 import {
+  buildImplementerEventPreimage,
+  IMPLEMENTER_EVENT_CANONICAL_VERSION,
+  IMPLEMENTER_EVENT_PURPOSE,
+} from "@zucoins/generic-node-contracts/implementer-events";
+import { createHash } from "node:crypto";
+import {
   parseEd25519Signature,
   parseSha256Hex,
   parseUuid,
@@ -25,6 +31,7 @@ import {
   A8_GOLDEN_PUBLIC_KEYS,
   assertNotGoldenKey,
   authenticateArtifact,
+  authenticateImplementerEvent,
   authenticateNodeEvent,
   deriveBaseline,
   isA8GoldenKey,
@@ -459,6 +466,74 @@ describe("authenticateNodeEvent", () => {
     expect(result.authenticated).toBe(false);
   });
 });
+
+describe("authenticateImplementerEvent", () => {
+  function buildImplementerEnvelope(signerPriv = nodePriv): ArtifactEnvelope {
+    const preimageText = buildImplementerEventPreimage({
+      purpose: IMPLEMENTER_EVENT_PURPOSE,
+      canonical_version: IMPLEMENTER_EVENT_CANONICAL_VERSION,
+      node_id: NODE_KEY_ID,
+      implementer_id: "44444444-4444-4444-8444-444444444444",
+      event_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      implementer_seq: "1",
+      operation_id: "55555555-5555-4555-8555-555555555555",
+      wallet_id: null,
+      event_type: "receive.landed",
+      data_sha256: "c".repeat(64),
+      node_event_hash: "d".repeat(64),
+      implementer_previous_event_hash: null,
+      created_at: "2026-07-15T10:30:00.000Z",
+    });
+    const preimageBytes = Buffer.from(preimageText, "utf8");
+    return {
+      key_id: parseUuid(NODE_KEY_ID),
+      preimage_text: preimageText,
+      preimage_sha256: parseSha256Hex(createHash("sha256").update(preimageBytes).digest("hex")),
+      signature: parseEd25519Signature(
+        edSign(null, preimageBytes, signerPriv).toString("base64url") + "==",
+      ),
+    };
+  }
+
+  it("authenticates a valid zp-implementer-event-v1 envelope", () => {
+    const envelope = buildImplementerEnvelope();
+    const nodeEventKey: NodeVerificationKey = { keyId: NODE_KEY_ID, publicKey: NODE_PUBKEY_B64 };
+    const result = authenticateImplementerEvent(envelope, nodeEventKey);
+    expect(result.authenticated).toBe(true);
+  });
+
+  it("rejects an implementer event signed by a different key", () => {
+    const { privateKey: wrongPriv } = generateKeyPairSync("ed25519");
+    const envelope = buildImplementerEnvelope(wrongPriv);
+    const result = authenticateImplementerEvent(envelope, NODE_KEY);
+    expect(result.authenticated).toBe(false);
+  });
+
+  it("rejects a zp-node-event-v1 envelope (wrong purpose for this verifier)", () => {
+    const preimage = buildNodeEvent({
+      node_id: parseUuid(NODE_KEY_ID),
+      event_id: parseUuid("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+      seq: "1",
+      operation_id: null,
+      wallet_id: null,
+      event_type: "receive.landed",
+      data_sha256: parseSha256Hex("c".repeat(64)),
+      previous_event_hash: null,
+      created_at: "2026-07-15T10:30:00.000Z",
+    });
+    const envelope: ArtifactEnvelope = {
+      key_id: parseUuid(NODE_KEY_ID),
+      preimage_text: preimage.preimageText,
+      preimage_sha256: parseSha256Hex(preimage.sha256 as string),
+      signature: parseEd25519Signature(signPreimage(preimage.preimageBytes)),
+    };
+    const result = authenticateImplementerEvent(envelope, NODE_KEY);
+    expect(result.authenticated).toBe(false);
+    if (result.authenticated) return;
+    expect(result.reason).toBe("unsupported_implementer_event_purpose");
+  });
+});
+
 
 describe("deriveBaseline", () => {
   it("derives a baseline projection from a valid head observation", () => {

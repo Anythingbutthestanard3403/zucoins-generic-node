@@ -32,6 +32,10 @@ import {
   verifySendExternalExpectedArtifact,
   type ResolvedSuiteVerificationKey,
 } from "../../protocol/suite/verify.js";
+import {
+  verifyImplementerCheckpoint,
+  verifyImplementerEvent,
+} from "../../protocol/implementer-events/verify.js";
 import type { ParsedSuiteTuple } from "../../protocol/suite/parsers.js";
 import {
   GENESIS_PROJECTION,
@@ -243,6 +247,10 @@ export function authenticateArtifact(
 
 // Authenticates a node event envelope against the node's published node-event key: verify
 // the node event signature/sequence only to authenticate the claim.
+//
+// NOTE: GET /v1/events serves `zp-implementer-event-v1`, not `zp-node-event-v1`. Prefer
+// `authenticateImplementerEvent` for the tenant pull stream. This function remains for the
+// operator/auditor-only node-global chain.
 export function authenticateNodeEvent(
   envelope: ArtifactEnvelope,
   nodeKeyMaterial: NodeVerificationKey,
@@ -256,6 +264,38 @@ export function authenticateNodeEvent(
     return { authenticated: true };
   } catch (error) {
     return { authenticated: false, reason: `node event: ${verifyErrorReason(error)}` };
+  }
+}
+
+// Authenticates a tenant-facing implementer continuity envelope (GET /v1/events events[]
+// and checkpoints[]) against the node's published node-event key. Dispatches on the
+// preimage purpose prefix: zp-implementer-event-v1 or zp-implementer-checkpoint-v1.
+// Purpose is checked before the signature (suite discipline).
+export function authenticateImplementerEvent(
+  envelope: ArtifactEnvelope,
+  nodeKeyMaterial: NodeVerificationKey,
+): NodeArtifactResult {
+  const goldenRefusal = assertNotGoldenKey(nodeKeyMaterial);
+  if (goldenRefusal !== null) return { authenticated: false, reason: goldenRefusal };
+
+  const key = nodeKey(nodeKeyMaterial, "node_event");
+  const text = envelope.preimage_text;
+  try {
+    if (text.startsWith("zp-implementer-event-v1\n")) {
+      verifyImplementerEvent(envelope, key);
+      return { authenticated: true };
+    }
+    if (text.startsWith("zp-implementer-checkpoint-v1\n")) {
+      verifyImplementerCheckpoint(envelope, key);
+      return { authenticated: true };
+    }
+    return { authenticated: false, reason: "unsupported_implementer_event_purpose" };
+  } catch (error) {
+    const reason =
+      typeof (error as { reason?: unknown }).reason === "string"
+        ? (error as { reason: string }).reason
+        : "verification_failed";
+    return { authenticated: false, reason: `implementer event: ${reason}` };
   }
 }
 

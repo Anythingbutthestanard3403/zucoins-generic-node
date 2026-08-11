@@ -5,17 +5,12 @@
  * (`{key_id, preimage_text, preimage_sha256, signature}` — packages/node-core
  * event-log/dual-chain-appender.ts `buildArtifactEnvelope`); the event's own fields
  * (event_id, implementer_seq, operation_id, event_type, …) live inside the signed
- * `preimage_text`, not as separate top-level JSON properties.
+ * `preimage_text`, not as separate top-level JSON properties. Companion
+ * `checkpoints[]` carry opaque `zp-implementer-checkpoint-v1` envelopes.
  *
- * node-core has no consumer-side verifier registered for the `zp-implementer-event-v1`
- * purpose yet — `authenticateNodeEvent` (verifier/consumer) checks only the
- * operator/auditor-only `zp-node-event-v1` envelope, which this route never serves
- * (the two event chains are continuous but distinct). This function therefore returns the raw, as-yet-
- * unauthenticated envelopes and the page cursor; authenticating them and turning an
- * authenticated one into a `NodeEventWake` pipeline input is deliberately left to the
- * caller until that node-core verifier exists (a known, tracked gap).
- * `ingestEventWake` in pipeline.ts is ready to consume a `NodeEventWake` the
- * moment a caller has one.
+ * Authenticate served envelopes with `authenticateImplementerEvent` (exported from
+ * this package and from `@zucoins/node-core/verifier/consumer`). Turn an authenticated
+ * event into a `NodeEventWake` and hand it to `ingestEventWake` in pipeline.ts.
  */
 
 import type { ArtifactEnvelope } from "@zucoins/node-core/verifier/consumer";

@@ -5,7 +5,7 @@
 // - parseProofBundle: structural validation of untrusted wire bundles
 // - verifyOperationProof / verifyReceiveProof / verifyMoveProof / verifySendProof:
 // full pipeline verification (artifact signature → envelope → transaction → economic delta)
-// - authenticateArtifact / authenticateNodeEvent: standalone node-key signature checks
+// - authenticateArtifact / authenticateNodeEvent / authenticateImplementerEvent: standalone node-key signature checks
 // - deriveBaseline: derive a wallet baseline projection from a raw T0 gateway observation
 // - assertNotGoldenKey: A.9 item 16 live-chain golden-key refusal
 // pinning workflow: import `@zucoins/node-core/verifier/consumer/pinning`
@@ -38,6 +38,7 @@ export {
   A8_GOLDEN_PUBLIC_KEYS,
   assertNotGoldenKey,
   authenticateArtifact,
+  authenticateImplementerEvent,
   authenticateNodeEvent,
   deriveBaseline,
   isA8GoldenKey,

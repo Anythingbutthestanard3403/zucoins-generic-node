@@ -114,13 +114,13 @@ describe("suite-tuples census (the fixture-provenance purposes census, A.3.4,A.4
     expect(REPORT_REQUEST_WINDOW_MAX_SECONDS).toBe(60);
   });
 
-  it("freezes the C4 deferral of the three implementer tuples (A.6)", () => {
+  it("freezes the three implementer tuples as frozen (A.6; C4 discharged)", () => {
     assertFieldOrder(
       DEFERRED_IMPLEMENTER_TUPLES.map((tuple) => tuple.purpose),
       ["zp-implementer-event-v1", "zp-implementer-checkpoint-v1", "zp-implementer-keyrotation-v1"],
     );
     for (const tuple of DEFERRED_IMPLEMENTER_TUPLES) {
-      expect(tuple.disposition).toBe("deferred-c4");
+      expect(tuple.disposition).toBe("frozen");
     }
   });
 

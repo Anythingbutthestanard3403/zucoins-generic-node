@@ -1,7 +1,7 @@
 /**
  * SOURCE: the data model, enum vocabulary.
  *
- * All 17 Postgres ENUM types transcribed verbatim. Adding an enum value is a
+ * All 18 Postgres ENUM types transcribed verbatim. Adding an enum value is a
  * contract-version change, not an application-local migration.
  *
  * Completeness is not a hand-count: `api-schema.census.test.ts` carries the full
@@ -21,6 +21,7 @@ import {
   REPORTING_LIFECYCLE_EVENT_TYPES,
   REPORTING_REQUEST_CLASSES,
 } from "../reporting-persistence/decisions.ts";
+import { ATTENTION_REASONS } from "../operations/events.contract.ts";
 
 /** Re-use the canonical frozen operation kinds (avoids redeclaration per the scan/dependency-boundary gate).*/
 export const OPERATION_KIND = OPERATION_KINDS;
@@ -102,6 +103,9 @@ export const LINEAGE_PROOF_VERDICT = [
   "INVARIANT_BREACH",
 ] as const;
 
+/** Closed attention_reason vocabulary (Appendix B §4) — real Postgres ENUM (ZTR-1147). */
+export const ATTENTION_REASON = ATTENTION_REASONS;
+
 /** Re-use the canonical reporting lifecycle vocabularies (avoids a fourth twin declaration). */
 export const REPORTING_KEY_STATE = REPORTING_KEY_STATES;
 
@@ -109,7 +113,7 @@ export const REPORTING_KEY_LIFECYCLE_EVENT_TYPE = REPORTING_LIFECYCLE_EVENT_TYPE
 
 export const REPORTING_REQUEST_CLASS = REPORTING_REQUEST_CLASSES;
 
-/** All 17 enum names in their canonical sequence. */
+/** All 18 enum names in their canonical sequence. */
 export const PG_ENUM_NAMES = [
   "operation_kind",
   "operation_status",
@@ -128,6 +132,7 @@ export const PG_ENUM_NAMES = [
   "reporting_key_state",
   "reporting_key_lifecycle_event_type",
   "reporting_request_class",
+  "attention_reason",
 ] as const;
 
 export type PgEnumName = (typeof PG_ENUM_NAMES)[number];
@@ -151,6 +156,7 @@ export const PG_ENUMS: Record<PgEnumName, readonly string[]> = {
   reporting_key_state: REPORTING_KEY_STATE,
   reporting_key_lifecycle_event_type: REPORTING_KEY_LIFECYCLE_EVENT_TYPE,
   reporting_request_class: REPORTING_REQUEST_CLASS,
+  attention_reason: ATTENTION_REASON,
 };
 
 export const SOURCE = "data-model: enum vocabulary" as const;

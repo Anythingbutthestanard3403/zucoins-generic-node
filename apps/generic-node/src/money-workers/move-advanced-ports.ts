@@ -490,7 +490,38 @@ export function createMoveAdvancedPorts(
         sql: sqlExecutor,
       };
       const result: MoveBaselineBindingResult = await captureAndBindMoveBaselines(input);
-      if (!result.ok) return { ok: false, reason: result.reason };
+      if (!result.ok) {
+        // Destination retired / un-blessed mid-flight: park with the frozen vocabulary
+        // value (ZTR-1147). Other baseline rejections stay WAITING for the next tick.
+        if (result.reason === "destination_not_eligible") {
+          const attentionReason = toAttentionReason({
+            source: "DESTINATION_NO_LONGER_BLESSED",
+          });
+          try {
+            await deps.pool.query(
+              `UPDATE operations
+                  SET attention_required = true,
+                      attention_reason = COALESCE(attention_reason, $2),
+                      attention_detail = COALESCE(
+                        attention_detail,
+                        $3
+                      )
+                WHERE id = $1::uuid AND attention_required = false`,
+              [
+                operationId,
+                attentionReason,
+                `destination_not_eligible: ${result.detail}`,
+              ],
+            );
+          } catch (err) {
+            deps.logger.error(
+              `move baseline: op=${operationId} DESTINATION_NO_LONGER_BLESSED park failed`,
+              err,
+            );
+          }
+        }
+        return { ok: false, reason: result.reason };
+      }
       return { ok: true, bound: result.binding };
     },
 

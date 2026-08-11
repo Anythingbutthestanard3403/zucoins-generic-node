@@ -795,7 +795,7 @@ describe("step 6 — resume authorized only + Boot does not", () => {
     expect(s.attentions).toEqual([
       {
         operationId: "recv-1",
-        reason: "signer_audit_without_exact_preimage",
+        reason: "EXACT_BYTES_UNAVAILABLE",
         expectedRowVersion: 7,
       },
     ]);

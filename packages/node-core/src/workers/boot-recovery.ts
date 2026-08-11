@@ -19,6 +19,7 @@
 // IO is fully injected so unit tests prove the contract with zero network / DB.
 
 import { type OperationKind } from "@zucoins/generic-node-contracts/operations";
+import { type AttentionReason } from "@zucoins/generic-node-contracts/operations/events";
 import {
   auditPersistedWallet,
   projectWalletState,
@@ -36,6 +37,7 @@ import {
   classifyMoveReconcile,
   classifyReceiveReconcile,
   classifySendReconcile,
+  toAttentionReason,
   type MoveReconcileInput,
   type MoveReconcileOutcome,
   type ReceiveReconcileInput,
@@ -215,7 +217,7 @@ export interface BootRecoveryActions {
   /**
    * Park an operation with attention. Never clears attention (Boot does not).
    */
-  setAttention(operationId: string, reason: string, expectedRowVersion: number): Promise<void>;
+  setAttention(operationId: string, reason: AttentionReason, expectedRowVersion: number): Promise<void>;
   /**
    * Apply a classification-authorized resume. Implementations MUST refuse any
    * action not in the authorized set for the classification. Counters below
@@ -274,6 +276,12 @@ export interface ClassifiedOperation {
   readonly kind: OperationKind;
   readonly classification: BootRecoveryClassification;
   readonly reason: string;
+  /**
+   * Closed vocabulary value written to operations.attention_reason when this
+   * classification parks attention. Null for classifications that never park
+   * (LANDED_VERIFIED / PROVEN_NOT_STARTED / WAITING).
+   */
+  readonly attentionReason: AttentionReason | null;
   readonly authorizedResume: AuthorizedResumeAction | null;
   readonly phaseAuditOk: boolean;
   /**
@@ -678,9 +686,14 @@ function withCas(
 function classifyOne(op: OperationPhaseEvidence): ClassifiedOperation {
   const phase = auditPhaseBoundaries(op);
   if (phase.forceBreach) {
+    const breachSource =
+      phase.reason === "signer_audit_without_exact_preimage"
+        ? ({ source: "EXPECTED_BYTES_MISSING_WITH_SIGNER_AUDIT" } as const)
+        : ({ source: "SIGNER_AUDIT_CONTRADICTS_DURABLE_RECORD" } as const);
     return withCas(op, {
       classification: "INVARIANT_BREACH",
       reason: phase.reason,
+      attentionReason: toAttentionReason(breachSource),
       authorizedResume: null,
       phaseAuditOk: false,
     });
@@ -703,6 +716,7 @@ function classifyReceiveOp(op: OperationPhaseEvidence): ClassifiedOperation {
     return withCas(op, {
       classification: "INDETERMINATE",
       reason: "submit_boundary_recorded_awaiting_observation",
+      attentionReason: toAttentionReason({ source: "SUBMIT_OUTCOME_UNKNOWN" }),
       authorizedResume: null,
       phaseAuditOk: true,
     });
@@ -728,6 +742,7 @@ function mapReceiveOutcome(
       return withCas(op, {
         classification: "LANDED_VERIFIED",
         reason: "receive_landed_verified",
+        attentionReason: null,
         authorizedResume: {
           kind: "ADVANCE_LANDED",
           operationId: op.operationId,
@@ -740,6 +755,7 @@ function mapReceiveOutcome(
       return withCas(op, {
         classification: "PROVEN_NOT_STARTED",
         reason: `receive_never_crossed_${outcome.neverCrossedBoundary.toLowerCase()}`,
+        attentionReason: null,
         authorizedResume: {
           kind: outcome.resumeAction,
           operationId: op.operationId,
@@ -753,6 +769,7 @@ function mapReceiveOutcome(
       return withCas(op, {
         classification: "INDETERMINATE",
         reason: "receive_indeterminate",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -760,6 +777,7 @@ function mapReceiveOutcome(
       return withCas(op, {
         classification: "INVARIANT_BREACH",
         reason: "receive_invariant_breach",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -771,6 +789,7 @@ function classifyMoveOp(op: OperationPhaseEvidence): ClassifiedOperation {
     return withCas(op, {
       classification: "INDETERMINATE",
       reason: "submit_boundary_recorded_awaiting_observation",
+      attentionReason: toAttentionReason({ source: "SUBMIT_OUTCOME_UNKNOWN" }),
       authorizedResume: null,
       phaseAuditOk: true,
     });
@@ -793,6 +812,7 @@ function mapMoveOutcome(op: OperationPhaseEvidence, outcome: MoveReconcileOutcom
       return withCas(op, {
         classification: "LANDED_VERIFIED",
         reason: "move_landed_verified",
+        attentionReason: null,
         authorizedResume: {
           kind: "ADVANCE_LANDED",
           operationId: op.operationId,
@@ -805,6 +825,7 @@ function mapMoveOutcome(op: OperationPhaseEvidence, outcome: MoveReconcileOutcom
       return withCas(op, {
         classification: "PROVEN_NOT_STARTED",
         reason: `move_never_crossed_${outcome.neverCrossedBoundary.toLowerCase()}`,
+        attentionReason: null,
         authorizedResume: {
           kind: outcome.resumeAction,
           operationId: op.operationId,
@@ -818,6 +839,7 @@ function mapMoveOutcome(op: OperationPhaseEvidence, outcome: MoveReconcileOutcom
       return withCas(op, {
         classification: "INDETERMINATE",
         reason: "move_indeterminate",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -825,6 +847,7 @@ function mapMoveOutcome(op: OperationPhaseEvidence, outcome: MoveReconcileOutcom
       return withCas(op, {
         classification: "INVARIANT_BREACH",
         reason: "move_invariant_breach",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -839,6 +862,7 @@ function classifySendOp(op: OperationPhaseEvidence): ClassifiedOperation {
     return withCas(op, {
       classification: "WAITING",
       reason: "external_partial_awaiting_redemption",
+      attentionReason: null,
       authorizedResume: {
         kind: "CONTINUE_WAITING",
         operationId: op.operationId,
@@ -865,6 +889,7 @@ function mapSendOutcome(op: OperationPhaseEvidence, outcome: SendReconcileOutcom
       return withCas(op, {
         classification: "LANDED_VERIFIED",
         reason: "send_landed_verified",
+        attentionReason: null,
         authorizedResume: {
           kind: "ADVANCE_LANDED",
           operationId: op.operationId,
@@ -877,6 +902,7 @@ function mapSendOutcome(op: OperationPhaseEvidence, outcome: SendReconcileOutcom
       return withCas(op, {
         classification: "PROVEN_NOT_STARTED",
         reason: `send_never_crossed_${outcome.neverCrossedBoundary.toLowerCase()}`,
+        attentionReason: null,
         authorizedResume: {
           kind: outcome.resumeAction,
           operationId: op.operationId,
@@ -890,6 +916,7 @@ function mapSendOutcome(op: OperationPhaseEvidence, outcome: SendReconcileOutcom
       return withCas(op, {
         classification: "WAITING",
         reason: "send_waiting",
+        attentionReason: null,
         authorizedResume: {
           kind: "CONTINUE_WAITING",
           operationId: op.operationId,
@@ -901,6 +928,7 @@ function mapSendOutcome(op: OperationPhaseEvidence, outcome: SendReconcileOutcom
       return withCas(op, {
         classification: "INDETERMINATE",
         reason: "send_indeterminate",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -908,6 +936,7 @@ function mapSendOutcome(op: OperationPhaseEvidence, outcome: SendReconcileOutcom
       return withCas(op, {
         classification: "INVARIANT_BREACH",
         reason: "send_invariant_breach",
+        attentionReason: toAttentionReason(outcome.reason),
         authorizedResume: null,
         phaseAuditOk: true,
       });
@@ -933,12 +962,16 @@ export async function resumeAuthorizedActions(
   const resumed: AuthorizedResumeAction[] = [];
   for (const c of classified) {
     if (c.classification === "INVARIANT_BREACH") {
-      await actions.setAttention(c.operationId, c.reason, c.expectedRowVersion);
+      if (c.attentionReason !== null) {
+        await actions.setAttention(c.operationId, c.attentionReason, c.expectedRowVersion);
+      }
       continue;
     }
     if (c.classification === "INDETERMINATE") {
       // Park / set attention; retain leases. Never submit, never clear attention.
-      await actions.setAttention(c.operationId, c.reason, c.expectedRowVersion);
+      if (c.attentionReason !== null) {
+        await actions.setAttention(c.operationId, c.attentionReason, c.expectedRowVersion);
+      }
       continue;
     }
     if (c.authorizedResume === null) {
@@ -1086,7 +1119,9 @@ export async function runDeterministicBootRecovery(
         c.classification === "INVARIANT_BREACH" ||
         c.classification === "INDETERMINATE"
       ) {
-        await deps.actions.setAttention(c.operationId, c.reason, c.expectedRowVersion);
+        if (c.attentionReason !== null) {
+        await deps.actions.setAttention(c.operationId, c.attentionReason, c.expectedRowVersion);
+      }
       }
     }
   }

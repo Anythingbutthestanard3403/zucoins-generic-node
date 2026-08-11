@@ -196,6 +196,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // before the operations FKs were present. Checks all four relations for dangling rows
   // before adding any constraint, then installs explicit NO ACTION FKs. Appended only.
   "lease-operation-foreign-keys",
+  // operations.attention_reason (+ send_operations) text → attention_reason enum (ZTR-1147).
+  // Value-preserving USING cast after free-text purge for already-applied DBs. Appended.
+  "attention-reason-enum",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

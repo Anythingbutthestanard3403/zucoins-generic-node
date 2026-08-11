@@ -7,6 +7,7 @@
   "schemaFiles": [
     "admin-sessions-node-id.sql",
     "approval-stores.sql",
+    "attention-reason-enum.sql",
     "audit-log.sql",
     "base-enums-domains.sql",
     "custody-eligibility.sql",

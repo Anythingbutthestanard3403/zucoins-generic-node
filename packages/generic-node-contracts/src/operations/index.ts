@@ -41,3 +41,9 @@ export {
 } from "./routes.contract.ts";
 export type { RouteEntry, AuthMode } from "./routes.contract.ts";
 
+export {
+  ATTENTION_REASON_PRODUCTION_SETTERS,
+  ATTENTION_REASON_DISPOSITIONS,
+  attentionReasonCoverage,
+  assertAttentionReasonCensusComplete,
+} from "./attention-reason-setters.ts";

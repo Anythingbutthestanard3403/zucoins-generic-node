@@ -63,6 +63,18 @@ export const LIVE_ATTENTION_RETRACTION_ROUTES = Object.freeze([
   },
 ] as const);
 
+/**
+ * Live operator-park surface (OPERATOR_PARKED — ZTR-1147). Not in ROUTE_POLICIES;
+ * mounted on the admin dispatcher (session+CSRF+fresh TOTP).
+ */
+export const LIVE_OPERATOR_PARK_ROUTES = Object.freeze([
+  {
+    method: "POST" as const,
+    path: "/admin/v1/operations/:operation_id/operator-park",
+    authMode: "operator_session_totp" as const,
+  },
+] as const);
+
 export type RouteKey = `${string} ${string}`;
 
 export function routeKeyOf(method: string, path: string): RouteKey {

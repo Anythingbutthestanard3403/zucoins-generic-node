@@ -66,3 +66,12 @@ export * from "./slo.js";
 export * from "./storage-backpressure.js";
 // Optional operator Web Push — separate from wallet push_subscriptions.
 export * from "./operator-push.js";
+
+export {
+  OPERATOR_PARK_ATTENTION_REASON,
+  executeOperatorPark,
+  type OperatorParkInput,
+  type OperatorParkCommitted,
+  type OperatorParkOutcome,
+  type OperatorParkStore,
+} from "./operator-park.js";

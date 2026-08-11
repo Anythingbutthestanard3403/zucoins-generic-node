@@ -33,6 +33,7 @@ export {
   REPORTING_KEY_STATE,
   REPORTING_KEY_LIFECYCLE_EVENT_TYPE,
   REPORTING_REQUEST_CLASS,
+  ATTENTION_REASON,
 } from "./pg-enums.ts";
 export type { PgEnumName } from "./pg-enums.ts";
 

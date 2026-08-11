@@ -3,6 +3,7 @@
 export {
   RECONCILE_CLASSIFICATION_KINDS,
   assertUnreachable,
+  toAttentionReason,
   type ReconcileClassificationKind,
   type ClassifierOutputRelationship,
   type IndeterminateObservationAnomaly,

@@ -129,6 +129,9 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     expect(
       surface.liveAttentionRetractionRoutes.map((r) => `${r.method} ${r.path}`),
     ).toEqual(["POST /admin/v1/operations/:operation_id/attention-retraction"]);
+    expect(
+      surface.liveOperatorParkRoutes.map((r) => `${r.method} ${r.path}`),
+    ).toEqual(["POST /admin/v1/operations/:operation_id/operator-park"]);
     expect(surface.adminRouteDeps.halt).toBeDefined();
     expect(surface.adminRouteDeps.adminIdempotencyStore).toBeDefined();
     expect(surface.adminRouteDeps.atomicAdminMutation).toBeDefined();
@@ -158,6 +161,21 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     expect(surface.deferredAdminMoney.sendDecisionStore).toMatch(/live/i);
     expect(surface.deferredAdminMoney.recoveryActionStore).toMatch(/live/i);
     expect(surface.deferredAdminMoney.attentionRetractionStore).toMatch(/live/i);
+    expect(surface.deferredAdminMoney.operatorParkStore).toMatch(/live/i);
+  });
+
+  it("operator-park is live on admin router but stays out of ROUTE_POLICIES", () => {
+    const policy = routePolicyKeys();
+    expect(policy).not.toContain(
+      "POST /admin/v1/operations/:operation_id/operator-park",
+    );
+    const surface = createProductionRouteSurface({
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
+      nodeId: "11111111-1111-4111-8111-111111111111",
+      pool: { query: async () => ({ rows: [] }) } as never,
+    });
+    expect(surface.deferredAdminMoney.operatorParkStore).toMatch(/live/i);
+    expect(surface.deferredAdminMoney.operatorParkStore).toMatch(/createSqlOperatorParkStore/);
   });
 
   it("attention-retraction is live on admin router but stays out of ROUTE_POLICIES", () => {

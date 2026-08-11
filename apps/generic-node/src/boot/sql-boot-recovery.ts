@@ -26,6 +26,7 @@ import {
   type OperationKind,
   type LeaseRole,
 } from "@zucoins/node-core";
+import type { AttentionReason } from "@zucoins/generic-node-contracts/operations/events";
 
 const SQL_LIST_ACTIVE_LEASES = `
   SELECT wal.wallet_id::text AS wallet_id,
@@ -334,7 +335,7 @@ function createSqlBootRecoveryActions(
       logger.info(`boot-recovery: repair wallet=${walletId} state=${to}`);
     },
 
-    async setAttention(operationId: string, reason: string, expectedRowVersion: number): Promise<void> {
+    async setAttention(operationId: string, reason: AttentionReason, expectedRowVersion: number): Promise<void> {
       // operations' attention CHECK requires attention_required = (attention_reason IS
       // NOT NULL) — write both columns together. row_version is the CAS guard; a
       // zero rowCount means a concurrent writer already moved the row, so log and
@@ -342,9 +343,10 @@ function createSqlBootRecoveryActions(
       const result = await pool.query(
         `UPDATE operations
             SET attention_required = true,
-                attention_reason = COALESCE(attention_reason, $3)
+                attention_reason = COALESCE(attention_reason, $3),
+                attention_detail = COALESCE(attention_detail, $4)
           WHERE id = $1::uuid AND row_version = $2`,
-        [operationId, expectedRowVersion, reason],
+        [operationId, expectedRowVersion, reason, `boot:${reason}`],
       );
       if (result.rowCount === 0) {
         logger.error(`boot-recovery: attention CAS miss op=${operationId} expectedRowVersion=${expectedRowVersion}`);

@@ -105,8 +105,8 @@ describe("the crypto-goldens concern.2 auth scope census", () => {
 });
 
 describe("the crypto-goldens concern.2 Postgres ENUM census", () => {
-  it("has exactly 17 enum types", () => {
-    expect(PG_ENUM_NAMES).toHaveLength(17);
+  it("has exactly 18 enum types", () => {
+    expect(PG_ENUM_NAMES).toHaveLength(18);
   });
 
   it("freezes the enum names in doc sequence", () => {
@@ -128,6 +128,7 @@ describe("the crypto-goldens concern.2 Postgres ENUM census", () => {
       "reporting_key_state",
       "reporting_key_lifecycle_event_type",
       "reporting_request_class",
+      "attention_reason",
     ]);
   });
 
@@ -206,10 +207,14 @@ describe("the crypto-goldens concern.2 Postgres ENUM census", () => {
     expect(PG_ENUMS.reporting_request_class).toHaveLength(2);
   });
 
-  it("rejects an 18th enum (negative path)", () => {
+  it("attention_reason has exactly 15 values", () => {
+    expect(PG_ENUMS.attention_reason).toHaveLength(15);
+  });
+
+  it("rejects a 19th enum (negative path)", () => {
     expectRejects(
       () => [...PG_ENUM_NAMES, "new_enum"],
-      (mutated) => expect(mutated).toHaveLength(17),
+      (mutated) => expect(mutated).toHaveLength(18),
     );
   });
 
@@ -239,7 +244,7 @@ describe("the crypto-goldens concern.2 Postgres ENUM census", () => {
 /**
  *  — the completeness half of the enum freeze. The census above pins a hand-written
  * inventory; on its own it cannot notice a canonical enum this manifest never transcribed
- * (the exact defect this test was written for: the canonical data model declares 17 enums,
+ * (the exact defect this test was written for: the canonical data model declares 18 enums,
  * `PG_ENUMS` froze 14, and the count assertion asserted the undercount as truth). The
  * canonical CREATE TYPE universe is inlined below as a second, independently-transcribed
  * fixture — a new or edited enum fails here until it is frozen, in value AND sequence.
@@ -264,6 +269,23 @@ describe("Postgres ENUM canonical-universe completeness", () => {
     ["reporting_key_state", ["PENDING", "ACTIVE", "RETIRED", "REVOKED"]],
     ["reporting_key_lifecycle_event_type", ["FIRST_KEY_ACTIVATED", "KEY_ROTATED", "PRIOR_KEY_RETIRED", "KEY_REVOKED", "AUTH_HOLD_SET", "AUTH_HOLD_RELEASED"]],
     ["reporting_request_class", ["READ", "MUTATION"]],
+    ["attention_reason", [
+      "GATEWAY_RESPONSE_INVALID",
+      "GATEWAY_UNAVAILABLE_BEYOND_BUDGET",
+      "UNEXPECTED_HEAD_CHANGE",
+      "LINEAGE_GAP",
+      "SUBMIT_OUTCOME_AMBIGUOUS",
+      "SIGNING_OUTCOME_AMBIGUOUS",
+      "DESTINATION_NO_LONGER_BLESSED",
+      "T0_RELEASE_MISMATCH",
+      "VERIFICATION_REJECTED",
+      "VERIFICATION_INDETERMINATE",
+      "VERIFICATION_RESOURCE_EXHAUSTED",
+      "LEASE_INVARIANT_VIOLATION",
+      "EXACT_BYTES_UNAVAILABLE",
+      "OPERATOR_PARKED",
+      "POST_EXPIRY_RECONCILING",
+    ]],
   ]);
 
   it("the canonical enum name set equals PG_ENUM_NAMES exactly, in canonical sequence", () => {
@@ -305,7 +327,7 @@ describe("public enum barrel completeness (enums/ and api-schema/ index.ts)", ()
   // record keys follow this exact correspondence.
   const expectedExportNames = PG_ENUM_NAMES.map((name) => name.toUpperCase());
 
-  it("enums/index.ts's non-meta exports are exactly the 17 enum constants, no more, no fewer", () => {
+  it("enums/index.ts's non-meta exports are exactly the 18 enum constants, no more, no fewer", () => {
     const { PG_ENUM_NAMES: _names, PG_ENUMS: _map, ...enumOnlyExports } = enumsBarrel as Record<
       string,
       unknown

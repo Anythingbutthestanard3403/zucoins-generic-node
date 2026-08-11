@@ -456,7 +456,8 @@ describe("required CI gates", () => {
   it("runs the real admin browser suite in Chromium", () => {
     const active = wf.activeSource;
     expect(active).toMatch(/admin-playwright:/);
-    expect(active).toContain("playwright install --with-deps chromium");
+    // Hosted ubuntu uses --with-deps; self-hosted macOS installs the browser binary only.
+    expect(active).toMatch(/playwright install(?: --with-deps)? chromium/);
     const hit = findActiveGate(wf, "pnpm --filter @zucoins/generic-node-ui test:e2e");
     expect(hit).toBeDefined();
   });

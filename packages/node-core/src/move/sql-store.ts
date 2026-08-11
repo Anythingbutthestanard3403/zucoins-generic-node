@@ -143,10 +143,10 @@ export const STATEMENTS = {
     `(SELECT count(*)::int FROM wallet_active_leases wal ` +
     ` WHERE wal.operation_id = o.id AND wal.wallet_id IN (o.source_wallet_id, d.wallet_id)) AS active_lease_count, ` +
     `a.signing_key_id, a.preimage_text, a.preimage_sha256, a.signature, ` +
-    `(SELECT terminal_observation_id FROM operation_wallets ` +
-    ` WHERE operation_id = o.id AND operation_role = 'SOURCE') AS source_terminal_observation_id, ` +
-    `(SELECT terminal_observation_id FROM operation_wallets ` +
-    ` WHERE operation_id = o.id AND operation_role = 'DESTINATION') AS destination_terminal_observation_id, ` +
+    `(SELECT e.source_terminal_observation_id FROM move_observation_evidence e ` +
+    ` WHERE e.operation_id = o.id) AS source_terminal_observation_id, ` +
+    `(SELECT e.destination_terminal_observation_id FROM move_observation_evidence e ` +
+    ` WHERE e.operation_id = o.id) AS destination_terminal_observation_id, ` +
     `EXISTS (SELECT 1 FROM gateway_submit_attempts s ` +
     ` WHERE s.operation_id = o.id AND s.started_at IS NOT NULL) AS submit_started, ` +
     `EXISTS (SELECT 1 FROM gateway_submit_attempts s ` +

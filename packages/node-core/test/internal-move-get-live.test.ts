@@ -216,8 +216,190 @@ describe("GET /v1/internal-moves/:operation_id live projection", () => {
     expect(got!.expected_artifact!.signature).toBe(SIGNATURE);
     expect(statements.some((text) => text.includes("LEFT JOIN operation_expected_artifacts"))).toBe(true);
     expect(statements.some((text) => text.includes("wallet_active_leases"))).toBe(true);
-    expect(statements.some((text) => text.includes("operation_wallets"))).toBe(true);
+    expect(statements.some((text) => text.includes("move_observation_evidence"))).toBe(true);
+    expect(statements.some((text) => text.includes("operation_wallets"))).toBe(false);
     expect(statements.some((text) => text.includes("gateway_submit_attempts"))).toBe(true);
     expect(statements.some((text) => text.includes("operation_verifications"))).toBe(true);
+    expect(got!.source_terminal_observation_id).toBe(SOURCE_TERMINAL);
+    expect(got!.destination_terminal_observation_id).toBe(DESTINATION_TERMINAL);
+    expect(got!.execution_phase).toBe("LANDED_VERIFIED");
+  });
+
+  /**
+   * Regression for producer/reader table mismatch (Review A FAIL on f8aa614):
+   * persistMoveOutcome writes terminals only to move_observation_evidence; GET must
+   * project those same columns. A synthetic SQL driver serves terminals only when the
+   * SELECT text references move_observation_evidence — matching the real writer table —
+   * and leaves them null if the reader still queries operation_wallets. Old head fails;
+   * fixed head yields both IDs and LANDED_VERIFIED.
+   */
+  it("projects landed terminal IDs from move_observation_evidence (landing writer table)", async () => {
+    const statements: string[] = [];
+    const sql = {
+      async query<R>(text: string): Promise<{ rows: R[] }> {
+        statements.push(text);
+        if (text.includes("SELECT attempt_phase FROM operation_transactions")) {
+          return {
+            rows: [{
+              attempt_phase: "SETTLED_BODY_PERSISTED",
+              sign_intent_persisted: false,
+              partial_persisted: false,
+              partial_first_delivered: false,
+            } as R],
+          };
+        }
+        if (text.includes("SELECT o.attention_reason")) {
+          // Mimic durable state after persistMoveOutcome: terminals live only on evidence.
+          const readsEvidence = text.includes("move_observation_evidence");
+          const readsWalletsOnly =
+            text.includes("operation_wallets") && !readsEvidence;
+          // Fail closed if both wrong tables somehow appear — force evidence path.
+          const source = readsEvidence ? SOURCE_TERMINAL : null;
+          const destination = readsEvidence ? DESTINATION_TERMINAL : null;
+          if (readsWalletsOnly) {
+            // Old-head path: would return nulls even though landing wrote evidence.
+          }
+          return {
+            rows: [{
+              attention_reason: null,
+              terminal_at_ms: Date.parse("2026-08-01T00:05:00.000Z"),
+              verification_until_ms: Date.parse("2026-08-31T00:05:00.000Z"),
+              active_lease_count: 0,
+              signing_key_id: KEY_ID,
+              preimage_text: PREIMAGE,
+              preimage_sha256: "b".repeat(64),
+              signature: SIGNATURE,
+              source_terminal_observation_id: source,
+              destination_terminal_observation_id: destination,
+              submit_started: true,
+              submit_returned: true,
+              verification_accepted: true,
+            } as R],
+          };
+        }
+        if (text.includes("WHERE o.id = $1")) {
+          return {
+            rows: [{
+              id: OP_ID,
+              implementer_id: IMPL,
+              node_id: NODE,
+              kind: "MOVE_INTERNAL",
+              status: "INTERNAL_MOVE_LANDED",
+              row_version: 7,
+              attention_required: false,
+              source_wallet_id: SOURCE,
+              destination_id: DESTINATION,
+              destination_wallet_id: DESTINATION_WALLET,
+              amount_zkz: "1.25",
+              spawned_from_operation_id: null,
+              lease_group_id: OP_ID,
+              idempotency_key: "internal-move-live-read",
+              request_sha256: "a".repeat(64),
+              created_at_ms: Date.parse("2026-08-01T00:00:00.000Z"),
+              updated_at_ms: Date.parse("2026-08-01T00:05:00.000Z"),
+            } as R],
+          };
+        }
+        throw new Error(`unexpected SQL: ${text}`);
+      },
+    };
+    const move = new SqlMoveCreateStore({ sql });
+    const ops = createSqlOperationRouteStore({
+      nodeId: NODE,
+      queueCap: 8,
+      receive: {} as never,
+      move,
+      send: {} as never,
+      sendSigner: {} as never,
+    });
+
+    const got = await ops.getInternalMove(OP_ID, IMPL);
+    const projectionSql = statements.find((text) => text.includes("SELECT o.attention_reason"));
+    expect(projectionSql).toBeDefined();
+    expect(projectionSql!).toContain("move_observation_evidence");
+    expect(projectionSql!).not.toContain("operation_wallets");
+    // Landing writer columns (persistMoveOutcome UPDATE move_observation_evidence).
+    expect(projectionSql!).toContain("source_terminal_observation_id");
+    expect(projectionSql!).toContain("destination_terminal_observation_id");
+    expect(got!.source_terminal_observation_id).toBe(SOURCE_TERMINAL);
+    expect(got!.destination_terminal_observation_id).toBe(DESTINATION_TERMINAL);
+    expect(got!.execution_phase).toBe("LANDED_VERIFIED");
+    expect(got!.expected_artifact!.preimage_text).toBe(PREIMAGE);
+    expect(got!.expected_artifact!.signature).toBe(SIGNATURE);
+  });
+
+  it("keeps terminal IDs null and phase non-landed when evidence row has no terminals", async () => {
+    const sql = {
+      async query<R>(text: string): Promise<{ rows: R[] }> {
+        if (text.includes("SELECT attempt_phase FROM operation_transactions")) {
+          return {
+            rows: [{
+              attempt_phase: "SETTLED_BODY_PERSISTED",
+              sign_intent_persisted: false,
+              partial_persisted: false,
+              partial_first_delivered: false,
+            } as R],
+          };
+        }
+        if (text.includes("SELECT o.attention_reason")) {
+          expect(text).toContain("move_observation_evidence");
+          return {
+            rows: [{
+              attention_reason: null,
+              terminal_at_ms: null,
+              verification_until_ms: null,
+              active_lease_count: 2,
+              signing_key_id: KEY_ID,
+              preimage_text: PREIMAGE,
+              preimage_sha256: "b".repeat(64),
+              signature: SIGNATURE,
+              source_terminal_observation_id: null,
+              destination_terminal_observation_id: null,
+              submit_started: true,
+              submit_returned: true,
+              verification_accepted: false,
+            } as R],
+          };
+        }
+        if (text.includes("WHERE o.id = $1")) {
+          return {
+            rows: [{
+              id: OP_ID,
+              implementer_id: IMPL,
+              node_id: NODE,
+              kind: "MOVE_INTERNAL",
+              status: "SUBMITTED",
+              row_version: 3,
+              attention_required: false,
+              source_wallet_id: SOURCE,
+              destination_id: DESTINATION,
+              destination_wallet_id: DESTINATION_WALLET,
+              amount_zkz: "1.25",
+              spawned_from_operation_id: null,
+              lease_group_id: OP_ID,
+              idempotency_key: "internal-move-live-read",
+              request_sha256: "a".repeat(64),
+              created_at_ms: Date.parse("2026-08-01T00:00:00.000Z"),
+              updated_at_ms: Date.parse("2026-08-01T00:01:00.000Z"),
+            } as R],
+          };
+        }
+        throw new Error(`unexpected SQL: ${text}`);
+      },
+    };
+    const move = new SqlMoveCreateStore({ sql });
+    const ops = createSqlOperationRouteStore({
+      nodeId: NODE,
+      queueCap: 8,
+      receive: {} as never,
+      move,
+      send: {} as never,
+      sendSigner: {} as never,
+    });
+    const got = await ops.getInternalMove(OP_ID, IMPL);
+    expect(got!.source_terminal_observation_id).toBeNull();
+    expect(got!.destination_terminal_observation_id).toBeNull();
+    expect(got!.execution_phase).not.toBe("LANDED_VERIFIED");
+    expect(got!.lease_status).toBe("HELD");
   });
 });

@@ -3,8 +3,8 @@
 ## Head
 - Branch: `ztr-1166-dead-code`
 - PR: https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/91
-- Freeze-fix commit: `0a0e5fe2442b12590e51e1ccdbe84e2249bd9681` 
-- PR head SHA: `07f480cde161c1bdbb5b13fb18285fa92a311bf6`
+- Freeze-fix commit: `0a0e5fe2442b12590e51e1ccdbe84e2249bd9681`
+- PR head: whatever is tip of `ztr-1166-dead-code` after this handoff lands (gh pr view 91 --json headRefOid)
 
 ## Problem
 Dual A+B PASSed at `d0098202`, but Contracts CI failed on freeze drift from dead-code removal:

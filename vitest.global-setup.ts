@@ -19,9 +19,10 @@ import { userInfo } from "node:os";
 // Under multi-lane contention, CREATE DATABASE / SELECT 1 against the shared maintenance DB can
 // ETIMEDOUT (psql client kill) or hit "too many clients". Treating those as "no Postgres" made
 // pg suites silently skip and the run look green (ZTR-1204). Transient failures retry with
-// backoff; exhaustion (or any non-absent CREATE failure) fails the run loudly. CI=true also
-// refuses the silent no-Postgres skip path — pin TEST_DATABASE_URL when several lanes share one
-// instance (see README Developing).
+// backoff; exhaustion (or any non-absent CREATE failure) fails the run loudly. PG_REQUIRED=1
+// refuses the silent no-Postgres skip path (CI exports it); pin a non-empty TEST_DATABASE_URL
+// when several lanes share one instance (see README Developing). Empty TEST_DATABASE_URL= is
+// not a pin — auto-provision still runs.
 const MAINTENANCE_DB = "postgres";
 
 /** Bounded retries for lane-contention timeouts / capacity errors (probe + CREATE + DROP). */
@@ -178,9 +179,9 @@ const findReachableTarget = (): Reachability => {
 };
 
 function provisionTestDatabase(): (() => void) | undefined {
-  // An externally pinned URL (a CI service container, a run targeting its own instance) wins;
-  // this only fills the hole, it never overrides a deliberate choice. Empty string is not a pin
-  // — it is the filtered-run footgun that disables auto-provision and skips every pg suite.
+  // An externally pinned non-empty URL (CI service container, dedicated per-lane DB) wins;
+  // this only fills the hole, it never overrides a deliberate pin. Empty string is not a pin
+  // (TEST_DATABASE_URL=) — treat like unset and continue auto-provision.
   const pinned = process.env.TEST_DATABASE_URL;
   if (pinned !== undefined && pinned !== "") return undefined;
 

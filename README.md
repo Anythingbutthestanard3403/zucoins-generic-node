@@ -52,8 +52,9 @@ scratch database and assigns `TEST_DATABASE_URL` when unset.
   pnpm test
   ```
 
-  Leave `TEST_DATABASE_URL` unset for the default auto-provision path. Do not export an empty
-  value — that disables provisioning and makes pg suites skip (or fail under `PG_REQUIRED=1`).
+  Prefer leaving `TEST_DATABASE_URL` **unset** for the default auto-provision path. Pin only a
+  non-empty URL. An empty export (`TEST_DATABASE_URL=`) is **not** a pin — auto-provision still
+  runs (same as unset).
 - Transient `ETIMEDOUT` / "too many clients" during provision is retried with backoff; exhaustion
   fails the run instead of silently skipping money-path suites (ZTR-1204).
 

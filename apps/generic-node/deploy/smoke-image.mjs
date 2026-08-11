@@ -61,6 +61,12 @@ async function syntheticBoot(parsed) {
       "dist/ not built — run `tsc -b` (or `pnpm --filter @zucoins/generic-node build`) before the smoke",
     );
   }
+  const spaIndex = new URL("../admin/dist/index.html", import.meta.url);
+  if (!existsSync(fileURLToPath(spaIndex))) {
+    throw new Error(
+      "admin/dist/index.html missing — run `pnpm build` (root) or `pnpm --filter @zucoins/generic-node build:all` so the operator SPA is present",
+    );
+  }
   const { loadCustodyNodeConfig } = await import(distConfig.href);
   const { runBootLane, NodeReadiness } = await import(distBoot.href);
 

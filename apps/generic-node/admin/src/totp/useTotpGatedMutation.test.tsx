@@ -34,6 +34,8 @@ function seedSession() {
 }
 
 function captureRedirect(): { readonly to: () => string | undefined } {
+  // ZTR-1168: logout navigates client-side via history.pushState + popstate.
+  const pushState = vi.spyOn(window.history, "pushState");
   const assign = vi.fn();
   Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
   Object.defineProperty(window.location, "href", {
@@ -41,7 +43,11 @@ function captureRedirect(): { readonly to: () => string | undefined } {
     set: assign,
     get: () => "",
   });
-  return { to: () => assign.mock.calls[0]?.[0] as string | undefined };
+  return {
+    to: () =>
+      (pushState.mock.calls.find((c) => c[2] === "/login")?.[2] as string | undefined) ??
+      (assign.mock.calls[0]?.[0] as string | undefined),
+  };
 }
 
 function Harness({ mutationFn }: { mutationFn: (v: void, totp: string) => Promise<string> }) {

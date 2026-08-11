@@ -702,3 +702,59 @@ export type _AssertSignPath = typeof signDurableSendIntent extends (
 ) => Promise<unknown>
   ? true
   : never;
+
+describe("leaseEpoch end-to-end exactness (ZTR-1168)", () => {
+  it("source no longer coerces held.leaseEpoch through Number()", () => {
+    const src = readFileSync(join(SRC_CORE, "send-form-and-sign.ts"), "utf8");
+    expect(src).not.toMatch(/leaseEpoch:\s*Number\(\s*held\.leaseEpoch\s*\)/);
+    expect(src).toMatch(/leaseEpoch:\s*held\.leaseEpoch\.toString\(\)/);
+  });
+
+  it("preserves epochs above Number.MAX_SAFE_INTEGER as string for SQL", async () => {
+    const { insertSignIntent } = await import("../src/core/transaction-material-store.js");
+    const huge = 9_007_199_254_740_993n; // 2^53 + 1
+    expect(BigInt(Number(huge))).not.toBe(huge); // proves Number is lossy past 2^53
+    const params: unknown[][] = [];
+    const query = async (_sql: string, p: readonly unknown[]) => {
+      params.push([...p]);
+      return [{ operation_id: "x" }];
+    };
+    await insertSignIntent(query as never, {
+      operationId: OPERATION_ID,
+      approvalId: APPROVAL_ID,
+      sourceWalletId: SOURCE_WALLET_ID,
+      sourceT0ObservationId: SOURCE_OBSERVATION,
+      destinationT0ObservationId: DESTINATION_OBSERVATION,
+      leaseGroupId: LEASE_GROUP_ID,
+      leaseEpoch: huge.toString(),
+      innerPreimageText: "{}",
+      innerSha256: "a".repeat(64),
+      redemptionExpiryAt: "2026-01-15T00:05:00.000Z",
+      preparedAt: PREPARED_AT,
+    });
+    expect(params[0]![6]).toBe("9007199254740993");
+    expect(params[0]![6]).not.toBe(String(Number(huge)));
+  });
+
+  it("in-memory formAndSign keeps bigint epoch above 2^53", async () => {
+    const state = createInMemoryFormAndSignState();
+    const huge = 9_007_199_254_740_993n;
+    const persisted = await createInMemorySignIntentPort(state).commitSignIntent({
+      claim: claimOf(),
+      held: heldOf(huge),
+      approvalId: APPROVAL_ID,
+      sourceT0ObservationId: SOURCE_OBSERVATION,
+      destinationFormationObservationId: DESTINATION_OBSERVATION,
+      constructed: constructSendInner({
+        capture: captureOf(),
+        nodeClockMs: NODE_CLOCK_MS,
+      }),
+      preparedAt: PREPARED_AT,
+    });
+    expect(persisted.ok).toBe(true);
+    if (persisted.ok) {
+      expect(persisted.intent.leaseEpoch).toBe(huge);
+      expect(persisted.intent.leaseEpoch > 2n ** 53n).toBe(true);
+    }
+  });
+});

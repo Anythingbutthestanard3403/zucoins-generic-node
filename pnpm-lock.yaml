@@ -91,7 +91,7 @@ importers:
         specifier: ^19.2.0
         version: 19.2.8(react@19.2.8)
       react-router:
-        specifier: ^7.15.0
+        specifier: 7.18.2
         version: 7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       zustand:
         specifier: ^5.0.0

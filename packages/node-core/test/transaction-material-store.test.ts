@@ -157,7 +157,7 @@ describe("emitted statements and bound values", () => {
       sourceT0ObservationId: "44444444-4444-4444-8444-444444444444",
       destinationT0ObservationId: "55555555-5555-4555-8555-555555555555",
       leaseGroupId: "66666666-6666-4666-8666-666666666666",
-      leaseEpoch: 7,
+      leaseEpoch: "7",
       innerPreimageText: WALLET_INNER_PREIMAGE_TEXT,
       innerSha256: WALLET_INNER_PREIMAGE_SHA256,
       redemptionExpiryAt: "2026-07-26T00:05:00.000Z",

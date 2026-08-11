@@ -91,13 +91,16 @@ export function LabReceivePage() {
     onSuccess: (body) => {
       setResult(body);
       setGateLinks(null);
-      setSeed(""); // drop seed from React state after use
     },
     onError: (err: unknown) => {
       setResult(null);
       if (err instanceof ApiError && Array.isArray(err.extras?.checklist_links)) {
         setGateLinks(err.extras.checklist_links as readonly LabGateLink[]);
       }
+    },
+    onSettled: () => {
+      // Drop reporting seed from React state + controlled input on success and error (ZTR-1168).
+      setSeed("");
     },
   });
 

@@ -29,7 +29,7 @@ pnpm workspace, Node >= 22, pnpm 11.13.0 (`corepack enable`).
 
 ```bash
 pnpm install
-pnpm build                 # tsc -b across the project-reference graph
+pnpm build                 # operator SPA (admin/dist/index.html) then tsc -b across the project-reference graph
 pnpm lint                  # eslint .
 pnpm test                  # root vitest across every projects entry
 pnpm test:boundaries       # architecture gates only

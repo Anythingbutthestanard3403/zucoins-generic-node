@@ -6,11 +6,15 @@ import {
   assertOperatorPushPayloadSafe,
   buildOperatorPushPayload,
   InMemoryOperatorPushSubscriptionStore,
+  isValidOperatorPushAuth,
+  isValidOperatorPushP256dh,
   notifyOperatorsPendingAttention,
+  operatorPushEndpointFingerprint,
   OPERATOR_PUSH_FORBIDDEN_PAYLOAD_KEYS,
   type OperatorPushPayload,
   type OperatorPushSender,
 } from "./operator-push.js";
+import { generateAuthSecret, generateEcdhKeypair } from "../push/crypto.js";
 
 describe("operator push payload schema", () => {
   it("accepts attention type + deep link + summary only", () => {
@@ -114,5 +118,37 @@ describe("operator push store separation + fail-soft", () => {
     });
     expect(store.deleteByEndpoint("node-1", "op-1", "https://push.example/ep/1")).toBe(true);
     expect(store.listActiveByNode("node-1")).toHaveLength(0);
+  });
+});
+
+describe("operator push key material validation (ZTR-1168)", () => {
+  it("accepts real p256dh + auth and rejects placeholders", () => {
+    const kp = generateEcdhKeypair();
+    const auth = generateAuthSecret().toString("base64url");
+    expect(isValidOperatorPushP256dh(kp.publicKeyB64url)).toBe(true);
+    expect(isValidOperatorPushAuth(auth)).toBe(true);
+    expect(isValidOperatorPushP256dh("pending-p256dh-placeholder-value-xx")).toBe(false);
+    expect(isValidOperatorPushAuth("pending-auth-placeholder-xx")).toBe(false);
+    expect(isValidOperatorPushP256dh("too-short")).toBe(false);
+    expect(isValidOperatorPushAuth("short")).toBe(false);
+  });
+
+  it("deletes by endpoint fingerprint matching the list truncation", () => {
+    const store = new InMemoryOperatorPushSubscriptionStore();
+    const endpoint = "https://fcm.googleapis.com/fcm/send/very-long-endpoint-id-abc123xyz";
+    store.upsert({
+      id: "s1",
+      nodeId: "n1",
+      operatorId: "op1",
+      endpoint,
+      p256dh: "pk",
+      authSealed: "sealed",
+      createdAt: new Date().toISOString(),
+      userAgent: null,
+    });
+    const fp = operatorPushEndpointFingerprint(endpoint);
+    expect(fp).toBe(endpoint.slice(0, 48));
+    expect(store.deleteByEndpointFingerprint("n1", "op1", fp)).toBe(true);
+    expect(store.listByOperator("n1", "op1")).toHaveLength(0);
   });
 });

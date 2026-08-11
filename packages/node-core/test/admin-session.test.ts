@@ -553,8 +553,8 @@ describe("CSRF on state-changing auth routes", () => {
 });
 
 describe("password hashing", () => {
-  it("hashes and verifies at cost 12", async () => {
+  it("hashes and verifies at cost 13", async () => {
     const h = await hashPassword("test-password-12chars");
-    expect(h.startsWith("$2b$12$") || h.startsWith("$2a$12$")).toBe(true);
+    expect(h.startsWith("$2b$13$") || h.startsWith("$2a$13$")).toBe(true);
   });
 });

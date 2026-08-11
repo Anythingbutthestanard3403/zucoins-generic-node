@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       "/admin/v1": "http://localhost:3000",
       "/v1": "http://localhost:3000",
+      "/health": "http://localhost:3000",
       "/healthz": "http://localhost:3000",
       "/readyz": "http://localhost:3000",
     },

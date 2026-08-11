@@ -47,7 +47,7 @@ import {
   registerIpFailure,
 } from "./ip-lockout.js";
 import { consumeLoginAttempt, LOGIN_RATE_WINDOW_MS } from "./login-rate-limit.js";
-import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from "./password.js";
+import { DUMMY_PASSWORD_HASH, hashPassword, needsPasswordRehash, verifyPassword } from "./password.js";
 import {
   verifyTotp,
   type TotpBurnStore,
@@ -151,7 +151,7 @@ export async function handleAdminLogin(
   // equal to their own concurrency instead of the threshold.
   // Ceiling: ip-lockout state is in-memory per process, so an N-replica
   // deployment gives an attacker N× the threshold before any pair locks.
-  const user = await deps.userStore.findByUsername(username);
+  let user = await deps.userStore.findByUsername(username);
 
   // Constant work: exactly one bcrypt compare regardless of whether the user exists.
   const passwordMatches = await verifyPassword(
@@ -175,6 +175,14 @@ export async function handleAdminLogin(
   }
 
   clearIpFailures(ip, username);
+
+  // Rehash-on-next-login when stored cost is below current policy (ZTR-1168 cost 13).
+  // Only after a successful verify so attackers cannot force expensive rehashes.
+  if (needsPasswordRehash(user.passwordHash)) {
+    const upgraded = await hashPassword(password);
+    await deps.userStore.updatePassword(user.id, upgraded, user.mustChangePassword);
+    user = { ...user, passwordHash: upgraded };
+  }
 
   const { session, setCookie } = await deps.sessions.createSession({
     userId: user.id,

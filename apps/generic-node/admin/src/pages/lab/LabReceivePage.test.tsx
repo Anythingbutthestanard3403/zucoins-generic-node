@@ -1,12 +1,26 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LabReceivePage } from "./LabReceivePage.js";
+import { ApiError } from "../../lib/api.js";
+
+const apiMock = vi.fn();
 
 vi.mock("../../store/auth.js", () => ({
-  useAuth: (sel: (s: { demoMode: boolean }) => unknown) => sel({ demoMode: false }),
+  useAuth: Object.assign(
+    (sel: (s: { demoMode: boolean }) => unknown) => sel({ demoMode: false }),
+    { getState: () => ({ demoMode: false, user: { csrfToken: "tok" } }) },
+  ),
 }));
+
+vi.mock("../../lib/api.js", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/api.js")>("../../lib/api.js");
+  return {
+    ...actual,
+    api: (...args: unknown[]) => apiMock(...args),
+  };
+});
 
 vi.mock("../../lib/money.js", () => ({
   fetchReadinessChecklist: async () => ({
@@ -36,6 +50,11 @@ function renderPage() {
 }
 
 describe("LabReceivePage", () => {
+  afterEach(() => cleanup());
+  beforeEach(() => {
+    apiMock.mockReset();
+  });
+
   it("shows lab/non-production banner and cap", () => {
     renderPage();
     expect(screen.getByTestId("lab-banner").textContent).toMatch(/Lab \/ non-production/i);
@@ -48,7 +67,31 @@ describe("LabReceivePage", () => {
     renderPage();
     const body = document.body.textContent ?? "";
     expect(body.toLowerCase()).not.toMatch(/\bpaid\b(?!)/);
-    // explicit no false paid messaging
     expect(body).toMatch(/never treat this screen as "paid"|not settlement|not paid/i);
+  });
+
+  it("clears the reporting seed from the input on mutation error (ZTR-1168)", async () => {
+    apiMock.mockRejectedValueOnce(
+      new ApiError(400, {
+        error: { code: "validation_error", message: "lab refused" },
+      }),
+    );
+    renderPage();
+    const q = (label: string) =>
+      document.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;
+    const seed = q("Reporting private seed hex");
+    fireEvent.change(seed, { target: { value: "deadbeefcafebabe" } });
+    expect(seed.value).toBe("deadbeefcafebabe");
+    fireEvent.change(q("Reporting key id"), {
+      target: { value: "00000000-0000-4000-8000-000000000099" },
+    });
+    fireEvent.change(q("TOTP code"), { target: { value: "123456" } });
+    fireEvent.submit(screen.getByTestId("lab-receive-form"));
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(q("Reporting private seed hex").value).toBe("");
+    });
   });
 });

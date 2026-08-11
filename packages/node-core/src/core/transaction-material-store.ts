@@ -51,7 +51,8 @@ export interface SignIntentRow {
   readonly sourceT0ObservationId: string;
   readonly destinationT0ObservationId: string;
   readonly leaseGroupId: string;
-  readonly leaseEpoch: number;
+  /** Postgres bigint — string end-to-end; never JS Number (ZTR-1168). */
+  readonly leaseEpoch: string;
   /** The exact bytes the signer will be handed. Stored verbatim; never parsed or re-serialized. */
   readonly innerPreimageText: string;
   readonly innerSha256: string;

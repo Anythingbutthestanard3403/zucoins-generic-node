@@ -51,6 +51,14 @@ export interface TotpPromptContextValue {
 
 const Ctx = createContext<TotpPromptContextValue | null>(null);
 
+/** Active cancel hook — set by TotpPromptProvider so logout can dismiss without reload. */
+let cancelPendingTotpImpl: (() => void) | null = null;
+
+/** Cancel any in-flight TOTP prompt (used by logout). Safe when no provider is mounted. */
+export function cancelPendingTotpPrompt(): void {
+  cancelPendingTotpImpl?.();
+}
+
 export function useTotpPrompt(): TotpPromptContextValue {
   const c = useContext(Ctx);
   if (!c) throw new Error("useTotpPrompt must be used within a TotpPromptProvider");
@@ -129,9 +137,13 @@ export function TotpPromptProvider({ children }: { children: ReactNode }) {
   );
 
   const handleCancel = useCallback(() => {
-    if (!pending) return;
-    settle(pending, () => pending.reject(new TotpCancelledError()));
-  }, [pending, settle]);
+    const current = pendingRef.current;
+    if (!current) return;
+    settle(current, () => current.reject(new TotpCancelledError()));
+  }, [settle]);
+
+  // Keep module cancel in sync so logout can dismiss without a full reload (ZTR-1168).
+  cancelPendingTotpImpl = handleCancel;
 
   const value: TotpPromptContextValue = { requestTotp, requestCode };
 

@@ -271,7 +271,7 @@ export async function persistSendSignIntentSql(
     sourceT0ObservationId: input.sourceT0ObservationId,
     destinationT0ObservationId: input.destinationFormationObservationId,
     leaseGroupId: held.leaseGroupId,
-    leaseEpoch: Number(held.leaseEpoch),
+    leaseEpoch: held.leaseEpoch.toString(),
     innerPreimageText: constructed.innerPreimageText,
     innerSha256: constructed.innerSha256,
     redemptionExpiryAt: constructed.redemptionExpiryAt,

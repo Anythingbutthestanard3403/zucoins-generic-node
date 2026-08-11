@@ -208,7 +208,22 @@ export function isSendOperationType(operationType: string | null | undefined): b
 }
 
 export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
+  // Idempotency keys must be unique per request; unpredictability is not required.
+  // crypto.randomUUID is secure-context-only — fall back on plain HTTP (ZTR-1168).
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") {
+    return c.randomUUID();
+  }
+  if (c && typeof c.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    c.getRandomValues(bytes);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  // Last resort: time + Math.random — unique enough for idempotency, never silent throw.
+  return `idem-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 /** Guard: demo mode must never claim a money mutation succeeded. */
@@ -1114,6 +1129,8 @@ export interface OperatorPushStatus {
   readonly opt_in: boolean;
   readonly wired: boolean;
   readonly note: string;
+  /** VAPID application-server public key (base64url), when the node has one. */
+  readonly vapid_public_key: string | null;
   readonly subscriptions: readonly {
     readonly id: string;
     readonly endpoint_fingerprint: string;
@@ -1135,10 +1152,12 @@ export async function subscribeOperatorPush(body: {
   return api("/operator-push/subscribe", { method: "POST", body: JSON.stringify(body) });
 }
 
-export async function unsubscribeOperatorPush(endpoint: string): Promise<unknown> {
+export async function unsubscribeOperatorPush(
+  body: { readonly endpoint: string } | { readonly endpoint_fingerprint: string },
+): Promise<unknown> {
   assertLiveMoneySession("unsubscribe operator push");
   return api("/operator-push/unsubscribe", {
     method: "POST",
-    body: JSON.stringify({ endpoint }),
+    body: JSON.stringify(body),
   });
 }

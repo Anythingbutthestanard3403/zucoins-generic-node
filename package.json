@@ -6,10 +6,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "pnpm --filter @zucoins/generic-node-ui build && tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:boundaries": "vitest run packages/node-core/test/boundaries.test.ts packages/node-core/test/manifest-boundaries.test.ts packages/generic-node-contracts/src/scan/dependency-boundary.test.ts packages/generic-node-contracts/src/scan/generic-core.scan-gate.test.ts packages/generic-node-contracts/src/scan/reporting-serializer-confinement.census.test.ts"
+    "test:boundaries": "vitest run packages/node-core/test/boundaries.test.ts packages/node-core/test/manifest-boundaries.test.ts packages/generic-node-contracts/src/scan/dependency-boundary.test.ts packages/generic-node-contracts/src/scan/generic-core.scan-gate.test.ts packages/generic-node-contracts/src/scan/reporting-serializer-confinement.census.test.ts",
+    "build:tsc": "tsc -b"
   },
   "devDependencies": {
     "eslint": "^9.39.5",

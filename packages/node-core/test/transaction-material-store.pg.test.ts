@@ -244,7 +244,7 @@ const signIntentFor = (operationId: string, approvalId: string) => ({
   sourceT0ObservationId: randomUUID(),
   destinationT0ObservationId: randomUUID(),
   leaseGroupId: randomUUID(),
-  leaseEpoch: 4,
+  leaseEpoch: "4",
   innerPreimageText: WALLET_INNER_PREIMAGE_TEXT,
   innerSha256: WALLET_INNER_PREIMAGE_SHA256,
   redemptionExpiryAt: "2026-07-26T00:05:00.000Z",

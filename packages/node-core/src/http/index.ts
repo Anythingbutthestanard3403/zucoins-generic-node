@@ -115,6 +115,7 @@ export type {
 export {
   DUMMY_PASSWORD_HASH,
   hashPassword,
+  needsPasswordRehash,
   verifyPassword,
 } from "./password.js";
 

@@ -839,6 +839,7 @@ export function createProductionRouteSurface(
     operatorPush: {
       store: operatorPushStore,
       sealAuth: (auth: string) => operatorPushAuthSealer.seal(auth),
+      vapidPublicKey: (process.env.VAPID_PUBLIC_KEY ?? "").trim() || null,
     },
   };
 

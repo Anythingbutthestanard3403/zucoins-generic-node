@@ -64,25 +64,21 @@ describe("auth store paths (generic-node live surface)", () => {
     });
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const assign = vi.fn();
-    // jsdom location.href assignment
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { href: "" },
-    });
-    Object.defineProperty(window.location, "href", {
-      configurable: true,
-      set: assign,
-      get: () => "",
-    });
+    const pushState = vi.spyOn(window.history, "pushState");
+    const popEvents: Event[] = [];
+    const onPop = (e: Event) => popEvents.push(e);
+    window.addEventListener("popstate", onPop);
 
     await useAuth.getState().logout();
-    // Local clear + /login must not wait on the revoke POST (ZTR-1195).
+    // Local clear + client-side /login must not wait on the revoke POST (ZTR-1195 / ZTR-1168).
     expect(useAuth.getState().user).toBeNull();
-    expect(assign).toHaveBeenCalledWith("/login");
+    expect(pushState).toHaveBeenCalledWith({}, "", "/login");
+    expect(popEvents.length).toBeGreaterThanOrEqual(1);
     expect(fetchMock.mock.calls[0]![0]).toBe("/admin/v1/logout");
     const headers = new Headers((fetchMock.mock.calls[0]![1] as RequestInit).headers);
     expect(headers.get("X-CSRF-Token")).toBe("tok");
+    window.removeEventListener("popstate", onPop);
+    pushState.mockRestore();
   });
 
   it("logout clears local session before a hung revoke POST settles", async () => {
@@ -100,21 +96,17 @@ describe("auth store paths (generic-node live surface)", () => {
       release = () => resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     });
     vi.stubGlobal("fetch", vi.fn(async () => hung));
-    const assign = vi.fn();
-    Object.defineProperty(window, "location", { configurable: true, value: { href: "" } });
-    Object.defineProperty(window.location, "href", {
-      configurable: true,
-      set: assign,
-      get: () => "",
-    });
+    const pushState = vi.spyOn(window.history, "pushState");
 
     const pending = useAuth.getState().logout();
-    // Before the network answers: operator is already logged out locally.
+    // Must clear immediately without awaiting hung revoke (ZTR-1195).
     expect(useAuth.getState().user).toBeNull();
-    expect(assign).toHaveBeenCalledWith("/login");
+    expect(pushState).toHaveBeenCalledWith({}, "", "/login");
     release();
     await pending;
+    pushState.mockRestore();
   });
+
 
   it("changePassword posts /admin/v1/password with snake_case body", async () => {
     useAuth.setState({

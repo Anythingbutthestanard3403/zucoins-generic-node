@@ -15,15 +15,15 @@
   "DEFERRED_IMPLEMENTER_TUPLES": [
     {
       "purpose": "zp-implementer-event-v1",
-      "disposition": "deferred-c4"
+      "disposition": "frozen"
     },
     {
       "purpose": "zp-implementer-checkpoint-v1",
-      "disposition": "deferred-c4"
+      "disposition": "frozen"
     },
     {
       "purpose": "zp-implementer-keyrotation-v1",
-      "disposition": "deferred-c4"
+      "disposition": "frozen"
     }
   ],
   "DESTINATION_BLESS_TUPLE": {
@@ -150,6 +150,20 @@
       }
     ]
   },
+  "FROZEN_IMPLEMENTER_TUPLES": [
+    {
+      "purpose": "zp-implementer-event-v1",
+      "disposition": "frozen"
+    },
+    {
+      "purpose": "zp-implementer-checkpoint-v1",
+      "disposition": "frozen"
+    },
+    {
+      "purpose": "zp-implementer-keyrotation-v1",
+      "disposition": "frozen"
+    }
+  ],
   "REPORT_REQUEST_WINDOW_MAX_SECONDS": 60,
   "SOURCE": "suite tuples A.3.4, A.4.2, A.4.3, A.6, A.7; artifacts-freeze",
   "SUITE_TUPLE_FIELD_TYPES": [

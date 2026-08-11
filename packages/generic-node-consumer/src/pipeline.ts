@@ -16,7 +16,7 @@
 import { Buffer } from "node:buffer";
 
 import {
-  authenticateNodeEvent,
+  authenticateImplementerEvent,
   parseProofBundle,
   verifyOperationProof,
   type ArtifactEnvelope,
@@ -125,7 +125,8 @@ export function ingestEventWake(
   }
 
   // Wire event artifact fields are plain strings; the verifier brands them at the boundary.
-  const auth = authenticateNodeEvent(
+  // GET /v1/events serves zp-implementer-event-v1 (not zp-node-event-v1).
+  const auth = authenticateImplementerEvent(
     wake.artifact as ArtifactEnvelope,
     nodeEventKey,
   );

@@ -133,6 +133,7 @@ export {
 export * from "./scalars.js";
 export { ed25519PublicKeyObject, verifyRawEd25519 } from "./ed25519-verify.js";
 export * from "./suite/index.js";
+export * from "./implementer-events/index.js";
 export {
   TransactionConstructionError,
   buildSettledSplitChainTransactionV2,

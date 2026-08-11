@@ -1,7 +1,7 @@
 /**
  * Covers A.3.4
  * (artifact envelope), A.4.2 (`zp-destination-bless-v1`), A.4.3 (`zp-device-enrol-v1`),
- * A.6 (deferred implementer tuples), A.7 (`zp-wallet-head-fingerprint-v1`).
+ * A.6 (frozen implementer tuples; C4 discharged), A.7 (`zp-wallet-head-fingerprint-v1`).
  *
  * the fixture-provenance purposes census — the suite-tuple field sequences no earlier concern froze. The expected-artifact
  * approval, reporting-request/register, and node-event sequences stay owned by the artifacts /
@@ -156,13 +156,16 @@ export const CEREMONY_WINDOW_RULE = {
 /** The reporting-request window is deliberately tighter than the ceremony class (A.5). */
 export const REPORT_REQUEST_WINDOW_MAX_SECONDS = 60 as const;
 
-/** A.6 dual-continuity tuples: architecture frozen, field sequence and byte-exact golden
- *  DEFERRED to the byte-freeze child (binding condition C4). Frozen here only as a deferral
- *  record — never as usable field sequences. */
+/** A.6 dual-continuity tuples: C4 byte-freeze discharged in `src/implementer-events/`.
+ *  Disposition is now `frozen`; field sequences live in the implementer-events concern.
+ *  Name retained (`DEFERRED_IMPLEMENTER_TUPLES`) for gen-snapshot / import stability. */
 export const DEFERRED_IMPLEMENTER_TUPLES = [
-  { purpose: "zp-implementer-event-v1", disposition: "deferred-c4" },
-  { purpose: "zp-implementer-checkpoint-v1", disposition: "deferred-c4" },
-  { purpose: "zp-implementer-keyrotation-v1", disposition: "deferred-c4" },
+  { purpose: "zp-implementer-event-v1", disposition: "frozen" },
+  { purpose: "zp-implementer-checkpoint-v1", disposition: "frozen" },
+  { purpose: "zp-implementer-keyrotation-v1", disposition: "frozen" },
 ] as const;
+
+/** Alias matching the discharged C4 state. */
+export const FROZEN_IMPLEMENTER_TUPLES = DEFERRED_IMPLEMENTER_TUPLES;
 
 export const SOURCE = "suite tuples A.3.4, A.4.2, A.4.3, A.6, A.7; artifacts-freeze" as const;

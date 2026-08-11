@@ -153,19 +153,24 @@ export const SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [
 ];
 
 /**
- * The three implementer-scoped continuity tuples (A.6 Option 1 dual continuity):
- * architecture frozen, exact field sequence and byte-exact golden DEFERRED to the byte-freeze
- * child under binding condition C4. They are census members with disposition `deferred-c4` —
- * never usable as frozen verification targets until that child lands.
+ * The three implementer-scoped continuity tuples (A.6 Option 1 dual continuity).
+ * Byte-freeze (binding condition C4) landed in `src/implementer-events/`; disposition
+ * is now `frozen`. Preimages are built by that concern's own builders (not the suite
+ * serializer registry) — `serializer` still records the A.1.1 domain-separated form.
+ *
+ * Kept as a separate census (not merged into SUITE_PURPOSE_CENSUS) because the suite
+ * serializer registry remains the closed set of ten Appendix A suite purposes; these
+ * three ride the implementer-events concern. Empty deferred list retained so the
+ * disposition vocabulary and gen snapshot stay stable.
  */
-export const DEFERRED_SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [
+export const IMPLEMENTER_SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [
   {
     purpose: "zp-implementer-event-v1",
     signed: true,
     signingKeyRole: "node_event",
     serializer: SUITE_SERIALIZER,
-    disposition: "deferred-c4",
-    fieldSequenceOwner: "deferred — byte-freeze child (binding condition C4)",
+    disposition: "frozen",
+    fieldSequenceOwner: "src/implementer-events/implementer-event-tuple.ts",
     specCitation: "A.6",
   },
   {
@@ -173,8 +178,8 @@ export const DEFERRED_SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [
     signed: true,
     signingKeyRole: "node_event",
     serializer: SUITE_SERIALIZER,
-    disposition: "deferred-c4",
-    fieldSequenceOwner: "deferred — byte-freeze child (binding condition C4)",
+    disposition: "frozen",
+    fieldSequenceOwner: "src/implementer-events/implementer-checkpoint.ts",
     specCitation: "A.6",
   },
   {
@@ -182,11 +187,14 @@ export const DEFERRED_SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [
     signed: true,
     signingKeyRole: "node_event",
     serializer: SUITE_SERIALIZER,
-    disposition: "deferred-c4",
-    fieldSequenceOwner: "deferred — byte-freeze child (binding condition C4)",
+    disposition: "frozen",
+    fieldSequenceOwner: "src/implementer-events/implementer-keyrotation.ts",
     specCitation: "A.6",
   },
 ];
+
+/** @deprecated C4 deferral discharged — empty. Prefer IMPLEMENTER_SUITE_PURPOSE_CENSUS. */
+export const DEFERRED_SUITE_PURPOSE_CENSUS: readonly SuitePurposeEntry[] = [];
 
 /**
  * Legacy push-channel purposes (compatibility-literal preservation compatibility literals, owned by

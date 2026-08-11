@@ -81,6 +81,24 @@ export {
   type VerifyOperationResult,
 } from "./pipeline.js";
 
+// Consumer-side verifier for the GET /v1/events purpose actually served
+// (zp-implementer-event-v1 / zp-implementer-checkpoint-v1). Re-exported so an
+// integrator gets it from the SDK, not only from node-core internals.
+export {
+  authenticateImplementerEvent,
+  authenticateNodeEvent,
+  type ArtifactEnvelope,
+  type NodeArtifactResult,
+  type NodeVerificationKey,
+} from "@zucoins/node-core/verifier/consumer";
+
+// Gate: every purpose served by a tenant route has a consumer verifier. Used by
+// route-purpose-verifier.gate.test.ts so a green test cannot pin fiction.
+export {
+  ROUTE_SERVED_PURPOSES,
+  CONSUMER_VERIFIER_BY_PURPOSE,
+} from "./route-purpose-verifiers.js";
+
 // Merchant-hosted payment-instruction origin: instructions shown on a
 // merchant-controlled surface are verified against an independently pinned node identity
 // before anything is displayed.

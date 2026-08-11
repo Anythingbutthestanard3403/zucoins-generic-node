@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { assertClosedSet, assertFieldOrder, expectRejects } from "../testkit/freeze.ts";
 import {
   DEFERRED_SUITE_PURPOSE_CENSUS,
+  IMPLEMENTER_SUITE_PURPOSE_CENSUS,
   LEGACY_PUSH_PURPOSES_REFERENCE,
   PURPOSES_CONTRACT_VERSION,
   SUITE_PURPOSE_CENSUS,
@@ -18,6 +19,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const FROZEN_PURPOSES = SUITE_PURPOSE_CENSUS.map((entry) => entry.purpose);
 const DEFERRED_PURPOSES = DEFERRED_SUITE_PURPOSE_CENSUS.map((entry) => entry.purpose);
+const IMPLEMENTER_PURPOSES = IMPLEMENTER_SUITE_PURPOSE_CENSUS.map((entry) => entry.purpose);
 
 describe("purposes census (the fixture-provenance purposes census, Appendix A.3-A.7)", () => {
   it("freezes the ten live suite purposes, in Appendix A declaration sequence", () => {
@@ -35,19 +37,21 @@ describe("purposes census (the fixture-provenance purposes census, Appendix A.3-
     ]);
   });
 
-  it("freezes the three C4-deferred implementer tuples", () => {
-    assertFieldOrder(DEFERRED_PURPOSES, [
+  it("freezes the three implementer continuity tuples (C4 discharged)", () => {
+    expect(DEFERRED_PURPOSES).toEqual([]);
+    assertFieldOrder(IMPLEMENTER_PURPOSES, [
       "zp-implementer-event-v1",
       "zp-implementer-checkpoint-v1",
       "zp-implementer-keyrotation-v1",
     ]);
-    for (const entry of DEFERRED_SUITE_PURPOSE_CENSUS) {
-      expect(entry.disposition).toBe("deferred-c4");
+    for (const entry of IMPLEMENTER_SUITE_PURPOSE_CENSUS) {
+      expect(entry.disposition).toBe("frozen");
+      expect(existsSync(join(packageRoot, entry.fieldSequenceOwner)), entry.purpose).toBe(true);
     }
   });
 
-  it("carries the -v1 suffix on every live and deferred purpose (compatibility-literal preservation)", () => {
-    for (const purpose of [...FROZEN_PURPOSES, ...DEFERRED_PURPOSES]) {
+  it("carries the -v1 suffix on every live and implementer purpose (compatibility-literal preservation)", () => {
+    for (const purpose of [...FROZEN_PURPOSES, ...IMPLEMENTER_PURPOSES]) {
       expect(purpose.endsWith(SUITE_PURPOSE_SUFFIX)).toBe(true);
     }
   });
@@ -64,6 +68,10 @@ describe("purposes census (the fixture-provenance purposes census, Appendix A.3-
     expect(roleByPurpose.get("zp-reporting-register-v1")).toBe("reporting");
     expect(roleByPurpose.get("zp-node-event-v1")).toBe("node_event");
     expect(roleByPurpose.get("zp-wallet-head-fingerprint-v1")).toBe("none");
+    const implRoles = new Map(IMPLEMENTER_SUITE_PURPOSE_CENSUS.map((e) => [e.purpose, e.signingKeyRole]));
+    expect(implRoles.get("zp-implementer-event-v1")).toBe("node_event");
+    expect(implRoles.get("zp-implementer-checkpoint-v1")).toBe("node_event");
+    expect(implRoles.get("zp-implementer-keyrotation-v1")).toBe("node_event");
   });
 
   it("marks only the wallet-head fingerprint unsigned (A.7)", () => {
@@ -88,8 +96,8 @@ describe("purposes census (the fixture-provenance purposes census, Appendix A.3-
     }
   });
 
-  it("excludes the deferred and legacy-push purposes from the frozen census", () => {
-    for (const purpose of [...DEFERRED_PURPOSES, ...LEGACY_PUSH_PURPOSES_REFERENCE.purposes]) {
+  it("excludes the implementer and legacy-push purposes from the suite-serializer census", () => {
+    for (const purpose of [...IMPLEMENTER_PURPOSES, ...LEGACY_PUSH_PURPOSES_REFERENCE.purposes]) {
       expect(FROZEN_PURPOSES).not.toContain(purpose);
     }
   });
@@ -108,7 +116,7 @@ describe("purposes census (the fixture-provenance purposes census, Appendix A.3-
     );
   });
 
-  it("rejects a deferred purpose admitted as frozen (negative path)", () => {
+  it("rejects an implementer purpose admitted into the suite-serializer census (negative path)", () => {
     expectRejects(
       () => [...FROZEN_PURPOSES, "zp-implementer-event-v1"],
       (mutated) => assertClosedSet(mutated, FROZEN_PURPOSES),

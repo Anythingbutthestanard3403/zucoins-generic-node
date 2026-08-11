@@ -67,6 +67,9 @@ const SYNTHETIC_TRIGGERS: Readonly<Record<SafetyAlertSignal, number>> = {
   signer_loss: 1,
   backup_age: 86_400_000,
   push_no_transfer_code_streak: 20,
+  attention_backlog: 1,
+  gateway_read_failure: 1,
+  queue_oldest_age: 30,
 };
 
 describe("safety alerts — signal catalogue", () => {
@@ -84,6 +87,9 @@ describe("safety alerts — signal catalogue", () => {
         "signer_loss",
         "backup_age",
         "push_no_transfer_code_streak",
+        "attention_backlog",
+        "gateway_read_failure",
+        "queue_oldest_age",
       ]);
       expect(SAFETY_ALERT_RULES).toHaveLength(SAFETY_ALERT_SIGNALS.length);
       expect(ALERT_METRICS).toEqual(SAFETY_ALERT_SIGNALS);
@@ -102,6 +108,9 @@ describe("safety alerts — signal catalogue", () => {
         signer_loss: "P1",
         backup_age: "P1",
         push_no_transfer_code_streak: "P1",
+        attention_backlog: "P1",
+        gateway_read_failure: "P1",
+        queue_oldest_age: "P1",
       };
       for (const rule of SAFETY_ALERT_RULES) {
         expect(ALERT_SEVERITIES).toContain(rule.severity);
@@ -133,6 +142,9 @@ describe("safety alerts — signal catalogue", () => {
       expect(SAFETY_ALERT_RULE_BY_SIGNAL.push_no_transfer_code_streak.citation).toMatch(
         /no_transfer_code|ZTR-1154/,
       );
+      expect(SAFETY_ALERT_RULE_BY_SIGNAL.attention_backlog.citation).toMatch(/attention_required/);
+      expect(SAFETY_ALERT_RULE_BY_SIGNAL.gateway_read_failure.citation).toMatch(/t0_read|gateway-read/i);
+      expect(SAFETY_ALERT_RULE_BY_SIGNAL.queue_oldest_age.citation).toMatch(/oldest_age|RECEIVE_QUEUE_MAX_WAIT/);
     });
 
     it("marks lease_age diagnostic-only and never automatic release", () => {
@@ -286,6 +298,9 @@ describe("safety alerts — signal catalogue", () => {
           signer_loss: 0,
           backup_age: 0,
           push_no_transfer_code_streak: 0,
+          attention_backlog: 0,
+          gateway_read_failure: 0,
+          queue_oldest_age: 0,
         };
         readings[signal] = SYNTHETIC_TRIGGERS[signal];
 
@@ -342,6 +357,9 @@ describe("safety alerts — signal catalogue", () => {
         signerInFlightAmbiguous: 1,
         backupAgeMs: 1_000,
         pushNoTransferCodeStreak: 21,
+        attentionRequiredCount: 7,
+        gatewayReadFailureCount: 8,
+        queueOldestAgeSecs: 45,
       };
       const readings = deriveSafetyAlertReadings(input);
       expect(readings.invariant_breach).toBe(2);
@@ -356,6 +374,9 @@ describe("safety alerts — signal catalogue", () => {
       expect(readings.signer_loss).toBe(2);
       expect(readings.backup_age).toBe(1_000);
       expect(readings.push_no_transfer_code_streak).toBe(21);
+      expect(readings.attention_backlog).toBe(7);
+      expect(readings.gateway_read_failure).toBe(8);
+      expect(readings.queue_oldest_age).toBe(45);
     });
 
     it("queue_caps tracks pinned ratio so a consumer-less PINNED build-up is visible", () => {

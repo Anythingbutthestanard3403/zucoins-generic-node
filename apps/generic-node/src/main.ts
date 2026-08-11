@@ -53,6 +53,7 @@ import {
   createNodeMetrics,
   createMetricsHooks,
   createSafetyAlertEvaluator,
+  DEFAULT_ALERT_THRESHOLDS,
   createSqlActiveDeviceLookup,
   createSqlBlessingArtifactPersister,
   createSqlBlessingAuditAppender,
@@ -145,6 +146,8 @@ import { createProductionMetricsSnapshotSource } from "./metrics/snapshot-source
 import {
   CUSTODY_ALERT_COOLDOWN_MS,
   evaluateAndDispatchCustodyAlerts,
+  custodyAlertCountersFromMetrics,
+  createWebhookAlertChannel,
 } from "./metrics/custody-alerts.js";
 import {
   generateEphemeralIdentityPublicKey,
@@ -444,25 +447,49 @@ async function main(): Promise<void> {
   // safety-alert rule set (lease_age/queue_caps/signer_loss P0/P1 with spec-cited
   // postures), fed truthful readings below — never fabricated ones — from this scrape's
   // DB-truth snapshot. Log-only delivery: advisory, never gates admission or a lease.
-  const custodyAlertEvaluator = createSafetyAlertEvaluator({
-    backupMaxAgeMs: 24 * 60 * 60 * 1000,
-    channels: {
-      log: {
-        kind: "log",
-        deliver: async (notification) => {
-          logger.error(
-            `node: safety-alert signal=${notification.signal} severity=${notification.severity} ` +
-              `${notification.message}`,
-          );
-        },
+  const custodyAlertChannels: {
+    log: {
+      kind: "log";
+      deliver: (notification: {
+        signal: string;
+        severity: string;
+        message: string;
+      }) => Promise<void>;
+    };
+    webhook?: ReturnType<typeof createWebhookAlertChannel>;
+  } = {
+    log: {
+      kind: "log",
+      deliver: async (notification) => {
+        logger.error(
+          `node: safety-alert signal=${notification.signal} severity=${notification.severity} ` +
+            `${notification.message}`,
+        );
       },
     },
+  };
+  if (config.OPERATOR_ALERT_WEBHOOK_URL !== undefined) {
+    custodyAlertChannels.webhook = createWebhookAlertChannel({
+      url: config.OPERATOR_ALERT_WEBHOOK_URL,
+      logger,
+    });
+  }
+  const custodyAlertEvaluator = createSafetyAlertEvaluator({
+    backupMaxAgeMs: 24 * 60 * 60 * 1000,
+    channels: custodyAlertChannels,
     cooldownMs: CUSTODY_ALERT_COOLDOWN_MS,
+    thresholds: DEFAULT_ALERT_THRESHOLDS.map((t) =>
+      t.signal === "queue_oldest_age"
+        ? { ...t, value: config.RECEIVE_QUEUE_MAX_WAIT }
+        : t,
+    ),
   });
   // Real readiness verdict (schema ∧ db ∧ vault ∧ observation, the SAME
   // evaluator + probe /health/ready uses) and real DB-truth counters, replacing the prior
   // hard-coded `readinessReady: 0` and emptyOperationalSnapshot() stub. Fail-safe to a
   // stamps-only snapshot on DB outage so a scrape never 500s or hangs.
+  // Filled after shutdownRegistry is constructed (same boot function); scrape-time only.
+  let signerInFlightAmbiguousReading = (): boolean => false;
   const metricsSnapshotSource = createProductionMetricsSnapshotSource({
     getState: () => readiness.core.snapshot(),
     dbProbe,
@@ -490,8 +517,14 @@ async function main(): Promise<void> {
       leadership: 1,
     }),
     backupStatus: () => backupScheduler?.status() ?? null,
+    signerInFlightAmbiguous: () => signerInFlightAmbiguousReading(),
     onSnapshot: (snapshot, databaseTruthAvailable) => {
-      void evaluateAndDispatchCustodyAlerts(custodyAlertEvaluator, snapshot, databaseTruthAvailable);
+      void evaluateAndDispatchCustodyAlerts(
+        custodyAlertEvaluator,
+        snapshot,
+        databaseTruthAvailable,
+        custodyAlertCountersFromMetrics(metrics),
+      );
     },
   });
 
@@ -999,6 +1032,9 @@ async function main(): Promise<void> {
   }
 
   const shutdownRegistry = createShutdownRegistry();
+  signerInFlightAmbiguousReading = () =>
+    !readiness.core.snapshot().leadershipLockHeld && shutdownRegistry.inflightCount > 0;
+
   const registryHooks = shutdownRegistry.hooks();
   // EVENT_SIGNING availability is an authority, not a residual. Arms the
   // readiness conjunct at boot; a runtime signing failure withdraws authority and
@@ -1494,6 +1530,7 @@ async function main(): Promise<void> {
                 nodeId: config.NODE_ID,
                 ownerInstanceId: config.NODE_ID,
                 leadership: shutdownRegistry.authority,
+                metricsHooks,
                 moneyPathGates: moneyPathPorts,
                 submitGateway: {
                   endpoint: submitEndpoint,

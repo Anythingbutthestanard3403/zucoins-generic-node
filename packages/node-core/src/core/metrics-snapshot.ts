@@ -114,6 +114,13 @@ SELECT count(*)::int AS parked
     .replace(/\s+/g, " ")
     .trim(),
 
+  COUNT_ATTENTION_REQUIRED_OPS: `
+SELECT count(*)::int AS attention
+  FROM operations
+ WHERE attention_required = true`
+    .replace(/\s+/g, " ")
+    .trim(),
+
   COUNT_OPERATIONS_BY_STATUS: `
 SELECT status::text AS status,
        count(*)::int AS ops,
@@ -133,6 +140,11 @@ export interface MetricsProcessStamps {
   readonly observationDegraded: boolean;
   readonly workerHealth?: Readonly<Partial<Record<MetricWorkerName, 0 | 1>>>;
   readonly poolCapTotal: number;
+  /**
+   * 1 when tracked in-flight signing work exists while leadership is absent.
+   * Process stamp; composition root supplies from the shutdown registry.
+   */
+  readonly signerInFlightAmbiguous?: boolean;
 }
 
 function isWalletState(value: string): value is MetricWalletState {
@@ -170,6 +182,7 @@ export async function collectOperationalMetricsSnapshot(
     quarantineRows,
     opRows,
     parkedSendRows,
+    attentionRows,
   ] =
     await Promise.all([
       db.query<{ state: string; wallets: number }>(
@@ -189,6 +202,7 @@ export async function collectOperationalMetricsSnapshot(
         METRICS_SNAPSHOT_STATEMENTS.COUNT_OPERATIONS_BY_STATUS,
       ),
       db.query<{ parked: number }>(METRICS_SNAPSHOT_STATEMENTS.COUNT_PARKED_EXTERNAL_SENDS),
+      db.query<{ attention: number }>(METRICS_SNAPSHOT_STATEMENTS.COUNT_ATTENTION_REQUIRED_OPS),
     ]);
 
   const walletsByState: Partial<Record<MetricWalletState, number>> = {};
@@ -237,6 +251,8 @@ export async function collectOperationalMetricsSnapshot(
     oldestLeaseAgeSecs,
     quarantinedUnexpectedHead: Number(quarantineRows.rows[0]?.wallets ?? 0),
     parkedExternalSends: Number(parkedSendRows.rows[0]?.parked ?? 0),
+    attentionRequiredOps: Number(attentionRows.rows[0]?.attention ?? 0),
+    signerInFlightAmbiguous: stamps.signerInFlightAmbiguous ? 1 : 0,
     operationsByStatus,
     operationsOldestAgeSecsByStatus,
     storagePressure: stamps.storagePressure ? 1 : 0,
@@ -271,6 +287,7 @@ export function snapshotFromPoolPressure(
     readonly oldestLeaseAgeSecs?: number;
     readonly quarantinedUnexpectedHead?: number;
     readonly parkedExternalSends?: number;
+    readonly attentionRequiredOps?: number;
     readonly operationsByStatus?: Readonly<Partial<Record<MetricOperationStatus, number>>>;
     readonly operationsOldestAgeSecsByStatus?: Readonly<
       Partial<Record<MetricOperationStatus, number>>
@@ -299,6 +316,8 @@ export function snapshotFromPoolPressure(
     oldestLeaseAgeSecs: extras?.oldestLeaseAgeSecs ?? pressure.oldestReceiveLeaseAgeSecs,
     quarantinedUnexpectedHead: extras?.quarantinedUnexpectedHead ?? 0,
     parkedExternalSends: extras?.parkedExternalSends ?? 0,
+    attentionRequiredOps: extras?.attentionRequiredOps ?? 0,
+    signerInFlightAmbiguous: stamps.signerInFlightAmbiguous ? 1 : 0,
     operationsByStatus: extras?.operationsByStatus ?? {},
     operationsOldestAgeSecsByStatus: extras?.operationsOldestAgeSecsByStatus ?? {},
     storagePressure: stamps.storagePressure ? 1 : 0,

@@ -285,6 +285,8 @@ export interface MoveInvariantBreachQuarantineInput {
   readonly nowIso?: string;
   /** Optional id factory (tests). */
   readonly newId?: () => string;
+  /** Optional metric/page hook after durable quarantine commits (ZTR-1144). */
+  readonly onQuarantineApplied?: () => void;
 }
 
 export interface MoveInvariantBreachQuarantineResult {
@@ -471,7 +473,7 @@ export async function applyMoveInvariantBreachQuarantine(
   const priorSourceIdentity = identityOf(priorSourceWallet);
   const priorDestIdentity = identityOf(priorDestWallet);
 
-  return store.runAtomic(async () => {
+  const result = await store.runAtomic(async () => {
     const sourceWallet = await store.quarantineWallet(sourceWalletId, quarantineReason);
     const destinationWallet = await store.quarantineWallet(
       destinationWalletId,
@@ -560,6 +562,8 @@ export async function applyMoveInvariantBreachQuarantine(
       auditAction: "move.invariant_breach.quarantine_wallets" as const,
     };
   });
+  input.onQuarantineApplied?.();
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

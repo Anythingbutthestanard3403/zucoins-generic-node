@@ -25,7 +25,7 @@ Channels widen monotonically: a higher severity never drops a channel a lower on
 | Severity | Channels | Signals that reach this severity |
 | --- | --- | --- |
 | P0 | `log`, `webhook` | `duplicate_submit_attempt`, `invariant_breach`, `signer_loss`, `storage_pressure` |
-| P1 | `log`, `webhook` | `backup_age`, `endpoint_disagreement`, `lease_age`, `path_gap`, `push_no_transfer_code_streak`, `queue_caps`, `regression`, `signer_loss`, `storage_pressure` |
+| P1 | `log`, `webhook` | `attention_backlog`, `backup_age`, `endpoint_disagreement`, `gateway_read_failure`, `lease_age`, `path_gap`, `push_no_transfer_code_streak`, `queue_caps`, `queue_oldest_age`, `regression`, `signer_loss`, `storage_pressure` |
 | P2 | `log` | — |
 
 ## P0 signals and their required posture
@@ -35,13 +35,13 @@ verbatim `posture` field of its rule.
 
 ### `invariant_breach`
 
-**Unbound — cannot fire today.** input hardcoded 0; no `invariant_breach` metric exists (ZTR-1144)
+`gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites
 
 > Stop money engines, quarantine affected wallets, preserve evidence, operator escalation.
 
 ### `duplicate_submit_attempt`
 
-**Unbound — cannot fire today.** input hardcoded 0; no metric at the uniqueness-rejection site (ZTR-1144)
+`gn_duplicate_submit_rejection_total` on submit_decisions mint loser (move + receive claim paths)
 
 > Stop money engines, quarantine affected wallets, preserve evidence, operator escalation. Alert on submit_decision_id uniqueness-constraint rejection only — never on raw retry count.
 
@@ -53,7 +53,7 @@ verbatim `posture` field of its rule.
 
 ### `signer_loss`
 
-`gn_signer_leadership_held`; the ambiguity input that raises P0 is hardcoded 0 (ZTR-1144)
+`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)
 
 > P1 readiness-degraded when leadership is lost or cannot be re-acquired. P0 if loss coincides with an in-flight signing attempt whose outcome is ambiguous. Unsigned ops stay in existing public state; no alternate instance signs without leadership.
 
@@ -66,7 +66,7 @@ verbatim `posture` field of its rule.
 
 **Nothing pages today.** The composition root registers a `log` channel only, and no
 webhook URL is configurable — so every P1/P0 above is delivered to stdout and to nobody
-else. Until ZTR-1144 lands a webhook channel, your paging path must be built on scraping
+else. Configure OPERATOR_ALERT_WEBHOOK_URL (https, no credentials) for P1/P0 paging; absent keeps log-only
 the metrics endpoint with the rules in
 [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml), not on this escalation
 path.

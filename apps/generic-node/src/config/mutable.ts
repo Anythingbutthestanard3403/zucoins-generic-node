@@ -81,6 +81,8 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS",
   "MONEY_PATH_STATEMENT_TIMEOUT_MS",
   "SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS",
+  // Operator webhook is boot-time only (channel composition in main.ts).
+  "OPERATOR_ALERT_WEBHOOK_URL",
 ] as const satisfies readonly (keyof NodeConfig)[];
 
 export const MUTABLE_CONFIG_FIELDS = [

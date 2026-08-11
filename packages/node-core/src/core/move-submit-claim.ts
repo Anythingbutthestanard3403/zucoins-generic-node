@@ -101,6 +101,8 @@ export interface ExecuteMoveSubmitClaimOptions {
   readonly signedTransaction: unknown;
   readonly claimStore: MoveSubmitClaimStore;
   readonly submit: SubmitGatewayActionOptions;
+  /** Fired when claimSubmitOnce returns minted=false (uniqueness loser) — ZTR-1144. */
+  readonly onDuplicateSubmitRejection?: () => void;
 }
 
 // Claim SUBMIT(attempt) and invoke once (step 9). The gateway call is reachable on
@@ -122,6 +124,7 @@ export async function executeMoveSubmitClaim(
   });
 
   if (!minted) {
+    options.onDuplicateSubmitRejection?.();
     return { claim, executed: false, recordedOutcome: null };
   }
 

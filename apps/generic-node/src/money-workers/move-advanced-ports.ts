@@ -70,6 +70,7 @@ import {
   type NodeEventSigner,
   type SignedNodeEvent,
   type SignedMoveSteps,
+  type MetricsHooks,
   recordWalletSettledLedger,
   writeExactHeadLineagePath,
 } from "@zucoins/node-core";
@@ -110,6 +111,8 @@ export interface MoveAdvancedPortsDeps {
   readonly logger: MoveInternalWorkerLogger;
   /** Transaction-local money-path statement_timeout (ZTR-1156). */
   readonly moneyPathStatementTimeoutMs?: number;
+  /** ZTR-1144 — duplicate-submit metric seam. */
+  readonly metricsHooks?: MetricsHooks;
 }
 
 interface MoveOperationDetails {
@@ -462,6 +465,7 @@ export function createMoveAdvancedPorts(
         ? { exchange: deps.submitGateway.exchange ?? deps.gatewayExchange }
         : {}),
     },
+    onDuplicateSubmitRejection: () => deps.metricsHooks?.onDuplicateSubmitRejection(),
   });
 
   return {

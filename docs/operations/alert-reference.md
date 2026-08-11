@@ -21,24 +21,27 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 
 | Signal | Severity | Diagnostic only | Feeds |
 | --- | --- | --- | --- |
-| [`invariant_breach`](#invariant_breach) | P0 | no | **unbound** |
-| [`duplicate_submit_attempt`](#duplicate_submit_attempt) | P0 | no | **unbound** |
+| [`invariant_breach`](#invariant_breach) | P0 | no | live |
+| [`duplicate_submit_attempt`](#duplicate_submit_attempt) | P0 | no | live |
 | [`lease_age`](#lease_age) | P1 | yes | live |
-| [`path_gap`](#path_gap) | P1 | no | **unbound** |
-| [`regression`](#regression) | P1 | no | **unbound** |
-| [`endpoint_disagreement`](#endpoint_disagreement) | P1 | no | **unbound** |
+| [`path_gap`](#path_gap) | P1 | no | live |
+| [`regression`](#regression) | P1 | no | live |
+| [`endpoint_disagreement`](#endpoint_disagreement) | P1 | no | live |
 | [`storage_pressure`](#storage_pressure) | P1 | no | live |
 | [`queue_caps`](#queue_caps) | P1 | no | live |
 | [`signer_loss`](#signer_loss) | P1 | no | live |
 | [`backup_age`](#backup_age) | P1 | no | live |
 | [`push_no_transfer_code_streak`](#push_no_transfer_code_streak) | P1 | no | live |
+| [`attention_backlog`](#attention_backlog) | P1 | no | live |
+| [`gateway_read_failure`](#gateway_read_failure) | P1 | no | live |
+| [`queue_oldest_age`](#queue_oldest_age) | P1 | no | live |
 
 ## invariant_breach
 
 - **Severity:** P0
 - **Thresholds:** P0 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** **unbound — this rule cannot fire today.** input hardcoded 0; no `invariant_breach` metric exists (ZTR-1144)
+- **Feeds:** live — `gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites
 
 **Rule.**
 
@@ -53,7 +56,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P0
 - **Thresholds:** P0 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** **unbound — this rule cannot fire today.** input hardcoded 0; no metric at the uniqueness-rejection site (ZTR-1144)
+- **Feeds:** live — `gn_duplicate_submit_rejection_total` on submit_decisions mint loser (move + receive claim paths)
 
 **Rule.**
 
@@ -83,7 +86,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** **unbound — this rule cannot fire today.** input hardcoded 0 (ZTR-1144)
+- **Feeds:** live — `gn_proof_budget_exhaustion_total` (INDETERMINATE-by-budget path gaps)
 
 **Rule.**
 
@@ -98,7 +101,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** **unbound — this rule cannot fire today.** input hardcoded 0; `gn_observation_anomalies_total{kind}` is emitted but unconsumed (ZTR-1144)
+- **Feeds:** live — `gn_observation_anomalies_total{kind="REGRESSION"}`
 
 **Rule.**
 
@@ -113,7 +116,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** **unbound — this rule cannot fire today.** input hardcoded 0 (ZTR-1144)
+- **Feeds:** live — `gn_observation_anomalies_total{kind="ENDPOINT_DISAGREEMENT"}` from GATEWAY_ENDPOINT_DISAGREEMENT quarantine
 
 **Rule.**
 
@@ -143,7 +146,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 0.9
 - **Diagnostic only:** no
-- **Feeds:** live — queue depth, pool-cap utilization and pinned ratio; the 503 rate input is hardcoded 0 (ZTR-1144)
+- **Feeds:** live — queue depth, pool-cap utilization, pinned ratio, and `gn_receive_queue_full_503_total` (normalized)
 
 **Rule.**
 
@@ -158,7 +161,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 1; P0 when reading ≥ 2
 - **Diagnostic only:** no
-- **Feeds:** live — `gn_signer_leadership_held`; the ambiguity input that raises P0 is hardcoded 0 (ZTR-1144)
+- **Feeds:** live — `gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)
 
 **Rule.**
 
@@ -197,6 +200,51 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 **Required posture.**
 
 > Page operator. Compare a freshly decrypted live cleartext against goldens/push/delivered-envelope.data.v1; if the nest moved, update payload.ts precedence and refresh the golden in the same reviewed commit. Do not change the 204 discard response. Do not treat silence of other signals as an all-clear on the push channel.
+
+## attention_backlog
+
+- **Severity:** P1
+- **Thresholds:** P1 when reading ≥ 1
+- **Diagnostic only:** no
+- **Feeds:** live — `gn_operations_attention_required` COUNT(*), suppressed while `gn_database_truth_available` is 0
+
+**Rule.**
+
+> Doc 09 §9.1 — operations with attention_required accumulating past bound. P1 (operator backlog before wallet-cap exhaustion)
+
+**Required posture.**
+
+> Page operator. Drain attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.
+
+## gateway_read_failure
+
+- **Severity:** P1
+- **Thresholds:** P1 when reading ≥ 1
+- **Diagnostic only:** no
+- **Feeds:** live — `gn_t0_read_failures_total` process counter at the observation seam
+
+**Rule.**
+
+> Doc 09 §9.1 / ZTR-1162 — gn_t0_read_failures_total at the observation seam. P1 (gateway-read failures that close observation readiness)
+
+**Required posture.**
+
+> Fail closed for money decisions until gateway reads recover. Do not switch endpoints to erase disagreement; page operator if failures continue past the configured budget.
+
+## queue_oldest_age
+
+- **Severity:** P1
+- **Thresholds:** P1 when reading ≥ 30
+- **Diagnostic only:** no
+- **Feeds:** live — `gn_receive_queue_oldest_age_seconds`, band = RECEIVE_QUEUE_MAX_WAIT; suppressed while DB-truth unavailable
+
+**Rule.**
+
+> Doc 09 §9.1 — gn_receive_queue_oldest_age_seconds. P1 when the oldest unassigned receive exceeds RECEIVE_QUEUE_MAX_WAIT
+
+**Required posture.**
+
+> Stop affected admission path; keep other isolated lanes operating if invariants hold; operator escalation. Suppress when DB-truth gauges are unavailable.
 
 ## Invariants asserted by the source module
 

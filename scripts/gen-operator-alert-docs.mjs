@@ -32,27 +32,29 @@ export const ESCALATION_MATRIX_PATH = "docs/operations/escalation-matrix.md";
  *
  * Source of truth for this column is `apps/generic-node/src/metrics/custody-alerts.ts`
  * (`custodyAlertInputFromSnapshot`), which spreads `emptySafetyAlertMetricInput()` and
- * overrides only the snapshot-backed inputs. Every other input stays hardcoded zero, so
- * its rule is defined and unreachable. ZTR-1144 owns binding them.
+ * overrides snapshot-backed inputs and process counters from NodeMetrics (ZTR-1144).
  *
  * A signal missing from this map fails the census test — a new rule cannot ship without
  * an explicit statement of whether it can fire.
  */
 export const SIGNAL_WIRING = {
-  invariant_breach: { bound: false, note: "input hardcoded 0; no `invariant_breach` metric exists (ZTR-1144)" },
-  duplicate_submit_attempt: { bound: false, note: "input hardcoded 0; no metric at the uniqueness-rejection site (ZTR-1144)" },
+  invariant_breach: { bound: true, note: "`gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites" },
+  duplicate_submit_attempt: { bound: true, note: "`gn_duplicate_submit_rejection_total` on submit_decisions mint loser (move + receive claim paths)" },
   lease_age: { bound: true, note: "`gn_oldest_lease_age_seconds`, suppressed while `gn_database_truth_available` is 0" },
-  path_gap: { bound: false, note: "input hardcoded 0 (ZTR-1144)" },
-  regression: { bound: false, note: "input hardcoded 0; `gn_observation_anomalies_total{kind}` is emitted but unconsumed (ZTR-1144)" },
-  endpoint_disagreement: { bound: false, note: "input hardcoded 0 (ZTR-1144)" },
+  path_gap: { bound: true, note: "`gn_proof_budget_exhaustion_total` (INDETERMINATE-by-budget path gaps)" },
+  regression: { bound: true, note: "`gn_observation_anomalies_total{kind=\"REGRESSION\"}`" },
+  endpoint_disagreement: { bound: true, note: "`gn_observation_anomalies_total{kind=\"ENDPOINT_DISAGREEMENT\"}` from GATEWAY_ENDPOINT_DISAGREEMENT quarantine" },
   storage_pressure: { bound: true, note: "`gn_storage_pressure` — a 0/1 band flag, not a utilization fraction" },
-  queue_caps: { bound: true, note: "queue depth, pool-cap utilization and pinned ratio; the 503 rate input is hardcoded 0 (ZTR-1144)" },
-  signer_loss: { bound: true, note: "`gn_signer_leadership_held`; the ambiguity input that raises P0 is hardcoded 0 (ZTR-1144)" },
+  queue_caps: { bound: true, note: "queue depth, pool-cap utilization, pinned ratio, and `gn_receive_queue_full_503_total` (normalized)" },
+  signer_loss: { bound: true, note: "`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)" },
   backup_age: { bound: true, note: "`gn_backup_last_success_age_seconds`, suppressed while `gn_backup_last_success_available` is 0; threshold only exists when `backupMaxAgeMs` is passed" },
   push_no_transfer_code_streak: {
     bound: true,
     note: "`gn_push_no_transfer_code_streak` process-local gauge; in-process SAFETY_ALERT_SIGNALS fire on threshold via composePush + custodyAlertEvaluator",
   },
+  attention_backlog: { bound: true, note: "`gn_operations_attention_required` COUNT(*), suppressed while `gn_database_truth_available` is 0" },
+  gateway_read_failure: { bound: true, note: "`gn_t0_read_failures_total` process counter at the observation seam" },
+  queue_oldest_age: { bound: true, note: "`gn_receive_queue_oldest_age_seconds`, band = RECEIVE_QUEUE_MAX_WAIT; suppressed while DB-truth unavailable" },
 };
 
 /**
@@ -263,7 +265,7 @@ export function renderEscalationMatrix(core, script = "scripts/gen-operator-aler
     "",
     "**Nothing pages today.** The composition root registers a `log` channel only, and no",
     "webhook URL is configurable — so every P1/P0 above is delivered to stdout and to nobody",
-    "else. Until ZTR-1144 lands a webhook channel, your paging path must be built on scraping",
+    "else. Configure OPERATOR_ALERT_WEBHOOK_URL (https, no credentials) for P1/P0 paging; absent keeps log-only",
     "the metrics endpoint with the rules in",
     "[`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml), not on this escalation",
     "path.",

@@ -93,6 +93,7 @@ export async function receiveSubmitOnce(
   });
 
   if (!minted) {
+    input.metricsHooks?.onDuplicateSubmitRejection();
     return {
       kind: "AMBIGUOUS",
       claim,

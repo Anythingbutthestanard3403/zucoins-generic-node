@@ -5,7 +5,7 @@ posture text are in [`alert-reference.md`](alert-reference.md), which is generat
 source; this document is the part that needs judgement — what to check, what is safe, and
 what will make it worse.
 
-Five of the original ten OPS signals **cannot fire today** (ZTR-1144): their inputs are hardcoded zero.
+All catalogue signals are bound to live readings as of ZTR-1144. P0/P1 also reach the operator webhook when `OPERATOR_ALERT_WEBHOOK_URL` is configured.
 Their sections are still here, because the underlying condition is real even when the alert
 is not, and because [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml) watches
 proxy metrics for several of them. Silence from an unbound signal is not an all-clear.
@@ -61,7 +61,7 @@ simultaneously believe they own the incident.
 
 ## invariant_breach
 
-**P0. Unbound — this signal cannot fire (ZTR-1144).** Watch
+**P0.** Watch
 `gn_wallets_quarantined_unexpected_head > 0` as the closest live proxy; a clean reading there
 does not mean no breach.
 
@@ -85,7 +85,7 @@ just makes boot recovery refuse readiness, correctly.
 
 ## duplicate_submit_attempt
 
-**P0. Unbound — this signal cannot fire (ZTR-1144).** No metric exists at the rejection site.
+**P0.** Fired from `gn_duplicate_submit_rejection_total` (submit_decisions mint loser).
 
 **Means.** A `submit_decision_id` uniqueness constraint rejected a write: the same submit
 decision was attempted twice. The database prevented the second one. What you do not yet
@@ -126,7 +126,7 @@ over an operation with an ambiguous submit is a second signer over the same wall
 
 ## path_gap
 
-**P1. Unbound — this signal cannot fire (ZTR-1144).** Watch
+**P1.** Watch
 `increase(gn_proof_budget_exhaustion_total[15m]) > 0` as a partial proxy.
 
 **Means.** Lineage verification found a persistent gap: a missing body between the anchor and
@@ -144,7 +144,7 @@ unchanged head alone is insufficient. Widening the proof budget until the gap "r
 
 ## regression
 
-**P1. Unbound — this signal cannot fire (ZTR-1144).** Watch
+**P1.** Watch
 `increase(gn_observation_anomalies_total[15m]) > 0` — that counter is emitted and consumed by
 no in-process signal.
 
@@ -164,7 +164,7 @@ observation stream and does not erase what was recorded.
 
 ## endpoint_disagreement
 
-**P1. Unbound — this signal cannot fire (ZTR-1144).** Watch `gn_observation_degraded == 1`.
+**P1.** Watch `gn_observation_degraded == 1`.
 
 **Means.** Two independent gateway endpoints disagree about authoritative state. The node
 fails closed for money decisions until the configured authority policy resolves it.
@@ -203,7 +203,7 @@ you find yourself needing a superuser connection to relieve storage pressure, st
 ## queue_caps
 
 **P1.** Live: receive-queue depth, pool-cap utilization and pinned ratio, suppressed while
-`gn_database_truth_available` is 0. The 503 rate input is hardcoded 0 (ZTR-1144).
+`gn_database_truth_available` is 0. The 503 rate is bound to `gn_receive_queue_full_503_total`.
 
 **Means.** One of three things is at 90%: the receive-admission queue against
 `RECEIVE_QUEUE_CAP` (which is derived from `POOL_CAP_TOTAL`, not separately configurable),
@@ -230,7 +230,7 @@ tying the wallet to that operation.
 ## signer_loss
 
 **P1; P0 when an in-flight signing outcome is ambiguous.** Live:
-`gn_signer_leadership_held`. The input that raises it to P0 is hardcoded 0 (ZTR-1144) — **you
+`gn_signer_leadership_held`. The input that raises it to P0 is `gn_signer_in_flight_ambiguous` — **you
 must make that call by hand.**
 
 **Means.** This process does not hold the signer leadership lock. Readiness reports
@@ -308,3 +308,21 @@ flagged operations with their `attention_reason`; each reason has an entry in
 When in doubt, the safe default is the recovery axiom this system is built on: **retain
 leases, preserve exact bytes, keep reading, and require attention. Availability never
 outranks the possibility of a second transaction.**
+
+## attention_backlog
+
+**P1.** `gn_operations_attention_required` (DB-truth). Suppressed while `gn_database_truth_available` is 0.
+
+Page operator. Drain via admin recovery; do not release leases or rebuild.
+
+## gateway_read_failure
+
+**P1.** `gn_t0_read_failures_total` and/or `gn_observation_degraded`.
+
+Fail closed for money decisions until gateway reads recover. Do not switch endpoints to erase disagreement.
+
+## queue_oldest_age
+
+**P1.** `gn_receive_queue_oldest_age_seconds` vs `RECEIVE_QUEUE_MAX_WAIT`. Suppressed while DB-truth unavailable.
+
+Stop affected admission path; keep other isolated lanes operating if invariants hold.

@@ -31,10 +31,10 @@ describe("custodyAlertInputFromSnapshot", () => {
     expect(input.poolCapUtilization).toBeCloseTo(0.9);
     expect(input.pinnedPoolRatio).toBeCloseTo(0.3);
     expect(input.signerLeadershipHeld).toBe(0);
-    // Signals with no truthful counter in this snapshot stay at the empty default —
-    // never a fabricated reading.
+    // Process counters omitted → empty defaults (never fabricated).
     expect(input.invariantBreachCount).toBe(0);
     expect(input.backupAgeMs).toBe(0);
+    expect(input.attentionRequiredCount).toBe(0);
   });
 
   it("does not divide by zero when poolCapTotal is 0 (fresh/greenfield node)", () => {

@@ -150,7 +150,11 @@ export function fixedDualControlPolicy(mode: DualControlMode): DualControlPolicy
   return { getMode: () => mode };
 }
 
-/** In-memory policy for tests / lab. */
+/**
+ * In-memory policy for tests / lab.
+ * Default `two_human` matches fail-closed so an unwired test mount does not
+ * silently admit same-operator EXTERNAL SEND approve (peer device-sig → required).
+ */
 export class InMemoryDualControlPolicy implements DualControlPolicyPort {
   readonly auditEntries: Array<{
     readonly mode: DualControlMode;
@@ -158,21 +162,19 @@ export class InMemoryDualControlPolicy implements DualControlPolicyPort {
     readonly nodeId: string;
   }> = [];
 
-  constructor(private mode: DualControlMode = "single_operator") {}
+  constructor(private mode: DualControlMode = "two_human") {}
 
   getMode(): DualControlMode {
     return this.mode;
   }
 
-  setMode(mode: DualControlMode, meta?: DualControlPolicySetMeta): void {
+  setMode(mode: DualControlMode, meta: DualControlPolicySetMeta): void {
     this.mode = mode;
-    if (meta !== undefined) {
-      this.auditEntries.push({
-        mode,
-        actorId: meta.actorId,
-        nodeId: meta.nodeId,
-      });
-    }
+    this.auditEntries.push({
+      mode,
+      actorId: meta.actorId,
+      nodeId: meta.nodeId,
+    });
   }
 }
 
@@ -185,8 +187,11 @@ function detailsSha256(text: string): string {
  *
  * When the row is absent, `defaultMode` (boot-validated DUAL_CONTROL_MODE) is
  * returned so env still drives pre-mutation behaviour. After setMode the DB row
- * is source of truth across restarts. Unreadable store falls back to defaultMode
- * (availability); corrupt stored values resolve to two_human (never weaken).
+ * is source of truth across restarts.
+ *
+ * Fail closed (doc 01 §4.2 / ZTR-1214): unreadable store and corrupt stored
+ * values both resolve to `two_human` — never silently weaken a durable two_human
+ * row to boot defaultMode on a transient query fault (peer device-sig → required).
  */
 export function createSqlDualControlPolicy(
   sql: SqlExecutor,
@@ -215,7 +220,9 @@ export function createSqlDualControlPolicy(
   return {
     async getMode(): Promise<DualControlMode> {
       const raw = await readRaw();
-      if (!raw.ok) return defaultMode;
+      // Unreadable ≠ absent: absence may use boot defaultMode; read fault never
+      // weakens past two_human (same class as corrupt stored values).
+      if (!raw.ok) return "two_human";
       return effectiveDualControlMode(raw.value, defaultMode);
     },
 
@@ -226,10 +233,12 @@ export function createSqlDualControlPolicy(
       if (mode !== "single_operator" && mode !== "two_human") {
         throw new Error("unrecognised dual-control policy mode");
       }
+      // Previous mode is resolved fail-closed before the write so the audit row
+      // records the effective gate an operator was changing, not a weakened default.
       const previous = await readRaw();
       const previousMode = previous.ok
         ? effectiveDualControlMode(previous.value, defaultMode)
-        : defaultMode;
+        : "two_human";
 
       const details =
         "setting_key=" +

@@ -91,7 +91,7 @@ describe("enforceDualControlOperators", () => {
 });
 
 describe("InMemoryDualControlPolicy + issuer store", () => {
-  it("policy port switches modes and records audit meta when provided", () => {
+  it("policy port switches modes and always records audit meta (required)", () => {
     const p = new InMemoryDualControlPolicy("single_operator");
     expect(p.getMode()).toBe("single_operator");
     p.setMode("two_human", { actorId: "op-1", nodeId: "node-1" });
@@ -99,6 +99,10 @@ describe("InMemoryDualControlPolicy + issuer store", () => {
     expect(p.auditEntries).toEqual([
       { mode: "two_human", actorId: "op-1", nodeId: "node-1" },
     ]);
+  });
+
+  it("defaults to two_human so an unwired lab mount does not weaken", () => {
+    expect(new InMemoryDualControlPolicy().getMode()).toBe("two_human");
   });
 
   it("issuer store records and clears", () => {
@@ -164,7 +168,19 @@ describe("createSqlDualControlPolicy", () => {
     expect(await p.getMode()).toBe("two_human");
   });
 
-  it("unreadable store falls back to defaultMode", async () => {
+  it("unreadable store never weakens past two_human (even when defaultMode is single_operator)", async () => {
+    const sql: SqlExecutor = {
+      async query(): Promise<{ rows: never[] }> {
+        throw new Error("connection refused");
+      },
+    };
+    // The weaken path Review B D1 locked against: boot default single_operator
+    // must not win over a transient read fault after a durable two_human write.
+    const p = createSqlDualControlPolicy(sql, { defaultMode: "single_operator" });
+    expect(await p.getMode()).toBe("two_human");
+  });
+
+  it("unreadable store still two_human when defaultMode is already two_human", async () => {
     const sql: SqlExecutor = {
       async query(): Promise<{ rows: never[] }> {
         throw new Error("connection refused");

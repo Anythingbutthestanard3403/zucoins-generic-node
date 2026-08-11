@@ -994,9 +994,26 @@ async function main(): Promise<void> {
   logger.info(
     "node: destination bless LIVE (device authorizer + operator_device_keys + blessing artifacts)",
   );
-  // Effective dual-control mode at boot (ZTR-1214). Pre-mutation source is the
-  // validated env; durable node_settings overrides after a guarded POST.
-  logger.info(`node: dual-control mode=${config.DUAL_CONTROL_MODE}`);
+  // Effective dual-control mode at boot (ZTR-1214): same SQL getMode path the
+  // mount serves on approve/GET. Env is only the absent-row defaultMode.
+  {
+    const envMode = config.DUAL_CONTROL_MODE;
+    let effectiveMode = envMode;
+    try {
+      const port = routeSurface.adminRouteDeps.dualControlPolicy;
+      if (port !== undefined) {
+        effectiveMode = await port.getMode();
+      } else {
+        // Missing port fails closed (same as admin-router money path).
+        effectiveMode = "two_human";
+      }
+    } catch {
+      effectiveMode = "two_human";
+    }
+    logger.info(
+      `node: dual-control mode env=${envMode} effective=${effectiveMode}`,
+    );
+  }
   if (config.METRICS_SCRAPE_TOKEN !== undefined) {
     logger.info("node: /metrics mounted (bearer-gated)");
   }

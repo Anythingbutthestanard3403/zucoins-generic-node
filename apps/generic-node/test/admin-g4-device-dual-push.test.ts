@@ -45,6 +45,11 @@ function cookieFrom(setCookie: string | undefined): string {
 
 function makeRouter(opts?: {
   dualMode?: "single_operator" | "two_human";
+  /**
+   * When true, omit dualControlPolicy from router deps (wiring-drop simulation).
+   * Money approve/challenge/GET must fail closed to two_human (ZTR-1214 D2).
+   */
+  omitDualControlPolicy?: boolean;
   /** Default optional so dual-control path tests are not short-circuited by ZTR-1143 fail-closed. */
   deviceSignatureMode?: "required" | "optional";
   deviceSignaturePolicy?: InMemoryDeviceSignaturePolicy;
@@ -85,6 +90,7 @@ function makeRouter(opts?: {
     },
   };
   const loadOperation = opts?.loadOperation ?? (async () => null);
+  const omitDual = opts?.omitDualControlPolicy === true;
 
   const router = createAdminRouter({
     sessions,
@@ -105,7 +111,7 @@ function makeRouter(opts?: {
       challengeStore,
       loadOperation,
       deviceSignaturePolicy,
-      dualControlPolicy,
+      ...(omitDual ? {} : { dualControlPolicy }),
     }),
     sendDecisionStore: {
       rejectCreated: async () => {
@@ -116,7 +122,7 @@ function makeRouter(opts?: {
       },
     },
     deviceStore,
-    dualControlPolicy,
+    ...(omitDual ? {} : { dualControlPolicy }),
     deviceSignaturePolicy,
     challengeIssuerStore,
     deviceEnrollmentAuditLog: auditLog,
@@ -345,6 +351,83 @@ describe("G4 dual-control policy", () => {
     expect(res.status).toBeGreaterThanOrEqual(401);
     expect(res.status).toBeLessThan(500);
     expect(dualControlPolicy.getMode()).toBe("single_operator");
+  });
+
+  // Wiring-drop fail-closed (ZTR-1214 D2): absent dualControlPolicy must never
+  // admit single_operator on GET / approve — same class as device-sig missing port.
+  it("GET dual-control-policy without port surfaces two_human (never single_operator)", async () => {
+    const { router, userStore } = makeRouter({ omitDualControlPolicy: true });
+    const auth = await login(router, userStore);
+    const res = await router("GET", "/admin/v1/dual-control-policy", new Uint8Array(), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+    });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as { mode: string };
+    expect(body.mode).toBe("two_human");
+    expect(body.mode).not.toBe("single_operator");
+  });
+
+  it("approve without dualControlPolicy refuses same-operator (fail closed two_human)", async () => {
+    const OP_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const WALLET_ID = "55555555-5555-4555-8555-555555555555";
+    const op: ApprovalOperationSnapshot = {
+      operationId: OP_ID,
+      nodeId: NODE_ID,
+      status: "CREATED",
+      rowVersion: 1,
+      sourceWalletId: WALLET_ID,
+      sourcePubkey: "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+      destinationAddress: "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=",
+      amountZkz: "0.01",
+      referencesOperationId: null,
+    };
+    const { router, userStore } = makeRouter({
+      omitDualControlPolicy: true,
+      loadOperation: async (id) => (id === OP_ID ? op : null),
+      challengeStoreOverride: new InMemoryApprovalChallengeStore(),
+    });
+    const auth = await login(router, userStore);
+    const issued = await router(
+      "GET",
+      `/admin/v1/external-sends/${OP_ID}/approval-challenge`,
+      new Uint8Array(),
+      { cookie: auth.cookie, origin: ORIGIN, "x-csrf-token": auth.csrf },
+    );
+    expect(issued.status).toBe(200);
+    const challengeBody = JSON.parse(issued.body) as {
+      nonce: string;
+      preimage_sha256: string;
+      row_version: number;
+      dual_control?: { mode: string };
+    };
+    // Challenge response dual_control also fails closed when port absent.
+    expect(challengeBody.dual_control?.mode).toBe("two_human");
+    const res = await router(
+      "POST",
+      `/admin/v1/external-sends/${OP_ID}/approve`,
+      Buffer.from(
+        JSON.stringify({
+          challenge_nonce: challengeBody.nonce,
+          expected_row_version: challengeBody.row_version,
+          preimage_sha256: challengeBody.preimage_sha256,
+          device_key_id: null,
+          device_signature: null,
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+        "idempotency-key": randomUUID(),
+        "x-zp-totp": totpNow(),
+      },
+    );
+    expect(res.status).toBe(401);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe("same_operator_both_sides");
   });
 
   // Doc 01 §4.2 wants two things at once: a POLICY refusal must be tellable from

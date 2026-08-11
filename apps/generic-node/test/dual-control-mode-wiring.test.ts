@@ -44,6 +44,15 @@ describe("DUAL_CONTROL_MODE production wiring", () => {
     expect(call).not.toMatch(/dualControlMode:\s*"(single_operator|two_human)"/);
   });
 
+  it("main.ts boot log resolves effective mode via dualControlPolicy.getMode (ZTR-1214 D3)", () => {
+    // Must not claim "effective" while only printing env DUAL_CONTROL_MODE.
+    expect(mainSrc).toMatch(/dualControlPolicy[\s\S]{0,200}getMode\s*\(/);
+    expect(mainSrc).toMatch(/dual-control mode env=\$\{envMode\} effective=\$\{effectiveMode\}/);
+    expect(mainSrc).not.toMatch(
+      /dual-control mode=\$\{config\.DUAL_CONTROL_MODE\}/,
+    );
+  });
+
   it("the mount composes the dual-control policy from the mode it was handed", async () => {
     const surface = createProductionRouteSurface({
       nodeId: NODE_ID,

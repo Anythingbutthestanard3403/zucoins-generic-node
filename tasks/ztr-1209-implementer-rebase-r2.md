@@ -3,7 +3,7 @@
 - **lane:** implementer
 - **run:** `7be9a03f-0b91-473a-9701-dc8a6d855c38`
 - **prior dual-void head:** `76ba7637f6f01f5e846763b7cc219a88f7b18190`
-- **new HEAD:** `SEE_TIP_AFTER_PUSH`
+- **new HEAD:** `71e462a8cbbf937f09785ca99851e73a3709688d`
 - **product commit:** `c421cbcfe2b8bde6d5177163f91dfcb981bcb7ac` (serialize PG suites; verify bar)
 - **base:** `origin/main` @ `7617099405ea709203e551b2b34942e2136abe88`
 - **PR:** #92 (`ztr-1209-pg-flakiness`)

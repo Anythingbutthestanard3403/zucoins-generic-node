@@ -897,6 +897,10 @@ export function createMoveAdvancedPorts(
 
             await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
             await client.query("COMMIT");
+            // Durable INVARIANT_BREACH classification → P0 metric (ZTR-1144 dual-FAIL D1/D2).
+            if (parkingOutcome.kind === "INVARIANT_BREACH") {
+              deps.metricsHooks?.onInvariantBreach();
+            }
             deps.logger.info(
               `move reconcile: op=${operationId} re-raised attention outcome=${parkingOutcome.kind} ` +
                 `reason=${attentionReason}`,
@@ -946,6 +950,11 @@ export function createMoveAdvancedPorts(
 
             await advanceEventSeq(txQuery, deps.nodeId, seqInfo.seq);
             await client.query("COMMIT");
+            // Durable INVARIANT_BREACH park → P0 metric (ZTR-1144 dual-FAIL D1/D2).
+            // Attention backlog alone is P1; breach classification must page P0.
+            if (outcome.kind === "INVARIANT_BREACH") {
+              deps.metricsHooks?.onInvariantBreach();
+            }
             // Both leases stay held and no retry is licensed: an ambiguous move grants no
             // release and no non-landing conclusion. What it now also grants is visibility.
             deps.logger.info(

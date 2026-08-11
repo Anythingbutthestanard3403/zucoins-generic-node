@@ -111,13 +111,14 @@ groups:
           runbook: docs/operations/incidents.md#endpoint_disagreement
 
       # --- queue_caps (P1) ------------------------------------------------------
+      # Depth / pool / pinned need DB gauges; 503 is a process counter and must
+      # still fire during DB outage (mirrors in-process custody-alerts — ZTR-1144 D3).
       - alert: GenericNodeQueueCaps
         expr: >-
           (
             (gn_receive_queue_depth / clamp_min(gn_pool_cap_total, 1) >= 0.9)
             or (gn_pool_cap_utilization_percent / 100 >= 0.9)
             or (gn_pinned_wallets / clamp_min(gn_total_wallets, 1) >= 0.9)
-            or (increase(gn_receive_queue_full_503_total[15m]) >= 1)
           )
           and on(instance) gn_database_truth_available == 1
         for: 10m
@@ -125,10 +126,23 @@ groups:
           severity: P1
           signal: queue_caps
         annotations:
-          summary: "Receive queue / pool cap / pinned ratio / 503 full pressure"
+          summary: "Receive queue / pool cap / pinned ratio pressure"
           posture: >-
             Stop affected admission/mint path; keep other isolated lanes operating if
             invariants hold; operator escalation.
+          runbook: docs/operations/incidents.md#queue_caps
+
+      - alert: GenericNodeReceiveQueueFull503
+        expr: increase(gn_receive_queue_full_503_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: P1
+          signal: queue_caps
+        annotations:
+          summary: "Receive admission returned 503 queue-full (process counter)"
+          posture: >-
+            Process-local 503 counter — not DB-gated. Stop affected admission/mint path;
+            operator escalation. Mirrors in-process queue_caps 503 arm.
           runbook: docs/operations/incidents.md#queue_caps
 
       # --- signer_loss (P1; P0 when ambiguous in-flight) --------------------------

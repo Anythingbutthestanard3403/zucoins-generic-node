@@ -1032,8 +1032,11 @@ async function main(): Promise<void> {
   }
 
   const shutdownRegistry = createShutdownRegistry();
+  // Signing-only: general drain (boot token, runUnderLeadership, backup) must not
+  // latch P0 signer_loss (ZTR-1144 dual-FAIL D2).
   signerInFlightAmbiguousReading = () =>
-    !readiness.core.snapshot().leadershipLockHeld && shutdownRegistry.inflightCount > 0;
+    !readiness.core.snapshot().leadershipLockHeld &&
+    shutdownRegistry.signingInflightCount > 0;
 
   const registryHooks = shutdownRegistry.hooks();
   // EVENT_SIGNING availability is an authority, not a residual. Arms the
@@ -1379,6 +1382,7 @@ async function main(): Promise<void> {
         leadership: shutdownRegistry.authority,
         store: bootStore,
         actions: bootActions,
+        onInvariantBreach: () => metricsHooks.onInvariantBreach(),
       });
       return {
         ready: report.ready,
@@ -1495,8 +1499,10 @@ async function main(): Promise<void> {
         // ZTR-1162: stamp readiness on every money-path gateway read outcome.
         readGatewayAction: observedGatewayRead,
         runUnderLeadership: (work) => stamped.runUnderLeadership(work),
-        trackSigningInflight: (work) =>
-          shutdownRegistry.authority.trackSigningInflight(work),
+        // Drain-track only. Real signUnderLease bodies auto-enter signingInflightCount
+        // via the registry's freeze-on-first setSigningInflightTracker (ZTR-1144 D2).
+        // Binding money ticks to authority.trackSigningInflight falsely P0'd signer_loss.
+        trackSigningInflight: (work) => shutdownRegistry.trackInflight(work),
         // SEND form/sign lamps leadership latch from the shutdown-registry authority.
         signerLeadership: shutdownRegistry.authority,
         candidateIntakeInbox: candidateIntake,

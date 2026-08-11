@@ -727,6 +727,8 @@ export async function applyMoveBreachOperatorAction(
     readonly breachOutcome?: Extract<MoveAmbiguityOutcome, { kind: "INVARIANT_BREACH" }>;
     readonly sourceWalletId?: string;
     readonly destinationWalletId?: string;
+    /** Forwarded to applyMoveInvariantBreachQuarantine (ZTR-1144). */
+    readonly onQuarantineApplied?: () => void;
   },
 ): Promise<
   | { readonly kind: "ACKNOWLEDGED"; readonly result: MoveBreachAcknowledgeResult }
@@ -786,6 +788,7 @@ export async function applyMoveBreachOperatorAction(
     destinationWalletId: input.destinationWalletId ?? op.destinationWalletId,
     nowIso: input.nowIso,
     newId: input.newId,
+    onQuarantineApplied: input.onQuarantineApplied,
   });
   return { kind: "QUARANTINED", result };
 }

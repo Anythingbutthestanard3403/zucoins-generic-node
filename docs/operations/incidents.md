@@ -203,7 +203,8 @@ you find yourself needing a superuser connection to relieve storage pressure, st
 ## queue_caps
 
 **P1.** Live: receive-queue depth, pool-cap utilization and pinned ratio, suppressed while
-`gn_database_truth_available` is 0. The 503 rate is bound to `gn_receive_queue_full_503_total`.
+`gn_database_truth_available` is 0. The 503 rate is bound to `gn_receive_queue_full_503_total`
+(process counter — **not** DB-gated in-process or in Prom `GenericNodeReceiveQueueFull503`).
 
 **Means.** One of three things is at 90%: the receive-admission queue against
 `RECEIVE_QUEUE_CAP` (which is derived from `POOL_CAP_TOTAL`, not separately configurable),

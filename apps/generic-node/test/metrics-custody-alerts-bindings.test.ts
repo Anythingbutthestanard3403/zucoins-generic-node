@@ -153,4 +153,30 @@ describe("ZTR-1144 custody alert bindings", () => {
     );
     expect(delivered).toContain("gateway_read_failure");
   });
+
+  it("composition: MOVE park and boot recovery emit onInvariantBreach (source ratchet)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const here = dirname(fileURLToPath(import.meta.url));
+    const move = readFileSync(join(here, "../src/money-workers/move-advanced-ports.ts"), "utf8");
+    expect(move).toMatch(/outcome\.kind === "INVARIANT_BREACH"/);
+    expect(move).toMatch(/metricsHooks\?\.onInvariantBreach\(\)/);
+    const main = readFileSync(join(here, "../src/main.ts"), "utf8");
+    expect(main).toMatch(/onInvariantBreach:\s*\(\)\s*=>\s*metricsHooks\.onInvariantBreach\(\)/);
+    expect(main).toMatch(/signingInflightCount/);
+    const rules = readFileSync(
+      join(here, "../../../docs/operations/alerts/generic-node.rules.yml"),
+      "utf8",
+    );
+    expect(rules).toMatch(/GenericNodeReceiveQueueFull503/);
+    expect(rules).toMatch(/increase\(gn_receive_queue_full_503_total/);
+    // 503 arm must not share the DB-truth conjunct with depth/pool gauges.
+    const queueCapsBlock = rules.slice(
+      rules.indexOf("alert: GenericNodeQueueCaps"),
+      rules.indexOf("alert: GenericNodeReceiveQueueFull503"),
+    );
+    expect(queueCapsBlock).not.toMatch(/gn_receive_queue_full_503_total/);
+  });
+
 });

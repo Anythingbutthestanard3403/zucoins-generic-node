@@ -339,6 +339,11 @@ export interface BootRecoveryDeps {
    * 60s. Recording never frees the lease.
    */
   readonly staleHeartbeatMs?: number;
+  /**
+   * Fired once when the boot walk concludes with invariantBreach=true
+   * (key/lease/classification). ZTR-1144 — pages P0 via gn_invariant_breach_total.
+   */
+  readonly onInvariantBreach?: () => void;
 }
 
 // ── Step 2: key material / public-key correspondence ──────────────────────────
@@ -1106,6 +1111,7 @@ export async function runDeterministicBootRecovery(
 
   if (invariantBreach) {
     await deps.actions.stopMoneyEngines("boot: global invariant breach");
+    deps.onInvariantBreach?.();
   }
 
   // Step 6 — resume ONLY authorized actions. Never on breach ops / indeterminate.

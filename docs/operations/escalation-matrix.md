@@ -35,7 +35,7 @@ verbatim `posture` field of its rule.
 
 ### `invariant_breach`
 
-`gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites
+`gn_invariant_breach_total` from MOVE park/re-raise INVARIANT_BREACH, applyMoveInvariantBreachQuarantine.onQuarantineApplied, boot-recovery invariantBreach, receive-expiry breach
 
 > Stop money engines, quarantine affected wallets, preserve evidence, operator escalation.
 
@@ -53,7 +53,7 @@ verbatim `posture` field of its rule.
 
 ### `signer_loss`
 
-`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)
+`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (P0 only when leadership lost AND signingInflightCount>0 — not general drain)
 
 > P1 readiness-degraded when leadership is lost or cannot be re-acquired. P0 if loss coincides with an in-flight signing attempt whose outcome is ambiguous. Unsigned ops stay in existing public state; no alternate instance signs without leadership.
 

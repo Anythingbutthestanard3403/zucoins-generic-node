@@ -38,15 +38,15 @@ export const ESCALATION_MATRIX_PATH = "docs/operations/escalation-matrix.md";
  * an explicit statement of whether it can fire.
  */
 export const SIGNAL_WIRING = {
-  invariant_breach: { bound: true, note: "`gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites" },
+  invariant_breach: { bound: true, note: "`gn_invariant_breach_total` from MOVE park/re-raise INVARIANT_BREACH, applyMoveInvariantBreachQuarantine.onQuarantineApplied, boot-recovery invariantBreach, receive-expiry breach" },
   duplicate_submit_attempt: { bound: true, note: "`gn_duplicate_submit_rejection_total` on submit_decisions mint loser (move + receive claim paths)" },
   lease_age: { bound: true, note: "`gn_oldest_lease_age_seconds`, suppressed while `gn_database_truth_available` is 0" },
   path_gap: { bound: true, note: "`gn_proof_budget_exhaustion_total` (INDETERMINATE-by-budget path gaps)" },
   regression: { bound: true, note: "`gn_observation_anomalies_total{kind=\"REGRESSION\"}`" },
   endpoint_disagreement: { bound: true, note: "`gn_observation_anomalies_total{kind=\"ENDPOINT_DISAGREEMENT\"}` from GATEWAY_ENDPOINT_DISAGREEMENT quarantine" },
   storage_pressure: { bound: true, note: "`gn_storage_pressure` — a 0/1 band flag, not a utilization fraction" },
-  queue_caps: { bound: true, note: "queue depth, pool-cap utilization, pinned ratio, and `gn_receive_queue_full_503_total` (normalized)" },
-  signer_loss: { bound: true, note: "`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)" },
+  queue_caps: { bound: true, note: "queue depth, pool-cap utilization, pinned ratio (DB-gated); `gn_receive_queue_full_503_total` process counter (not DB-gated in-process or Prom)" },
+  signer_loss: { bound: true, note: "`gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (P0 only when leadership lost AND signingInflightCount>0 — not general drain)" },
   backup_age: { bound: true, note: "`gn_backup_last_success_age_seconds`, suppressed while `gn_backup_last_success_available` is 0; threshold only exists when `backupMaxAgeMs` is passed" },
   push_no_transfer_code_streak: {
     bound: true,

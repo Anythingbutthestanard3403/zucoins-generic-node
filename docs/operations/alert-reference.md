@@ -41,7 +41,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P0
 - **Thresholds:** P0 when reading ≥ 1
 - **Diagnostic only:** no
-- **Feeds:** live — `gn_invariant_breach_total` from applyMoveInvariantBreachQuarantine / receive-expiry breach sites
+- **Feeds:** live — `gn_invariant_breach_total` from MOVE park/re-raise INVARIANT_BREACH, applyMoveInvariantBreachQuarantine.onQuarantineApplied, boot-recovery invariantBreach, receive-expiry breach
 
 **Rule.**
 
@@ -146,7 +146,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 0.9
 - **Diagnostic only:** no
-- **Feeds:** live — queue depth, pool-cap utilization, pinned ratio, and `gn_receive_queue_full_503_total` (normalized)
+- **Feeds:** live — queue depth, pool-cap utilization, pinned ratio (DB-gated); `gn_receive_queue_full_503_total` process counter (not DB-gated in-process or Prom)
 
 **Rule.**
 
@@ -161,7 +161,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 - **Severity:** P1
 - **Thresholds:** P1 when reading ≥ 1; P0 when reading ≥ 2
 - **Diagnostic only:** no
-- **Feeds:** live — `gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (raises P0 when both)
+- **Feeds:** live — `gn_signer_leadership_held` + `gn_signer_in_flight_ambiguous` (P0 only when leadership lost AND signingInflightCount>0 — not general drain)
 
 **Rule.**
 

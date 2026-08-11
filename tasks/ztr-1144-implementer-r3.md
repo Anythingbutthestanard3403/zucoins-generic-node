@@ -45,9 +45,9 @@ No regen required once in-process matches the claimed split.
 |---|---|
 | `tsc -b packages/node-core apps/generic-node` | clean |
 | vitest: safety-alerts, metrics, invariant-breach, custody-alerts, custody-alerts-bindings, snapshot-source, graceful-stop, money-workers | **180 passed / 8 files** |
-| vitest: operator-docs.census | (see push commit) |
-| lint generic-node + node-core | (see push commit) |
+| vitest: operator-docs.census | **38 passed** |
+| eslint touched custody-alerts + tests | 0 errors |
 
 ## HEAD
 
-`310afe374e68d717329631029067f29eece5233a`
+`bee5b9fd81accc1f890eca90ba0341225ee504d7`

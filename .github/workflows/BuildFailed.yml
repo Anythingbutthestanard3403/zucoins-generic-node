@@ -1,0 +1,10 @@
+name: BuildFailed-reclaim
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  reclaim:
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - run: echo reclaim-ok

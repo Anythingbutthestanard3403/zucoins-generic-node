@@ -7,6 +7,7 @@ import {
   type CandidateIntakeRequest,
   type CandidateIntakeService,
   type MetricCandidateIntakeSource,
+  type MetricsHooks,
   type SenderPreflightObserver,
   type SqlQueryFn,
 } from "@zucoins/node-core";
@@ -35,6 +36,8 @@ export interface CandidateIntakeEnqueueResult {
 
 export interface CandidateIntakeInbox {
   readonly size: () => number;
+  /** Current depth of one producer lane (for the backlog gauge). */
+  readonly sizeBySource: (source: CandidateIntakeSource) => number;
   readonly take: (limit: number) => readonly CandidateIntakeRequest[];
   readonly enqueue: (
     request: CandidateIntakeRequest,
@@ -65,6 +68,7 @@ export function createCandidateIntakeInbox(maxPerSource: number): CandidateIntak
   const lanes: Record<CandidateIntakeSource, CandidateIntakeRequest[]> = { push: [], relay: [] };
   return {
     size: () => lanes.push.length + lanes.relay.length,
+    sizeBySource: (source) => lanes[source].length,
     take(limit) {
       if (limit <= 0) return [];
       // Strict preference for the authenticated lane: relay entries are only served
@@ -90,6 +94,8 @@ export interface ReceiveCandidateIntakeStepDeps {
   readonly inbox: CandidateIntakeInbox;
   readonly observeSender: SenderPreflightObserver;
   readonly logger: MoneyWorkerLogger;
+  /** Optional: publish gn_candidate_intake_backlog after the drain. */
+  readonly metricsHooks?: MetricsHooks;
   readonly nowMs?: () => number;
   readonly nowIso?: () => string;
 }
@@ -112,6 +118,10 @@ export async function runReceiveCandidateIntakeStep(
   deps: ReceiveCandidateIntakeStepDeps,
 ): Promise<number> {
   const batch = deps.inbox.take(INTAKE_BATCH_LIMIT);
+  // Depth after take is the truth the gauge should show — publish even on an empty
+  // batch so a scrape after a full drain does not keep a stale non-zero.
+  deps.metricsHooks?.setCandidateIntakeBacklog("push", deps.inbox.sizeBySource("push"));
+  deps.metricsHooks?.setCandidateIntakeBacklog("relay", deps.inbox.sizeBySource("relay"));
   if (batch.length === 0) return 0;
 
   const service = createProductionCandidateIntakeService(deps);

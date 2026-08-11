@@ -862,6 +862,9 @@ async function main(): Promise<void> {
   const refusingIntakeSources = new Set<CandidateIntakeSource>();
   const depositToCandidateIntake = (source: CandidateIntakeSource, rawBody: unknown): boolean => {
     const result = enqueueReceiverChannelDeposit(candidateIntake, rawBody, source);
+    // Backlog gauge is process-local and set on every deposit attempt so operators see
+    // the approach to the per-lane cap before refusals start climbing (ZTR-1216).
+    metricsHooks.setCandidateIntakeBacklog(source, candidateIntake.sizeBySource(source));
     if (result.enqueued) {
       refusingIntakeSources.delete(source);
       logger.info(`node: candidate intake deposit enqueued source=${source}`);
@@ -958,8 +961,9 @@ async function main(): Promise<void> {
       discoveryDocument: routeSurface.discoveryDocument,
       reportingListener: routeSurface.reportingListener,
       subscribeDeps: routeSurface.subscribeDeps,
-      // Anonymous lane. Capped at RECEIVE_QUEUE_CAP and served only with the budget the
-      // authenticated lane leaves; the route answers 204 either way (non-oracular).
+      // Anonymous lane. Volume-throttled per socket peer in the listener (ZTR-1216),
+      // capped at RECEIVE_QUEUE_CAP, served only with the budget the authenticated lane
+      // leaves; the route answers 204 either way (non-oracular).
       onReceiverChannelDeposit: (rawBody) => {
         depositToCandidateIntake("relay", rawBody);
       },

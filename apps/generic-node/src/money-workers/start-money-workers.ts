@@ -1454,6 +1454,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
         inbox: candidateIntake,
         observeSender: senderPreflightObserver,
         logger: deps.logger,
+        ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
       });
       if (accepted > 0) {
         deps.logger.info(`money-workers: candidate intake accepted ${accepted} partial(s)`);

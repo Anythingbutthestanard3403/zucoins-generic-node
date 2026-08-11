@@ -249,3 +249,31 @@ against those exact bytes. APNs was not captured — see the golden `meta.json`.
 golden; if the nest moved, update `payload.ts` precedence and refresh the golden in the
 same reviewed commit. Do **not** change the 204 response.
 
+
+## Candidate-intake backlog (origin-relay + Web Push)
+
+The node admits payer step-1 partials through two producer lanes into one in-memory
+inbox (`createCandidateIntakeInbox`):
+
+| Lane | Route | Trust |
+| --- | --- | --- |
+| `push` | `POST /v1/receivers/push/:endpoint_id` | Authenticated (ECE auth secret + endpoint id) |
+| `relay` | `POST /v1/receivers/origin-relay` | Anonymous; volume-throttled per socket peer |
+
+Both lanes are capped at `RECEIVE_QUEUE_CAP` (= `POOL_CAP_TOTAL`). The relay lane is
+additionally rate-limited (~120 deposits/minute/IP). Every HTTP outcome on both routes is
+**204** — throttled, full, malformed, and accepted are indistinguishable on the wire
+(non-oracular). Operators watch:
+
+- `gn_candidate_intake_backlog{source}` — current in-memory depth (approach to the cap)
+- `gn_candidate_intake_refused_total{source,reason}` — cliff counts (`inbox_full`,
+  `rate_limited`, decode failures, …)
+
+### Restart durability — intentional drop, reconcile repairs
+
+The candidate-intake inbox is **process-local**. A process restart discards any un-served
+backlog. That is intentional for this ticket (ZTR-1216): there is no durable queue for
+pre-intake deposits. Genuine receives that were only sitting in the inbox are re-detected
+by the node's existing **reconcile / periodic-repair** path once the corresponding on-chain
+evidence is visible again. Do not treat a post-restart backlog of 0 as proof that nothing
+was in flight — check open `RECEIVE_EXTERNAL` operations and reconcile outcomes instead.

@@ -199,6 +199,21 @@ describe("createNodeMetrics — per-scrape gauges (DB-truth snapshot)", () => {
   });
 });
 
+describe("candidate-intake backlog gauge (ZTR-1216)", () => {
+  it("renders per-source backlog after setCandidateIntakeBacklog", async () => {
+    const metrics = createNodeMetrics();
+    const hooks = createMetricsHooks(metrics);
+    hooks.setCandidateIntakeBacklog("relay", 7);
+    hooks.setCandidateIntakeBacklog("push", 2);
+    hooks.onCandidateIntakeRefused("relay", "rate_limited");
+    const body = await renderMetrics(metrics);
+    expect(body).toContain("# TYPE gn_candidate_intake_backlog gauge");
+    expect(body).toContain('gn_candidate_intake_backlog{source="relay"} 7');
+    expect(body).toContain('gn_candidate_intake_backlog{source="push"} 2');
+    expect(body).toContain('gn_candidate_intake_refused_total{reason="rate_limited",source="relay"} 1');
+  });
+});
+
 describe("collectOperationalMetricsSnapshot — SQL collector", () => {
   it("uses the allocator-equivalent permanent release exclusions", () => {
     expect(METRICS_SNAPSHOT_STATEMENTS.COUNT_AVAILABLE_WALLETS).toContain(

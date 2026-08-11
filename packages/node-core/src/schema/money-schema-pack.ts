@@ -36,8 +36,8 @@
  * duplicate body is retained only for the standalone fail-closed lease migrator. Missing
  * membership/group refs are wired during assembly; operation refs are fix-forwarded by the
  * appended lease-operation-foreign-keys slice after operations exists.
- * - operation_expected_artifacts: expected-artifacts first (stronger FKs);
- * move-baseline CREATE stripped (bodies diverge; first is strict FK superset).
+ * - operation_expected_artifacts: single owner expected-artifacts.sql (stronger FKs +
+ * insert-only trigger). move-baseline-binding must not re-CREATE the table.
  * - operator_device_keys: device-keys first; approval-stores CREATE stripped
  * (bodies equivalent).
  *

@@ -28,12 +28,13 @@ export const EXPECTED_ARTIFACTS_INVARIANTS: readonly ExpectedArtifactsInvariant[
   {
     id: "ARTIFACT_PURPOSE_CLOSED_SET",
     sqlAnchor:
-      "purpose text NOT NULL CHECK (purpose IN (\n    'zp-receive-expected-v1',\n    'zp-move-internal-expected-v1',\n    'zp-send-external-expected-v1'\n  )),",
+      "purpose text NOT NULL CONSTRAINT operation_expected_artifacts_purpose_check CHECK (purpose IN (\n    'zp-receive-expected-v1',\n    'zp-move-internal-expected-v1',\n    'zp-send-external-expected-v1'\n  )),",
     rule: "exactly three frozen purpose literals: receive, move-internal, send-external. A fourth purpose is a constraint violation; changing any field/field-sequence requires a new purpose/version and new goldens.",
   },
   {
     id: "ARTIFACT_CANONICAL_VERSION_ONE",
-    sqlAnchor: "canonical_version integer NOT NULL CHECK (canonical_version = 1),",
+    sqlAnchor:
+      "canonical_version integer NOT NULL\n    CONSTRAINT operation_expected_artifacts_canonical_version_check CHECK (canonical_version = 1),",
     rule: "only canonical version 1 is representable: a version other than 1 is a constraint violation.",
   },
   {
@@ -58,8 +59,14 @@ export const EXPECTED_ARTIFACTS_INVARIANTS: readonly ExpectedArtifactsInvariant[
   },
   {
     id: "ARTIFACT_PREIMAGE_NONEMPTY",
-    sqlAnchor: "CHECK (octet_length(preimage_text) > 0)",
+    sqlAnchor:
+      "CONSTRAINT operation_expected_artifacts_preimage_text_check\n    CHECK (octet_length(preimage_text) > 0)",
     rule: "the persisted preimage is never the empty byte string.",
+  },
+  {
+    id: "ARTIFACT_INSERT_ONLY_TRIGGER",
+    sqlAnchor: "BEFORE UPDATE OR DELETE ON operation_expected_artifacts",
+    rule: "insert-only byte-immutability: a row-level trigger rejects UPDATE and DELETE so the preimage a crash-recovery resumes from cannot be rewritten.",
   },
 ] as const;
 
@@ -74,7 +81,7 @@ export const EXPECTED_ARTIFACTS_MUTABILITY_REGIMES = [
 
 export const SCHEMA_EXPECTED_ARTIFACTS_OBLIGATIONS = [
   "execution sequence: create the FK target relations (operations, node_signing_keys) and the sha256_hex / padded_base64url_signature domains before this file's table.",
-  "guards: install BEFORE UPDATE/DELETE enforcement for the insert-only regime (the schema conventions sanction byte-immutability triggers; no trigger DDL is frozen in this file).",
+  "guards: BEFORE UPDATE/DELETE insert-only trigger is frozen in this file (EXPECTED_ARTIFACT_INSERT_ONLY).",
   "negative: a second operation_expected_artifacts row for the same operation_id violates the UNIQUE constraint on operation_id.",
   "negative: a purpose literal outside the three frozen values is rejected by the column CHECK.",
   "negative: canonical_version other than 1 is rejected by the column CHECK.",

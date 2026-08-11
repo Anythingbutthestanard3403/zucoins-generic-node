@@ -33,6 +33,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sqlPath = resolve(here, "../src/schema", MOVE_BASELINE_SCHEMA_FILE);
+const expectedArtifactsPath = resolve(here, "../src/schema/expected-artifacts.sql");
 const sql = readFileSync(sqlPath, "utf8");
 const sqlBytes = readFileSync(sqlPath);
 
@@ -44,8 +45,8 @@ describe("move-baseline binding census", () => {
     expect(missing).toEqual([]);
   });
 
-  it("declares exactly the three tables", () => {
-    expect(sql).toContain("CREATE TABLE operation_expected_artifacts (");
+  it("declares exactly the two binding/evidence tables (artifacts owned elsewhere)", () => {
+    expect(sql).not.toContain("CREATE TABLE operation_expected_artifacts");
     expect(sql).toContain("CREATE TABLE operation_observation_bindings (");
     expect(sql).toContain("CREATE TABLE move_observation_evidence (");
     // The wallet/lease/observation/registry roots belong to their own slices, never this one.
@@ -58,7 +59,7 @@ describe("move-baseline binding census", () => {
   it("carries no key material and no REFERENCES to a table it does not create", () => {
     expect(sql).not.toMatch(/private_key|secret_key|\bseed\b|key_material|keypair/);
     expect(sql).not.toMatch(/REFERENCES\s+(operations|gateway_observations|node_signing_keys)/);
-    expect(DEFERRED_FOREIGN_KEYS.length).toBe(3);
+    expect(DEFERRED_FOREIGN_KEYS.length).toBe(2);
   });
 
   it("mutation negative: removing an anchored clause is caught by the census", () => {
@@ -73,7 +74,7 @@ describe("move-baseline binding census", () => {
   });
 
   it("execution obligations are inventoried and non-trivial", () => {
-    expect(SCHEMA_EXECUTION_OBLIGATIONS.length).toBeGreaterThanOrEqual(8);
+    expect(SCHEMA_EXECUTION_OBLIGATIONS.length).toBeGreaterThanOrEqual(5);
     for (const obligation of SCHEMA_EXECUTION_OBLIGATIONS) {
       expect(obligation.length).toBeGreaterThan(20);
     }
@@ -242,6 +243,9 @@ describe.skipIf(databaseUrl === undefined)("against a live PostgreSQL", () => {
       throw new Error(`TEST_DATABASE_URL is set but PostgreSQL is unreachable: ${probe.stderr}`);
     }
     psql(["-c", `DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`]);
+    // Composition mirrors pack ownership: this slice creates bindings/evidence (and the
+    // domains it needs standalone); expected-artifacts.sql is the sole CREATE owner of
+    // operation_expected_artifacts. Stubs satisfy its FKs for the live capture drills.
     const applied = psql([
       "-c",
       `CREATE SCHEMA ${SCHEMA}`,
@@ -249,13 +253,36 @@ describe.skipIf(databaseUrl === undefined)("against a live PostgreSQL", () => {
       `SET search_path TO ${SCHEMA}`,
       "-f",
       sqlPath,
+      "-c",
+      "CREATE TABLE operations (id uuid PRIMARY KEY)",
+      "-c",
+      "CREATE TABLE node_signing_keys (id uuid PRIMARY KEY)",
+      "-f",
+      expectedArtifactsPath,
     ]);
     expect(applied.stderr, "greenfield apply should be clean").toBe("");
     expect(applied.status, "greenfield apply should succeed").toBe(0);
+    // Owner-slice FKs require operations + signing keys before artifact drills.
+    for (const op of [OP_A, OP_B, OP_FLOW]) {
+      const r = psql([
+        "-c",
+        `SET search_path TO ${SCHEMA}`,
+        "-c",
+        `INSERT INTO operations (id) VALUES ('${op}') ON CONFLICT DO NOTHING`,
+      ]);
+      if (r.status !== 0) throw new Error(`seed operations failed: ${r.stderr}`);
+    }
+    const keySeed = psql([
+      "-c",
+      `SET search_path TO ${SCHEMA}`,
+      "-c",
+      `INSERT INTO node_signing_keys (id) VALUES ('${SIGNING_KEY_ID}') ON CONFLICT DO NOTHING`,
+    ]);
+    if (keySeed.status !== 0) throw new Error(`seed signing key failed: ${keySeed.stderr}`);
     liveReady = true;
   });
 
-  it("materialises the three tables greenfield", () => {
+  it("materialises binding/evidence tables and composed expected-artifacts owner", () => {
     const tables = run(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = '${SCHEMA}' ORDER BY 1`,
     );
@@ -331,7 +358,7 @@ describe.skipIf(databaseUrl === undefined)("against a live PostgreSQL", () => {
 
     const emptyPreimage = run(insertArtifact(ARTIFACT_B, OP_B, { preimage: "" }));
     expect(constraintOf(emptyPreimage.stderr)).toBe(
-      "operation_expected_artifacts_preimage_nonempty",
+      "operation_expected_artifacts_preimage_text_check",
     );
   });
 

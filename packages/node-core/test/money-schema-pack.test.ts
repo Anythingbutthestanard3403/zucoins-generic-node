@@ -395,7 +395,6 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     // Any newly duplicated table changes this exact set and fails the gate.
     expect(multi.map(([n]) => n).sort()).toEqual(
       [
-        "operation_expected_artifacts",
         "operator_device_keys",
         // Production owner is custody-eligibility; lease-foundation retains a target body
         // solely for its standalone empty-legacy expansion migrator.

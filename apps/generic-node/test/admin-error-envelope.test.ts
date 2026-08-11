@@ -169,9 +169,9 @@ describe("admin error envelope (ZTR-1196)", () => {
     const remote = "203.0.113.50";
     const body = Buffer.from(JSON.stringify({ username: "admin", password: "wrong-password" }));
     const headers = { "content-type": "application/json" };
-    // Pre-spend the IP budget via the same limiter handleAdminLogin uses so the
+    // Pre-spend the IP budget via the same limiter the login route uses so the
     // suite does not need 30 sequential bcrypt-bound 401s (flake under full-suite load).
-    // Must use wall-clock now: handleAdminLogin calls consumeLoginAttempt(ip) without
+    // Must use wall-clock now: the router calls consumeLoginAttempt(ip) without
     // an atMs override, so a synthetic epoch opens a different fixed window.
     const now = Date.now();
     for (let i = 0; i < LOGIN_RATE_MAX_REQUESTS; i++) {

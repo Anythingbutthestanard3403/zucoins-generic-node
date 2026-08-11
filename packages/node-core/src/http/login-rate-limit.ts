@@ -18,6 +18,10 @@
 // Ceiling: in-memory per process, exactly like ip-lockout.ts — an N-replica
 // deployment gives a caller N x the budget before any window sheds. The upgrade path
 // is the durable leg (SqlReportingRateLimiter), same as the reporting surface.
+//
+// Single production call site: apps/generic-node admin-router POST /admin/v1/login,
+// BEFORE body decode (ZTR-1218). handleAdminLogin must not call consumeLoginAttempt
+// again — that would be a second limiter hop on the well-formed path (ZTR-1201 AC5).
 
 import { InMemoryReportingRateLimiter } from "../reporting/in-memory-rate-limiter.js";
 

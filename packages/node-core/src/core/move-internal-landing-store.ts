@@ -193,8 +193,8 @@ const PERSIST_MOVE_OUTCOME = `WITH cas AS (
   UPDATE operations SET
     status = $2::operation_status,
     row_version = row_version + 1,
-    attention_required = ($3::text IS NOT NULL),
-    attention_reason = $3::text,
+    attention_required = ($3::attention_reason IS NOT NULL),
+    attention_reason = $3::attention_reason,
     attention_detail = $4::text,
     verification_material_available_until =
       coalesce($5::timestamptz, verification_material_available_until),

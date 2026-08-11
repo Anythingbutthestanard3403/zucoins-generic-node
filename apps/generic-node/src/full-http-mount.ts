@@ -1046,7 +1046,6 @@ export function createProductionRouteSurface(
     deferredHalt: DEFERRED_HALT_ROUTE,
     liveAttentionRetractionRoutes: LIVE_ATTENTION_RETRACTION_ROUTES,
     liveOperatorParkRoutes: LIVE_OPERATOR_PARK_ROUTES,
-  LIVE_OPERATOR_PARK_ROUTES,
     deferredAdminMoney: LIVE_ADMIN_MONEY_ENGINES,
     adminMoneyLive: true,
     adminTotpLabBound: labTotp !== null,

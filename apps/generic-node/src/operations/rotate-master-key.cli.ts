@@ -42,6 +42,7 @@ import {
 } from "@zucoins/node-core";
 
 import type { ResolvedRootKdfSalt } from "../vault/root-kdf-salt.js";
+import { rewrapVaultBootCanary } from "../vault/boot-canary.js";
 
 const MIN_MASTER_KEY_BYTES = 32;
 
@@ -90,6 +91,24 @@ export interface RotateMasterKeyCliDeps {
   readonly countTotpSecretRows: NonNullable<MasterKeyRotationInput["countTotpSecretRows"]>;
   /** Same-UoW persistence port for the complete rewrapped TOTP census. */
   readonly commitTotpSecrets?: MasterKeyRotationInput["commitTotpSecrets"];
+  /**
+   * NODE_ID used as boot-canary AAD (must match the id unlock seals under).
+   * Required so rotation can rewrap `vault.boot_canary_v1` under the new root.
+   */
+  readonly nodeId: string;
+  /**
+   * Boot-canary census envelope (or null when absent). May be a snapshot OR a live
+   * loader — the coordinator re-invokes this via loadBootCanaryEnvelope inside the
+   * fence and on D-B5 finalize so crash-resume never proves a stale pre-rotation blob.
+   * Authoritative presence is still proven via countBootCanaryRows inside the fence.
+   */
+  readonly loadBootCanaryCensus:
+    | MasterKeyRotationInput["bootCanary"]
+    | (() => Promise<NonNullable<MasterKeyRotationInput["bootCanary"]>>);
+  /** Authoritative 0-or-1 boot-canary count on the ceremony connection inside the fence. */
+  readonly countBootCanaryRows: NonNullable<MasterKeyRotationInput["countBootCanaryRows"]>;
+  /** Same-UoW UPDATE of the rewrapped boot-canary envelope. */
+  readonly commitBootCanary?: MasterKeyRotationInput["commitBootCanary"];
   /**
    * The node's authoritative root-KDF salt, read from `vault_root_kdf_salt` on the live
    * connection. Required, and not defaulted to the config-only resolver: rotation must derive
@@ -230,6 +249,19 @@ export async function runRotateMasterKeyCli(
       "TOTP_SECRET rows present but commitTotpSecrets port is not wired",
     );
   }
+  const bootCanaryCountProbe = await deps.countBootCanaryRows();
+  if (bootCanaryCountProbe > 0 && deps.commitBootCanary === undefined) {
+    throw new MasterKeyRotationError(
+      "ROTATION_REFUSED",
+      "VAULT_BOOT_CANARY row present but commitBootCanary port is not wired",
+    );
+  }
+  if (typeof deps.nodeId !== "string" || deps.nodeId.length === 0) {
+    throw new MasterKeyRotationError(
+      "ROTATION_REFUSED",
+      "nodeId is required to rewrap the vault boot canary under the new root",
+    );
+  }
 
   const oldMaster = parseMasterKey(oldRaw, "VAULT_MASTER_KEY");
   let newMaster: Buffer | undefined;
@@ -261,6 +293,10 @@ export async function runRotateMasterKeyCli(
       typeof deps.loadTotpSecretsCensus === "function"
         ? await deps.loadTotpSecretsCensus()
         : deps.loadTotpSecretsCensus;
+    const bootCanary =
+      typeof deps.loadBootCanaryCensus === "function"
+        ? await deps.loadBootCanaryCensus()
+        : deps.loadBootCanaryCensus;
     const keyRing = buildKeyRing({
       writerEpoch: toEpoch,
       writerRoot: newRoot,
@@ -273,6 +309,7 @@ export async function runRotateMasterKeyCli(
       nodeSigningKeys,
       pushReceiverSecrets,
       totpSecrets,
+      bootCanary,
       keyRing,
       fromEpoch,
       toEpoch,
@@ -288,6 +325,29 @@ export async function runRotateMasterKeyCli(
       commitPushSecrets: deps.commitPushSecrets,
       countTotpSecretRows: deps.countTotpSecretRows,
       commitTotpSecrets: deps.commitTotpSecrets,
+      countBootCanaryRows: deps.countBootCanaryRows,
+      commitBootCanary: deps.commitBootCanary,
+      // Live reload inside the fence / D-B5 finalize — never trust the pre-rotation snapshot alone.
+      loadBootCanaryEnvelope: async () => {
+        const census =
+          typeof deps.loadBootCanaryCensus === "function"
+            ? await deps.loadBootCanaryCensus()
+            : deps.loadBootCanaryCensus;
+        const envelope = census?.envelope ?? null;
+        return envelope !== null && envelope.length > 0 ? envelope : null;
+      },
+      rewrapBootCanary: (input) => {
+        const report = rewrapVaultBootCanary({
+          oldRootKey: input.oldRootKey,
+          newRootKey: input.newRootKey,
+          nodeId: deps.nodeId,
+          envelope: input.envelope,
+        });
+        return {
+          result: report.result,
+          rewrappedEnvelope: report.rewrappedEnvelope,
+        };
+      },
       rewrapNodeSigningKeyStore: (input) => {
         // Rotation census types purpose as string; rewrap asserts exact purpose at seal/open.
         return rewrapNodeSigningKeyStore({
@@ -366,7 +426,7 @@ export async function main(_argv: readonly string[] = process.argv): Promise<voi
     { event: "rotate.refused", reason: "adapters_not_wired" },
     "rotate-master-key REFUSED — durable vault census/journal/unit-of-work adapters are not wired in this binary. " +
       "Call runRotateMasterKeyCli(deps) from the node composition root that injects real ports " +
-      `(advisory lock id=${MASTER_KEY_ROTATION_ADVISORY_LOCK_ID}), including NODE_SIGNING_KEYS and PUSH_RECEIVER_SECRETS census + authoritative count + same-UoW commit ports, and the resolveRootKdfSalt port reading vault_root_kdf_salt.`,
+      `(advisory lock id=${MASTER_KEY_ROTATION_ADVISORY_LOCK_ID}), including NODE_SIGNING_KEYS, PUSH_RECEIVER_SECRETS, TOTP_SECRET, and VAULT_BOOT_CANARY census + authoritative count + same-UoW commit ports, nodeId for canary AAD, and the resolveRootKdfSalt port reading vault_root_kdf_salt.`,
   );
   process.exitCode = 1;
 }

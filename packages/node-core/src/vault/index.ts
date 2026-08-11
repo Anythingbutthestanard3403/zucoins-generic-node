@@ -104,6 +104,7 @@ export {
   type PushSecretRotationRow,
   type TotpSecretRotationCensus,
   type TotpSecretRotationRow,
+  type BootCanaryRotationCensus,
   type RegisteredSealedStore,
   type RegisteredStoreRewrapStatus,
   type RotationLogger,

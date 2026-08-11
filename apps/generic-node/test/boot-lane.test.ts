@@ -102,6 +102,33 @@ describe("boot lane — boot recovery ordering", () => {
     expect(readiness.snapshot().checks.vault).toBe(false);
   });
 
+  // ZTR-1177: vault-unlock throw leaves the vault gate closed and never starts money workers.
+  // proveVaultRootWithBootCanary / assertRootKeyOpensSealedEnvelope failures surface here.
+  it("vault-unlock throw keeps ready false, vault gate closed, and startMoneyWorkers uncalled", async () => {
+    const events: string[] = [];
+    const readiness = new NodeReadiness(3);
+    const deps = happyDeps(events, readiness);
+    let moneyWorkersCalls = 0;
+    deps.startMoneyWorkers = () => {
+      moneyWorkersCalls += 1;
+      events.push("money-workers");
+    };
+    deps.unlockVault = async () => {
+      throw new Error(
+        "VAULT_BOOT_CANARY_DOES_NOT_OPEN: vault-unlock: the derived root key does not open the boot canary",
+      );
+    };
+    const result = await runBootLane(deps);
+
+    expect(result.ready).toBe(false);
+    expect(result.failedStep).toBe("vault-unlock");
+    expect(moneyWorkersCalls).toBe(0);
+    expect(events).not.toContain("money-workers");
+    expect(readiness.snapshot().ready).toBe(false);
+    // Gate opens only after unlockVault resolves — never on the throw path.
+    expect(readiness.snapshot().checks.vault).toBe(false);
+  });
+
   it("runs the post-migration assertion after migrations, before the vault (wiring point)", async () => {
     const events: string[] = [];
     const readiness = new NodeReadiness(3);

@@ -512,7 +512,7 @@ describe("durable vault seal bootstrap (restart)", () => {
       vaultMasterKey: "env-provisioned-vault-master-key-32chars",
       durableSeal: {
         phase: "shown",
-        keyFingerprintHex: "ab".repeat(32),
+        keyFingerprintHex: "ab".repeat(48),
         offlineBackupAcked: true,
       },
     });

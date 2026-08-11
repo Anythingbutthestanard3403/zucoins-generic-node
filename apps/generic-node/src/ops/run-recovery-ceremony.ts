@@ -7,14 +7,19 @@
 //   4. runRestoreRecoveryCeremony — stamps eligible wallets honestly on LIVE
 //   5. Destroy throwaway instance; never print private keys
 //
-// Env (required): DATABASE_URL, VAULT_MASTER_KEY (≥32 chars), NODE_ID, ADMIN_TOTP_CODE
+// Env (required): DATABASE_URL, NODE_ID, ADMIN_TOTP_CODE
+// Master key: interactive TTY / FD (doc 07 §5.5.2) — NOT a persistent env var.
+//   VAULT_MASTER_KEY_FD=<n> reads one line from that fd (operator-passed secret channel).
+//   Otherwise prompts on /dev/tty with echo disabled when stdin is a TTY.
+//   VAULT_MASTER_KEY_ALLOW_ENV=1 keeps env fallback for automation only (loud warning).
 // Env (optional): NODE_IDENTITY_SEED (verify sealed public key on live export),
 //                 ARCHIVE_PATH (skip live export; load file), ARCHIVE_OUT,
-//                 ARCHIVE_EPOCH_MASTER_KEY (prior-epoch archive key)
+//                 ARCHIVE_EPOCH_MASTER_KEY_FD or interactive for prior-epoch key
 //
 //   node dist/ops/run-recovery-ceremony.js
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -68,12 +73,22 @@ const MIN_MASTER_KEY_CHARS = 32;
 
 export interface RunRecoveryCeremonyEnv {
   readonly DATABASE_URL?: string;
+  /**
+   * @deprecated Doc 07 §5.5.2 forbids persistent env for the ceremony master key.
+   * Only consumed when VAULT_MASTER_KEY_ALLOW_ENV=1 (automation opt-in).
+   */
   readonly VAULT_MASTER_KEY?: string;
+  /** File descriptor number whose contents are the master key (one line). Preferred secret channel. */
+  readonly VAULT_MASTER_KEY_FD?: string;
+  /** Set to "1"/"true" to allow VAULT_MASTER_KEY env fallback (warns on stderr). */
+  readonly VAULT_MASTER_KEY_ALLOW_ENV?: string;
   readonly NODE_ID?: string;
   readonly NODE_IDENTITY_SEED?: string;
   readonly ARCHIVE_PATH?: string;
   readonly ARCHIVE_OUT?: string;
   readonly ARCHIVE_EPOCH_MASTER_KEY?: string;
+  readonly ARCHIVE_EPOCH_MASTER_KEY_FD?: string;
+  readonly ARCHIVE_EPOCH_MASTER_KEY_ALLOW_ENV?: string;
   /**
    * A FRESH single-use TOTP code from the operator's authenticator. The
    * ceremony start is a guarded mutation: the code is verified against the enrolled admin
@@ -106,6 +121,10 @@ export interface RunRecoveryCeremonySummary {
 
 function fail(message: string): never {
   console.error(`run-recovery-ceremony: ${message}`);
+  // Vitest / library callers: throw so the suite can assert. CLI entry still ends the process.
+  if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
+    throw new Error(message);
+  }
   process.exit(1);
 }
 
@@ -129,6 +148,159 @@ function requireEnv(env: RunRecoveryCeremonyEnv, name: keyof RunRecoveryCeremony
   if (value === undefined || value === "") fail(`${name} is required`);
   return value;
 }
+
+function envFlagTrue(value: string | undefined): boolean {
+  const v = (value ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+/**
+ * Read a single-line secret from an operator-passed file descriptor (doc 07 §5.5.2).
+ * Does not echo; does not place the secret in argv or a persistent process environment.
+ */
+function readSecretFromFd(fdRaw: string, label: string): string {
+  const fd = Number(fdRaw);
+  if (!Number.isInteger(fd) || fd < 0) {
+    fail(`${label}_FD must be a non-negative integer file descriptor`);
+  }
+  try {
+    const raw = readFileSync(fd, "utf8");
+    const line = raw.split(/\r?\n/, 1)[0] ?? "";
+    const value = line.trim();
+    if (value.length === 0) fail(`${label} from fd ${fd} is empty`);
+    return value;
+  } catch (err) {
+    fail(`${label}_FD=${fd} unreadable: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Interactive prompt with echo disabled on /dev/tty (or stdin when it is a TTY).
+ */
+async function promptSecret(prompt: string): Promise<string> {
+  const fs = await import("node:fs");
+  let input: NodeJS.ReadableStream;
+  let output: NodeJS.WritableStream;
+  let ttyFd: number | undefined;
+  try {
+    // openSync fails immediately when no controlling TTY (CI / non-interactive).
+    ttyFd = fs.openSync("/dev/tty", "r+");
+    input = fs.createReadStream("", { fd: ttyFd, autoClose: true });
+    output = fs.createWriteStream("", { fd: ttyFd, autoClose: false });
+  } catch {
+    if (!process.stdin.isTTY) {
+      fail(
+        "master key must be supplied interactively (TTY) or via VAULT_MASTER_KEY_FD; " +
+          "persistent VAULT_MASTER_KEY env is disabled unless VAULT_MASTER_KEY_ALLOW_ENV=1",
+      );
+    }
+    input = process.stdin;
+    output = process.stderr;
+  }
+
+  const stdin = input as NodeJS.ReadStream & {
+    setRawMode?: (mode: boolean) => void;
+    isRaw?: boolean;
+  };
+  const wasRaw = stdin.isRaw === true;
+  if (typeof stdin.setRawMode === "function") {
+    stdin.setRawMode(true);
+  }
+  if (typeof stdin.resume === "function") stdin.resume();
+
+  try {
+    output.write(prompt);
+    const value = await new Promise<string>((resolve, reject) => {
+      let buf = "";
+      const onData = (chunk: Buffer | string) => {
+        const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+        for (let i = 0; i < s.length; i += 1) {
+          const code = s.charCodeAt(i);
+          const ch = s[i]!;
+          if (ch === "\n" || ch === "\r" || code === 4) {
+            cleanup();
+            output.write("\n");
+            resolve(buf);
+            return;
+          }
+          if (code === 3) {
+            cleanup();
+            reject(new Error("interrupted"));
+            return;
+          }
+          if (code === 127 || code === 8) {
+            buf = buf.slice(0, -1);
+            continue;
+          }
+          if (code >= 32 || ch === "\t") buf += ch;
+        }
+      };
+      const onEnd = () => {
+        cleanup();
+        resolve(buf);
+      };
+      const onErr = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const cleanup = () => {
+        input.off("data", onData);
+        input.off("end", onEnd);
+        input.off("error", onErr);
+      };
+      input.on("data", onData);
+      input.on("end", onEnd);
+      input.on("error", onErr);
+    });
+    return value;
+  } finally {
+    if (typeof stdin.setRawMode === "function") {
+      stdin.setRawMode(wasRaw);
+    }
+  }
+}
+
+export async function resolveCeremonyMasterKey(
+  env: RunRecoveryCeremonyEnv,
+  opts: {
+    readonly label: "VAULT_MASTER_KEY" | "ARCHIVE_EPOCH_MASTER_KEY";
+    readonly required: boolean;
+  },
+): Promise<string | undefined> {
+  const fdKey = opts.label === "VAULT_MASTER_KEY" ? "VAULT_MASTER_KEY_FD" : "ARCHIVE_EPOCH_MASTER_KEY_FD";
+  const allowKey =
+    opts.label === "VAULT_MASTER_KEY"
+      ? "VAULT_MASTER_KEY_ALLOW_ENV"
+      : "ARCHIVE_EPOCH_MASTER_KEY_ALLOW_ENV";
+  const fdRaw = env[fdKey as keyof RunRecoveryCeremonyEnv] as string | undefined;
+  if (fdRaw !== undefined && fdRaw.trim() !== "") {
+    return readSecretFromFd(fdRaw.trim(), opts.label);
+  }
+  if (envFlagTrue(env[allowKey as keyof RunRecoveryCeremonyEnv] as string | undefined)) {
+    const fromEnv = env[opts.label]?.trim();
+    if (fromEnv !== undefined && fromEnv !== "") {
+      console.error(
+        `run-recovery-ceremony: WARNING: ${opts.label} taken from process environment ` +
+          `(${allowKey}=1). Doc 07 §5.5.2 forbids persistent env for ceremony secrets — ` +
+          `prefer ${fdKey} or an interactive TTY prompt.`,
+      );
+      return fromEnv;
+    }
+  } else if (env[opts.label]?.trim()) {
+    console.error(
+      `run-recovery-ceremony: ignoring ${opts.label} in the environment ` +
+        `(set ${allowKey}=1 to opt in, or use ${fdKey} / interactive prompt).`,
+    );
+  }
+  if (!opts.required) return undefined;
+  // Tests inject env without a TTY — if neither FD nor allow-env supplied a value, fail closed
+  // unless we can prompt.
+  const prompted = await promptSecret(`${opts.label} (echo hidden): `);
+  const value = prompted.trim();
+  if (value.length === 0) fail(`${opts.label} is required`);
+  return value;
+}
+
 
 function b64urlNonce(): string {
   const raw = randomBytes(16);
@@ -404,16 +576,26 @@ export async function runRecoveryCeremony(deps: {
 }): Promise<RunRecoveryCeremonySummary> {
   const env = deps.env ?? process.env;
   const databaseUrl = requireEnv(env, "DATABASE_URL");
-  const masterKey = requireEnv(env, "VAULT_MASTER_KEY");
-  if (masterKey.length < MIN_MASTER_KEY_CHARS) {
+  const masterKey = await resolveCeremonyMasterKey(env, {
+    label: "VAULT_MASTER_KEY",
+    required: true,
+  });
+  if (masterKey === undefined || masterKey.length < MIN_MASTER_KEY_CHARS) {
     fail(`VAULT_MASTER_KEY must be at least ${MIN_MASTER_KEY_CHARS} characters`);
   }
   const nodeId = requireEnv(env, "NODE_ID");
   const ceremonyId = deps.newId?.() ?? randomUUID();
   const ceremonyNonce = b64urlNonce();
   const issuedAt = (deps.now ?? (() => new Date()))().toISOString();
-  const archiveEpochMaster = env.ARCHIVE_EPOCH_MASTER_KEY?.trim();
-  if (archiveEpochMaster !== undefined && archiveEpochMaster.length < MIN_MASTER_KEY_CHARS) {
+  const archiveEpochMaster = await resolveCeremonyMasterKey(env, {
+    label: "ARCHIVE_EPOCH_MASTER_KEY",
+    required: false,
+  });
+  if (
+    archiveEpochMaster !== undefined &&
+    archiveEpochMaster.length > 0 &&
+    archiveEpochMaster.length < MIN_MASTER_KEY_CHARS
+  ) {
     fail(`ARCHIVE_EPOCH_MASTER_KEY must be at least ${MIN_MASTER_KEY_CHARS} characters`);
   }
 

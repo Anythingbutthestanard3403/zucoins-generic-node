@@ -8,7 +8,7 @@
 // into ceremony (that is the Mode A admin API). This module only assists first-boot
 // generation so operators need not invent a 32+ char secret.
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const VAULT_MASTER_MIN_CHARS = 32;
 /** 32 random bytes → 43-char base64url (no pad) ≥ 32 chars entropy. */
@@ -74,9 +74,9 @@ export interface VaultMasterBootstrapState {
   /** Ephemeral plaintext — memory only; wiped on ack. Never persisted. */
   pendingPlaintext: string | null;
   offlineBackupAcked: boolean;
-  /** sha256 hex of master (for fingerprint prefix only). */
+  /** Salted PBKDF2 verifier hex (salt||dk) for durable seal + UI prefix — never bare SHA-256(master). */
   keyFingerprintHex: string | null;
-  /** sha256 digest of master for backup-collision checks without retaining plaintext. */
+  /** PBKDF2 dk bytes for backup-collision checks without retaining plaintext. */
   keyDigest: Buffer | null;
 }
 
@@ -95,18 +95,21 @@ export function createConfiguredVaultMasterState(
   vaultMasterKey: string,
   offlineBackupAcked = false,
 ): VaultMasterBootstrapState {
-  const digest = createHash("sha256").update(vaultMasterKey).digest();
+  // Process-local only: salted PBKDF2 verifier. Never a bare SHA-256 of the master.
+  const { verifierHex, digest } = computeVaultMasterVerifier(vaultMasterKey);
   return {
     phase: "configured",
     pendingPlaintext: null,
     offlineBackupAcked,
-    keyFingerprintHex: digest.toString("hex"),
+    keyFingerprintHex: verifierHex,
     keyDigest: digest,
   };
 }
 
 export function fingerprintPrefix(hex: string | null): string | null {
   if (!hex || hex.length < 12) return null;
+  // Salted verifier is salt(32 hex)||dk(64 hex) — show prefix of the dk half only.
+  if (hex.length >= 96) return hex.slice(32, 44);
   return hex.slice(0, 12);
 }
 
@@ -130,6 +133,48 @@ export function statusFromState(state: VaultMasterBootstrapState): VaultMasterSt
  * entropy via node:crypto randomBytes — browser WebCrypto would also be
  * valid; server generation keeps the show-once cache off localStorage.
  */
+/** Salted high-cost master-key verifier (ZTR-1171). Not a cheap SHA-256 oracle. */
+export const VAULT_MASTER_VERIFIER_ITERATIONS = 600_000;
+export const VAULT_MASTER_VERIFIER_SALT_BYTES = 16;
+export const VAULT_MASTER_VERIFIER_DK_BYTES = 32;
+
+/**
+ * Derive a persisted verifier: pbkdf2-sha256(master, random-salt, 600k) → salt||dk hex.
+ * Salt is stored with the digest so verification is possible without a separate column.
+ */
+export function computeVaultMasterVerifier(masterKey: string, salt?: Buffer): {
+  readonly verifierHex: string;
+  readonly salt: Buffer;
+  readonly digest: Buffer;
+} {
+  const s = salt ?? randomBytes(VAULT_MASTER_VERIFIER_SALT_BYTES);
+  if (s.length !== VAULT_MASTER_VERIFIER_SALT_BYTES) {
+    throw new Error("vault master verifier salt must be 16 bytes");
+  }
+  const dk = pbkdf2Sync(
+    Buffer.from(masterKey, "utf8"),
+    s,
+    VAULT_MASTER_VERIFIER_ITERATIONS,
+    VAULT_MASTER_VERIFIER_DK_BYTES,
+    "sha256",
+  );
+  return {
+    verifierHex: Buffer.concat([s, dk]).toString("hex"),
+    salt: s,
+    digest: dk,
+  };
+}
+
+/** True when hex is a 96-char salted verifier (16-byte salt || 32-byte dk). */
+export function isSaltedVaultMasterVerifierHex(hex: string): boolean {
+  return /^[0-9a-f]{96}$/.test(hex);
+}
+
+/** Legacy bare SHA-256 fingerprint (64 hex) — refused for new seals after ZTR-1171. */
+export function isLegacyVaultMasterFingerprintHex(hex: string): boolean {
+  return /^[0-9a-f]{64}$/.test(hex);
+}
+
 export function generateVaultMasterKey(): string {
   // base64url without padding — high entropy, operator-copyable, ≥32 chars.
   return randomBytes(VAULT_MASTER_ENTROPY_BYTES).toString("base64url");
@@ -184,10 +229,10 @@ export function generateShowOnce(
   }
   assertDistinctFromBackupKek(master, opts.backupMasterKey);
 
-  const digest = createHash("sha256").update(master).digest();
+  const { verifierHex, digest } = computeVaultMasterVerifier(master);
   state.phase = "shown";
   state.pendingPlaintext = master;
-  state.keyFingerprintHex = digest.toString("hex");
+  state.keyFingerprintHex = verifierHex;
   state.keyDigest = digest;
   state.offlineBackupAcked = false;
 

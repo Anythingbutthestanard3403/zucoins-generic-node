@@ -84,6 +84,13 @@ export interface LeaseReader {
 export type SignUnderLeaseTxPortsOf<P extends string> = {
   readonly leaseReader: LeaseReader;
   readonly auditLog: SignerAuditLogOf<P>;
+  /**
+   * Optional wallet-state re-read under the same transaction that holds the lease
+   * FOR UPDATE (ZTR-1171). When present, runLockedSignSection refuses QUARANTINED /
+   * RETIRED / signing-halted wallets after the lease check and before vault open.
+   * Production money-path wiring supplies this; recovery harnesses may omit it.
+   */
+  readonly assertWalletMaySign?: (walletId: string) => void | Promise<void>;
 };
 
 export type SignUnderLeaseTxPorts = SignUnderLeaseTxPortsOf<SigningPurpose>;
@@ -302,6 +309,34 @@ async function runLockedSignSection<P extends string>(
       timestamp: now(),
     });
     return { kind: "rejected", reason: rejection };
+  }
+
+  // ZTR-1171: re-check wallet state inside the lease-lock transaction so a wallet
+  // quarantined after lease acquisition cannot still be signed from. Prefer the
+  // transaction-scoped port when present; outer assertWalletMaySign runs earlier
+  // for money-path leadership/admission ordering and for harnesses without a TX.
+  if (ports.assertWalletMaySign !== undefined) {
+    try {
+      await ports.assertWalletMaySign(capability.walletId);
+    } catch (err) {
+      const reason =
+        err instanceof WalletSigningHaltedError
+          ? `wallet signing halted: ${err.walletId}`
+          : err instanceof Error
+            ? err.message
+            : "wallet may not sign";
+      await ports.auditLog.append({
+        walletId: capability.walletId,
+        operationId: capability.operationId,
+        leaseEpoch: capability.leaseEpoch,
+        purpose: capability.purpose,
+        preimageSha256: capability.expectedPreimageSha256,
+        outcome: "REJECTED",
+        rejectionReason: reason,
+        timestamp: now(),
+      });
+      return { kind: "rejected", reason };
+    }
   }
 
   const computedDigest = sha256Hex(capability.preimageText);

@@ -20,6 +20,7 @@ import {
   InMemoryDualControlPolicy,
   InMemoryDeviceSignaturePolicy,
   InMemoryEnrollmentAuditLog,
+  InMemoryDeviceRevocationAuditLog,
   InMemoryEnrollmentChallengeStore,
   InMemoryOperatorPushSubscriptionStore,
   InMemorySecondDeviceCeremonyStore,
@@ -117,6 +118,8 @@ function makeRouter(opts?: {
     dualControlPolicy,
     deviceSignaturePolicy,
     challengeIssuerStore,
+    deviceEnrollmentAuditLog: auditLog,
+    deviceRevocationAuditLog: new InMemoryDeviceRevocationAuditLog(),
     secondDeviceEnrol: {
       enrollmentChallengeStore,
       ceremonyStore,

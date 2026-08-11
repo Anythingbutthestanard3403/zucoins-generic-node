@@ -27,6 +27,9 @@ export function isNeverLog(name: string): boolean {
   if (name.includes("masterkey")) return true;
   if (name === "secret" || name.endsWith("secret")) return true;
   if (name.includes("password") || name === "passwd" || name === "pwd") return true;
+  // Recovery-pack PIN and sealed blob field names (ZTR-1171). password ≠ passcode.
+  if (name.includes("passcode") || name === "pin" || name.endsWith("pin")) return true;
+  if (name.includes("packfile")) return true;
   if (name.includes("cookie")) return true;
   if (name.includes("csrf") || name.includes("xsrf")) return true;
   if (name === "apikey" || name.includes("plaintext")) return true;

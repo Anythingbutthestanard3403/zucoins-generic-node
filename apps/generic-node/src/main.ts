@@ -385,6 +385,27 @@ async function main(): Promise<void> {
     isDatabaseReachable: () => dbProbe.cachedReachable(),
     backpressure: storagePressure.storageBackpressure,
     haltGate,
+    // ZTR-1171: outer wallet-state gate (signUnderLease also re-checks inside the lease TX).
+    getWallet: async (walletId) => {
+      const result = await pool.query<{
+        id: string;
+        state: "AVAILABLE" | "PINNED" | "QUARANTINED" | "RETIRED";
+        quarantine_reason: string | null;
+      }>(
+        `SELECT id::text AS id, state::text AS state, quarantine_reason
+           FROM wallets WHERE id = $1::uuid LIMIT 1`,
+        [walletId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return null;
+      return {
+        walletId: row.id,
+        state: row.state,
+        quarantineReason: row.quarantine_reason,
+        activeLeaseId: null,
+        signingHalted: row.state === "QUARANTINED" || row.state === "RETIRED",
+      };
+    },
   });
 
   const metrics = createNodeMetrics();

@@ -88,13 +88,13 @@ import {
   createNodeSettingsHaltEvidenceRecorder,
   createSqlDeviceKeyStore,
   createSqlEnrollmentChallengeStore,
-  InMemoryEnrollmentAuditLog,
-  InMemoryDeviceRevocationAuditLog,
+  createSqlEnrollmentAuditLog,
+  createSqlDeviceRevocationAuditLog,
   NoopDeviceRevocationSideEffects,
   type DeviceSqlExecutor,
   // Second-device enrol, dual-control policy, operator push
   InMemorySecondDeviceCeremonyStore,
-  InMemoryDualControlPolicy,
+  fixedDualControlPolicy,
   InMemoryApprovalChallengeIssuerStore,
   InMemoryOperatorPushSubscriptionStore,
   createSqlDeviceSignaturePolicy,
@@ -716,7 +716,7 @@ export function createProductionRouteSurface(
   // env here: an unrecognised value must have already refused boot rather than reach
   // this constructor as the weaker mode. No `?? "single_operator"` — the schema owns
   // the default, and a fallback here would re-open the downgrade one level up.
-  const dualControlPolicy = new InMemoryDualControlPolicy(config.dualControlMode);
+  const dualControlPolicy = fixedDualControlPolicy(config.dualControlMode);
   // Additive device-signature policy (ZTR-1143): durable node_settings row, fail closed.
   const deviceSignaturePolicy: DeviceSignaturePolicyPort =
     config.deviceSignaturePolicy ?? createSqlDeviceSignaturePolicy(config.pool);
@@ -778,8 +778,8 @@ export function createProductionRouteSurface(
     credentialService,
     resolveImplementerId,
     deviceEnrollmentChallengeStore,
-    deviceEnrollmentAuditLog: new InMemoryEnrollmentAuditLog(),
-    deviceRevocationAuditLog: new InMemoryDeviceRevocationAuditLog(),
+    deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
+    deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
     deviceRevocationSideEffects: new NoopDeviceRevocationSideEffects(),
     // node-mint the reporting credential (raw shown once by the SPA), replacing
     // dependence on REPORTING_KEY_OUT. Same custody pool; the node persists public only.
@@ -833,7 +833,7 @@ export function createProductionRouteSurface(
     secondDeviceEnrol: {
       enrollmentChallengeStore: deviceEnrollmentChallengeStore,
       ceremonyStore: secondDeviceCeremonyStore,
-      auditLog: new InMemoryEnrollmentAuditLog(),
+      auditLog: createSqlEnrollmentAuditLog(deviceSql),
       nodeOrigin,
     },
     operatorPush: {

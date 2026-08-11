@@ -15,6 +15,7 @@ import type { Pool, PoolClient } from "pg";
 
 import {
   createSqlSignerAuditLog,
+  WalletSigningHaltedError,
   type ActiveLeaseRecord,
   type LeaseReader,
   type SignUnderLeaseTransactionFn,
@@ -103,6 +104,29 @@ export function createSqlLeaseReaderFromQueryFn(query: SqlQueryFn): LeaseReader 
   };
 }
 
+/** Wallet state under the same pinned client as the lease FOR UPDATE (ZTR-1171). */
+const SELECT_WALLET_SIGNING_STATE = `
+  SELECT w.state::text AS state
+    FROM wallets w
+   WHERE w.id = $1::uuid
+   LIMIT 1`;
+
+async function assertWalletMaySignOnClient(
+  client: PoolClient,
+  walletId: string,
+): Promise<void> {
+  const result = await client.query<{ state: string }>(SELECT_WALLET_SIGNING_STATE, [
+    walletId,
+  ]);
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new WalletSigningHaltedError(walletId);
+  }
+  if (row.state === "QUARANTINED" || row.state === "RETIRED") {
+    throw new WalletSigningHaltedError(walletId);
+  }
+}
+
 function txPortsFromClient(client: PoolClient): SignUnderLeaseTxPorts {
   const query: SqlQueryFn = async (text, values) => {
     const result = await client.query(text, values as unknown[]);
@@ -111,6 +135,7 @@ function txPortsFromClient(client: PoolClient): SignUnderLeaseTxPorts {
   return {
     leaseReader: createSqlLeaseReader(client),
     auditLog: createSqlSignerAuditLog(query),
+    assertWalletMaySign: (walletId) => assertWalletMaySignOnClient(client, walletId),
   };
 }
 

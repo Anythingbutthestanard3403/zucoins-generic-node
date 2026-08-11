@@ -1,6 +1,7 @@
 // Durable vault-master seal marker.
 //
-// Persists phase + fingerprint only — never the master key plaintext.
+// Persists phase + salted PBKDF2 verifier only — never the master key plaintext
+// and never a bare SHA-256(master) oracle (ZTR-1171).
 // Survives process restart so show-once cannot re-issue after generate/seal.
 
 import {
@@ -68,7 +69,8 @@ export function createSqlVaultMasterSealStore(sql: VaultMasterSealSqlExecutor): 
         return null;
       }
       const fp = String(row["key_fingerprint_hex"] ?? "");
-      if (!/^[0-9a-f]{64}$/.test(fp)) return null;
+      // ZTR-1171: accept salted 96-hex verifier; reject legacy bare 64-hex SHA-256 oracle rows.
+      if (!/^[0-9a-f]{96}$/.test(fp)) return null;
       const acked =
         row["offline_backup_acked"] === true ||
         row["offline_backup_acked"] === "t" ||
@@ -100,13 +102,15 @@ export function createSqlVaultMasterSealStore(sql: VaultMasterSealSqlExecutor): 
  * Never restores plaintext — pendingPlaintext is always null after restart.
  */
 export function bootstrapFromDurableSeal(seal: DurableVaultMasterSeal): VaultMasterBootstrapState {
-  const digest = Buffer.from(seal.keyFingerprintHex, "hex");
+  // verifierHex = salt(16) || dk(32); keyDigest is the dk half only.
+  const raw = Buffer.from(seal.keyFingerprintHex, "hex");
+  const digest = raw.length === 48 ? raw.subarray(16) : null;
   return {
     phase: seal.phase,
     pendingPlaintext: null,
     offlineBackupAcked: seal.offlineBackupAcked || seal.phase === "sealed",
     keyFingerprintHex: seal.keyFingerprintHex,
-    keyDigest: digest.length === 32 ? digest : null,
+    keyDigest: digest,
   };
 }
 
@@ -115,7 +119,7 @@ export function durableSealFromBootstrap(
   state: VaultMasterBootstrapState,
 ): DurableVaultMasterSeal | null {
   if (state.phase === "virgin") return null;
-  if (!state.keyFingerprintHex || !/^[0-9a-f]{64}$/.test(state.keyFingerprintHex)) {
+  if (!state.keyFingerprintHex || !/^[0-9a-f]{96}$/.test(state.keyFingerprintHex)) {
     return null;
   }
   return {

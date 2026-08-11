@@ -723,6 +723,8 @@ export {
   createSqlBlessingAuditAppender,
   createSqlDeviceKeyStore,
   createSqlEnrollmentChallengeStore,
+  createSqlEnrollmentAuditLog,
+  createSqlDeviceRevocationAuditLog,
   InMemoryDeviceKeyStore,
   InMemoryEnrollmentChallengeStore,
   InMemoryEnrollmentAuditLog,

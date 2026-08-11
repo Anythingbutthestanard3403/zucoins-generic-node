@@ -338,7 +338,10 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
   };
 
   type DepsOverrides = Partial<
-    Pick<MoveAdvancedPortsDeps, "gatewayExchange" | "nodeIdentitySigner" | "vault" | "leadership">
+    Pick<
+      MoveAdvancedPortsDeps,
+      "gatewayExchange" | "nodeIdentitySigner" | "vault" | "leadership" | "metricsHooks"
+    >
   >;
 
   function makeDeps(nodeId: string, overrides?: DepsOverrides): MoveAdvancedPortsDeps {
@@ -361,6 +364,7 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
       gatewayUrls: [GATEWAY_A],
       gatewayExchange: overrides?.gatewayExchange ?? failingExchange(),
       nodeIdentitySigner: overrides?.nodeIdentitySigner ?? (() => null),
+      metricsHooks: overrides?.metricsHooks,
       logger,
     };
   }
@@ -863,11 +867,13 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
     readonly attention_required: boolean;
     readonly attention_reason: string | null;
     readonly attention_detail: string | null;
+    readonly attention_episode: number;
     readonly no_terminal: boolean;
     readonly implementer_id: string;
   }> {
     const rows = await pool.query(
       `SELECT status::text AS status, attention_required, attention_reason, attention_detail,
+              attention_episode::int AS attention_episode,
               (terminal_at IS NULL) AS no_terminal, implementer_id::text AS implementer_id
          FROM operations WHERE id = $1::uuid`,
       [operationId],
@@ -1070,6 +1076,209 @@ describe.skipIf(!PG_AVAILABLE)("move-advanced-ports reconcileAndLand SQL paths (
         "operation.needs_attention",
         "operation.needs_attention",
       ]);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1222 Option B: INDETERMINATE park then INVARIANT_BREACH upgrades reason/detail/episode and appends one dual-chain event",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.destinationWalletId,
+        leaseRole: "MOVE_DESTINATION",
+      });
+      const wallets = [seeded.sourceWalletId, seeded.destinationWalletId];
+      const signer = stubNodeIdentitySigner(seeded.signingKeyId);
+
+      let breachCalls = 0;
+      const first = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY),
+        nodeIdentitySigner: signer,
+        metricsHooks: {
+          onInvariantBreach: () => {
+            breachCalls += 1;
+          },
+        } as MoveAdvancedPortsDeps["metricsHooks"],
+      });
+      expect(first).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      const parked = await readAttention(seeded.operationId);
+      expect(parked.status).toBe("NEEDS_ATTENTION");
+      expect(parked.attention_required).toBe(true);
+      expect(parked.attention_reason).toBe("VERIFICATION_INDETERMINATE");
+      expect(parked.attention_detail).toContain("INDETERMINATE");
+      // First park via persistMoveOutcome does not bump attention_episode (default 0);
+      // severity upgrade (and ZTR-1223 re-raise) increment it.
+      const episodeAfterPark = parked.attention_episode;
+      expect(episodeAfterPark).toBe(0);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+      expect(breachCalls).toBe(0);
+
+      // Drop the destination lease so the next tick classifies INVARIANT_BREACH while the
+      // flag is still raised. Prior to ZTR-1222 this tick discarded the breach entirely.
+      await pool.query(`DELETE FROM wallet_active_leases WHERE wallet_id = $1::uuid`, [
+        seeded.destinationWalletId,
+      ]);
+
+      const upgraded = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: landedHeadExchange(),
+        nodeIdentitySigner: signer,
+        metricsHooks: {
+          onInvariantBreach: () => {
+            breachCalls += 1;
+          },
+        } as MoveAdvancedPortsDeps["metricsHooks"],
+      });
+      expect(upgraded).toEqual({
+        ok: false,
+        reason: "reconcile: INVARIANT_BREACH",
+        holdReconcile: true,
+      });
+
+      const after = await readAttention(seeded.operationId);
+      expect(after.status).toBe("NEEDS_ATTENTION");
+      expect(after.attention_required).toBe(true);
+      expect(after.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
+      expect(after.attention_detail).toContain("INVARIANT_BREACH");
+      expect(after.attention_detail).toContain("LEASE_NOT_ACTIVE_DURING_RECONCILE");
+      expect(after.attention_episode).toBe(episodeAfterPark + 1);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual([
+        "operation.needs_attention",
+        "operation.needs_attention",
+      ]);
+      expect(await implementerEventTypes(after.implementer_id)).toEqual([
+        "operation.needs_attention",
+        "operation.needs_attention",
+      ]);
+      expect(breachCalls).toBe(1);
+      // Source lease remains held; park never releases.
+      expect(await heldLeases(wallets)).toEqual([seeded.sourceWalletId]);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1222 Option B: INVARIANT_BREACH then INDETERMINATE does not downgrade reason/detail/episode",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.destinationWalletId,
+        leaseRole: "MOVE_DESTINATION",
+      });
+      const signer = stubNodeIdentitySigner(seeded.signingKeyId);
+      const ambiguous = pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY);
+
+      // Park once via the normal path so dual-chain events and status are real, then stamp
+      // a breach-class attention payload (simulating a prior severity upgrade). Re-ticking
+      // INDETERMINATE must not downgrade columns or append another event.
+      const first = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(first).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+
+      const breachDetail =
+        'INVARIANT_BREACH {"source":"LEASE_NOT_ACTIVE_DURING_RECONCILE","walletId":"fixture"}';
+      await pool.query(
+        `UPDATE operations
+            SET attention_reason = 'LEASE_INVARIANT_VIOLATION'::attention_reason,
+                attention_detail = $2,
+                attention_episode = 2,
+                row_version = row_version + 1,
+                updated_at = now()
+          WHERE id = $1::uuid AND attention_required = true`,
+        [seeded.operationId, breachDetail],
+      );
+      const parked = await readAttention(seeded.operationId);
+      expect(parked.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
+      expect(parked.attention_detail).toBe(breachDetail);
+      expect(parked.attention_episode).toBe(2);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+
+      const second = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(second).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+
+      const after = await readAttention(seeded.operationId);
+      expect(after.status).toBe("NEEDS_ATTENTION");
+      expect(after.attention_required).toBe(true);
+      expect(after.attention_reason).toBe("LEASE_INVARIANT_VIOLATION");
+      expect(after.attention_detail).toBe(breachDetail);
+      expect(after.attention_episode).toBe(2);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1222 Option B: equal-severity re-tick while attention_required stays a no-op hold",
+    async () => {
+      const seeded = await seedMoveOperation(true, {
+        sourcePublicKey: WALLET_SENDER_PUBLIC_KEY,
+        destinationPublicKey: WALLET_RECEIVER_PUBLIC_KEY,
+      });
+      await seedSettledAttempt(seeded.operationId);
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.sourceWalletId,
+        leaseRole: "MOVE_SOURCE",
+      });
+      await seedActiveLease({
+        leaseGroupId: seeded.leaseGroupId,
+        operationId: seeded.operationId,
+        walletId: seeded.destinationWalletId,
+        leaseRole: "MOVE_DESTINATION",
+      });
+      const signer = stubNodeIdentitySigner(seeded.signingKeyId);
+      const ambiguous = pathDisagreementExchange(WALLET_SENDER_PUBLIC_KEY);
+
+      const first = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(first).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      const parked = await readAttention(seeded.operationId);
+      const episode = parked.attention_episode;
+      const detail = parked.attention_detail;
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
+
+      const second = await reconcile(seeded.nodeId, seeded.operationId, {
+        gatewayExchange: ambiguous,
+        nodeIdentitySigner: signer,
+      });
+      expect(second).toEqual({ ok: false, reason: "reconcile: INDETERMINATE", holdReconcile: true });
+      const after = await readAttention(seeded.operationId);
+      expect(after.attention_reason).toBe("VERIFICATION_INDETERMINATE");
+      expect(after.attention_detail).toBe(detail);
+      expect(after.attention_episode).toBe(episode);
+      expect(await nodeEventTypes(seeded.operationId)).toEqual(["operation.needs_attention"]);
     },
     PG_TEST_TIMEOUT_MS,
   );

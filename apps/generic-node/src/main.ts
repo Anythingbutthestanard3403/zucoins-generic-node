@@ -900,6 +900,7 @@ async function main(): Promise<void> {
           action_data: { [RECEIVER_CHANNEL_ACTION_DATA_FIELD]: transferCodeEncoded },
         }),
       logger,
+      metricsHooks,
     });
     logger.info(`push: VAPID mode=${vapidMode} (observe counts without blocking; enforce fails closed)`);
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);

@@ -80,6 +80,20 @@ describe("createNodeMetrics — event counters", () => {
         .some(([, labels]) => labels.rpc === "submit_transaction__v1" && labels.outcome === "error"),
     ).toBe(true);
   });
+
+  it("records push receive outcomes and the no_transfer_code streak gauge (ZTR-1154)", () => {
+    const metrics = createNodeMetrics();
+    const hooks = createMetricsHooks(metrics);
+    hooks.onPushReceive("enqueued", "data");
+    hooks.onPushReceive("no_transfer_code", "none");
+    hooks.onPushReceive("decrypt_failed", "none");
+    hooks.setPushNoTransferCodeStreak(7);
+
+    expect(metrics.pushReceiveTotal.get({ outcome: "enqueued", shape: "data" })).toBe(1);
+    expect(metrics.pushReceiveTotal.get({ outcome: "no_transfer_code", shape: "none" })).toBe(1);
+    expect(metrics.pushReceiveTotal.get({ outcome: "decrypt_failed", shape: "none" })).toBe(1);
+    expect(metrics.pushNoTransferCodeStreak.get({})).toBe(7);
+  });
 });
 
 describe("createNodeMetrics — per-scrape gauges (DB-truth snapshot)", () => {

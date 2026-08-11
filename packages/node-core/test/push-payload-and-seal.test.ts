@@ -3,7 +3,10 @@
 // a 204 with nothing enqueued, a wrong AAD yields a wallet decrypting another's keys, and
 // a wrong gate lets an external receive proceed with no way to be notified of payment.
 
-import { createDecipheriv, hkdfSync } from "node:crypto";
+import { createHash, createDecipheriv, hkdfSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { buildWalletDekInfo, HKDF_DEK_LABEL } from "@zucoins/generic-node-contracts/vault";
 import { describe, expect, it } from "vitest";
@@ -12,18 +15,24 @@ import {
   buildIdProofQuery,
   buildPushReceiverDekInfo,
   buildPushSecretAad,
-  PUSH_RECEIVER_DEK_HKDF_LABEL,
+  createPushNoTransferCodeStreakTracker,
+  createPushReceiveMetricsPort,
+  createPushReceiver,
   createPushSecretSealer,
   createPushSubscriptionService,
+  DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,
   generateAuthSecret,
   generateEcdhKeypair,
   generateEndpointId,
   isValidEndpointId,
   parsePushCleartext,
+  PUSH_RECEIVER_DEK_HKDF_LABEL,
   PushSubscriptionRequiredError,
   resolveTransferCodeFromEnvelope,
   type PushAuditSink,
   type PushGatewayActions,
+  type PushReceiveMetricOutcome,
+  type PushReceiveMetricShape,
   type PushSubscriptionRow,
   type PushSubscriptionStore,
   type PushWalletRef,
@@ -77,6 +86,187 @@ describe("delivered payload resolution", () => {
   it("folds malformed cleartext to null instead of throwing", () => {
     expect(parsePushCleartext(Buffer.from("not json", "utf8"))).toBeNull();
     expect(resolveTransferCodeFromEnvelope(parsePushCleartext(Buffer.from("{", "utf8")))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ZTR-1154 — digest-pinned delivered envelope golden (FCM/Mozilla data shape).
+// Bytes live under packages/generic-node-contracts/goldens/push/. No committed
+// test writes or regenerates them; the sha256 constant is the pin.
+// ---------------------------------------------------------------------------
+
+const PUSH_GOLDEN_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../generic-node-contracts/goldens/push",
+);
+const PUSH_ENVELOPE_GOLDEN_NAME = "delivered-envelope.data.v1.json.txt";
+/** SHA-256 of the exact golden bytes. Update only with a reviewed golden change. */
+const PUSH_ENVELOPE_DATA_V1_SHA256 =
+  "936d81f42de6beebd93493565bceca995aa67514aea6e23205bfb74657a220b5";
+
+describe("delivered envelope golden (ZTR-1154)", () => {
+  const raw = readFileSync(join(PUSH_GOLDEN_DIR, PUSH_ENVELOPE_GOLDEN_NAME));
+
+  it("has no trailing newline in the raw golden bytes", () => {
+    expect(raw.length).toBeGreaterThan(0);
+    expect(raw[raw.length - 1]).not.toBe(0x0a);
+  });
+
+  it("digest-pins the golden (sha256 hard-coded; test never writes the file)", () => {
+    const digest = createHash("sha256").update(raw).digest("hex");
+    expect(digest).toBe(PUSH_ENVELOPE_DATA_V1_SHA256);
+  });
+
+  it("resolveTransferCodeFromEnvelope extracts the code from the golden bytes", () => {
+    const envelope = parsePushCleartext(raw);
+    const resolved = resolveTransferCodeFromEnvelope(envelope);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.shape).toBe("data");
+    expect(resolved!.transferCodeEncoded.length).toBeGreaterThan(0);
+    // Embedded code is the pinned RECEIVE transfer-code golden.
+    const receiveCode = readFileSync(
+      join(PUSH_GOLDEN_DIR, "../transfer-code/receive-code.v1.b64url.txt"),
+      "utf8",
+    );
+    expect(resolved!.transferCodeEncoded).toBe(receiveCode);
+  });
+});
+
+describe("push receive outcome metrics + no_transfer_code streak (ZTR-1154)", () => {
+  it("defaults the consecutive threshold to 20 with documented rationale constant", () => {
+    expect(DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD).toBe(20);
+  });
+
+  it("increments streak on no_transfer_code, resets on enqueued, ignores decrypt_failed", () => {
+    const alerts: number[] = [];
+    const tracker = createPushNoTransferCodeStreakTracker({
+      threshold: 3,
+      onAlert: (a) => alerts.push(a.streak),
+    });
+    tracker.observe("no_transfer_code");
+    tracker.observe("no_transfer_code");
+    expect(tracker.streak()).toBe(2);
+    expect(alerts).toEqual([]);
+    tracker.observe("decrypt_failed");
+    expect(tracker.streak()).toBe(2);
+    tracker.observe("no_transfer_code");
+    expect(tracker.streak()).toBe(3);
+    expect(alerts).toEqual([3]);
+    // Second observation at/above threshold does not re-fire until reset.
+    tracker.observe("no_transfer_code");
+    expect(alerts).toEqual([3]);
+    tracker.observe("enqueued");
+    expect(tracker.streak()).toBe(0);
+    tracker.observe("no_transfer_code");
+    tracker.observe("no_transfer_code");
+    tracker.observe("no_transfer_code");
+    expect(alerts).toEqual([3, 3]);
+  });
+
+  it("createPushReceiver emits outcome metrics with shape on enqueued", async () => {
+    const seen: Array<{ outcome: PushReceiveMetricOutcome; shape: PushReceiveMetricShape }> = [];
+    const store: PushSubscriptionStore = {
+      async insert() {},
+      async findByWalletId() {
+        return null;
+      },
+      async findByEndpointId(endpointId) {
+        if (endpointId !== "wp_abcdefghijklmnopqrst") return null;
+        return {
+          walletId: WALLET_ID,
+          walletPublicKey: "pk",
+          endpointId,
+          receiverEcdhPublic: "pub",
+          receiverEcdhPrivateSealed: "sealed:aa",
+          receiverAuthSecretSealed: "sealed:bb",
+          status: "ACTIVE",
+          appServerPublicKey: "app",
+        };
+      },
+      async listSubscribableWallets() {
+        return [];
+      },
+      async markStatus() {},
+      async replaceSealedMaterial() {},
+    };
+    const sealer = {
+      async open(sealed: string) {
+        if (sealed.startsWith("sealed:")) return Buffer.from(sealed.slice(7), "utf8");
+        throw new Error("unopenable");
+      },
+    };
+    const golden = readFileSync(join(PUSH_GOLDEN_DIR, PUSH_ENVELOPE_GOLDEN_NAME));
+    const receiver = createPushReceiver({
+      store,
+      sealer,
+      decryptor: {
+        async decrypt() {
+          return golden;
+        },
+      },
+      sink: () => true,
+      metrics: createPushReceiveMetricsPort({
+        sink: {
+          onOutcome(outcome, shape) {
+            seen.push({ outcome, shape });
+          },
+        },
+      }),
+    });
+    const outcome = await receiver.receive("wp_abcdefghijklmnopqrst", Buffer.from("body"));
+    expect(outcome).toBe("enqueued");
+    expect(seen).toEqual([{ outcome: "enqueued", shape: "data" }]);
+  });
+
+  it("createPushReceiver emits no_transfer_code when envelope has no code", async () => {
+    const seen: string[] = [];
+    const store: PushSubscriptionStore = {
+      async insert() {},
+      async findByWalletId() {
+        return null;
+      },
+      async findByEndpointId() {
+        return {
+          walletId: WALLET_ID,
+          walletPublicKey: "pk",
+          endpointId: "wp_abcdefghijklmnopqrst",
+          receiverEcdhPublic: "pub",
+          receiverEcdhPrivateSealed: "sealed:aa",
+          receiverAuthSecretSealed: "sealed:bb",
+          status: "ACTIVE",
+          appServerPublicKey: "app",
+        };
+      },
+      async listSubscribableWallets() {
+        return [];
+      },
+      async markStatus() {},
+      async replaceSealedMaterial() {},
+    };
+    const receiver = createPushReceiver({
+      store,
+      sealer: {
+        async open(sealed: string) {
+          if (sealed.startsWith("sealed:")) return Buffer.from(sealed.slice(7), "utf8");
+          throw new Error("unopenable");
+        },
+      },
+      decryptor: {
+        async decrypt() {
+          return Buffer.from(JSON.stringify({ data: { type_data: { other: "x" } } }), "utf8");
+        },
+      },
+      sink: () => true,
+      metrics: {
+        onOutcome(outcome) {
+          seen.push(outcome);
+        },
+      },
+    });
+    expect(await receiver.receive("wp_abcdefghijklmnopqrst", Buffer.from("b"))).toBe(
+      "no_transfer_code",
+    );
+    expect(seen).toEqual(["no_transfer_code"]);
   });
 });
 

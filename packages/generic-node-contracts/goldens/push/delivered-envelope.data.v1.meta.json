@@ -1,0 +1,34 @@
+{
+  "concern": "push",
+  "slice": "push-envelope.1",
+  "golden": "DELIVERED Web Push cleartext envelope — FCM/Mozilla (data.type_data) shape",
+  "files": {
+    "cleartext_json": "delivered-envelope.data.v1.json.txt"
+  },
+  "digests": {
+    "cleartext_json_sha256": "936d81f42de6beebd93493565bceca995aa67514aea6e23205bfb74657a220b5",
+    "cleartext_json_len": 572
+  },
+  "shape": "data",
+  "shapes_captured": [
+    "data"
+  ],
+  "shapes_not_captured": [
+    "aps",
+    "send_side_fallback"
+  ],
+  "shapes_not_captured_note": "Only the FCM/Mozilla data.type_data shape was obtainable for this pin. APNs (aps.data.type_data) and the send-side notification_type_data fallback remain covered by hand-written precedence cases in node-core push-payload-and-seal.test.ts, not by a live capture.",
+  "provenance": {
+    "envelope_source": "Reconstructed delivered cleartext matching the wallet service-worker precedence documented in packages/node-core/src/push/payload.ts (type_data = envelope.data?.type_data for standard FCM/Mozilla). Live wallet push host reshapes sender action_data into this nesting before RFC 8291 aes128gcm encryption; this golden is the post-decrypt cleartext the node parses.",
+    "wallet_mirror": "reference SplitChain wallet implementation (splitchain.js) service-worker delivered-payload path; mirror not part of this repository",
+    "wallet_version": "v200.6 (wallet coupling audit 2026-08-06 / 2026-08-07; shape confirmed against wallet SW nesting, not a live APNs/FCM ciphertext capture)",
+    "capture_date": "2026-08-11",
+    "sanitisation": "transfer_code_encoded substituted with the already-committed digest-pinned RECEIVE transfer-code golden (goldens/transfer-code/receive-code.v1.b64url.txt, sha256 104eb00c3bda958b82b7ce5a24e582dd9efa3e63d2192838fe26b5b23dcb2bab). That code is a deterministic test vector (Ed25519 seeds 02/03), never a live funded transfer. Envelope nesting/field names are the pinned surface; the code body is structural ballast only.",
+    "hand_verified": "Shape fields and nesting hand-checked against packages/node-core/src/push/payload.ts resolveTransferCodeFromEnvelope precedence (data branch). transfer_code_encoded byte-identical to receive-code.v1.b64url.txt. No trailing newline on cleartext file.",
+    "regenerated_by": "Offline golden-writer (quarantined per packages/generic-node-contracts/CONTRACT.md \"Golden regeneration and quarantine\"; no committed test writes a golden).",
+    "decisions": [
+      "push-delivered-envelope-shape",
+      "transfer-code-encoding"
+    ]
+  }
+}

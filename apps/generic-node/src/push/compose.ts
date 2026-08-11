@@ -17,10 +17,14 @@
 import type { Pool } from "pg";
 
 import {
+  createPushNoTransferCodeStreakTracker,
+  createPushReceiveMetricsPort,
   createPushReceiver,
   createPushSecretSealer,
   createPushSubscriptionService,
+  DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,
   PushSubscriptionRequiredError,
+  type MetricsHooks,
   type PushSubscriptionService,
   type PushVapidMode,
   type PushVapidOutcome,
@@ -86,6 +90,11 @@ export interface ComposePushDeps {
    */
   readonly sink: (transferCodeEncoded: string) => boolean;
   readonly logger: PushCompositionLogger;
+  /**
+   * Optional metrics hooks (ZTR-1154). When set, push receive outcomes feed
+   * gn_push_receive_total and the consecutive no_transfer_code streak gauge/alert.
+   */
+  readonly metricsHooks?: MetricsHooks;
 }
 
 export interface PushComposition {
@@ -181,7 +190,31 @@ export function composePush(deps: ComposePushDeps): PushComposition {
     },
   };
 
+  // ZTR-1154: consecutive no_transfer_code streak (shape-break detector). Process-local;
+  // threshold rationale is on DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD.
+  const noCodeStreak = createPushNoTransferCodeStreakTracker({
+    threshold: DEFAULT_PUSH_NO_TRANSFER_CODE_STREAK_THRESHOLD,
+    onAlert: (alert) => {
+      deps.logger.error(
+        `push: ALERT ${alert.kind} streak=${alert.streak} threshold=${alert.threshold} — ${alert.message}`,
+      );
+    },
+  });
+  const pushReceiveMetrics = createPushReceiveMetricsPort({
+    streak: noCodeStreak,
+    sink:
+      deps.metricsHooks === undefined
+        ? undefined
+        : {
+            onOutcome(outcome, shape) {
+              deps.metricsHooks?.onPushReceive(outcome, shape);
+              deps.metricsHooks?.setPushNoTransferCodeStreak(noCodeStreak.streak());
+            },
+          },
+  });
+
   return {
+
     service,
 
     async onPushDelivery(endpointId, body, authorizationHeader) {
@@ -200,6 +233,7 @@ export function composePush(deps: ComposePushDeps): PushComposition {
         nodeOrigin: deps.nodeOrigin,
         vapidMode: deps.vapidMode ?? "observe",
         onVapidOutcome: deps.onVapidOutcome,
+        metrics: pushReceiveMetrics,
       });
       const outcome = await perRow.receive(endpointId, body, authorizationHeader);
       deps.logger.info(`push: delivery outcome=${outcome}`);

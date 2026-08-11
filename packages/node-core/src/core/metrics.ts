@@ -285,6 +285,30 @@ export const METRIC_PUSH_VAPID_OUTCOMES = [
 ] as const;
 export type MetricPushVapidOutcome = (typeof METRIC_PUSH_VAPID_OUTCOMES)[number];
 
+/**
+ * Push-receive money-path outcomes (ZTR-1154). Coarse closed set rendered on the
+ * public scrape — never echoes envelope bytes or transfer codes.
+ * `enqueued` / `no_transfer_code` / `decrypt_failed` only; refused/unknown stay audit-only.
+ */
+export const METRIC_PUSH_RECEIVE_OUTCOMES = [
+  "enqueued",
+  "no_transfer_code",
+  "decrypt_failed",
+] as const;
+export type MetricPushReceiveOutcome = (typeof METRIC_PUSH_RECEIVE_OUTCOMES)[number];
+
+/**
+ * Delivered-envelope shape label on the enqueued path. `none` is used for
+ * no_transfer_code / decrypt_failed so the series stays fully labelled.
+ */
+export const METRIC_PUSH_RECEIVE_SHAPES = [
+  "aps",
+  "data",
+  "send_side_fallback",
+  "none",
+] as const;
+export type MetricPushReceiveShape = (typeof METRIC_PUSH_RECEIVE_SHAPES)[number];
+
 /** Observation anomaly classification (closed; relationship/parse kinds). */
 export const METRIC_ANOMALY_KINDS = [
   "REGRESSION",
@@ -436,6 +460,16 @@ export interface NodeMetrics {
   readonly candidateIntakeRefused: CounterMetric;
   /** Inbound Web Push VAPID gate outcomes (ZTR-1161). */
   readonly pushVapid: CounterMetric;
+  /**
+   * Inbound Web Push receive outcomes (ZTR-1154). Labels: outcome, shape.
+   * shape is meaningful on enqueued; "none" otherwise.
+   */
+  readonly pushReceiveTotal: CounterMetric;
+  /**
+   * Current consecutive no_transfer_code count with no intervening enqueued
+   * (process-local; resets on enqueue or process restart).
+   */
+  readonly pushNoTransferCodeStreak: GaugeMetric;
 
   // --- per-scrape gauges (filled from snapshot on render) ---
   readonly availableWallets: GaugeMetric;
@@ -536,6 +570,16 @@ export function createNodeMetrics(): NodeMetrics {
     "gn_push_vapid_total",
     "Inbound Web Push VAPID verification outcomes (verified|rejected|absent|no_key).",
     ["outcome"],
+  );
+  const pushReceiveTotal = createCounter(
+    "gn_push_receive_total",
+    "Inbound Web Push receive outcomes by closed outcome and envelope shape (ZTR-1154).",
+    ["outcome", "shape"],
+  );
+  const pushNoTransferCodeStreak = createGauge(
+    "gn_push_no_transfer_code_streak",
+    "Consecutive no_transfer_code push receives since the last enqueued delivery (shape-break detector).",
+    [],
   );
 
   const availableWallets = createGauge(
@@ -686,6 +730,8 @@ export function createNodeMetrics(): NodeMetrics {
     idempotencyTotal,
     candidateIntakeRefused,
     pushVapid,
+    pushReceiveTotal,
+    pushNoTransferCodeStreak,
     availableWallets,
     totalWallets,
     walletsByState,
@@ -790,6 +836,8 @@ export function createNodeMetrics(): NodeMetrics {
       idempotencyTotal.reset();
       candidateIntakeRefused.reset();
       pushVapid.reset();
+      pushReceiveTotal.reset();
+      pushNoTransferCodeStreak.reset();
       availableWallets.reset();
       totalWallets.reset();
       walletsByState.reset();
@@ -913,6 +961,8 @@ export async function renderMetrics(metrics: NodeMetrics): Promise<string> {
     renderCounter(metrics.idempotencyTotal),
     renderCounter(metrics.candidateIntakeRefused),
     renderCounter(metrics.pushVapid),
+    renderCounter(metrics.pushReceiveTotal),
+    renderGauge(metrics.pushNoTransferCodeStreak),
     renderGauge(metrics.availableWallets),
     renderGauge(metrics.totalWallets),
     renderGauge(metrics.walletsByState),
@@ -971,6 +1021,13 @@ export interface MetricsHooks {
   /** Inbound push VAPID gate outcome (ZTR-1161). */
   onPushVapid(outcome: MetricPushVapidOutcome): void;
   /**
+   * Inbound Web Push receive outcome (ZTR-1154). `shape` is the envelope nest that
+   * yielded the code on enqueued; pass `"none"` for no_transfer_code / decrypt_failed.
+   */
+  onPushReceive(outcome: MetricPushReceiveOutcome, shape: MetricPushReceiveShape): void;
+  /** Publish the current consecutive no_transfer_code streak gauge. */
+  setPushNoTransferCodeStreak(streak: number): void;
+  /**
    * Observe a gateway call duration. `rpc` is a closed action name;
    * `outcome` is ok on any non-throwing response (including app-level reject).
    */
@@ -1020,6 +1077,12 @@ export function createMetricsHooks(metrics: NodeMetrics): MetricsHooks {
     },
     onPushVapid(outcome) {
       metrics.pushVapid.inc({ outcome });
+    },
+    onPushReceive(outcome, shape) {
+      metrics.pushReceiveTotal.inc({ outcome, shape });
+    },
+    setPushNoTransferCodeStreak(streak) {
+      metrics.pushNoTransferCodeStreak.set({}, streak);
     },
     observeGateway(rpc, outcome, durationSeconds) {
       metrics.gatewayRequestDuration.observe({ rpc, outcome }, durationSeconds);

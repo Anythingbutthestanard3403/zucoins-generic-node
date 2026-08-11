@@ -23,32 +23,43 @@ const GUARD_EXEMPT_PROJECTS = new Map<string, string>([
 
 const GUARD_FILENAME = "setup-network-guard.ts";
 const REPO_ROOT = new URL("../../../", import.meta.url);
-// The order vitest itself resolves a project directory in. The operator SPA declares its test
-// block in vite.config.ts (one config for dev server, build and tests); looking only for
-// vitest.config.ts would report it as having no setup files at all.
+// Directory projects resolve vitest.config.ts / vite.config.ts (operator SPA uses vite.config).
+// File projects (packages/node-core/vitest.pg.config.ts) are the config itself.
 const CONFIG_FILENAMES = ["vitest.config.ts", "vite.config.ts"];
 
 interface ProjectConfig {
-  test?: { setupFiles?: string | string[] };
+  test?: {
+    setupFiles?: string | string[];
+    poolOptions?: { forks?: { singleFork?: boolean } };
+    include?: string[];
+  };
 }
 
 const projectEntries = (rootConfig as { test?: { projects?: (string | ProjectConfig)[] } }).test
   ?.projects;
 
-async function setupFilesOf(entry: string | ProjectConfig): Promise<string[]> {
-  let config: ProjectConfig;
-  if (typeof entry === "string") {
-    const configPath = CONFIG_FILENAMES.map(
-      (filename) => new URL(`${entry}/${filename}`, REPO_ROOT),
-    ).find((candidate) => existsSync(candidate));
-    if (configPath === undefined) return [];
-    config = ((await import(pathToFileURL(fileURLToPath(configPath)).href)) as {
-      default: ProjectConfig;
-    }).default;
-  } else {
+function resolveConfigUrl(entry: string): URL | undefined {
+  const asFile = new URL(entry, REPO_ROOT);
+  if (existsSync(asFile) && entry.endsWith(".ts")) return asFile;
+  return CONFIG_FILENAMES.map((filename) => new URL(`${entry}/${filename}`, REPO_ROOT)).find(
+    (candidate) => existsSync(candidate),
+  );
+}
+
+async function loadProjectConfig(entry: string | ProjectConfig): Promise<ProjectConfig> {
+  if (typeof entry !== "string") {
     // An inline entry contributes only what it spells out — exactly the shape that lost the guard.
-    config = entry;
+    return entry;
   }
+  const configPath = resolveConfigUrl(entry);
+  if (configPath === undefined) return {};
+  return ((await import(pathToFileURL(fileURLToPath(configPath)).href)) as {
+    default: ProjectConfig;
+  }).default;
+}
+
+async function setupFilesOf(entry: string | ProjectConfig): Promise<string[]> {
+  const config = await loadProjectConfig(entry);
   const declared = config.test?.setupFiles ?? [];
   return typeof declared === "string" ? [declared] : declared;
 }
@@ -78,5 +89,41 @@ describe("vitest project network-guard census", () => {
   it("keeps the exemption list free of projects that are no longer listed", () => {
     const listed = new Set((projectEntries ?? []).filter((entry) => typeof entry === "string"));
     expect([...GUARD_EXEMPT_PROJECTS.keys()].filter((project) => !listed.has(project))).toEqual([]);
+  });
+});
+
+describe("vitest PG project concurrency bound (ZTR-1209)", () => {
+  // Workspace projects cannot set maxWorkers/fileParallelism (NonProjectOptions). The only
+  // per-project concurrency control Vitest honors is poolOptions.forks.singleFork.
+  const PG_PROJECT_SUFFIX = "vitest.pg.config.ts";
+
+  it("lists dedicated unit + pg config files for node-core and generic-node", () => {
+    const listed = (projectEntries ?? []).filter((e): e is string => typeof e === "string");
+    expect(listed).toContain("packages/node-core/vitest.unit.config.ts");
+    expect(listed).toContain("packages/node-core/vitest.pg.config.ts");
+    expect(listed).toContain("apps/generic-node/vitest.unit.config.ts");
+    expect(listed).toContain("apps/generic-node/vitest.pg.config.ts");
+    // Directory package entries would load the umbrella only — nested projects are not expanded.
+    expect(listed).not.toContain("packages/node-core");
+    expect(listed).not.toContain("apps/generic-node");
+  });
+
+  it("every *.pg.config.ts project serializes files via singleFork", async () => {
+    const pgEntries = (projectEntries ?? []).filter(
+      (e): e is string => typeof e === "string" && e.endsWith(PG_PROJECT_SUFFIX),
+    );
+    expect(pgEntries.length).toBeGreaterThanOrEqual(2);
+    for (const entry of pgEntries) {
+      const config = await loadProjectConfig(entry);
+      expect(
+        config.test?.poolOptions?.forks?.singleFork,
+        `${entry} must set poolOptions.forks.singleFork`,
+      ).toBe(true);
+      const include = config.test?.include ?? [];
+      expect(
+        include.some((g) => g.includes(".pg.test.ts") || g.includes("pg-concurrency")),
+        `${entry} include must cover PG suites`,
+      ).toBe(true);
+    }
   });
 });

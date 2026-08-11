@@ -27,6 +27,7 @@ under pressure. Before you change anything at 3am, read this:
 | [`escalation-matrix.md`](escalation-matrix.md) | You need to decide who to wake (generated from source) |
 | [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml) | You are wiring Prometheus |
 | [`push-action-suffix-rotation.md`](push-action-suffix-rotation.md) | Boot fails with `PushActionVocabularyRejectedError` / wallet push action-name drift |
+| [`full-suite-test-runs.md`](full-suite-test-runs.md) | You need full-suite vs targeted test expectations (ZTR-1209) |
 
 ## What the node is
 

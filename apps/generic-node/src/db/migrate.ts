@@ -103,7 +103,19 @@ export async function runMigrationsOnPool(
     // and outside drizzle's per-migration transactions. pgcrypto is a PG13+ *trusted*
     // extension the connecting DB-owner role may install without superuser. Idempotent, and it
     // leaves the byte-frozen migration SQL (and its inert node-core twin) untouched.
-    await client.query("CREATE EXTENSION IF NOT EXISTS pgcrypto");
+    // CREATE EXTENSION IF NOT EXISTS is not concurrency-safe under multi-file PG suites
+    // (unique_violation on pg_extension_name_index). Match base-enums-domains.sql (ZTR-1209).
+    await client.query(`
+      DO $$
+      BEGIN
+        CREATE EXTENSION IF NOT EXISTS pgcrypto;
+      EXCEPTION
+        WHEN unique_violation THEN
+          NULL;
+        WHEN duplicate_object THEN
+          NULL;
+      END $$;
+    `);
     // Reporting journal prefix (historical drizzle tags 0000/0001).
     await migrate(drizzle(client), { migrationsFolder });
     // Layer-1 money schema pack (receive barriers + wallets/ops/…).

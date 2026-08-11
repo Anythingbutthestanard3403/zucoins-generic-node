@@ -2,12 +2,12 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import base from "./vitest.config.js";
+import base from "./vitest.unit.config.ts";
 
 // Dedicated config for the live-chain acceptance runs (`*.live.test.ts`), mirroring the
 // repo-root vitest.live-chain.config.ts used by packages/splitchain.
 //
-// Two deliberate differences from vitest.config.ts:
+// Two deliberate differences from vitest.unit.config.ts:
 // 1. NO setup-network-guard.ts. contains node-core's ordinary suite from all
 // network access; a live acceptance run is the one thing that must reach the real
 // gateway, so it gets its own config rather than an escape hatch inside the guard —

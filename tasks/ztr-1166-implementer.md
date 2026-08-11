@@ -1,7 +1,7 @@
 # ZTR-1166 — implementer
 
-**PR:** (filled after open)  
-**Head SHA:** 7d59b0433048e9b5fe84ac675ada791e98384c69  
+**PR:** #91  
+**Head SHA:** a1cfc316975b6ce3d2824e9b47a39bb950977465  
 **Branch:** `ztr-1166-dead-code`  
 **Governing:** ticket body + sweeper 2026-08-11 locked defaults (`tasks/audit-2026-08-06.md` §6)
 

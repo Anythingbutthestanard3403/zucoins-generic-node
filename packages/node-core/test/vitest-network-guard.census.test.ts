@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -32,6 +33,7 @@ interface ProjectConfig {
     setupFiles?: string | string[];
     poolOptions?: { forks?: { singleFork?: boolean } };
     include?: string[];
+    exclude?: string[];
   };
 }
 
@@ -125,5 +127,169 @@ describe("vitest PG project concurrency bound (ZTR-1209)", () => {
         `${entry} include must cover PG suites`,
       ).toBe(true);
     }
+  });
+
+  // Non-suffix live-PG openers must ride the singleFork pg project, not the parallel unit pool.
+  // Paths are package-relative (match vitest.pg.config.ts include entries).
+  const NODE_CORE_LIVE_NON_SUFFIX = [
+    "src/observation/capture.concurrency.test.ts",
+    "src/observation/quarantine.integration.test.ts",
+    "test/custody-eligibility-lease-pk.test.ts",
+    "test/degraded-mode.fault.test.ts",
+    "test/disk-db-exhaustion.fault.test.ts",
+    "test/migration-integrity.test.ts",
+    "test/observation-migration-integrity.test.ts",
+    "test/operation-lifecycle-concurrency.test.ts",
+    "test/registry-isolation-rotation.test.ts",
+  ] as const;
+
+  const GENERIC_NODE_LIVE_NON_SUFFIX = [
+    "test/db/migrate-guards.test.ts",
+    "test/db/migration-lock.test.ts",
+    "test/db/overlap-guard.test.ts",
+    "test/genesis-t0-observer.test.ts",
+    "test/operations/arm-live-composition.test.ts",
+    "test/reporting/durable-store.test.ts",
+    "test/reporting/production-destinations-list.test.ts",
+    "test/reporting/production-durable-mount.test.ts",
+    "test/reporting/production-reporting-stream.test.ts",
+  ] as const;
+
+  function basenameOf(packageRelative: string): string {
+    const parts = packageRelative.split("/");
+    return parts[parts.length - 1] ?? packageRelative;
+  }
+
+  function excludeCovers(excludes: string[], packageRelative: string): boolean {
+    const base = basenameOf(packageRelative);
+    return excludes.some(
+      (g) =>
+        g === packageRelative ||
+        g === `**/${base}` ||
+        g.endsWith(`/${base}`) ||
+        g === base,
+    );
+  }
+
+  function includeCovers(includes: string[], packageRelative: string): boolean {
+    return includes.some(
+      (g) =>
+        g === packageRelative ||
+        g === `**/${basenameOf(packageRelative)}` ||
+        g.endsWith(`/${basenameOf(packageRelative)}`),
+    );
+  }
+
+  it("unit excludes and pg includes cover every known non-suffix live-PG opener", async () => {
+    const pairs: { unit: string; pg: string; files: readonly string[] }[] = [
+      {
+        unit: "packages/node-core/vitest.unit.config.ts",
+        pg: "packages/node-core/vitest.pg.config.ts",
+        files: NODE_CORE_LIVE_NON_SUFFIX,
+      },
+      {
+        unit: "apps/generic-node/vitest.unit.config.ts",
+        pg: "apps/generic-node/vitest.pg.config.ts",
+        files: GENERIC_NODE_LIVE_NON_SUFFIX,
+      },
+    ];
+    const gaps: string[] = [];
+    for (const { unit, pg, files } of pairs) {
+      const unitCfg = await loadProjectConfig(unit);
+      const pgCfg = await loadProjectConfig(pg);
+      const excludes = unitCfg.test?.exclude ?? [];
+      const includes = pgCfg.test?.include ?? [];
+      for (const file of files) {
+        if (!excludeCovers(excludes, file)) {
+          gaps.push(`${unit} exclude missing ${file}`);
+        }
+        if (!includeCovers(includes, file)) {
+          gaps.push(`${pg} include missing ${file}`);
+        }
+      }
+      expect(
+        pgCfg.test?.poolOptions?.forks?.singleFork,
+        `${pg} must remain singleFork`,
+      ).toBe(true);
+    }
+    expect(gaps).toEqual([]);
+  });
+
+  /**
+   * Strong openers: a new suite that does any of these outside singleFork is a red gate.
+   * Comment-only / mock-only mentions of TEST_DATABASE_URL or `import type { Pool }` do not match.
+   * Deliberately omits bare `psql (` — version strings like `psql (PostgreSQL) 16.4` are not openers.
+   */
+  const LIVE_PG_OPENER =
+    /\bnew\s+Pool\s*\(|\bnew\s+Client\s*\(|\bfrom\s+["']pg["']|\brunMigrationsOnPool\b|\bCREATE\s+DATABASE\b|\bcreatedb\b|\bexecFileSync\s*\(\s*["']psql["']|\bspawn(?:Sync)?\s*\(\s*["']psql["']|\bexecFile\s*\(\s*["']psql["']/;
+
+  /** Files that import/mention pg machinery without opening a live server. */
+  const LIVE_PG_SCAN_ALLOWLIST = new Set([
+    // Mock Pool only — no TEST_DATABASE_URL / no connect.
+    "apps/generic-node/test/postgres-deadline.test.ts",
+    // Census / provision unit tests: pattern strings, not live connections.
+    "packages/node-core/test/mandatory-database-tests.census.test.ts",
+    "packages/node-core/test/vitest-global-setup-provision.test.ts",
+    "packages/node-core/test/vitest-network-guard.census.test.ts",
+  ]);
+
+  function walkTestFiles(absDir: string, out: string[]): void {
+    if (!existsSync(absDir)) return;
+    for (const name of readdirSync(absDir)) {
+      if (name === "node_modules" || name === "dist") continue;
+      const full = join(absDir, name);
+      const st = statSync(full);
+      if (st.isDirectory()) {
+        // live-chain has its own singleFork config, not part of root pnpm test.
+        if (name === "live-chain") continue;
+        walkTestFiles(full, out);
+        continue;
+      }
+      if (name.endsWith(".test.ts") || name.endsWith(".test.mjs")) out.push(full);
+    }
+  }
+
+  function isSuffixPg(relPosix: string): boolean {
+    return (
+      relPosix.endsWith(".pg.test.ts") ||
+      relPosix.endsWith("-pg.test.ts") ||
+      relPosix.endsWith("/pg-concurrency.test.ts")
+    );
+  }
+
+  it("no live-PG opener runs outside a singleFork pg project", () => {
+    const repoRootPath = fileURLToPath(REPO_ROOT);
+    const knownNonSuffix = new Set(
+      [
+        ...NODE_CORE_LIVE_NON_SUFFIX.map((f) => `packages/node-core/${f}`),
+        ...GENERIC_NODE_LIVE_NON_SUFFIX.map((f) => `apps/generic-node/${f}`),
+      ].map((p) => p.replace(/\\/g, "/")),
+    );
+
+    const roots = [
+      join(repoRootPath, "packages/node-core/src"),
+      join(repoRootPath, "packages/node-core/test"),
+      join(repoRootPath, "apps/generic-node/src"),
+      join(repoRootPath, "apps/generic-node/test"),
+      join(repoRootPath, "apps/generic-node/scripts"),
+    ];
+    const files: string[] = [];
+    for (const root of roots) walkTestFiles(root, files);
+
+    const leaks: string[] = [];
+    for (const abs of files) {
+      const rel = relative(repoRootPath, abs).replace(/\\/g, "/");
+      if (isSuffixPg(rel)) continue;
+      if (LIVE_PG_SCAN_ALLOWLIST.has(rel)) continue;
+      if (knownNonSuffix.has(rel)) continue;
+      const body = readFileSync(abs, "utf8");
+      if (LIVE_PG_OPENER.test(body)) {
+        leaks.push(rel);
+      }
+    }
+    expect(
+      leaks,
+      "live-PG openers must be *.pg.test.ts or listed in NODE_CORE/GENERIC_NODE_LIVE_NON_SUFFIX + unit exclude/pg include",
+    ).toEqual([]);
   });
 });

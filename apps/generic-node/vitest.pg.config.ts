@@ -48,6 +48,17 @@ export default defineConfig({
       "src/**/*.pg.test.ts",
       "test/**/*-pg.test.ts",
       "scripts/**/*.pg.test.ts",
+      // Live-Postgres openers that predate the *.pg.test.ts suffix convention (ZTR-1209 r5).
+      // Must stay in lockstep with vitest.unit.config.ts exclude + the census inventory.
+      "test/db/migrate-guards.test.ts",
+      "test/db/migration-lock.test.ts",
+      "test/db/overlap-guard.test.ts",
+      "test/genesis-t0-observer.test.ts",
+      "test/operations/arm-live-composition.test.ts",
+      "test/reporting/durable-store.test.ts",
+      "test/reporting/production-destinations-list.test.ts",
+      "test/reporting/production-durable-mount.test.ts",
+      "test/reporting/production-reporting-stream.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     pool: "forks",

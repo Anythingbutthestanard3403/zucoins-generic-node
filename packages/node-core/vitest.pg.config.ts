@@ -56,6 +56,17 @@ export default defineConfig({
       "src/**/*.pg.test.ts",
       "test/**/*-pg.test.ts",
       "test/pg-concurrency.test.ts",
+      // Live-Postgres openers that predate the *.pg.test.ts suffix convention (ZTR-1209 r5).
+      // Must stay in lockstep with vitest.unit.config.ts exclude + the census inventory.
+      "src/observation/capture.concurrency.test.ts",
+      "src/observation/quarantine.integration.test.ts",
+      "test/custody-eligibility-lease-pk.test.ts",
+      "test/degraded-mode.fault.test.ts",
+      "test/disk-db-exhaustion.fault.test.ts",
+      "test/migration-integrity.test.ts",
+      "test/observation-migration-integrity.test.ts",
+      "test/operation-lifecycle-concurrency.test.ts",
+      "test/registry-isolation-rotation.test.ts",
     ],
     exclude: ["**/node_modules/**", "**/dist/**"],
     pool: "forks",

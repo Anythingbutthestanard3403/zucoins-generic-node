@@ -134,6 +134,13 @@ export default defineConfig({
       },
 
       {
+        // ./operations/events subpath — must precede ./operations (prefix match).
+        find: "@zucoins/generic-node-contracts/operations/events",
+        replacement: fileURLToPath(
+          new URL("../generic-node-contracts/src/operations/events.contract.ts", import.meta.url),
+        ),
+      },
+      {
         // The `./operations` subpath (frozen OperationKind single source, consumed by
         // src/proof/types.ts and src/api/discovery.ts). Like the subpaths above, it must precede
         // the package-root entry or the prefix match would swallow it into `.../src/index.ts/operations`.
@@ -220,6 +227,16 @@ export default defineConfig({
       "**/*.pg.test.ts",
       "**/*-pg.test.ts",
       "**/pg-concurrency.test.ts",
+      // Live-Postgres openers hosted by vitest.pg.config.ts (singleFork) — ZTR-1209 r5.
+      "**/capture.concurrency.test.ts",
+      "**/quarantine.integration.test.ts",
+      "**/custody-eligibility-lease-pk.test.ts",
+      "**/degraded-mode.fault.test.ts",
+      "**/disk-db-exhaustion.fault.test.ts",
+      "**/migration-integrity.test.ts",
+      "**/observation-migration-integrity.test.ts",
+      "**/operation-lifecycle-concurrency.test.ts",
+      "**/registry-isolation-rotation.test.ts",
     ],
     // this project is standalone (see the comment above) so it inherits NONE of the
     // root project's options — including the testTimeout/hookTimeout the root config raised for

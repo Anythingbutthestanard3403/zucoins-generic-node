@@ -102,6 +102,17 @@ export default defineConfig({
         ),
       },
       {
+        // ./operations/events subpath (DURABLE_EVENTS) — must precede ./operations or the
+        // prefix match swallows it into .../operations/index.ts/events.
+        find: "@zucoins/generic-node-contracts/operations/events",
+        replacement: fileURLToPath(
+          new URL(
+            "../../packages/generic-node-contracts/src/operations/events.contract.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
         find: "@zucoins/generic-node-contracts/operations",
         replacement: fileURLToPath(
           new URL("../../packages/generic-node-contracts/src/operations/index.ts", import.meta.url),
@@ -176,9 +187,19 @@ export default defineConfig({
       "**/dist/**",
       "**/*.pg.test.ts",
       "**/*-pg.test.ts",
+      // Live-Postgres openers hosted by vitest.pg.config.ts (singleFork) — ZTR-1209 r5.
+      "**/migrate-guards.test.ts",
+      "**/migration-lock.test.ts",
+      "**/overlap-guard.test.ts",
+      "**/genesis-t0-observer.test.ts",
+      "**/arm-live-composition.test.ts",
+      "**/durable-store.test.ts",
+      "**/production-destinations-list.test.ts",
+      "**/production-durable-mount.test.ts",
+      "**/production-reporting-stream.test.ts",
     ],
-    // Remaining suites may still open Postgres (e.g. reporting/durable-store). Keep global
-    // setup so TEST_DATABASE_URL is assigned under package and root runs alike.
+    // Unit project is non-PG. globalSetup still assigns TEST_DATABASE_URL so a stray
+    // opener fails loudly under the census rather than silently skipping.
     globalSetup: [fileURLToPath(new URL("../../vitest.global-setup.ts", import.meta.url))],
     testTimeout: 120_000,
     hookTimeout: 120_000,

@@ -17,7 +17,7 @@ Review B: `makeRouter` in `admin-device-keys.test.ts` dropped required `nodeId: 
 3. `AdminUser` login fixtures correctly omit `nodeId` (not on `AdminUser`).
 
 ## Head SHA
-`HEAD_SHA_PLACEHOLDER`
+`2f11c27086943e16e8fac3889fbbdebd59703b22`
 
 ## Verification
 | Command | Result |

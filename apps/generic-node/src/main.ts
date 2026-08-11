@@ -994,6 +994,9 @@ async function main(): Promise<void> {
   logger.info(
     "node: destination bless LIVE (device authorizer + operator_device_keys + blessing artifacts)",
   );
+  // Effective dual-control mode at boot (ZTR-1214). Pre-mutation source is the
+  // validated env; durable node_settings overrides after a guarded POST.
+  logger.info(`node: dual-control mode=${config.DUAL_CONTROL_MODE}`);
   if (config.METRICS_SCRAPE_TOKEN !== undefined) {
     logger.info("node: /metrics mounted (bearer-gated)");
   }

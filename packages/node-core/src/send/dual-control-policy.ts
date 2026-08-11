@@ -8,6 +8,14 @@
 // no optional policy — doc 01 §4.2 makes node policy opt-in — which is single_operator.
 // A setting that is PRESENT but unrecognised never resolves to a mode; see
 // parseDualControlMode.
+//
+// Durable home (ZTR-1214): node_settings key ops.dual_control_mode + audit_log on change.
+// Guarded admin POST requires fresh TOTP. Boot-validated DUAL_CONTROL_MODE is the
+// pre-mutation default when the row is absent; after setMode the DB is source of truth.
+
+import { createHash, randomUUID } from "node:crypto";
+
+import type { SqlExecutor } from "./sql-store.js";
 
 export const DUAL_CONTROL_MODES = ["single_operator", "two_human"] as const;
 export type DualControlMode = (typeof DUAL_CONTROL_MODES)[number];
@@ -54,6 +62,22 @@ export function parseDualControlMode(
   return (DUAL_CONTROL_MODES as readonly string[]).includes(raw)
     ? (raw as DualControlMode)
     : "invalid";
+}
+
+/**
+ * Effective mode for a stored node_settings value.
+ * - absent/null → `defaultMode` (boot-validated env, or single_operator)
+ * - exact literal → that mode
+ * - unrecognised → `two_human` (stricter; never silently weaken)
+ */
+export function effectiveDualControlMode(
+  raw: string | null | undefined,
+  defaultMode: DualControlMode = "single_operator",
+): DualControlMode {
+  if (raw === null || raw === undefined) return defaultMode;
+  const parsed = parseDualControlMode(raw);
+  if (parsed === "invalid") return "two_human";
+  return parsed;
 }
 
 export function dualControlModeLabel(mode: DualControlMode): string {
@@ -105,8 +129,21 @@ export function enforceDualControlOperators(
   return { ok: true };
 }
 
+export interface DualControlPolicySetMeta {
+  readonly actorId: string;
+  readonly nodeId: string;
+}
+
 export interface DualControlPolicyPort {
   getMode(): DualControlMode | Promise<DualControlMode>;
+  /**
+   * Persist a new mode. High-authority: callers must gate with fresh TOTP.
+   * Implementations write audit_log. Optional only for pure read ports in tests.
+   */
+  setMode?(
+    mode: DualControlMode,
+    meta: DualControlPolicySetMeta,
+  ): void | Promise<void>;
 }
 
 export function fixedDualControlPolicy(mode: DualControlMode): DualControlPolicyPort {
@@ -115,13 +152,127 @@ export function fixedDualControlPolicy(mode: DualControlMode): DualControlPolicy
 
 /** In-memory policy for tests / lab. */
 export class InMemoryDualControlPolicy implements DualControlPolicyPort {
+  readonly auditEntries: Array<{
+    readonly mode: DualControlMode;
+    readonly actorId: string;
+    readonly nodeId: string;
+  }> = [];
+
   constructor(private mode: DualControlMode = "single_operator") {}
 
   getMode(): DualControlMode {
     return this.mode;
   }
 
-  setMode(mode: DualControlMode): void {
+  setMode(mode: DualControlMode, meta?: DualControlPolicySetMeta): void {
     this.mode = mode;
+    if (meta !== undefined) {
+      this.auditEntries.push({
+        mode,
+        actorId: meta.actorId,
+        nodeId: meta.nodeId,
+      });
+    }
   }
+}
+
+function detailsSha256(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+/**
+ * SQL-backed policy over `node_settings` + `audit_log`.
+ *
+ * When the row is absent, `defaultMode` (boot-validated DUAL_CONTROL_MODE) is
+ * returned so env still drives pre-mutation behaviour. After setMode the DB row
+ * is source of truth across restarts. Unreadable store falls back to defaultMode
+ * (availability); corrupt stored values resolve to two_human (never weaken).
+ */
+export function createSqlDualControlPolicy(
+  sql: SqlExecutor,
+  opts?: {
+    readonly newId?: () => string;
+    readonly defaultMode?: DualControlMode;
+  },
+): DualControlPolicyPort {
+  const newId = opts?.newId ?? (() => randomUUID());
+  const defaultMode = opts?.defaultMode ?? "single_operator";
+
+  async function readRaw(): Promise<
+    { readonly ok: true; readonly value: string | null } | { readonly ok: false }
+  > {
+    try {
+      const result = await sql.query<{ setting_value: string }>(
+        "SELECT setting_value FROM node_settings WHERE setting_key = $1",
+        [DUAL_CONTROL_SETTING_KEY],
+      );
+      return { ok: true, value: result.rows[0]?.setting_value ?? null };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  return {
+    async getMode(): Promise<DualControlMode> {
+      const raw = await readRaw();
+      if (!raw.ok) return defaultMode;
+      return effectiveDualControlMode(raw.value, defaultMode);
+    },
+
+    async setMode(
+      mode: DualControlMode,
+      meta: DualControlPolicySetMeta,
+    ): Promise<void> {
+      if (mode !== "single_operator" && mode !== "two_human") {
+        throw new Error("unrecognised dual-control policy mode");
+      }
+      const previous = await readRaw();
+      const previousMode = previous.ok
+        ? effectiveDualControlMode(previous.value, defaultMode)
+        : defaultMode;
+
+      const details =
+        "setting_key=" +
+        DUAL_CONTROL_SETTING_KEY +
+        ";previous=" +
+        previousMode +
+        ";next=" +
+        mode;
+      const detailsSha = detailsSha256(details);
+
+      // Single statement: settings upsert + audit insert. Either both land or
+      // neither does — even when the caller has not opened an outer TX. When
+      // bound to the admin mutation PoolClient, this also rides that TX so a
+      // later ROLLBACK undoes the policy flip with the idempotency row.
+      await sql.query(
+        `WITH upserted AS (
+           INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
+           VALUES ($1, $2, 1, now())
+           ON CONFLICT (setting_key) DO UPDATE
+           SET setting_value = EXCLUDED.setting_value,
+               row_version = node_settings.row_version + 1,
+               updated_at = now()
+           RETURNING setting_key
+         )
+         INSERT INTO audit_log (
+           id, node_id, actor_kind, actor_id, action, operation_id, wallet_id,
+           details_text, details_sha256, created_at
+         )
+         SELECT
+           $3::uuid, $4::uuid, 'OPERATOR_SESSION', $5,
+           'ops.dual_control_mode_changed', NULL, NULL,
+           $6, $7, now()
+         FROM upserted`,
+        [
+          DUAL_CONTROL_SETTING_KEY,
+          mode,
+          newId(),
+          meta.nodeId,
+          meta.actorId,
+          details,
+          detailsSha,
+        ],
+      );
+    },
+  };
 }

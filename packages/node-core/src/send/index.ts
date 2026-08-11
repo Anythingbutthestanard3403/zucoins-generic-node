@@ -150,19 +150,22 @@ export {
   type ReadFreshHead,
 } from "./late-landing-reconcile.js";
 
-// Dual-control two-human policy.
+// Dual-control two-human policy (durable node_settings + audit — ZTR-1214).
 export {
   DUAL_CONTROL_MODES,
   DUAL_CONTROL_SETTING_KEY,
   DUAL_CONTROL_COPY,
   parseDualControlMode,
+  effectiveDualControlMode,
   dualControlModeLabel,
   enforceDualControlOperators,
   fixedDualControlPolicy,
   InMemoryDualControlPolicy,
+  createSqlDualControlPolicy,
   type DualControlMode,
   type DualControlCheckResult,
   type DualControlPolicyPort,
+  type DualControlPolicySetMeta,
 } from "./dual-control-policy.js";
 export {
   InMemoryApprovalChallengeIssuerStore,

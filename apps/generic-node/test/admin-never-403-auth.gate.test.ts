@@ -141,6 +141,7 @@ function makeRouter(opts?: {
       challengeStore,
       loadOperation,
       deviceSignaturePolicy,
+      dualControlPolicy,
       destinationService,
     }),
     sendDecisionStore: {

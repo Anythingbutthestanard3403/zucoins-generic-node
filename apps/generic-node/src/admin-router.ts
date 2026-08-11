@@ -525,6 +525,29 @@ function parseDeviceSignaturePolicyBody(
   return { ok: true, body: { mode: raw.mode } };
 }
 
+function parseDualControlPolicyBody(
+  raw: unknown,
+): ParseOk<{ mode: DualControlMode }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (raw.mode !== "single_operator" && raw.mode !== "two_human") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "mode must be single_operator or two_human",
+    };
+  }
+  const known = new Set(["mode"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { mode: raw.mode } };
+}
+
 const KNOWN_SCOPES = new Set<string>(IMPLEMENTER_SCOPES);
 
 // Review rework: validate a path `:id` is a canonical lowercase UUID BEFORE the TOTP
@@ -1196,6 +1219,12 @@ export interface AdminMutationTxPorts {
    * Approve-path reads may still use deps.deviceSignaturePolicy (fail-closed).
    */
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
+  /**
+   * TX-scoped dual-control policy (ZTR-1214). Mutation writes MUST use this port
+   * so node_settings + audit_log commit/roll back with the admin mutation TX.
+   * GET/approve reads may still use deps.dualControlPolicy.
+   */
+  readonly dualControlPolicy?: DualControlPolicyPort;
 }
 
 export interface AdminRouterResponse {
@@ -2662,6 +2691,79 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               return {
                 mode,
                 requires_device_signature: mode === "required",
+                short: copy.short,
+                long: copy.long,
+                approve_hint: copy.approve_hint,
+              };
+            },
+          });
+          if (!guarded.ok) {
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return {
+            outcome: "commit" as const,
+            status: 200,
+            responseBody: guarded.result,
+          };
+        },
+      });
+    }
+
+    // POST /admin/v1/dual-control-policy — guarded mutation (fresh TOTP + audit). ZTR-1214.
+    if (verb === "POST" && pathname === "/admin/v1/dual-control-policy") {
+      if (deps.dualControlPolicy === undefined || deps.dualControlPolicy.setMode === undefined) {
+        return fail(503, "service_unavailable", "dual-control policy not writable", requestId);
+      }
+      const routeId = "admin_dual_control_policy";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const policyPort = ports.dualControlPolicy;
+          if (policyPort === undefined || policyPort.setMode === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "transactional dual-control policy not wired", requestId),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseDualControlPolicyBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              await policyPort.setMode!(body.mode, {
+                actorId: user.id,
+                nodeId,
+              });
+              const mode = body.mode;
+              const copy = DUAL_CONTROL_COPY[mode];
+              return {
+                mode,
                 short: copy.short,
                 long: copy.long,
                 approve_hint: copy.approve_hint,

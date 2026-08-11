@@ -66,11 +66,9 @@ export const FIRST_BOOT_CONFIG_FIELDS = [
   // deployment-platform healthcheck timeout — tied to railway.json,
   // not a runtime knob. Changing it requires a redeploy to match.
   "RAILWAY_HEALTHCHECK_TIMEOUT_MS",
-  // The dual-control mode is read once at boot into the policy port the admin
-  // router consults, so there is no path that re-applies a changed value to a
-  // running node. Classifying it mutable would let the write path accept a
-  // change that never takes effect. Making it changeable at runtime means moving
-  // the policy to durable storage behind a guarded mutation, not relabelling it.
+  // Dual-control mode env is the pre-mutation default only. Runtime changes go
+  // through POST /admin/v1/dual-control-policy (fresh TOTP + audit_log →
+  // node_settings). Relabelling this field mutable would bypass that gate.
   "DUAL_CONTROL_MODE",
   // Runtime pg.Pool + leadership ownership knobs are read once when the pool /
   // leadership watch is constructed; a mutable write would not rebuild either

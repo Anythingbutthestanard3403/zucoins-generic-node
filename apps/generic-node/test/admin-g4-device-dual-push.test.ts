@@ -100,11 +100,12 @@ function makeRouter(opts?: {
     loadOperation,
     // The approve route runs inside the required atomic idempotency transaction;
     // without it every approve is 503 before any policy is consulted.
-    // TX ports must carry deviceSignaturePolicy so POST policy setMode is not 503.
+    // TX ports must carry policy ports so POST setMode is not 503 (ZTR-1143 / ZTR-1214).
     ...createTestAdminAtomicDeps({
       challengeStore,
       loadOperation,
       deviceSignaturePolicy,
+      dualControlPolicy,
     }),
     sendDecisionStore: {
       rejectCreated: async () => {
@@ -286,6 +287,64 @@ describe("G4 dual-control policy", () => {
     expect(body.mode).toBe("two_human");
     expect(body.short).toMatch(/Two-human/i);
     expect(body.long).toMatch(/different admin operator/i);
+  });
+
+  it("POST changes policy under fresh TOTP and records an audit entry (ZTR-1214)", async () => {
+    const { router, userStore, dualControlPolicy } = makeRouter({
+      dualMode: "single_operator",
+    });
+    const auth = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/dual-control-policy",
+      Buffer.from(JSON.stringify({ mode: "two_human" })),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+        "idempotency-key": randomUUID(),
+        "x-zp-totp": totpNow(),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as { mode: string; short: string };
+    expect(body.mode).toBe("two_human");
+    expect(body.short).toMatch(/Two-human/i);
+    expect(dualControlPolicy.getMode()).toBe("two_human");
+    expect(dualControlPolicy.auditEntries).toEqual([
+      expect.objectContaining({ mode: "two_human", actorId: auth.userId, nodeId: NODE_ID }),
+    ]);
+    // GET still works and reflects the mutation.
+    const getRes = await router("GET", "/admin/v1/dual-control-policy", new Uint8Array(), {
+      cookie: auth.cookie,
+      origin: ORIGIN,
+      "x-csrf-token": auth.csrf,
+    });
+    expect(getRes.status).toBe(200);
+    expect((JSON.parse(getRes.body) as { mode: string }).mode).toBe("two_human");
+  });
+
+  it("POST without TOTP is refused", async () => {
+    const { router, userStore, dualControlPolicy } = makeRouter({
+      dualMode: "single_operator",
+    });
+    const auth = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/dual-control-policy",
+      Buffer.from(JSON.stringify({ mode: "two_human" })),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+        "idempotency-key": randomUUID(),
+      },
+    );
+    expect(res.status).toBeGreaterThanOrEqual(401);
+    expect(res.status).toBeLessThan(500);
+    expect(dualControlPolicy.getMode()).toBe("single_operator");
   });
 
   // Doc 01 §4.2 wants two things at once: a POLICY refusal must be tellable from

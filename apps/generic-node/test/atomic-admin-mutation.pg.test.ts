@@ -6,7 +6,9 @@ import { Client, Pool, type PoolClient } from "pg";
 
 import {
   createSqlDeviceSignaturePolicy,
+  createSqlDualControlPolicy,
   DEVICE_SIGNATURE_POLICY_SETTING_KEY,
+  DUAL_CONTROL_SETTING_KEY,
 } from "@zucoins/node-core";
 
 import { SqlAdminIdempotencyStore } from "../src/ops/admin-idempotency.js";
@@ -345,6 +347,56 @@ describe.skipIf(!PG_AVAILABLE)("atomic REQUIRED admin mutation (disposable PG)",
     expect(setting.rows[0]?.setting_value).toBe("required");
     const audits = await pool.query(
       "SELECT 1 FROM audit_log WHERE action = 'approval.device_signature_policy_changed'",
+    );
+    expect(audits.rows).toHaveLength(0);
+  });
+
+  it("rolls back dual-control policy setMode when post-write mutation aborts (ZTR-1214)", async () => {
+    await pool.query(
+      `INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
+       VALUES ($1, 'single_operator', 1, now())
+       ON CONFLICT (setting_key) DO UPDATE
+       SET setting_value = 'single_operator', row_version = node_settings.row_version + 1, updated_at = now()`,
+      [DUAL_CONTROL_SETTING_KEY],
+    );
+    const execute = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor: (client: PoolClient) => ({
+        dualControlPolicy: createSqlDualControlPolicy(client, {
+          defaultMode: "single_operator",
+        }),
+      }),
+    });
+    await pool.query("ALTER TABLE admin_mutation_idempotency RENAME TO admin_mutation_idempotency_offline");
+    try {
+      await expect(
+        execute(
+          {
+            nodeId,
+            routeId: "admin_dual_control_policy",
+            idempotencyKey: `dual-control-policy-rollback-${randomUUID()}`,
+            fingerprint: fingerprint("a".repeat(64)),
+          },
+          async (ports) => {
+            await ports.dualControlPolicy.setMode!("two_human", {
+              actorId: "op-rollback",
+              nodeId,
+            });
+            return { outcome: "commit" as const, status: 200, responseBody: { mode: "two_human" } };
+          },
+        ),
+      ).rejects.toMatchObject({ code: "42P01" });
+    } finally {
+      await pool.query("ALTER TABLE admin_mutation_idempotency_offline RENAME TO admin_mutation_idempotency");
+    }
+    const setting = await pool.query<{ setting_value: string }>(
+      "SELECT setting_value FROM node_settings WHERE setting_key = $1",
+      [DUAL_CONTROL_SETTING_KEY],
+    );
+    expect(setting.rows[0]?.setting_value).toBe("single_operator");
+    const audits = await pool.query(
+      "SELECT 1 FROM audit_log WHERE action = 'ops.dual_control_mode_changed'",
     );
     expect(audits.rows).toHaveLength(0);
   });

@@ -95,11 +95,12 @@ import {
   type DeviceSqlExecutor,
   // Second-device enrol, dual-control policy, operator push
   InMemorySecondDeviceCeremonyStore,
-  fixedDualControlPolicy,
   InMemoryApprovalChallengeIssuerStore,
   InMemoryOperatorPushSubscriptionStore,
   createSqlDeviceSignaturePolicy,
+  createSqlDualControlPolicy,
   type DualControlMode,
+  type DualControlPolicyPort,
   type DeviceSignaturePolicyPort,
 } from "@zucoins/node-core";
 
@@ -371,8 +372,17 @@ export interface ProductionSurfaceConfig {
    * REQUIRED on purpose: an optional field resolved with `?? "single_operator"` let a
    * dropped caller wire silently downgrade a two_human deployment with tsc green and
    * every test passing. Dropping the wire is now a compile error at the call site.
+   *
+   * Used as the SQL policy defaultMode when the durable node_settings row is absent
+   * (pre-mutation). After a guarded POST the DB row is source of truth (ZTR-1214).
    */
   readonly dualControlMode: DualControlMode;
+  /**
+   * Dual-control policy port. Production wires SQL over node_settings; tests may
+   * inject InMemoryDualControlPolicy. When omitted, mount builds a SQL port from
+   * config.pool with defaultMode = dualControlMode.
+   */
+  readonly dualControlPolicy?: DualControlPolicyPort;
   /**
    * Additive device-signature policy port. Production wires SQL over node_settings;
    * tests may inject InMemoryDeviceSignaturePolicy. When omitted, mount builds a
@@ -718,11 +728,12 @@ export function createProductionRouteSurface(
   // Ceremony/issuer/push side-stores are process-local until a durable migration lands
   // (fail-soft / re-issue on restart OK).
   const secondDeviceCeremonyStore = new InMemorySecondDeviceCeremonyStore();
-  // Mode comes from the validated schema (config.DUAL_CONTROL_MODE), never from raw
-  // env here: an unrecognised value must have already refused boot rather than reach
-  // this constructor as the weaker mode. No `?? "single_operator"` — the schema owns
-  // the default, and a fallback here would re-open the downgrade one level up.
-  const dualControlPolicy = fixedDualControlPolicy(config.dualControlMode);
+  // Dual-control (ZTR-1214): durable node_settings row. Boot-validated dualControlMode
+  // is defaultMode when the row is absent (pre-mutation). No `?? "single_operator"` —
+  // the schema owns that default at the call site. Tests may inject InMemory.
+  const dualControlPolicy: DualControlPolicyPort =
+    config.dualControlPolicy ??
+    createSqlDualControlPolicy(config.pool, { defaultMode: config.dualControlMode });
   // Additive device-signature policy (ZTR-1143): durable node_settings row, fail closed.
   const deviceSignaturePolicy: DeviceSignaturePolicyPort =
     config.deviceSignaturePolicy ?? createSqlDeviceSignaturePolicy(config.pool);
@@ -876,12 +887,15 @@ export function createProductionRouteSurface(
         store: createNodeSettingsHaltStore(client),
         evidence: createNodeSettingsHaltEvidenceRecorder(client),
       };
-      // Device-signature policy writes must share the mutation PoolClient so a
-      // ROLLBACK undoes node_settings + audit_log with the idempotency row (ZTR-1143).
+      // Policy writes must share the mutation PoolClient so a ROLLBACK undoes
+      // node_settings + audit_log with the idempotency row (ZTR-1143 / ZTR-1214).
       // Prefer the TX SQL port over any injected process-level fixed/in-memory port:
       // production always uses SQL; tests that inject InMemory rebind via createTestAdminAtomicDeps.
       const txDeviceSignaturePolicy: DeviceSignaturePolicyPort =
         createSqlDeviceSignaturePolicy(client);
+      const txDualControlPolicy: DualControlPolicyPort = createSqlDualControlPolicy(client, {
+        defaultMode: config.dualControlMode,
+      });
       return {
         challengeStore: createSqlApprovalChallengeStore(client),
         sendDecisionStore: new SqlSendDecisionStore(client),
@@ -890,6 +904,7 @@ export function createProductionRouteSurface(
         halt: shadowHalt,
         credentialService: new CredentialService(new SqlCredentialStore(client, config.nodeId)),
         deviceSignaturePolicy: txDeviceSignaturePolicy,
+        dualControlPolicy: txDualControlPolicy,
       };
     },
   });

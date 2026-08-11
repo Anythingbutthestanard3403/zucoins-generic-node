@@ -20,6 +20,8 @@
 // mutation evidence in the PR body shows each typed assertion going red when its lock is removed.
 //
 // Connectivity: TEST_DATABASE_URL (root vitest.global-setup) or PG_REQUIRED fail-closed.
+// DB-TEST-03: second active lease fails including cross-operation-kind races
+
 
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -648,7 +650,7 @@ describe("receive-pool admission and reservation races (real PG / separate proce
   );
 
   it.skipIf(!live)(
-    "S3: a second lease on an already-leased wallet raises LeaseError[ALREADY_LEASED]",
+    "DB-TEST-03: second active lease fails including cross-operation-kind races (ALREADY_LEASED)",
     async () => {
       psqlMust(dbUrl, RESET_POOL);
       const first = OP(2500);

@@ -13,6 +13,9 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// DB-TEST-27: missing trusted restore source/markers lifecycle-epoch or nonce-high-water regression remain hard-held
+// DB-TEST-35: missing or unequal local/trusted lifecycle epoch nonce-burn high-water retains restore_hold
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
@@ -477,7 +480,7 @@ describe.skipIf(!PG_AVAILABLE)(
       if (workDir) await rm(workDir, { recursive: true, force: true });
     });
 
-    it("backup → restore forces auth_hold=true; restore_hold-only release keeps admission closed", async () => {
+    it("DB-TEST-27: missing trusted restore source/markers lifecycle-epoch or nonce-high-water regression remain hard-held", async () => {
       const backupPath = join(workDir, "open-auth.zbkp");
       await exportEncryptedBackup(dbUrl(sourceDb), backupPath, masterKey);
 
@@ -608,7 +611,7 @@ describe.skipIf(!PG_AVAILABLE)(
       }
     }, 90_000);
 
-    it("force auth-hold SQL shape rejects bare head UPDATE", () => {
+    it("DB-TEST-35: missing or unequal local/trusted lifecycle epoch nonce-burn high-water retains restore_hold", () => {
       const built = buildForceAuthHoldSetStatements({
         nodeId,
         implementerId,

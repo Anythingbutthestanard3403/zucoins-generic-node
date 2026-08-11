@@ -26,6 +26,8 @@
 //     and sign ∥ release on one group take locks in one order, never deadlock
 //
 // Connectivity: TEST_DATABASE_URL (vitest.global-setup) or PG_REQUIRED fail-closed.
+// DB-TEST-04: two-wallet acquisition is all-or-nothing and sorted
+
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -754,7 +756,7 @@ describe("lease-foundation real-PG behaviours", () => {
     }
   }, 120_000);
 
-  it("13/1/2/4/14/3/7/6/12: acquire, concurrent, release, ABA, sign, replay", async () => {
+  it("DB-TEST-04: two-wallet acquisition is all-or-nothing and sorted (acquire concurrent release)", async () => {
     if (!live) return;
 
     // Ensure foundation ready (prior test may have expanded)

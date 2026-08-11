@@ -6,6 +6,7 @@
 //
 //   node packages/node-core/test/live-chain/setup-live-db.mjs [database] # SEND
 //   node packages/node-core/test/live-chain/setup-live-db.mjs --receive [db] # RECEIVE
+//   node packages/node-core/test/live-chain/setup-live-db.mjs --move [db] # MOVE_INTERNAL
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -15,12 +16,18 @@ import { tmpdir } from "node:os";
 
 const args = process.argv.slice(2);
 const receive = args.includes("--receive");
+const move = args.includes("--move");
+if (receive && move) {
+  throw new Error("pass only one of --receive / --move");
+}
 const positional = args.filter((a) => !a.startsWith("--"));
 const db =
   positional[0] ??
-  (receive
-    ? (process.env.RECEIVE_EXECUTE_DATABASE ?? "receive_execute_live")
-    : (process.env.SEND_EXECUTE_DATABASE ?? "send_execute_live"));
+  (move
+    ? (process.env.MOVE_EXECUTE_DATABASE ?? "move_execute_live")
+    : receive
+      ? (process.env.RECEIVE_EXECUTE_DATABASE ?? "receive_execute_live")
+      : (process.env.SEND_EXECUTE_DATABASE ?? "send_execute_live"));
 const schemaDir = join(dirname(fileURLToPath(import.meta.url)), "../../src/schema");
 
 // Dependency order: domains/enums, then registry, then the tables that reference them.
@@ -63,7 +70,21 @@ const RECEIVE_FILES = [
   "signer-support",
 ];
 
-const FILES = receive ? RECEIVE_FILES : SEND_FILES;
+// MOVE_INTERNAL — dual-wallet path. Shares custody + operations + transaction-material
+// with SEND; move-internal-create / move-internal-landing supply the MOVE-specific tables.
+const MOVE_FILES = [
+  "base-enums-domains",
+  "node-implementer-registry",
+  "custody-eligibility",
+  "operations",
+  "transaction-material",
+  "submit-attempts",
+  "move-baseline-binding",
+  "move-observation-evidence",
+  "signer-support",
+];
+
+const FILES = move ? MOVE_FILES : receive ? RECEIVE_FILES : SEND_FILES;
 
 const psql = (database, args) =>
   execFileSync("psql", ["-d", database, "-v", "ON_ERROR_STOP=1", ...args], {

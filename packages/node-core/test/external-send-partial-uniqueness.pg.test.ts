@@ -1,4 +1,10 @@
+// DB-TEST-11: node code cannot create any submit attempt for SEND_EXTERNAL
 /**
+ * Governing (mandatory database test 11 / DB-TEST-11): node code cannot create any
+ * submit attempt for SEND_EXTERNAL — the SEND path has no node submit function; this
+ * suite proves the schema side of that rule (one partial / no second attempt under the
+ * same approval) against live PostgreSQL.
+ *
  * external-send-partial-uniqueness.pg.test.ts
  *
  * "no second external partial", proven against a REAL PostgreSQL database
@@ -413,7 +419,7 @@ describeIfPg(
       assertionsRun += 1;
     });
 
-    it("(h) operation_transactions structurally forbids a second attempt row, both ways (23505 / 23514)", () => {
+    it("DB-TEST-11: node code cannot create any submit attempt for SEND_EXTERNAL (second attempt forbidden)", () => {
       psqlMust(scratchDb, insertAttempt(OP_TX, 1, 30));
 
       const duplicate = runPsql(scratchDb, insertAttempt(OP_TX, 1, 31), true);

@@ -55,6 +55,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+// DB-TEST-14: node and platform use different observer rows and cannot import one another's cursor
+
 
 import type { SequenceCapture } from "@zucoins/generic-node-contracts/observation";
 
@@ -591,7 +593,7 @@ describeIfPg("observation verification two-independent-observations runtime gold
     runPsql(MAINTENANCE_DB, `DROP DATABASE IF EXISTS ${scratchDb} WITH (FORCE)`);
   });
 
-  it("one physical body → NODE + PLATFORM pipelines → two distinct rows, no shared cursor", async () => {
+  it("DB-TEST-14: node and platform use different observer rows and cannot import one another's cursor", async () => {
     const pk = nextWalletPk();
     const dual = makeDualCapturers(scratchDb, pk);
 

@@ -14,6 +14,8 @@
 // root vitest project.
 import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+// DB-TEST-01: imported wallet cannot become a destination
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -254,7 +256,7 @@ describe.skipIf(!TEST_DATABASE_URL)(
   "claim-boundary adversarial tests against real PostgreSQL",
   { timeout: 120_000 },
   () => {
-    it("#1 origin-only rejection — fully sink-eligible imported wallet fails purely on key_origin", async () => {
+    it("DB-TEST-01: imported wallet cannot become a destination — origin-only rejection", async () => {
       // Every other automatic-sink dimension is satisfied: recovery-verified, BLESSED
       // destination (planted via temporary trigger disable), AVAILABLE. Rejection must be
       // CUSTODY_LEASE_ORIGIN_REJECTED — not destination/recovery/state.

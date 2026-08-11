@@ -1,3 +1,5 @@
+// Deferred parent/child correlation for completed reporting mutations (DB-TEST-33/34).
+// Rows 21–26 / 30–32 / 36 are discharged in packages/node-core/test/mandatory-db-discharge-21-36.pg.test.ts.
 // §16.33 mandatory database test — deferred parent/child correlation for completed
 // reporting mutations, against a database built by the PRODUCTION migrator
 // (runMigrationsOnPool: reporting drizzle prefix + the money schema pack).
@@ -21,6 +23,9 @@
 // Connectivity: TEST_DATABASE_URL (vitest.global-setup provisions one) with a
 // registerPgRequiredGuard so PG_REQUIRED=1 cannot silently skip. Teardown drops only the
 // scratch database this file created.
+// DB-TEST-33: deferred route triggers reject pending parent / child without parent / nonce mismatch
+// DB-TEST-34: nonce/idempotency/arm/ack disagreement in method raw_target body digest fails
+
 
 import { createHash, randomUUID } from "node:crypto";
 
@@ -344,7 +349,7 @@ describe.skipIf(databaseUrl === undefined || databaseUrl === "")(
       expect(survivors.rowCount).toBe(0);
     });
 
-    it("rejects a parent and child whose reporting_nonce_id disagree", async () => {
+    it("DB-TEST-34: nonce/idempotency/arm/ack disagreement in method raw_target body digest fails", async () => {
       const s = await newScenario("nonce-split");
       const otherNonce = randomUUID();
       await insertNonce(otherNonce, "verification_complete", s.rawTarget, s.bodySha256);
@@ -404,7 +409,7 @@ describe.skipIf(databaseUrl === undefined || databaseUrl === "")(
       }
     });
 
-    it("rejects a child whose completion parent never lands", async () => {
+    it("DB-TEST-33: deferred route triggers reject pending parent / child without parent / nonce mismatch", async () => {
       const s = await newScenario("orphan-child");
       const outcome = await commitInOneTransaction([[INSERT_ACK, ackParams(s)]]);
       expect(outcome.committed).toBe(false);

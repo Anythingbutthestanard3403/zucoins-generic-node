@@ -207,5 +207,9 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     setupFiles: [fileURLToPath(new URL("./test/setup-network-guard.ts", import.meta.url))],
+    // Same hermetic TEST_DATABASE_URL provisioner apps/generic-node uses. Without this,
+    // standalone `pnpm exec vitest run --config packages/node-core/vitest.config.ts …`
+    // leaves PG suites on describe.skip and greens having proven nothing (ZTR-1173 r3).
+    globalSetup: [fileURLToPath(new URL("../../vitest.global-setup.ts", import.meta.url))],
   },
 });

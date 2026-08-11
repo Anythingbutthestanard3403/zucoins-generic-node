@@ -9,6 +9,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// DB-TEST-29: reporting key identities accept only id node_id implementer_id public_key registered_at
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";
@@ -376,7 +378,7 @@ describe.skipIf(databaseUrl === undefined)("against a live PostgreSQL", () => {
       .split("\n")
       .filter(Boolean);
 
-  it("materializes exactly the columns for both tables", (ctx) => {
+  it("DB-TEST-29: reporting key identities accept only id node_id implementer_id public_key registered_at", (ctx) => {
     if (!reachable) ctx.skip();
     expect(columns("implementer_reporting_keys")).toEqual([
       "id",

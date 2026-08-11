@@ -21,6 +21,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// DB-TEST-15: observation/event/audit append-only triggers reject update and delete
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -236,7 +238,7 @@ describe.skipIf(databaseUrl === undefined)("against a live PostgreSQL", () => {
 
   // --- node_events (mandatory DB test 15, "event") -------------------------------------------
 
-  it("D4: UPDATE of a signed event column is rejected by the trigger", (ctx) => {
+  it("DB-TEST-15: observation/event/audit append-only triggers reject update and delete", (ctx) => {
     if (!reachable) ctx.skip();
     const result = run(
       EVENT_SCHEMA,

@@ -23,6 +23,8 @@
  */
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFileSync } from "node:fs";
+// DB-TEST-06: one idempotency key with different request hash is conflict never replay success
+
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -421,7 +423,7 @@ describeIfPg("MOVE_INTERNAL admission — real frozen DDL against real PostgreSQ
     assertionsRun += 1;
   });
 
-  it("rejects a duplicate idempotency scope with unique_violation (23505)", () => {
+  it("DB-TEST-06: one idempotency key with different request hash is conflict never replay success", () => {
     const duplicate = runPsql(
       scratchDb,
       rawOperationInsert({

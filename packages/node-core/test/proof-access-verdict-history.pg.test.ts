@@ -42,6 +42,10 @@
 //
 // Connectivity: TEST_DATABASE_URL or PG_REQUIRED fail-closed. Teardown drops only
 // databases this file created (proof_access_verdict_ prefix).
+// DB-TEST-16: verification-complete conflicting replay fails and cannot release the wallet
+// DB-TEST-18: gap cycle duplicate body/signature conflicting body cannot create landed verdict; missing completed SEND body
+// DB-TEST-19: UNEXPLAINED_JUMP observation remains immutable; COMPLETE_PATH_SUCCESSOR only via adjudication
+
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -848,7 +852,7 @@ describe.skipIf(!serverReachable)("proof access + immutable verdict history (rea
 
   /* ── mandatory database test 16 — conflicting replay ──────────────────────────── */
 
-  it("rejects a conflicting verification-complete replay and cannot release the wallet", async () => {
+  it("DB-TEST-16: verification-complete conflicting replay fails and cannot release the wallet", async () => {
     const set = seedOperationSet(url);
     const leg = prepareLeg({
       rawTarget: set.receiveTarget,
@@ -1110,7 +1114,7 @@ describe.skipIf(!serverReachable)("proof access + immutable verdict history (rea
 
   /* ── UNEXPLAINED_JUMP immutability (test 19 half) ──────────────── */
 
-  it("keeps an UNEXPLAINED_JUMP observation immutable (no UPDATE path)", () => {
+  it("DB-TEST-19: UNEXPLAINED_JUMP observation remains immutable; COMPLETE_PATH_SUCCESSOR only via adjudication", () => {
     const before = psqlMust(
       url,
       `SELECT relationship FROM gateway_observations WHERE id = '${OBS_JUMP}'`,
@@ -1204,7 +1208,7 @@ describe.skipIf(!serverReachable)("proof access + immutable verdict history (rea
 
   /* ── lineage path CHECKs (tests 17–18 structural half) ─────────── */
 
-  it("round-trips zero-depth path bodies byte-exact (path_depth = body_count - 1)", () => {
+  it("DB-TEST-17: zero-depth and arbitrary-depth path bodies/manifests round-trip exactly", () => {
     const set = seedOperationSet(url);
     const landingId = randomUUID();
     const pathId = randomUUID();
@@ -1367,7 +1371,7 @@ describe.skipIf(!serverReachable)("proof access + immutable verdict history (rea
     expect(dup.ok).toBe(false);
   });
 
-  it("never creates an adjudication row for an INDETERMINATE landing proof path", () => {
+  it("DB-TEST-18: gap cycle duplicate body/signature conflicting body; missing completed SEND body", () => {
     const set = seedOperationSet(url);
     const landingId = randomUUID();
     const pathId = randomUUID();

@@ -18,6 +18,8 @@
 // psql runs as a child process (node:child_process), which keeps the in-process
 // network-containment guard intact — as migration-integrity.test.ts and
 // node-implementer-registry.pg.test.ts already do.
+// DB-TEST-10: second transaction attempt submit decision or submit call for one operation fails
+
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -263,7 +265,7 @@ describe.skipIf(databaseUrl === undefined)(
       expect(second.claim.attemptId).toBe(authorization.submitDecisionId);
     });
 
-    it("a second submit_decisions row for one attempt is a UNIQUE violation, not an app check", async () => {
+    it("DB-TEST-10: second transaction attempt submit decision or submit call for one operation fails", async () => {
       const authorization = await seedOperation();
       await makeSubmitDecisionClaimStore(query).claimSubmitOnce({
         attemptId: authorization.submitDecisionId,

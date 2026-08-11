@@ -6,6 +6,8 @@
 //     reporting table (0 private/seed columns);
 //   * list() surfaces the public identity + derived status and never the seed;
 //   * a second issue finds the credential already ACTIVE and fails closed (409-mapped code).
+// DB-TEST-28: exact raw target request preimage/digest/signature exact-body digest survive round-trip
+
 
 import { execFileSync } from "node:child_process";
 import {
@@ -173,7 +175,7 @@ describe.skipIf(!PG_AVAILABLE)("reporting-credential service (public-only persis
     }
   });
 
-  it("issue returns the raw seed once, byte-equal to the ceremony's minted key, persisting public only", async () => {
+  it("DB-TEST-28: exact raw target request preimage/digest/signature exact-body digest survive round-trip", async () => {
     const issued = await issueReportingCredential(pool, {
       nodeId: NODE_ID,
       implementerId: IMPLEMENTER_ID,

@@ -1,9 +1,12 @@
 // Genesis reporting-key enrolment → READY→ARM→RELEASED offline E2E.
+// Competing rotation / admission-vs-revocation race (DB-TEST-23) lives in
+// packages/node-core/test/mandatory-db-discharge-21-36.pg.test.ts.
 //
 // AC:
 //  1. enrolBootstrapReportingKey produces ACTIVE lifecycle + open restore without replica.
 //  2. createProductionRouteSurface ARM with five reporting headers RELEASES code.
 //  3. Evidence/logs assertion surface: transfer_code_sha256 only (never private seed or full code).
+
 
 import { execFileSync } from "node:child_process";
 import {

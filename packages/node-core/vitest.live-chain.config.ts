@@ -25,7 +25,7 @@ export default defineConfig({
   resolve: base.resolve,
   test: {
     include: ["test/live-chain/**/*.live.test.ts"],
-    passWithNoTests: true,
+    passWithNoTests: false,
     fileParallelism: false,
     pool: "forks",
     poolOptions: { forks: { singleFork: true } },

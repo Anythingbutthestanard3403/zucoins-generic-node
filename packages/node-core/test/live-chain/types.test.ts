@@ -1,10 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createGatewayClient,
+  createGatewayReadCredentials,
+  createGatewaySubmitCredentials,
+} from "../../src/gateway/index.js";
+import type { GatewayResponse } from "../../src/protocol/index.js";
+import type { GatewaySubmitTransport } from "../../src/gateway/types.js";
+
+import {
   amountWithinTolerance,
   compareAmounts,
+  enableGatewaySubmit,
+  GatewayConfigurationError,
   signedDelta,
   subtractAmounts,
+  type GatewaySubmitCapability,
 } from "./types.js";
 
 describe("compareAmounts", () => {
@@ -35,5 +46,55 @@ describe("subtractAmounts / signedDelta", () => {
   it("amountWithinTolerance respects the bound", () => {
     expect(amountWithinTolerance("0.000001", "0.000001", "0")).toBe(true);
     expect(amountWithinTolerance("0.000001", "0.01", "0")).toBe(false);
+  });
+});
+
+const RESPONSE: GatewayResponse = {
+  statusCode: 200,
+  bodyBytes: Uint8Array.from([4, 5, 6]),
+};
+
+function submitTransport(): GatewaySubmitTransport {
+  return {
+    credentials: createGatewaySubmitCredentials(),
+    submit: async () => RESPONSE,
+  };
+}
+
+function readTransport() {
+  return {
+    credentials: createGatewayReadCredentials(),
+    read: async () => RESPONSE,
+  };
+}
+
+describe("D10.4 branded submit capability (live-chain surface)", () => {
+  it("enableGatewaySubmit mints a capability the gateway client accepts", () => {
+    const cap = enableGatewaySubmit(submitTransport());
+    expect(cap.enabled).toBe(true);
+    const client = createGatewayClient({
+      gatewayUrls: "https://gateway.example/",
+      readTransport: readTransport(),
+      submitCapability: cap,
+    });
+    expect(client.canSubmit).toBe(true);
+  });
+
+  it("a plain object cannot forge the submit capability brand", () => {
+    const forged = {
+      enabled: true,
+      transport: submitTransport(),
+    } as unknown as GatewaySubmitCapability;
+    expect(() =>
+      createGatewayClient({
+        gatewayUrls: "https://gateway.example/",
+        readTransport: readTransport(),
+        submitCapability: forged,
+      }),
+    ).toThrow(GatewayConfigurationError);
+  });
+
+  it("enableGatewaySubmit rejects an absent transport", () => {
+    expect(() => enableGatewaySubmit(undefined as never)).toThrow(GatewayConfigurationError);
   });
 });

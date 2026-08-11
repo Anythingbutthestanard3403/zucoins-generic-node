@@ -129,3 +129,18 @@ export interface MoveInternalPlan {
   readonly amount: Amount;
   readonly authorization: DualControlAuthorization;
 }
+
+
+// ─── D10.4 branded submit capability (located, not re-implemented) ───────────
+//
+// Doc 11 §10 / D10.4 / ZTR-799: the live-chain approval gate is retired. Submit still
+// requires a branded capability issued by `enableGatewaySubmit` at construction — a
+// plain `{ enabled: true, transport }` object cannot forge the brand (see
+// `packages/node-core/src/gateway/client.ts` and `packages/node-core/src/gateway/types.ts`).
+// Live adapters import the production mint rather than inventing a second brand.
+export {
+  enableGatewaySubmit,
+  GatewaySubmitDisabledError,
+  GatewayConfigurationError,
+} from "../../src/gateway/client.js";
+export type { GatewaySubmitCapability } from "../../src/gateway/types.js";

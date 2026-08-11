@@ -2,6 +2,8 @@
 
 **Claim:** lane=implementer run=74ef996b-3060-4d38-8ac6-c5053c3a78c9  
 **Branch:** `ztr-1146-closed-events-tenant-stream`  
+**PR:** #56  
+**Head SHA:** `ff785ff3d9bbfe59b2440ed7c073c502461ce5de`  
 **Governing spec:** Appendix B durable public events (closed nine); doc 05 §8.1 implementer stream; dual continuity via `event-log/dual-chain-appender.ts`.
 
 ## Acceptance criteria

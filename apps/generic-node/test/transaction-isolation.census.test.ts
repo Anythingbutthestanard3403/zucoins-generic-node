@@ -567,14 +567,15 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       site: "createPoolSqlTransactionRunner (SqlProofBodyStore)",
       pathClass: "other",
       isolation: "READ COMMITTED",
-      mechanism: "NONE",
+      mechanism: "ROW_LOCK",
       covering:
         "SqlProofBodyStore persists CANDIDATE evidence and is explicitly non-authority " +
-        "(proof-body/sql-store.ts:26-28): no statement sets a verdict, records a landing, or " +
-        "releases a lease. KNOWN OPEN OBLIGATION: that store's contract asks the composition " +
-        "root for a per-(path_proof_id) advisory lock around cap-read / insert / increment " +
-        "(proof-body/sql-store.ts:29-33) and this runner takes none. The exposure is a " +
-        "storage-cap overshoot, not a double-apply — tracked separately, not fixed here.",
+        "(proof-body/sql-store.ts): no statement sets a verdict, records a landing, or " +
+        "releases a lease. Inside the TX, persistProofBody → lockPathProofId issues " +
+        "`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))` keyed on " +
+        "path_proof_id (STATEMENTS.ADVISORY_LOCK_PATH_PROOF) before cap-read / insert / " +
+        "increment, serializing concurrent same-path_proof_id persists (ZTR-1211). " +
+        "Per-tenant / idempotency-tuple residuals remain documented soft bounds.",
       pinned: "pool.connect() → BEGIN → body(sql) → COMMIT on one client",
     },
   ],

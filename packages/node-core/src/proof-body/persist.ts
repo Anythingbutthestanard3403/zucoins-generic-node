@@ -121,6 +121,12 @@ export interface ProofBodyStore {
   countByRole(tenantId: string, role: string): Promise<number>;
   totalBytesByTenant(tenantId: string): Promise<number>;
   findByIdempotencyKey(tenantId: string, operationId: string, key: string): Promise<StoredProofBody | null>;
+  /**
+   * Optional composition-root fence: take a transaction-scoped advisory lock keyed on
+   * path_proof_id before the cap-read / insert / increment sequence. SqlProofBodyStore
+   * implements this via pg_advisory_xact_lock; in-memory doubles omit it.
+   */
+  lockPathProofId?(pathProofId: string): Promise<void>;
 }
 
 /** Composition-owned transaction boundary. The callback receives a transaction-scoped
@@ -164,6 +170,13 @@ async function persistProofBodyInTransaction(
 ): Promise<PersistProofBodyResult> {
   const { accepted, identity, path_proof_id, idempotency_key } = request;
   const { body, rawSha256 } = accepted;
+
+  // Serialize concurrent persists for this path_proof_id (slot cap-read / insert /
+  // sighting increment). Durable SqlProofBodyStore takes pg_advisory_xact_lock here
+  // inside the composition-root transaction; doubles without the method skip it.
+  if (store.lockPathProofId !== undefined) {
+    await store.lockPathProofId(path_proof_id);
+  }
 
   // 1. Idempotent retry: same key already seen (scoped to tenant + operation).
   const existingByKey = await store.findByIdempotencyKey(identity.tenant_id, identity.operation_id, idempotency_key);

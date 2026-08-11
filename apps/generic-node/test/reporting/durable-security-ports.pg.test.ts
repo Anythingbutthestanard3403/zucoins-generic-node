@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client, Pool } from "pg";
 
 import {
+  MAX_SIGHTINGS_PER_BODY,
   SqlProofBodyStore,
   handleGetVerificationMaterial,
   persistProofBody,
@@ -242,6 +243,99 @@ describe.skipIf(!PG_AVAILABLE)("durable reporting security ports (real PostgreSQ
     expect((await new SqlVerificationAccessStore(pool).read(row.operation_id, 30_000))?.status).toBe("OPEN");
     await access.revoke(row.operation_id, new Date(40_000));
     expect((await new SqlVerificationAccessStore(pool).read(row.operation_id, 30_000))?.status).toBe("REVOKED");
+  });
+
+  it("ZTR-1211: concurrent same-path_proof_id persists serialize — no slot-cap overshoot", async () => {
+    // Seed one body + slot counter at MAX-1, then race N duplicate-byte resubmits.
+    // Without pg_advisory_xact_lock on path_proof_id every racer can read cap-1 and
+    // increment past MAX_SIGHTINGS_PER_BODY. With the lock, final count stays at MAX.
+    const pathProofId = randomUUID();
+    const tenantId = randomUUID();
+    const operationId = randomUUID();
+    const bodyText = '{"ztr1211":"cap-race"}';
+    const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+    const bodySha = sha(bodyText);
+    const rawBytes = new TextEncoder().encode(bodyText);
+    const rawSha = sha(bodyText);
+    const padSig = `${"A".repeat(86)}==`;
+    const store = new SqlProofBodyStore(
+      createPoolSqlExecutor(pool),
+      createPoolSqlTransactionRunner(pool),
+    );
+    const baseAccepted = {
+      accepted: true as const,
+      body: {
+        path_index: 0,
+        source_kind: "PROOF_CHANNEL" as const,
+        completed_transaction_text: bodyText,
+        completed_transaction_sha256: bodySha,
+        completed_transaction_octets: Buffer.byteLength(bodyText),
+        wallet_role: "sender" as const,
+        s_signature: padSig,
+        p_signature: "",
+        b_amount: "0",
+        inner_preimage_text: '{"inner":true}',
+        inner_sha256: sha('{"inner":true}'),
+        step_1_signature: padSig,
+        step_2_signature: padSig,
+        verification_manifest_text: "[]",
+        verification_manifest_sha256: sha("[]"),
+      },
+      rawBytes,
+      rawSha256: rawSha,
+    };
+    const first = await persistProofBody(store, {
+      accepted: baseAccepted,
+      identity: { tenant_id: tenantId, operation_id: operationId, wallet_role: "sender" },
+      path_proof_id: pathProofId,
+      idempotency_key: "seed-0",
+    });
+    expect(first.persisted).toBe(true);
+
+    // Drive the slot counter to MAX-1 without 99 full persists.
+    await pool.query(
+      `INSERT INTO proof_body_slot_sighting_counters (path_proof_id, path_index, sighting_count)
+       VALUES ($1::uuid, 0, $2)
+       ON CONFLICT (path_proof_id, path_index) DO UPDATE
+         SET sighting_count = EXCLUDED.sighting_count`,
+      [pathProofId, MAX_SIGHTINGS_PER_BODY - 1],
+    );
+    // Keep tenant counter below its own cap so only the slot cap can fire.
+    await pool.query(
+      `INSERT INTO proof_body_tenant_sighting_counters (tenant_id, sighting_count)
+       VALUES ($1::uuid, $2)
+       ON CONFLICT (tenant_id) DO UPDATE SET sighting_count = EXCLUDED.sighting_count`,
+      [tenantId, MAX_SIGHTINGS_PER_BODY - 1],
+    );
+
+    const concurrency = 12;
+    const results = await Promise.all(
+      Array.from({ length: concurrency }, (_, i) =>
+        persistProofBody(store, {
+          accepted: baseAccepted,
+          identity: { tenant_id: tenantId, operation_id: operationId, wallet_role: "sender" },
+          path_proof_id: pathProofId,
+          idempotency_key: `race-${i}`,
+        }),
+      ),
+    );
+
+    const accepted = results.filter((r) => r.persisted);
+    const rejected = results.filter((r) => !r.persisted);
+    // Exactly one racer may take the last slot; the rest must fail closed at the cap.
+    expect(accepted.length).toBe(1);
+    expect(rejected.length).toBe(concurrency - 1);
+    for (const r of rejected) {
+      if (!r.persisted) {
+        expect(r.reason).toBe("QUOTA_EXCEEDED");
+        expect(r.detail).toContain("MAX_SIGHTINGS_PER_BODY");
+      }
+    }
+    const slotCount = await new SqlProofBodyStore(createPoolSqlExecutor(pool)).countSightingsBySlot(
+      pathProofId,
+      0,
+    );
+    expect(slotCount).toBe(MAX_SIGHTINGS_PER_BODY);
   });
 
   it("rolls back exact body and both sighting counters after every injected statement failure", async () => {

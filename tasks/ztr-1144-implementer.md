@@ -1,6 +1,6 @@
 # ZTR-1144 implementer
 
-**HEAD:** `568ad912f4516445c55215e3eceb55098755637d`
+**HEAD:** `64b146f7be93b1a89b317b31e480bdc12d193214`
 **Branch:** `ztr-1144-alert-bindings`
 **Base:** `origin/main` @ `db3f5f0`
 
@@ -20,7 +20,7 @@
 - [x] E2E test: inject breach → P0 webhook POST (`metrics-custody-alerts-bindings.test.ts`)
 - [x] Alert rules committed + operator docs regenerated
 
-## Verify @ 568ad912f4516445c55215e3eceb55098755637d
+## Verify @ 64b146f7be93b1a89b317b31e480bdc12d193214
 - `tsc -b`: clean
 - `@zucoins/node-core` vitest safety-alerts + metrics: **61 passed**
 - `apps/generic-node` vitest custody bindings + custody alerts + operator docs census + snapshot-source: **71 passed**

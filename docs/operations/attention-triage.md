@@ -186,6 +186,21 @@ state or leases.
 
 **Never.** Release the lease. Un-quarantine. Rebuild. Restart to clear it.
 
+### MOVE parked severity upgrade (ZTR-1222)
+
+While a `MOVE_INTERNAL` is already parked with `attention_required=true` and
+`status=NEEDS_ATTENTION`, later reconcile ticks do **not** re-append equal-severity
+parks (no spam, no status edge). A **higher** parking severity does upgrade in place:
+
+- `INDETERMINATE` (e.g. `VERIFICATION_INDETERMINATE`) → `INVARIANT_BREACH`
+  (e.g. `LEASE_INVARIANT_VIOLATION`) updates `attention_reason` / `attention_detail`,
+  increments `attention_episode`, appends one dual-chain `operation.needs_attention`
+  event, and fires the P0 `invariant_breach` metric.
+- Equal or lower severity is a no-op hold. Severity never downgrades.
+- `LANDED_VERIFIED` still proceeds through the normal landing path.
+- Operator retraction (`attention_required=false`, status still `NEEDS_ATTENTION`)
+  still re-raises on the next park (ZTR-1223); that path is unchanged.
+
 ## EXACT_BYTES_UNAVAILABLE
 
 **Caused by.** A `MALFORMED_BODY` during path verification, or — far more seriously — expected

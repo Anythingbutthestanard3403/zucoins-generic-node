@@ -296,6 +296,45 @@ function buildMoveNeedsAttentionEventData(
   });
 }
 
+
+/**
+ * Severity rank for MOVE parking verdicts while status stays NEEDS_ATTENTION (ZTR-1222
+ * Option B). Higher wins; equal or lower is a no-op hold so ticks never spam events or
+ * downgrade a breach classification back to indeterminate.
+ */
+function moveParkingSeverity(kind: MoveParkingOutcome["kind"]): number {
+  switch (kind) {
+    case "INDETERMINATE":
+      return 1;
+    case "INVARIANT_BREACH":
+      return 2;
+  }
+}
+
+/**
+ * Recover the parked severity from the live attention columns. Prefer the kind prefix
+ * stamped into attention_detail (`${kind} ${JSON.stringify(reason)}`); fall back to the
+ * closed attention_reason so a breach-class reason still outranks a mild re-tick when
+ * detail is missing.
+ */
+function storedMoveParkingSeverity(
+  attentionDetail: string | null | undefined,
+  attentionReason: string | null | undefined,
+): number {
+  if (typeof attentionDetail === "string") {
+    if (attentionDetail.startsWith("INVARIANT_BREACH")) return moveParkingSeverity("INVARIANT_BREACH");
+    if (attentionDetail.startsWith("INDETERMINATE")) return moveParkingSeverity("INDETERMINATE");
+  }
+  if (
+    attentionReason === "LEASE_INVARIANT_VIOLATION" ||
+    attentionReason === "EXACT_BYTES_UNAVAILABLE"
+  ) {
+    return moveParkingSeverity("INVARIANT_BREACH");
+  }
+  // Unknown / mild / missing → indeterminate floor so a later INVARIANT_BREACH can upgrade.
+  return moveParkingSeverity("INDETERMINATE");
+}
+
 /** Convert a FreshHeadRead to a MoveBaselineObservationOutcome. */
 function freshHeadToOutcome(read: FreshHeadRead, walletPublicKey: string): MoveBaselineObservationOutcome {
   const envelope = read.envelope;
@@ -748,12 +787,20 @@ export function createMoveAdvancedPorts(
 
           const opRows = await txQuery(
             `SELECT status::text AS status, row_version::text AS rv,
-                    attention_required
+                    attention_required,
+                    attention_reason::text AS attention_reason,
+                    attention_detail
                FROM operations WHERE id = $1::uuid`,
             [operationId],
           );
           const op = opRows[0] as
-            | { status: string; rv: string; attention_required: boolean }
+            | {
+                status: string;
+                rv: string;
+                attention_required: boolean;
+                attention_reason: string | null;
+                attention_detail: string | null;
+              }
             | undefined;
           if (op === undefined) {
             await client.query("ROLLBACK");
@@ -769,12 +816,152 @@ export function createMoveAdvancedPorts(
           // Re-park guard keys on attention_required (the live flag), not status
           // (ZTR-1223). Operator retraction clears attention_required while leaving
           // status='NEEDS_ATTENTION'; a subsequent ambiguous tick must be able to re-raise.
-          // While the flag is still raised, a non-landing verdict is a no-op hold: the
-          // frozen MOVE_INTERNAL table has no NEEDS_ATTENTION → NEEDS_ATTENTION edge, and
-          // re-appending would throw once per tick.
+          // While the flag is still raised, equal-or-lower severity is a no-op hold (ZTR-1222
+          // Option B): the frozen MOVE_INTERNAL table has no NEEDS_ATTENTION → NEEDS_ATTENTION
+          // edge, so we never call persistMoveOutcome again. A *higher* parking severity
+          // (INDETERMINATE → INVARIANT_BREACH) upgrades reason/detail/episode + dual-chain
+          // event without a status edge — never a downgrade.
           if (outcome.kind !== "LANDED_VERIFIED" && attentionRequired) {
-            await client.query("ROLLBACK");
-            return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
+            const parkingOutcome = outcome as MoveParkingOutcome;
+            const currentSeverity = storedMoveParkingSeverity(
+              op.attention_detail,
+              op.attention_reason,
+            );
+            const nextSeverity = moveParkingSeverity(parkingOutcome.kind);
+            if (nextSeverity <= currentSeverity) {
+              await client.query("ROLLBACK");
+              return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
+            }
+
+            // Severity-monotonic attention upgrade (ZTR-1222 Option B). Status stays
+            // NEEDS_ATTENTION; only attention columns + dual-chain event advance.
+            const seqInfoUpgrade = await lockNextEventSeq(txQuery, deps.nodeId);
+            const nowIsoUpgrade = new Date().toISOString();
+            const dataTextUpgrade = buildMoveNeedsAttentionEventData(
+              parkingOutcome,
+              nowIsoUpgrade,
+            );
+            const dataSha256Upgrade = sha256HexUtf8(dataTextUpgrade);
+            const nodeEventInputUpgrade: NodeEventInput = {
+              node_id: parseUuid(deps.nodeId),
+              event_id: parseUuid(crypto.randomUUID()),
+              seq: seqInfoUpgrade.seq.toString(),
+              operation_id: parseUuid(operationId),
+              wallet_id: null,
+              event_type: "operation.needs_attention",
+              data_sha256: parseSha256Hex(dataSha256Upgrade),
+              previous_event_hash:
+                seqInfoUpgrade.previousEventHash === null
+                  ? null
+                  : parseSha256Hex(seqInfoUpgrade.previousEventHash),
+              created_at: nowIsoUpgrade,
+            };
+            const preimageUpgrade = buildNodeEvent(nodeEventInputUpgrade);
+            const signedUpgrade = await nodeIdentitySigner.signWithNodeIdentity(
+              preimageUpgrade.preimageBytes,
+            );
+            const eventHashUpgrade = computeEventLogNodeEventHash(
+              preimageUpgrade.preimageText,
+              signedUpgrade.signature,
+            );
+            const eventUpgrade: SignedNodeEvent = {
+              seq: nodeEventInputUpgrade.seq,
+              eventId: nodeEventInputUpgrade.event_id,
+              nodeId: nodeEventInputUpgrade.node_id,
+              walletId: null,
+              eventType: "operation.needs_attention",
+              dataText: dataTextUpgrade,
+              dataSha256: dataSha256Upgrade,
+              preimageText: preimageUpgrade.preimageText,
+              preimageSha256: preimageUpgrade.sha256,
+              signingKeyId: signedUpgrade.signingKeyId,
+              signature: signedUpgrade.signature,
+              previousEventHash: seqInfoUpgrade.previousEventHash,
+              eventHash: eventHashUpgrade,
+            };
+
+            const attentionReasonUpgrade = toAttentionReason(parkingOutcome.reason);
+            const attentionDetailUpgrade =
+              `${parkingOutcome.kind} ${JSON.stringify(parkingOutcome.reason)}`;
+            const upgraded = await txQuery(
+              `UPDATE operations
+                  SET attention_reason = $2::attention_reason,
+                      attention_detail = $3,
+                      attention_episode = attention_episode + 1,
+                      row_version = row_version + 1,
+                      updated_at = $4::timestamptz
+                WHERE id = $1::uuid
+                  AND kind = 'MOVE_INTERNAL'
+                  AND status = 'NEEDS_ATTENTION'
+                  AND attention_required = true
+                  AND row_version = $5::bigint
+              RETURNING id`,
+              [
+                operationId,
+                attentionReasonUpgrade,
+                attentionDetailUpgrade,
+                nowIsoUpgrade,
+                Number(op.rv),
+              ],
+            );
+            if (upgraded[0] === undefined) {
+              await client.query("ROLLBACK");
+              return { ok: false, reason: "persist: PRECONDITION_UNMET", holdReconcile: true };
+            }
+
+            await txQuery(
+              `INSERT INTO node_events
+                 (seq, event_id, canonical_version, node_id, operation_id, wallet_id, event_type,
+                  data_text, data_sha256, preimage_text, preimage_sha256, signing_key_id, signature,
+                  previous_event_hash, event_hash, created_at)
+               VALUES
+                 ($1::bigint, $2::uuid, 1, $3::uuid, $4::uuid, NULL, $5::text,
+                  $6::text, $7::text, $8::text, $9::text, $10::uuid, $11::text,
+                  $12::text, $13::text, $14::timestamptz)`,
+              [
+                eventUpgrade.seq,
+                eventUpgrade.eventId,
+                eventUpgrade.nodeId,
+                operationId,
+                eventUpgrade.eventType,
+                eventUpgrade.dataText,
+                eventUpgrade.dataSha256,
+                eventUpgrade.preimageText,
+                eventUpgrade.preimageSha256,
+                eventUpgrade.signingKeyId,
+                eventUpgrade.signature,
+                eventUpgrade.previousEventHash,
+                eventUpgrade.eventHash,
+                nowIsoUpgrade,
+              ],
+            );
+
+            const identityUpgrade = deps.nodeIdentitySigner();
+            if (identityUpgrade === null) throw new Error("node identity signer unavailable");
+            await appendImplementerEventLeg(txQuery, {
+              nodeId: deps.nodeId,
+              implementerId: details.implementerId,
+              eventId: eventUpgrade.eventId,
+              eventType: eventUpgrade.eventType,
+              operationId,
+              walletId: null,
+              dataSha256: dataSha256Upgrade,
+              nodeEventHash: eventUpgrade.eventHash,
+              createdAt: nowIsoUpgrade,
+              signer: asSyncEventSigner(identityUpgrade),
+            });
+
+            await advanceEventSeq(txQuery, deps.nodeId, seqInfoUpgrade.seq);
+            await client.query("COMMIT");
+            // Durable INVARIANT_BREACH classification → P0 metric (ZTR-1144 dual-FAIL D1/D2).
+            if (parkingOutcome.kind === "INVARIANT_BREACH") {
+              deps.metricsHooks?.onInvariantBreach();
+            }
+            deps.logger.info(
+              `move reconcile: op=${operationId} severity-upgraded attention outcome=${parkingOutcome.kind} ` +
+                `reason=${attentionReasonUpgrade}`,
+            );
+            return { ok: false, reason: `reconcile: ${parkingOutcome.kind}`, holdReconcile: true };
           }
 
           const seqInfo = await lockNextEventSeq(txQuery, deps.nodeId);

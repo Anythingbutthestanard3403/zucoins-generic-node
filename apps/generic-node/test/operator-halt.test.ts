@@ -72,6 +72,7 @@ describe("operator halt", () => {
     readiness.markSchemaMigrated();
     readiness.setVaultAvailable(true);
     readiness.recordObservationReadSuccess();
+    readiness.setEventSignerAvailable(true);
     const bp = createStorageBackpressure();
     const gate = createHaltGate(RUNNING);
     const ports = createMoneyPathAdmissionPortsFromRuntime({

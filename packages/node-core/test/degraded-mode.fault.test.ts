@@ -160,6 +160,8 @@ function healthyReadiness(budget = 3): NodeCoreReadinessState {
   state.setVaultAvailable(true);
   state.recordObservationReadSuccess();
   state.setLeadershipHeld(true);
+  // Money admission is fail-closed on event signer until arm (ZTR-1221).
+  state.setEventSignerAvailable(true);
   return state;
 }
 
@@ -1751,6 +1753,24 @@ describe("money-admission production gate", () => {
     expect(() =>
       assertNewMoneyWorkAdmitted({ ...base, vaultKeyRingLoaded: false }, true),
     ).toThrow(/vault_unavailable/);
+    expect(() =>
+      assertNewMoneyWorkAdmitted({ ...base, eventSignerAvailable: false }, true),
+    ).toThrow(/event_signer_unavailable/);
+  });
+
+  it("default NodeCoreReadinessState (no ensure) refuses money even when other gates open (ZTR-1221)", () => {
+    const state = new NodeCoreReadinessState({ observationFailureBudget: 3 });
+    state.markSchemaMigrated();
+    state.setVaultAvailable(true);
+    state.recordObservationReadSuccess();
+    state.setLeadershipHeld(true);
+    // eventSignerAvailable remains default false
+    expect(state.snapshot().eventSignerAvailable).toBe(false);
+    expect(() => assertNewMoneyWorkAdmitted(state.snapshot(), true)).toThrow(
+      /event_signer_unavailable/,
+    );
+    state.setEventSignerAvailable(true);
+    expect(() => assertNewMoneyWorkAdmitted(state.snapshot(), true)).not.toThrow();
   });
 });
 

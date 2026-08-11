@@ -643,6 +643,7 @@ describe("deployment scenario 8 — restart (re-run from step 1, no stale state)
       leadership: true,
       gateway: true,
       eventSigner: true,
+      restoreHoldClear: true,
     });
   });
 

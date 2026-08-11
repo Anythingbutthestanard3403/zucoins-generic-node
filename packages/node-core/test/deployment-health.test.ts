@@ -42,6 +42,7 @@ function fullyStamped(state: NodeCoreReadinessState, leadership = true): void {
   state.markSchemaMigrated();
   state.setVaultAvailable(true);
   state.recordObservationReadSuccess();
+  state.setRestoreHoldClear(true);
   state.setLeadershipHeld(leadership);
 }
 
@@ -174,6 +175,7 @@ describe("fault matrix 1 — boot sequence", () => {
       let dbOk = true;
       if (closed === "vault_available") state.setVaultAvailable(false);
       if (closed === "database_reachable") dbOk = false;
+      if (closed === "restore_hold_clear") state.setRestoreHoldClear(false);
       const h = createHealthHandlers({
         version: VERSION,
         getState: () => state.snapshot(),
@@ -621,6 +623,7 @@ describe("cross-cutting — no sensitive leak under any fault condition", () => 
       "database_reachable",
       "vault_available",
       "observation_read_capable",
+      "restore_hold_clear",
       "signer_leadership",
       "halt",
       "storage_pressure",
@@ -630,6 +633,7 @@ describe("cross-cutting — no sensitive leak under any fault condition", () => 
       "database_reachable",
       "vault_available",
       "observation_read_capable",
+      "restore_hold_clear",
     ]);
   });
 

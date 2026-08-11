@@ -847,6 +847,7 @@ const SUITE_BUILDERS_FILE = "suite/builders.ts";
 const SUITE_PARSERS_FILE = "suite/parsers.ts";
 const SUITE_REGISTRY_FILE = "suite/registry.ts";
 const SUITE_ENCODERS_FILE = "suite/encoders.ts";
+const IMPLEMENTER_VERIFY_FILE = "implementer-events/verify.ts";
 const SUITE_MANIFEST_FILE = "suite/manifest.ts";
 // Pinned to manifest.ts's SUITE_SERIALIZER_ENTRYPOINT datum by an assertion below, so renaming the
 // canonical entrypoint without updating the manifest turns this gate red instead of silently
@@ -1123,6 +1124,20 @@ function isSuiteBoundaryInputRecord(node: ts.TypeReferenceNode, relativePath: st
   if (relativePath === SUITE_SERIALIZE_FILE) {
     return enclosingTypeAliasName(node) === "SuiteTupleValues";
   }
+  // implementer-events/verify.ts — inbound wire JSON only; EMITTED preimages come from
+  // contracts builders and are byte-compared via assertCanonicalPreimage (never re-signed).
+  if (relativePath === IMPLEMENTER_VERIFY_FILE) {
+    const owner = enclosingFunctionName(node);
+    return (
+      owner === "parseJsonObject" ||
+      owner === "requireString" ||
+      owner === "requireStringOrNull" ||
+      owner === "requireCanonicalVersion" ||
+      owner === "parseImplementerEventPayload" ||
+      owner === "parseImplementerCheckpointPayload" ||
+      owner === "parseImplementerKeyRotationPayload"
+    );
+  }
   return false;
 }
 
@@ -1238,17 +1253,39 @@ function hasCanonicalRebuildFence(
 }
 
 function isSuiteWireJsonParse(node: ts.CallExpression, relativePath: string): boolean {
-  if (relativePath !== SUITE_PARSERS_FILE) return false;
   if (node.arguments.length !== 1) return false;
-  const functionNode = enclosingFunction(node);
-  if (
-    functionNode === null ||
-    !ts.isFunctionDeclaration(functionNode) ||
-    functionNode.name?.text !== "parseSuitePurpose"
-  ) {
-    return false;
+  if (relativePath === SUITE_PARSERS_FILE) {
+    const functionNode = enclosingFunction(node);
+    if (
+      functionNode === null ||
+      !ts.isFunctionDeclaration(functionNode) ||
+      functionNode.name?.text !== "parseSuitePurpose"
+    ) {
+      return false;
+    }
+    return hasCanonicalRebuildFence(functionNode, node);
   }
-  return hasCanonicalRebuildFence(functionNode, node);
+  // implementer continuity verify: JSON.parse only inside parseJsonObject; rebuilt preimage
+  // is always contracts-builder output and assertCanonicalPreimage rejects any drift before
+  // signature check. Fence = file contains assertCanonicalPreimage + buildImplementer*Preimage.
+  if (relativePath === IMPLEMENTER_VERIFY_FILE) {
+    const functionNode = enclosingFunction(node);
+    if (
+      functionNode === null ||
+      !ts.isFunctionDeclaration(functionNode) ||
+      functionNode.name?.text !== "parseJsonObject"
+    ) {
+      return false;
+    }
+    const text = node.getSourceFile().text;
+    return (
+      text.includes("assertCanonicalPreimage") &&
+      text.includes("buildImplementerEventPreimage") &&
+      text.includes("buildImplementerCheckpointPreimage") &&
+      text.includes("buildImplementerKeyRotationPreimage")
+    );
+  }
+  return false;
 }
 
 // E12 — serialize.ts `JSON.stringify(payload)` — THE canonical suite-tuple signing preimage.
@@ -2702,7 +2739,7 @@ describe("suite-tuple serializer exemption integrity", () => {
     // already-exempt file changes a count and forces a reviewed edit here — which is the point: the
     // surface cannot grow silently under cover of an existing grant.
     expect(Object.fromEntries([...ledger].sort())).toEqual({
-      "boundary input Record": 4,
+      "boundary input Record": 12,
       "builder values spread": 10,
       "canonical serializer call": 11,
       "canonical serializer declaration": 1,
@@ -2718,7 +2755,7 @@ describe("suite-tuple serializer exemption integrity", () => {
       // One, not three: routed all three envelope splices through the single guarded
       // `jsonEscapeString` helper, so the file now holds exactly one `JSON.stringify` call.
       "transfer-code string escape": 1,
-      "wire JSON.parse": 1,
+      "wire JSON.parse": 2,
     });
 
     // The canonical serializer is singular by contract. A second declaration anywhere in

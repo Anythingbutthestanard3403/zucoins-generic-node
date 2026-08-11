@@ -1,5 +1,9 @@
 name: CI
 
+# Hosted ubuntu-latest currently fails at workflow startup on this private Free
+# account (path=BuildFailed, jobs=0) — proven by a minimal probe branch. Delivery
+# CI therefore runs on a registered self-hosted runner until hosted minutes/billing
+# allow ubuntu-latest again. Gates and fail-closed census are identical either way.
 on:
   push:
     branches: [main]
@@ -19,28 +23,19 @@ env:
 jobs:
   quality-and-tests:
     name: Build, lint, contracts, full tests, and structural gates
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 90
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
+    # PostgreSQL is provisioned on the runner host (Homebrew postgres). Hosted
+    # `services:` requires Docker and is unavailable on this runner; PG_REQUIRED=1
+    # still fails closed if the local server is down.
     env:
       PG_REQUIRED: "1"
       PGHOST: 127.0.0.1
       PGPORT: "5432"
       PGUSER: postgres
       PGPASSWORD: postgres
+      # Prefer peer/trust local superuser when password auth is unset on the host.
+      PG_RUNNER_FALLBACK_USER: rileyredford
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -55,8 +50,20 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Resolve PostgreSQL client and credentials
+        run: |
+          command -v psql
+          command -v pg_isready
+          if pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres; then
+            echo "Using PGUSER=$PGUSER"
+          elif pg_isready -h "$PGHOST" -p "$PGPORT" -U "${PG_RUNNER_FALLBACK_USER}" -d postgres; then
+            echo "PGUSER=${PG_RUNNER_FALLBACK_USER}" >> "$GITHUB_ENV"
+            echo "PGPASSWORD=" >> "$GITHUB_ENV"
+            echo "Using fallback PGUSER=${PG_RUNNER_FALLBACK_USER}"
+          else
+            echo "PostgreSQL not reachable under PG_REQUIRED=1" >&2
+            exit 1
+          fi
       - name: Verify PostgreSQL is reachable
         run: pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres
       - name: Build
@@ -76,7 +83,7 @@ jobs:
 
   admin-playwright:
     name: Admin Playwright (Chromium)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 30
     steps:
       - name: Checkout

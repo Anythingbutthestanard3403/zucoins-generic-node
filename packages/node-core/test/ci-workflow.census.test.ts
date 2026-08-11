@@ -439,7 +439,15 @@ describe("required CI gates", () => {
 
   it("requires a healthy PostgreSQL service rather than permitting DB skips", () => {
     const active = wf.activeSource;
-    expect(active).toContain("image: postgres:16");
+    // Hosted path uses `services.postgres` (image: postgres:16). Self-hosted path
+    // cannot use GHA service containers; both must still set PG_REQUIRED=1, pin
+    // PGHOST, and run pg_isready so a skipped DB suite fails the build.
+    const hasHostedService = /image:\s*postgres:16/.test(active);
+    const hasSelfHostedRunner = /runs-on:\s*\[\s*self-hosted/.test(active);
+    expect(
+      hasHostedService || hasSelfHostedRunner,
+      "CI must provision PostgreSQL via hosted service image OR self-hosted runner with local PG",
+    ).toBe(true);
     expect(active).toMatch(/PG_REQUIRED:\s*["']?1["']?/);
     expect(active).toContain("PGHOST: 127.0.0.1");
     expect(active).toContain("pg_isready");

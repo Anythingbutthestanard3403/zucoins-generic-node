@@ -1,7 +1,8 @@
 # ZTR-1216 — implementer handoff
 
 **PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/89
-**Head SHA:** `43ce258388d6c357f575c9e30d856959f3782254`
+**Head SHA (PR tip):** 
+**Code commit:** `85bdf3a788c76c48555ae338b19cd8a338312db6`
 **Branch:** `ztr-1216-candidate-intake-residuals`
 
 ## Locked defaults (sweeper 2026-08-11)

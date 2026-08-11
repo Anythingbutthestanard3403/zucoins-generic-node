@@ -23,11 +23,11 @@ import {
 } from "../../src/dr/encrypted-backup.js";
 import { ReportingSchemaAbsentError } from "../../src/dr/hold-db-orchestration.js";
 import {
-  applyDualGateForceAfterRestore,
   applyForceAuthHoldAfterRestore,
 } from "../../src/dr/auth-hold.js";
 import { applyForceRestoreHoldAfterRestore } from "../../src/dr/restore-hold.js";
 import { evaluateRestoreHoldRelease } from "../../src/dr/restore-hold.js";
+import { deriveContinuitySnapshot } from "../../src/dr/markers.js";
 import {
   evaluateReadinessFromProbes,
   type ReadinessStateInputs,
@@ -391,7 +391,10 @@ describe.skipIf(!PG_AVAILABLE)("restore fault-injection cases 2–6 (ZTR-1172)",
   }, 120_000);
 
   it("case 5: nonce ledger without admitted request projections — high-water inconsistent", async () => {
-    // A burn counter ahead of any nonce rows is the partial dump shape.
+    // Partial dump: burn counter claims high-water 99 while nonce rows are empty.
+    // Trusted markers bound to the pre-corruption high-water must refuse release
+    // against the restored local snapshot (nonce_burn_high_water_mismatch), and
+    // readiness stays closed under the forced hold.
     const src = createDb("c5s");
     const ids = {
       nodeId: randomUUID(),
@@ -401,9 +404,22 @@ describe.skipIf(!PG_AVAILABLE)("restore fault-injection cases 2–6 (ZTR-1172)",
       nonceId: randomUUID(),
     };
     const pool = new Pool({ connectionString: dbUrl(src) });
+    let trustedMarkers: {
+      lifecycleEpoch: bigint;
+      nonceBurnHighWater: bigint;
+      terminalEventHash: string;
+    };
     try {
       await seedBaseNode(pool, ids, { authHold: false, withStates: true, withEvent: true });
-      // Drop all nonce rows while leaving counter high — partial dump.
+      // Capture honest continuity BEFORE the partial-dump corruption.
+      const honest = await deriveContinuitySnapshot(dbUrl(src), ids.nodeId);
+      trustedMarkers = {
+        lifecycleEpoch: honest.lifecycleEpoch,
+        nonceBurnHighWater: honest.nonceBurnHighWater,
+        terminalEventHash: honest.terminalEventHash,
+      };
+      expect(trustedMarkers.nonceBurnHighWater).toBeGreaterThan(0n);
+      // Drop all nonce rows while leaving counter high — partial dump shape.
       await pool.query(`DELETE FROM reporting_request_nonces`);
       await pool.query(
         `UPDATE reporting_nonce_burn_counters SET next_burn_sequence = 99 WHERE node_id = $1`,
@@ -415,17 +431,37 @@ describe.skipIf(!PG_AVAILABLE)("restore fault-injection cases 2–6 (ZTR-1172)",
     const backupPath = join(workDir, "c5.zbkp");
     await exportEncryptedBackup(dbUrl(src), backupPath, masterKey);
     const tgt = createDb("c5t");
-    // Restore + force may succeed (force allocates fresh nonces), but the dump
-    // is partially consistent: continuity high-water from counter disagrees
-    // with empty nonce ledger. Assert evaluateRestoreHoldRelease refuses
-    // missing trusted source (case 6 overlap) and readiness stays false under hold.
     const result = await restoreEncryptedBackup(backupPath, dbUrl(tgt), masterKey, {
       nodeId: ids.nodeId,
     });
     expect(result.restoreHold.applied).toBe(true);
-    const decision = evaluateRestoreHoldRelease({ trusted: null, local: null });
+    expect(result.authHold.applied).toBe(true);
+
+    // Local continuity after restore+force: AUTH_HOLD_SET is projected away, so
+    // nonce high-water reflects restored nonce rows (empty → 0) — not the orphaned
+    // counter. Trusted markers from the pre-corruption dump disagree → refuse.
+    const local = await deriveContinuitySnapshot(dbUrl(tgt), ids.nodeId);
+    expect(local.nonceBurnHighWater).not.toBe(trustedMarkers!.nonceBurnHighWater);
+    const decision = evaluateRestoreHoldRelease({
+      trusted: {
+        format: "zp-gn-continuity-markers-v1",
+        trustedSourceId: "file:/drill/case5-partial-nonce.json",
+        trustedSourceObservedAt: "2026-01-15T10:00:00.000Z",
+        lifecycleEpoch: trustedMarkers!.lifecycleEpoch.toString(),
+        nonceBurnHighWater: trustedMarkers!.nonceBurnHighWater.toString(),
+        terminalEventHash: trustedMarkers!.terminalEventHash,
+        provenance: "successful_scheduled_backup",
+        backupArtifactSha256: "aa".repeat(32),
+        backupOutputPath: backupPath,
+      },
+      local,
+    });
     expect(decision.release).toBe(false);
-    if (!decision.release) expect(decision.reason).toBe("missing_trusted_source");
+    if (!decision.release) {
+      expect(decision.reason).toBe("nonce_burn_high_water_mismatch");
+    }
+
+    // Held restore keeps deploy-ready closed (machine-readable).
     const state: ReadinessStateInputs = {
       schemaMigrated: true,
       vaultKeyRingLoaded: true,

@@ -59,6 +59,14 @@ export interface SqlStreamWriterEffectsOptions {
    */
   readonly onAnomalyRequired: SqlAnomalyRequiredHandler;
   readonly takeAdvisoryLock?: boolean;
+  /**
+   * ZTR-1172 / §7.7 boot seed handoff. streamKey (`observerId:walletPublicKey`) →
+   * prior raw bytes hydrated at boot. On first loadPrior for a key, when SQL returns
+   * a prior whose raw bytes differ from the seed, prefer the boot-hydrated bytes for
+   * consecutive-dedup so the first post-restart tick does not rest solely on a
+   * post-boot SQL re-read that the boot walk already proved. Consumed once per key.
+   */
+  readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
 }
 
 interface CursorJoinRow {
@@ -218,11 +226,19 @@ export function createSqlStreamWriterEffects(
     allocateObservationId = () => randomUUID(),
     onAnomalyRequired,
     takeAdvisoryLock = true,
+    bootPriorRawByStreamKey,
   } = options;
 
   const lastObsIdByStream = new Map<string, string>();
+  /** Boot seeds still pending first loadPrior consume (defensive copy of map entries). */
+  const pendingBootPriors =
+    bootPriorRawByStreamKey === undefined
+      ? null
+      : new Map<string, Uint8Array | null>(bootPriorRawByStreamKey);
   const streamId = (key: ObservationStreamKey): string =>
     `${key.observerId}\0${key.walletPublicKey}`;
+  const bootStreamKey = (key: ObservationStreamKey): string =>
+    `${key.observerId}:${key.walletPublicKey}`;
 
   const loadPrior = async (key: ObservationStreamKey): Promise<StreamCursor | null> => {
     if (takeAdvisoryLock) {
@@ -235,6 +251,8 @@ export function createSqlStreamWriterEffects(
     );
     if (cursorRowResult.rows.length === 0) {
       lastObsIdByStream.delete(streamId(key));
+      // Consume boot seed if present (empty stream — first capture APPEND).
+      pendingBootPriors?.delete(bootStreamKey(key));
       return null;
     }
 
@@ -256,7 +274,18 @@ export function createSqlStreamWriterEffects(
       key.walletPublicKey,
     ]);
     const history = historyResult.rows;
-    const rawBytes = toBytes(row.raw_response_bytes);
+    let rawBytes = toBytes(row.raw_response_bytes);
+    // §7.7: first post-restart load prefers boot-hydrated exact bytes when present.
+    if (pendingBootPriors !== null) {
+      const sk = bootStreamKey(key);
+      if (pendingBootPriors.has(sk)) {
+        const seeded = pendingBootPriors.get(sk);
+        pendingBootPriors.delete(sk);
+        if (seeded !== null && seeded !== undefined) {
+          rawBytes = new Uint8Array(seeded);
+        }
+      }
+    }
     const verified = isVerifiedParseResult(
       row.parse_result as Parameters<typeof isVerifiedParseResult>[0],
     );

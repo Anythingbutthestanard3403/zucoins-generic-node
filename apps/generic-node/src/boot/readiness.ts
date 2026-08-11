@@ -94,8 +94,10 @@ export class NodeReadiness {
   }
 
   /**
-   * Stamp restore_hold_clear. Post-restore force stamps false; dual-gate
-   * release stamps true. Defaults open for greenfield boots.
+   * Stamp restore_hold_clear. Boot + live RESTORE_HOLD_PROBE re-read durable
+   * reporting_restore_state; dual-gate release mutates Postgres and the next
+   * probe (ready handler / keep-warm) restamps true without process restart.
+   * Defaults open for greenfield boots.
    */
   setRestoreHoldClear(clear: boolean): void {
     this.inner.setRestoreHoldClear(clear);
@@ -162,14 +164,24 @@ export class NodeReadiness {
   }
 }
 
+/** Default TTL for live restore_hold re-probe (matches CachedDbProbe class of freshness). */
+export const DEFAULT_RESTORE_HOLD_PROBE_TTL_MS = 2_000;
+
+export type RestoreHoldDb = {
+  query: (
+    text: string,
+    params?: readonly unknown[],
+  ) => Promise<{ rows: Array<{ restore_hold: boolean }> }>;
+};
+
 /**
  * Probe reporting_restore_state for this node and stamp restore_hold_clear.
  * Missing table or missing row → clear (greenfield). Held row → not clear.
- * Fail-closed on query errors (throws).
+ * Fail-closed on query errors (throws) — the live probe catches and stamps false.
  */
 export async function stampRestoreHoldFromDb(
   readiness: Pick<NodeReadiness, "setRestoreHoldClear">,
-  db: { query: (text: string, params?: readonly unknown[]) => Promise<{ rows: Array<{ restore_hold: boolean }> }> },
+  db: RestoreHoldDb,
   nodeId: string,
 ): Promise<{ readonly restoreHoldClear: boolean; readonly rowPresent: boolean }> {
   try {
@@ -196,4 +208,87 @@ export async function stampRestoreHoldFromDb(
     }
     throw err;
   }
+}
+
+/**
+ * Live RESTORE_HOLD_PROBE — re-reads durable restore_hold on a TTL so dual-gate
+ * release (CLI or in-process) re-opens /health/ready and money admission without
+ * requiring a process restart. Boot stamp warms the cache; this is the post-boot
+ * authority (not an imaginary in-process release callback).
+ *
+ * Fail-closed: unexpected query errors stamp restoreHoldClear=false.
+ */
+export class CachedRestoreHoldProbe {
+  private last: { restoreHoldClear: boolean; rowPresent: boolean } | undefined;
+  private cachedAtMs = Number.NEGATIVE_INFINITY;
+  private inFlight: Promise<{ restoreHoldClear: boolean; rowPresent: boolean }> | undefined;
+
+  constructor(
+    private readonly readiness: Pick<NodeReadiness, "setRestoreHoldClear">,
+    private readonly db: RestoreHoldDb,
+    private readonly nodeId: string,
+    private readonly ttlMs: number = DEFAULT_RESTORE_HOLD_PROBE_TTL_MS,
+    private readonly clock: () => number = () => Date.now(),
+  ) {
+    if (!Number.isFinite(ttlMs) || ttlMs < 0) {
+      throw new RangeError("CachedRestoreHoldProbe: ttlMs must be a non-negative finite number");
+    }
+  }
+
+  /** Force the next refresh to hit the database. */
+  invalidate(): void {
+    this.cachedAtMs = Number.NEGATIVE_INFINITY;
+    this.inFlight = undefined;
+  }
+
+  /** Last completed stamp, or undefined before the first refresh settles. */
+  cached(): { readonly restoreHoldClear: boolean; readonly rowPresent: boolean } | undefined {
+    return this.last;
+  }
+
+  /**
+   * Re-probe when TTL elapsed. Safe for onBeforeEvaluate and keep-warm timers.
+   * Always leaves readiness stamped; unexpected errors stamp clear=false.
+   */
+  async refresh(): Promise<{ readonly restoreHoldClear: boolean; readonly rowPresent: boolean }> {
+    const now = this.clock();
+    if (this.last !== undefined && now - this.cachedAtMs < this.ttlMs) {
+      return this.last;
+    }
+    if (this.inFlight !== undefined) {
+      return this.inFlight;
+    }
+    const run = (async (): Promise<{ restoreHoldClear: boolean; rowPresent: boolean }> => {
+      try {
+        const stamped = await stampRestoreHoldFromDb(this.readiness, this.db, this.nodeId);
+        this.last = stamped;
+        this.cachedAtMs = this.clock();
+        return stamped;
+      } catch {
+        this.readiness.setRestoreHoldClear(false);
+        const failed = { restoreHoldClear: false, rowPresent: false } as const;
+        this.last = failed;
+        this.cachedAtMs = this.clock();
+        return failed;
+      } finally {
+        this.inFlight = undefined;
+      }
+    })();
+    this.inFlight = run;
+    return run;
+  }
+}
+
+/**
+ * Compose storage-pressure + restore_hold live probe for readinessHttp.onBeforeEvaluate.
+ * Restore-hold refresh runs first so a dual-gate release is visible on the same ready poll.
+ */
+export function composeReadinessOnBeforeEvaluate(input: {
+  readonly storagePressureOnBeforeEvaluate: () => void | Promise<void>;
+  readonly restoreHoldProbe: CachedRestoreHoldProbe;
+}): () => Promise<void> {
+  return async () => {
+    await input.restoreHoldProbe.refresh();
+    await input.storagePressureOnBeforeEvaluate();
+  };
 }

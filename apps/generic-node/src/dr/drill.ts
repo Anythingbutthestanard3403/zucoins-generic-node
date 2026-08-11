@@ -1,10 +1,11 @@
 // Disaster-recovery drill for generic-node.
 //
 // ZTR-1172: takes a real (minimal dual-gate) node backup, restores into a
-// throwaway database, asserts the dual hold was forced, boots a readiness
-// probe against the restored DB (DB reachable + restore_hold held), and
-// records wall-clock RPO/RTO. A green drill is restore verification —
-// not a synthetic-table round-trip.
+// throwaway database, asserts the dual hold was forced, boots the readiness
+// evaluator + live RESTORE_HOLD_PROBE against the restored DB (deploy-ready
+// conjunction fails on restore_hold_clear while hold is forced), and records
+// wall-clock RPO/RTO. A green drill is restore verification — not a
+// synthetic-table round-trip or a bare SELECT 1.
 //
 // Throwaway DB lifecycle matches ops/sql-restored-instance.ts
 // (createdb/dropdb against a maintenance template).
@@ -17,12 +18,27 @@ import { join } from "node:path";
 
 import { Pool } from "pg";
 
+import {
+  evaluateReadinessFromProbes,
+  type ReadinessStateInputs,
+} from "@zucoins/node-core";
+
+import {
+  CachedRestoreHoldProbe,
+  NodeReadiness,
+  stampRestoreHoldFromDb,
+} from "../boot/readiness.js";
 import { MINIMAL_DUAL_GATE_SCHEMA_SQL } from "./drill-node-schema.js";
+import { releaseDualGatesWithTrustedMarkers } from "./auth-hold.js";
 import {
   exportEncryptedBackup,
   restoreEncryptedBackup,
 } from "./encrypted-backup.js";
 import { ReportingSchemaAbsentError } from "./hold-db-orchestration.js";
+import {
+  CONTINUITY_MARKER_FORMAT,
+  deriveContinuitySnapshot,
+} from "./markers.js";
 
 export interface DrillResult {
   passed: boolean;
@@ -332,7 +348,9 @@ export async function runDrill(
     }
     steps.push("verified restored data matches original (post-export row absent)");
 
-    // Boot-against-restored: prove restore_hold is held and would gate readiness.
+    // Boot-against-restored: stamp + evaluate readiness the same way production
+    // does (NodeReadiness + stampRestoreHoldFromDb + evaluateReadinessFromProbes).
+    // Dual-gate force must leave restore_hold_clear false → ready 503.
     const pool = new Pool({ connectionString: drillUrl, max: 1 });
     try {
       const hold = await pool.query<{ restore_hold: boolean }>(
@@ -349,8 +367,69 @@ export async function runDrill(
       if (auth.rowCount === 0 || auth.rows.some((r) => r.auth_hold !== true)) {
         throw new Error("restored lifecycle head not auth_hold=true");
       }
-      await pool.query("SELECT 1");
-      steps.push("booted readiness probe against restored DB (restore_hold held, auth_hold held)");
+
+      const readiness = new NodeReadiness(3);
+      readiness.markSchemaChecksPassed();
+      readiness.setVaultAvailable(true);
+      readiness.recordGatewayReadSuccess();
+      readiness.setEventSignerAvailable(true);
+      const stamp = await stampRestoreHoldFromDb(readiness, pool, ids.nodeId);
+      if (stamp.restoreHoldClear !== false || stamp.rowPresent !== true) {
+        throw new Error(
+          `boot stamp did not hold restore_hold_clear=false (clear=${stamp.restoreHoldClear} row=${stamp.rowPresent})`,
+        );
+      }
+      const probe = new CachedRestoreHoldProbe(readiness, pool, ids.nodeId, 0);
+      const live = await probe.refresh();
+      if (live.restoreHoldClear !== false) {
+        throw new Error("live RESTORE_HOLD_PROBE did not report hold after restore");
+      }
+      const inputs: ReadinessStateInputs = readiness.core.snapshot();
+      const verdict = evaluateReadinessFromProbes(inputs, true);
+      if (verdict.ready) {
+        throw new Error("readiness evaluator returned ready=true under forced restore_hold");
+      }
+      if (!verdict.failing.includes("restore_hold_clear")) {
+        throw new Error(
+          `expected restore_hold_clear in failing checks, got ${verdict.failing.join(",")}`,
+        );
+      }
+      // Prove dual-gate release + live probe re-opens ready without process restart.
+      // Local continuity after AUTH_HOLD_SET force projects to the pre-force seed point.
+      const local = await deriveContinuitySnapshot(drillUrl, ids.nodeId);
+      const released = await releaseDualGatesWithTrustedMarkers(drillUrl, {
+        nodeId: ids.nodeId,
+        trusted: {
+          format: CONTINUITY_MARKER_FORMAT,
+          trustedSourceId: "file:/drill/markers.json",
+          trustedSourceObservedAt: "2026-01-15T10:00:00.000Z",
+          lifecycleEpoch: local.lifecycleEpoch.toString(),
+          nonceBurnHighWater: local.nonceBurnHighWater.toString(),
+          terminalEventHash: local.terminalEventHash,
+          provenance: "successful_scheduled_backup",
+          backupArtifactSha256: backup.sha256,
+          backupOutputPath: backupPath,
+        },
+      });
+      if (!released.released) {
+        throw new Error(
+          `dual-gate release refused during drill boot proof: ${"reason" in released.decision ? released.decision.reason : "unknown"}`,
+        );
+      }
+      probe.invalidate();
+      const afterRelease = await probe.refresh();
+      if (afterRelease.restoreHoldClear !== true) {
+        throw new Error("live probe did not clear restore_hold after dual-gate release");
+      }
+      const releasedVerdict = evaluateReadinessFromProbes(readiness.core.snapshot(), true);
+      if (!releasedVerdict.ready) {
+        throw new Error(
+          `readiness stayed not-ready after hold clear: failing=${releasedVerdict.failing.join(",")}`,
+        );
+      }
+      steps.push(
+        "booted readiness evaluator against restored DB (restore_hold gates ready; live probe re-opens after dual-gate release)",
+      );
     } finally {
       await pool.end();
     }

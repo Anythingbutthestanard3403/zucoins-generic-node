@@ -112,6 +112,8 @@ import {
   installGracefulStop,
   NodeReadiness,
   stampRestoreHoldFromDb,
+  CachedRestoreHoldProbe,
+  composeReadinessOnBeforeEvaluate,
   runBootLane,
   type BootLogger,
   type SignerLeadershipHandle,
@@ -374,6 +376,19 @@ async function main(): Promise<void> {
       );
     },
   });
+
+  // ZTR-1172: live RESTORE_HOLD_PROBE — dual-gate release mutates Postgres; this
+  // restamps restore_hold_clear on ready polls / keep-warm so ready re-opens
+  // without process restart (CLI `dr markers release` included).
+  const restoreHoldProbe = new CachedRestoreHoldProbe(readiness, pool, config.NODE_ID);
+  const onBeforeEvaluate = composeReadinessOnBeforeEvaluate({
+    storagePressureOnBeforeEvaluate: storagePressure.onBeforeEvaluate,
+    restoreHoldProbe,
+  });
+  const restoreHoldKeepWarm = setInterval(() => {
+    void restoreHoldProbe.refresh().catch(() => {});
+  }, 2_000);
+  restoreHoldKeepWarm.unref();
 
   // Operator halt — fail-closed gate until restore completes.
   const haltGate: HaltGate = createHaltGate("HALTED");
@@ -930,7 +945,7 @@ async function main(): Promise<void> {
       operationStore,
       operationAuth,
       newRequestId: (): string => randomUUID(),
-      onBeforeEvaluate: storagePressure.onBeforeEvaluate,
+      onBeforeEvaluate,
       storageBackpressure: storagePressure.storageBackpressure,
       metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
       metrics,
@@ -1016,11 +1031,11 @@ async function main(): Promise<void> {
   const leadershipPool = createLeadershipPool(pool);
 
   // SQL-backed boot recovery store + actions (real inventory, not greenfield-only).
-  const { store: bootStore, actions: bootActions } = createSqlBootRecovery(
-    pool,
-    logger,
-    vaultKeyStore,
-  );
+  const {
+    store: bootStore,
+    actions: bootActions,
+    seeds: bootRecoverySeeds,
+  } = createSqlBootRecovery(pool, logger, vaultKeyStore);
 
   const result = await runBootLane({
     readiness,
@@ -1049,6 +1064,9 @@ async function main(): Promise<void> {
       // ZTR-1172: stamp restore_hold_clear from durable state so /health/ready
       // is 503 while a post-restore hold is active (RESTORE_HOLD_READINESS).
       const holdStamp = await stampRestoreHoldFromDb(readiness, pool, config.NODE_ID);
+      // Align live probe cache with boot stamp so first ready poll is coherent.
+      restoreHoldProbe.invalidate();
+      await restoreHoldProbe.refresh();
       logger.info(
         `boot: restore_hold_clear=${holdStamp.restoreHoldClear} rowPresent=${holdStamp.rowPresent}`,
       );
@@ -1423,6 +1441,7 @@ async function main(): Promise<void> {
           await requireActivePushSubscriptionOrRefuse(push, walletId);
         },
         moneyPathGates: moneyPathPorts,
+        bootRecoverySeeds,
         // The settle step co-signs under this latch and submits to
         // the first configured gateway. Submit is never spread across the endpoint list.
         leadership: shutdownRegistry.authority,

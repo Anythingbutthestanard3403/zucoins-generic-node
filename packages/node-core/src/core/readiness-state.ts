@@ -31,7 +31,8 @@ export interface ReadinessStateInputs {
    * restore_hold is clear for this node. Gating on /health/ready (ZTR-1172 /
    * RESTORE_HOLD_READINESS). Defaults true so greenfield boots and compositions
    * that never stamp a hold stay ready; a post-restore force stamps false until
-   * the dual-gate release ceremony.
+   * the dual-gate release ceremony. Live RESTORE_HOLD_PROBE re-reads durable
+   * state on a TTL so release re-opens ready without process restart.
    */
   readonly restoreHoldClear: boolean;
   readonly leadershipLockHeld: boolean;
@@ -120,8 +121,9 @@ export class NodeCoreReadinessState {
   }
 
   /**
-   * Stamp restore_hold_clear. Fail-closed after restore: force path stamps
-   * false; dual-gate release stamps true. Defaults open for greenfield.
+   * Stamp restore_hold_clear. Fail-closed after restore: force path / held row
+   * stamps false; RESTORE_HOLD_PROBE restamps true after dual-gate release
+   * clears the durable row. Defaults open for greenfield.
    */
   setRestoreHoldClear(clear: boolean): void {
     this.restoreHoldClear = clear;

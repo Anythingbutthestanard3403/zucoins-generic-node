@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createSqlStreamWriterEffects,
   hydrateRawBytePriors,
   type BootRecoveryStore,
   type ObservationCursorHint,
@@ -90,5 +91,75 @@ describe("boot queue rebuild seeds (ZTR-1172 §7.7)", () => {
     const queued = await store.listQueuedReceiveOperationIds();
     await actions.rebuildReceiveAdmissionQueue(queued);
     expect(seeds.receiveAdmissionQueue).toEqual(["recv-1"]);
+  });
+});
+
+
+describe("stream writer boot seed handoff (ZTR-1172 §7.7)", () => {
+  it("createSqlStreamWriterEffects prefers boot-hydrated prior raw bytes on first loadPrior", async () => {
+    const seeded = new Uint8Array([9, 8, 7, 6]);
+    const sqlRaw = new Uint8Array([1, 2, 3, 4]);
+    let step = 0;
+    const effects = createSqlStreamWriterEffects({
+      sql: {
+        query: async () => {
+          step += 1;
+          if (step % 3 === 1) {
+            return { rows: [{ last_recorded_observation_id: "obs-row-1" }] };
+          }
+          if (step % 3 === 2) {
+            return {
+              rows: [
+                {
+                  next_wallet_seq: "2",
+                  consecutive_repeat_count: "0",
+                  last_recorded_observation_id: "obs-row-1",
+                  last_raw_response_sha256: "aa".repeat(32),
+                  last_semantic_fingerprint: null,
+                  wallet_seq: "1",
+                  raw_response_bytes: Buffer.from(sqlRaw),
+                  raw_response_sha256: "bb".repeat(32),
+                  parse_result: "VERIFIED_GENESIS",
+                  wallet_role: "genesis",
+                  s_signature: "sig-s",
+                  p_signature: "sig-p",
+                  semantic_fingerprint: "fp",
+                },
+              ],
+            };
+          }
+          return {
+            rows: [
+              {
+                wallet_seq: "1",
+                parse_result: "VERIFIED_GENESIS",
+                wallet_role: "genesis",
+                s_signature: "sig-s",
+                p_signature: "sig-p",
+                semantic_fingerprint: "fp",
+                relationship: "FIRST",
+              },
+            ],
+          };
+        },
+      },
+      project: () => {
+        throw new Error("project unused in loadPrior-only test");
+      },
+      onAnomalyRequired: async () => {},
+      takeAdvisoryLock: false,
+      bootPriorRawByStreamKey: new Map([["obs-1:wallet-pk", seeded]]),
+    });
+
+    const prior = await effects.loadPrior({ observerId: "obs-1", walletPublicKey: "wallet-pk" });
+    expect(prior).not.toBeNull();
+    expect(Buffer.from(prior!.lastRecorded.rawResponseBytes).equals(Buffer.from(seeded))).toBe(
+      true,
+    );
+
+    const prior2 = await effects.loadPrior({ observerId: "obs-1", walletPublicKey: "wallet-pk" });
+    expect(Buffer.from(prior2!.lastRecorded.rawResponseBytes).equals(Buffer.from(sqlRaw))).toBe(
+      true,
+    );
   });
 });

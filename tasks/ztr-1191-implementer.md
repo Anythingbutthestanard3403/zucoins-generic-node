@@ -20,24 +20,23 @@
 - [x] emit-json equivalent: golden + contract-drift-manifest sha updated, freeze tests green
 - [x] tests green on touched packages (pre-existing scan gate + leadership lint on main)
 
-## Verify (this SHA)
+## Verify (implementation SHA)
 ```
 npx tsc -b                                    # green
 pnpm --filter @zucoins/generic-node-contracts test
   # 2732 passed; 1 pre-existing fail: generic-core.scan-gate (drain/sweep on main)
-pnpm --filter @zucoins/node-core exec vitest run src/send/approve.test.ts ...
+pnpm --filter @zucoins/node-core targeted auth suite
   # 7 files, 151 passed
-pnpm --filter @zucoins/generic-node exec vitest run test/admin-never-403-auth.gate.test.ts ...
-  # 7 files, 69 passed (incl. gate 4/4)
+apps/generic-node targeted admin suite (incl. gate)
+  # 7 files, 69 passed (gate 4/4)
 ```
 
 ## Governing
 - `packages/generic-node-contracts/src/route-policy/CONTRACT.md` J2
 - `packages/generic-node-contracts/src/route-policy/auth-classes.ts`
-- Ticket: never-403 auth invariant vs deliberate origin/password 403s
+
+## PR
+#55 — https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/55
 
 ## Head SHA
-`08a121f013440b24e9166167dc4dbeb3708ffeee`
-
-## Head SHA
-
+`6003f5e9f84aa8139e7589dd720d032d33fa5a55`

@@ -1,9 +1,10 @@
 // Externally trusted continuity markers for reporting restore-hold release.
-// Markers live OUTSIDE the node database and are emitted only after a successful backup.
+// Markers live OUTSIDE the node database and are emitted only with a successful
+// scheduled backup, bound to the dump's PostgreSQL snapshot (not a post-dump re-read).
 
-import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { withConnectedPgClient, type HoldDbClient } from "./hold-db-orchestration.js";
 
@@ -120,7 +121,15 @@ export async function writeContinuityMarkers(
   }
   await mkdir(dirname(path), { recursive: true });
   const body = `${JSON.stringify(checked.markers, null, 2)}\n`;
-  await writeFile(path, body, { encoding: "utf8", mode: 0o600 });
+  // Atomic publish (temp + rename) so a crash mid-write cannot leave truncated JSON.
+  const tmp = join(dirname(path), `.${randomBytes(8).toString("hex")}.markers.tmp`);
+  try {
+    await writeFile(tmp, body, { encoding: "utf8", mode: 0o600 });
+    await rename(tmp, path);
+  } catch (err) {
+    await unlink(tmp).catch(() => undefined);
+    throw err;
+  }
 }
 
 export function compareContinuityMarkers(

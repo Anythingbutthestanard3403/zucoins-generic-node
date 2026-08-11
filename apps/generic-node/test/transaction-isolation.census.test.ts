@@ -66,7 +66,7 @@ interface TransactionSite {
    */
   readonly pathClass: "money-path" | "other";
   /** `SERIALIZABLE` iff the literal itself sets the level; asserted against the source. */
-  readonly isolation: "READ COMMITTED" | "SERIALIZABLE";
+  readonly isolation: "READ COMMITTED" | "REPEATABLE READ" | "SERIALIZABLE";
   readonly mechanism: Mechanism;
   /** The covering statement and its target, or why none is needed. Required for money-path. */
   readonly covering: string;
@@ -173,6 +173,21 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "same advance function under the same FOR UPDATE, for both halves of the dual gate — " +
         "restore_hold and auth_hold either both commit or neither does.",
       pinned: "withConnectedPgClient, one client for both halves",
+    },
+  ],
+  "apps/generic-node/src/dr/encrypted-backup.ts": [
+    {
+      site: "exportEncryptedBackupBoundToContinuity",
+      pathClass: "other",
+      isolation: "REPEATABLE READ",
+      mechanism: "NONE",
+      covering:
+        "read-only REPEATABLE READ holds one backend snapshot for deriveContinuitySnapshotOnClient " +
+        "+ pg_export_snapshot + pg_dump --snapshot so marker values equal the sealed dump " +
+        "(ZTR-1136 Review B D1). No money mutation; ROLLBACK ends the holder.",
+      pinned:
+        "withConnectedPgClient one dedicated client; dump child uses exported snapshot id " +
+        "while the holder TX remains open",
     },
   ],
   "apps/generic-node/src/main.ts": [
@@ -723,10 +738,23 @@ describe("transaction isolation census (CONVENTIONS.md §1)", () => {
         const entry = declared[index];
         if (entry === undefined) return; // count assertion above already reddened
         const setsSerializable = site.text === "BEGIN ISOLATION LEVEL SERIALIZABLE";
+        const setsRepeatableRead = /\bREPEATABLE\s+READ\b/i.test(site.text);
         expect(
           entry.isolation === "SERIALIZABLE",
           `${file}:${site.line} declares isolation=${entry.isolation} but the source says ${site.text}`,
         ).toBe(setsSerializable);
+        if (setsRepeatableRead) {
+          expect(
+            entry.isolation,
+            `${file}:${site.line} source sets REPEATABLE READ but declares ${entry.isolation}`,
+          ).toBe("REPEATABLE READ");
+        }
+        if (entry.isolation === "REPEATABLE READ") {
+          expect(
+            setsRepeatableRead,
+            `${file}:${site.line} declares REPEATABLE READ but source is ${site.text}`,
+          ).toBe(true);
+        }
       });
     }
   });

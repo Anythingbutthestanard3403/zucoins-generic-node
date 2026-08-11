@@ -1627,7 +1627,8 @@ describe("main.ts graceful-stop composition", () => {
     expect(mainSource).toMatch(/backupScheduler\s*=\s*createBackupScheduler/);
     expect(mainSource).toMatch(/afterSuccess:\s*async/);
     expect(mainSource).toMatch(/BACKUP_CONTINUITY_MARKERS_PATH/);
-    expect(mainSource).toMatch(/deriveContinuitySnapshot/);
+    expect(mainSource).toMatch(/continuityNodeId:\s*config\.NODE_ID/);
+    expect(mainSource).toMatch(/continuitySnapshot/);
     expect(mainSource).toMatch(/writeContinuityMarkers/);
     // ENGINE_QUIESCE: stop new schedules synchronously.
     expect(mainSource).toMatch(/backupScheduler\?\.stop\(\)/);

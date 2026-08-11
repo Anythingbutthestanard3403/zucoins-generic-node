@@ -28,8 +28,10 @@ export {
   restoreEncryptedBackup,
   awaitCleanExit,
   buildRestorePsqlArgs,
+  buildPgDumpArgs,
   type BackupResult,
   type DecryptedBackup,
+  type ExportEncryptedBackupOptions,
   type ParsedEnvelope,
 } from "./encrypted-backup.js";
 
@@ -114,6 +116,7 @@ export {
   type BackupScheduleOwnership,
   type BackupScheduleStatus,
   type BackupSchedulerHandle,
+  type ScheduledBackupPairingInput,
   type ScheduledBackupSuccess,
 } from "./schedule.js";
 

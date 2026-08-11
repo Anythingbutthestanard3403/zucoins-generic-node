@@ -93,29 +93,35 @@ describe("createBackupScheduler — graceful stop", () => {
     dirs.push(dir);
     const markerPath = join(dir, "continuity.json");
     const sha256 = "22".repeat(32);
+    const dumpBoundSnapshot = {
+      lifecycleEpoch: 7n,
+      nonceBurnHighWater: 42n,
+      terminalEventHash: "ab".repeat(32),
+    };
     const scheduler = createBackupScheduler(
       baseConfig({
         outputDir: dir,
         nowMs: () => 1_000,
+        // Production path: continuitySnapshot is captured with the dump snapshot.
         exportBackup: async (_databaseUrl, outputPath) => {
           await writeFile(outputPath, "encrypted-backup", "utf8");
-          return { outputPath, bytesWritten: 16, sha256 };
+          return {
+            outputPath,
+            bytesWritten: 16,
+            sha256,
+            continuitySnapshot: dumpBoundSnapshot,
+          };
         },
         afterSuccess: async (success) => {
+          const snapshot = success.result.continuitySnapshot;
+          if (snapshot === undefined) throw new Error("missing dump-bound snapshot");
           await writeContinuityMarkers(
             markerPath,
-            buildScheduledBackupMarkers(
-              {
-                lifecycleEpoch: 7n,
-                nonceBurnHighWater: 42n,
-                terminalEventHash: "ab".repeat(32),
-              },
-              {
-                backupArtifactSha256: success.result.sha256,
-                backupOutputPath: success.result.outputPath,
-                observedAt: new Date(success.finishedAtMs),
-              },
-            ),
+            buildScheduledBackupMarkers(snapshot, {
+              backupArtifactSha256: success.result.sha256,
+              backupOutputPath: success.result.outputPath,
+              observedAt: new Date(success.finishedAtMs),
+            }),
           );
         },
       }),
@@ -131,6 +137,103 @@ describe("createBackupScheduler — graceful stop", () => {
       lifecycleEpoch: "7",
       nonceBurnHighWater: "42",
     });
+    // RPO anchors advance only after marker pairing.
+    expect(scheduler.status().lastSuccessAtMs).toBe(success.finishedAtMs);
+    expect(scheduler.status().rpoBreached).toBe(false);
+  });
+
+  it("does not advance RPO / lastSuccess when afterSuccess (marker pair) fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gn-marker-fail-"));
+    dirs.push(dir);
+    const sha256 = "33".repeat(32);
+    const scheduler = createBackupScheduler(
+      baseConfig({
+        outputDir: dir,
+        nowMs: () => 2_000,
+        policy: {
+          rpoTargetMs: 1,
+          rtoTargetMs: 1,
+          retentionDays: 7,
+          scheduleIntervalMs: 1,
+        },
+        exportBackup: async (_databaseUrl, outputPath) => {
+          await writeFile(outputPath, "encrypted-backup", "utf8");
+          return {
+            outputPath,
+            bytesWritten: 16,
+            sha256,
+            continuitySnapshot: {
+              lifecycleEpoch: 1n,
+              nonceBurnHighWater: 0n,
+              terminalEventHash: "cd".repeat(32),
+            },
+          };
+        },
+        afterSuccess: async () => {
+          throw new Error("marker write refused");
+        },
+      }),
+    );
+    handles.push(scheduler);
+
+    await expect(scheduler.runOnce()).rejects.toThrow(/marker write refused/);
+    const st = scheduler.status();
+    expect(st.lastSuccessAtMs).toBeNull();
+    expect(st.newestArtifactAtMs).toBeNull();
+    expect(st.consecutiveFailures).toBe(1);
+    expect(st.lastError).toMatch(/marker write refused/);
+    // Owner with no paired success must report RPO breach under tight policy.
+    expect(st.rpoBreached).toBe(true);
+    // Unpaired final artifact must not remain on disk.
+    const { readdir } = await import("node:fs/promises");
+    const leftovers = (await readdir(dir)).filter((n) => n.endsWith(".zbkp"));
+    expect(leftovers).toEqual([]);
+  });
+
+  it("uses dump-bound continuitySnapshot from export — not a post-seal re-derive", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gn-dump-bound-"));
+    dirs.push(dir);
+    const markerPath = join(dir, "continuity.json");
+    const dumpEpoch = 9n;
+    let afterSaw: bigint | undefined;
+    const scheduler = createBackupScheduler(
+      baseConfig({
+        outputDir: dir,
+        nowMs: () => 3_000,
+        continuityNodeId: "00000000-0000-4000-8000-000000000099",
+        exportBackup: async (_databaseUrl, outputPath, _key, options) => {
+          // Scheduler must request snapshot-bound export when continuityNodeId is set.
+          expect(options?.continuityNodeId).toBe("00000000-0000-4000-8000-000000000099");
+          await writeFile(outputPath, "enc", "utf8");
+          return {
+            outputPath,
+            bytesWritten: 3,
+            sha256: "44".repeat(32),
+            continuitySnapshot: {
+              lifecycleEpoch: dumpEpoch,
+              nonceBurnHighWater: 100n,
+              terminalEventHash: "ef".repeat(32),
+            },
+          };
+        },
+        afterSuccess: async (success) => {
+          afterSaw = success.result.continuitySnapshot?.lifecycleEpoch;
+          await writeContinuityMarkers(
+            markerPath,
+            buildScheduledBackupMarkers(success.result.continuitySnapshot!, {
+              backupArtifactSha256: success.result.sha256,
+              backupOutputPath: success.result.outputPath,
+              observedAt: new Date(success.finishedAtMs),
+            }),
+          );
+        },
+      }),
+    );
+    handles.push(scheduler);
+    await scheduler.runOnce();
+    expect(afterSaw).toBe(dumpEpoch);
+    const marker = JSON.parse(await readFile(markerPath, "utf8")) as { lifecycleEpoch: string };
+    expect(marker.lifecycleEpoch).toBe("9");
   });
 
   it("drain() awaits an in-flight export started before stop()", async () => {

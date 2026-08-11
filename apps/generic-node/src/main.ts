@@ -132,7 +132,6 @@ import { createProductionStoragePressureWiring } from "./storage-pressure.js";
 import {
   buildScheduledBackupMarkers,
   createBackupScheduler,
-  deriveContinuitySnapshot,
   probePgClientBinaries,
   writeContinuityMarkers,
 } from "./dr/index.js";
@@ -1455,12 +1454,19 @@ async function main(): Promise<void> {
       // Same latch family money workers consult — lost leadership stops further dumps.
       isLeader: () => shutdownRegistry.authority.held,
       trackInflight: (work) => shutdownRegistry.trackInflight(work),
+      // Bind marker values to the dump snapshot inside exportEncryptedBackup.
+      continuityNodeId: config.NODE_ID,
       afterSuccess: async (success) => {
         const markerPath = config.BACKUP_CONTINUITY_MARKERS_PATH;
         if (markerPath === undefined) {
           throw new Error("BACKUP_CONTINUITY_MARKERS_PATH is required for scheduled backup continuity");
         }
-        const snapshot = await deriveContinuitySnapshot(config.DATABASE_URL, config.NODE_ID);
+        const snapshot = success.result.continuitySnapshot;
+        if (snapshot === undefined) {
+          throw new Error(
+            "scheduled backup missing dump-bound continuitySnapshot — refusing unpaired artifact",
+          );
+        }
         await writeContinuityMarkers(
           markerPath,
           buildScheduledBackupMarkers(snapshot, {

@@ -95,11 +95,14 @@ values read only from the restored database have no authority — that is the en
 anti-rollback property. If an attacker can hand you a stale database, they can hand you a
 stale database that agrees with itself.
 
-Every successful scheduled backup derives the values from the healthy live database and
-writes a provenance-bound marker to `BACKUP_CONTINUITY_MARKERS_PATH`. Archive that file with
-the corresponding `.zbkp` outside the database/PVC restore boundary. Its
-`backupArtifactSha256` and `backupOutputPath` identify the successful backup that emitted it.
-`BACKUP_SCHEDULE_ENABLED=true` is refused at boot unless the marker path is configured.
+Every successful scheduled backup captures the three continuity values on the **same
+PostgreSQL snapshot** as the sealed `.zbkp` (`pg_export_snapshot` + `pg_dump --snapshot`),
+then writes a provenance-bound marker to `BACKUP_CONTINUITY_MARKERS_PATH` only after that
+pair succeeds. RPO success anchors do not advance if marker write fails (the unpaired
+artifact is removed). Archive that marker file with the corresponding `.zbkp` outside the
+database/PVC restore boundary. Its `backupArtifactSha256` and `backupOutputPath` identify
+the successful backup that emitted it. `BACKUP_SCHEDULE_ENABLED=true` is refused at boot
+unless the marker path is configured.
 
 Retrieve that externally held file, then let the command derive the local values from the
 restored database:

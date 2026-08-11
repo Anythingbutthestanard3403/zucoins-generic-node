@@ -151,6 +151,7 @@ import {
   reconcileRootKdfSalt,
   resolveConfiguredRootKdfSalt,
 } from "./vault/root-kdf-salt.js";
+import { proveVaultRootWithBootCanary } from "./vault/boot-canary.js";
 import { createPoolVaultSigner } from "./money-workers/send-vault-signer.js";
 import {
   SqlReportingRateLimiter,
@@ -1029,10 +1030,20 @@ async function main(): Promise<void> {
         rootKey,
         saltSource: rootSalt.source,
       });
+      // Boot canary (ZTR-1177): always seal/unseal a fixed non-secret under the final
+      // root. Closes the virgin-node hole where assertRootKeyOpensSealedEnvelope returns
+      // checked:false — a wrong VAULT_MASTER_KEY on restore must fail vault-unlock here,
+      // before readiness opens the vault gate and before money workers start.
+      const canary = await proveVaultRootWithBootCanary({
+        sql: poolSql,
+        nodeId: config.NODE_ID,
+        rootKey,
+      });
       logger.info(
         `boot: vault root salt source=${rootSalt.source} persisted=${rootSalt.persisted} ` +
           `rederived=${rootSalt.rederive} ` +
-          `self-check=${proof.checked ? `opened:${proof.provenAgainst}` : "nothing-sealed"}`,
+          `self-check=${proof.checked ? `opened:${proof.provenAgainst}` : "nothing-sealed"} ` +
+          `canary=${canary.action}`,
       );
       // ZTR-1134: seal residual plaintext TOTP secrets and drop totp_secret_base32.
       // Needs the unlocked root; drizzle 0007/0008 only add/conditionally drop the column.

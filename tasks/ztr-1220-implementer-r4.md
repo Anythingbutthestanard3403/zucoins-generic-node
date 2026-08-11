@@ -73,4 +73,4 @@ pnpm --filter @zucoins/generic-node-ui exec vitest run src/lib/money.test.ts
 - `tasks/ztr-1220-implementer-r4.md` — this handoff
 
 ## Head SHA
-(set after commit)
+`d67b2ba0b3d13a3eadd28efbc7f8f43a9ab3960c`

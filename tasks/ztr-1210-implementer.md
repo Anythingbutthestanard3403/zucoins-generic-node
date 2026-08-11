@@ -1,7 +1,8 @@
 # ZTR-1210 implementer handoff
 
 **PR:** #76 https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/76
-**HEAD:** `01109096ac7742f7cba4ddd7830ee80458ea2632`
+**Code HEAD:** `0009e5754a278a4604fc38aa7da450d5038adfe4`  
+**PR HEAD:** `a6102901dc1f7e90618de1277a55cbd5bb9101ff`
 **run:** 464608e3-b1e9-4609-847b-24f001a5c572
 
 ## What landed

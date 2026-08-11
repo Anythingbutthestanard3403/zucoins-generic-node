@@ -95,14 +95,23 @@ const B0 = {
   pinnedRedemptionWindowSecs: 300,
   pinnedAgingMarginSecs: 3600,
   pinnedApprovalFreshnessSecs: 300,
-  /** Frozen partial byte columns for redelivery identity proofs. */
+  /**
+   * Frozen partial byte columns = Appendix A §A.8.3 SEND_EXTERNAL redemption golden
+   * (A.8.0 inner re-signed with D9.14 expiry "1784333100"). transfer_code columns are
+   * not part of A.8.3 binding (ZTR-427); they remain structural fingerprint fields only
+   * and are sha256-pinned so mutation still fails loudly.
+   */
   partial: {
-    innerSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    innerSha256: "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d",
     step1Signature:
-      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-    transferCodeText: "zp1:freeze-b0-partial-bytes-v1",
-    transferCodeSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "KKyZRQpHR7Xt3QhUXe0eki2iJC9sGYJ13tDzMN5lpQXA3ets0_7PPHZgOmbxDq2R9Hd7TPN_8Su-QVkuLcFyBA==",
+    /** Illustrative only — A.8.3 deliberately does not bind transfer_code_sha256. */
+    transferCodeText: "golden-transfer-code-v1",
+    transferCodeSha256: "4b3e384d7c1774a450fdf9f74d338d1c6802a1057b2fd49e23c78244912c18f4",
   },
+  /** Exact A.8.3 step-1 preimage (one line; no trailing newline). */
+  a83Step1Preimage:
+    '{"type":"unique_combinable","version":"2","unix_time_secs":"1784332800.125","signer_steps":2,"step_1_signer":"sender","step_2_signer":"receiver","step_1_key_public__base64urlsafe":"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=","step_2_key_public__base64urlsafe":"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E=","step_1_state":{"amount":"7.75"},"step_2_state":{"amount":"2.25"},"previous_step_1_state_signature":"","previous_step_2_state_signature":"","expiry__unix_time_secs":"1784333100","message":"zp1:33333333-3333-4333-8333-333333333333:ord_7YQ3"}',
 } as const;
 
 /** Decision / ticket citations every case must remain discoverable under. */
@@ -207,6 +216,7 @@ const BYTE_IMMUTABILITY_SQL = readFileSync(
   join(HERE, "../src/schema/transaction-material-byte-immutability.sql"),
   "utf8",
 );
+const SIGNER_SUPPORT_SQL = readFileSync(join(HERE, "../src/schema/signer-support.sql"), "utf8");
 const SUBMIT_GUARD_TEST = readFileSync(join(HERE, "submit-write-path.guard.test.ts"), "utf8");
 const FORBIDDEN_RECOVERY_SRC = readFileSync(
   join(HERE, "../src/operator/recovery-inspection.ts"),
@@ -296,6 +306,17 @@ describe("Doc 11 §11.9 CONTRACT_FREEZE matrix — meta (D9.14 / GN-016 / ZTR-14
     expect(oracle.expectedOracleEligibleFromExpiry(B0.signedExpiryUnixSecs)).toBe(
       B0.oracleEligibleAt,
     );
+    // Appendix A §A.8.3 SEND_EXTERNAL redemption golden (no placeholders).
+    expect(B0.partial.innerSha256).toBe(
+      "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d",
+    );
+    expect(B0.partial.step1Signature).toBe(
+      "KKyZRQpHR7Xt3QhUXe0eki2iJC9sGYJ13tDzMN5lpQXA3ets0_7PPHZgOmbxDq2R9Hd7TPN_8Su-QVkuLcFyBA==",
+    );
+    expect(sha256Hex(B0.a83Step1Preimage)).toBe(B0.partial.innerSha256);
+    expect(B0.a83Step1Preimage).toContain('"expiry__unix_time_secs":"1784333100"');
+    expect(B0.partial.innerSha256).not.toMatch(/^a+$/);
+    expect(B0.partial.step1Signature).not.toMatch(/^A+=*$/);
     // Production MUST equal the pin (mutation of the constant fails the matrix).
     expect(SEND_REDEMPTION_WINDOW_SECS).toBe(B0.pinnedRedemptionWindowSecs);
     expect(SEND_PARTIAL_AGING_MARGIN_SECS).toBe(B0.pinnedAgingMarginSecs);
@@ -338,9 +359,17 @@ describe("EXP-BOUNDARY — delivery boundary (D9.14 / GN-016 / ZTR-149)", () => 
   it("EXP-BOUNDARY-02 at-expiry boundary is inclusive [P]", () => {
     const id: CaseId = "EXP-BOUNDARY-02";
     expect(id).toBe("EXP-BOUNDARY-02");
+    // Doc 11 §11.9: clock=expiry is still inside the window — partial servable, no state change.
     const clock = B0.signedExpiryUnixSecsNumber;
-    expect(isPastExpiry(B0.signedExpiryUnixSecs, clock)).toBe(true);
+    expect(isPastExpiry(B0.signedExpiryUnixSecs, clock)).toBe(false);
     expect(isPastExpiry(B0.signedExpiryUnixSecs, clock - 1)).toBe(false);
+    expect(isPastExpiry(B0.signedExpiryUnixSecs, clock + 1)).toBe(true);
+    const eval_ = evaluatePostDeliveryExpiry({ ...base, nowUnixSecs: clock });
+    expect(eval_.outcome).toBe("NOT_YET_EXPIRED");
+    if (eval_.outcome === "NOT_YET_EXPIRED") {
+      expect(eval_.remainingSecs).toBe(0);
+    }
+    expect(base.status).toBe("AWAITING_REDEMPTION");
     const actions = derivePermittedActions(
       b0Facts("AWAITING_REDEMPTION", b0Send()),
       "WAITING",
@@ -348,6 +377,7 @@ describe("EXP-BOUNDARY — delivery boundary (D9.14 / GN-016 / ZTR-149)", () => 
     expect(actions).toContain("REDELIVER_EXACT_PARTIAL");
     expect(transitionExists("AWAITING_REDEMPTION", "EXPIRED")).toBe(false);
     expect(SEND_EXTERNAL_STATES as readonly string[]).not.toContain("EXPIRED");
+    expect(EXPIRY_ATTENTION_SRC).not.toMatch(/operation\.expired/);
   });
 
   it("EXP-BOUNDARY-03 after-expiry delivery parks, never rejects [P]+[N]", () => {
@@ -447,13 +477,22 @@ describe("EXP-SKEW — two-timer separation (D9.14 / GN-016 / ZTR-149)", () => {
     const id: CaseId = "EXP-SKEW-04";
     expect(id).toBe("EXP-SKEW-04");
     const canonical = B0.signedExpiryUnixSecs;
+    const canonicalBody = JSON.stringify({ expiry__unix_time_secs: canonical });
+    const canonicalDigest = sha256Hex(canonicalBody);
+    // Mutation vectors (doc §11.9 / D8.10): ms string, JSON number, fractional string —
+    // each changes bytes and fails the digest pin.
+    const bodyMsString = JSON.stringify({
+      expiry__unix_time_secs: String(B0.signedExpiryUnixSecsNumber * 1000),
+    });
+    const bodyNumber = JSON.stringify({ expiry__unix_time_secs: B0.signedExpiryUnixSecsNumber });
+    const bodyFractional = JSON.stringify({ expiry__unix_time_secs: "1784333100.5" });
+    expect(sha256Hex(bodyMsString)).not.toBe(canonicalDigest);
+    expect(sha256Hex(bodyNumber)).not.toBe(canonicalDigest);
+    expect(sha256Hex(bodyFractional)).not.toBe(canonicalDigest);
+    expect(String(B0.signedExpiryUnixSecsNumber * 1000)).not.toBe(canonical);
     expect(() => isPastExpiry("1784333100.5", B0.signedExpiryUnixSecsNumber)).toThrow(
       /integer-seconds/,
     );
-    expect(String(B0.signedExpiryUnixSecsNumber * 1000)).not.toBe(canonical);
-    const bodyNumber = JSON.stringify({ expiry__unix_time_secs: B0.signedExpiryUnixSecsNumber });
-    const bodyString = JSON.stringify({ expiry__unix_time_secs: canonical });
-    expect(sha256Hex(bodyNumber)).not.toBe(sha256Hex(bodyString));
     // SIGN_INTENT freezes redemption_expiry once formed
     expect(SIGN_INTENT_FROZEN_AFTER_EXISTS).toContain("redemption_expiry");
   });
@@ -469,6 +508,9 @@ describe("EXP-REPLAY — single-use approval / one partial (D9.14 / GN-016 / ZTR
     expect(APPROVAL_CONSUMPTION.restoredAfterDownstreamFailure).toBe(false);
     expect(APPROVAL_CONSUMPTION.consumedBeforeMutation).toBe(true);
     expect(APPROVAL_CONSUMPTION.burnOnSignerFailure).toBe(true);
+    // 04 §8: reused (node_id, totp_timestep) fails unique index on totp_timestep_burns.
+    expect(SIGNER_SUPPORT_SQL).toMatch(/CREATE TABLE totp_timestep_burns/);
+    expect(SIGNER_SUPPORT_SQL).toContain("UNIQUE (node_id, totp_timestep)");
   });
 
   it("EXP-REPLAY-02 one approval ⇒ one sign intent ⇒ one partial [N]", () => {

@@ -38,6 +38,7 @@ import {
   type SendNonLandingOutcome,
   type LeaseSqlExecutor,
 } from "@zucoins/node-core";
+import { OPERATOR_RECOVERY_ACTIONS, RESERVED_RECOVERY_ACTIONS } from "@zucoins/generic-node-contracts/operator-halt";
 
 function parseOperationKind(value: string): OperationKind {
   if (!isOperationKind(value)) throw new Error(`unrecognized operation kind: ${value}`);
@@ -64,22 +65,14 @@ const TERMINAL_OPERATION_STATUSES: ReadonlySet<string> = new Set([
   "RECEIVE_LANDED", "INTERNAL_MOVE_LANDED", "EXTERNAL_SEND_LANDED", "EXPIRED", "REJECTED",
 ]);
 
-// Closed set of effect kinds this store commits. Unknown future kinds fail closed
-// (effect_not_implemented) before nonce/TOTP burn — never a silent no-op success.
-// CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED and REBUILD_INTERNAL_MOVE remain RESERVED at the
-// planning/admission layer (halt.contract RESERVED_RECOVERY_ACTIONS) but still have
-// real commit arms so a permitted POST cannot report success without mutation.
-export const IMPLEMENTED_EFFECT_KINDS: ReadonlySet<RecoveryActionEffect["kind"]> = new Set([
-  "RETRY_OBSERVATION",
-  "ACKNOWLEDGE_KEEP_PINNED",
-  "QUARANTINE_WALLETS",
-  "RELEASE_EXPIRED_RECEIVE",
-  "REDELIVER_EXACT_PARTIAL",
-  "CONTINUE_EXTERNAL_WAIT",
-  "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
-  "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
-  "REBUILD_INTERNAL_MOVE",
-]);
+// Closed set of effect kinds this store commits — derived from the frozen catalog so a
+// tenth action cannot land in halt.contract without failing the store's set equality.
+// Unknown future kinds fail closed (effect_not_implemented) before nonce/TOTP burn —
+// never a silent no-op success. RESERVED kinds still have real commit arms so a
+// permitted POST cannot report success without mutation; admission refuses them first.
+export const IMPLEMENTED_EFFECT_KINDS: ReadonlySet<RecoveryActionEffect["kind"]> = new Set(
+  OPERATOR_RECOVERY_ACTIONS,
+);
 
 function isImplementedEffect(effect: RecoveryActionEffect): boolean {
   return IMPLEMENTED_EFFECT_KINDS.has(effect.kind);
@@ -99,10 +92,7 @@ export const RECOVERY_ACTION_LABELS: Readonly<Record<RecoveryActionEffect["kind"
 };
 
 /** Recovery actions reserved at launch — UI must not offer as live success paths. */
-export const LAUNCH_RESERVED_RECOVERY_ACTIONS = [
-  "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
-  "REBUILD_INTERNAL_MOVE",
-] as const;
+export const LAUNCH_RESERVED_RECOVERY_ACTIONS = RESERVED_RECOVERY_ACTIONS;
 
 /**
  * The single switch that would make CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED reachable at

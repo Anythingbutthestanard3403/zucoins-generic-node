@@ -176,6 +176,14 @@ export default defineConfig({
         ),
       },
       {
+        // Closed recovery-action catalog (halt.contract) — SPA + recovery store
+        // derive live/reserved from this subpath. Must precede the package-root alias.
+        find: "@zucoins/generic-node-contracts/operator-halt",
+        replacement: fileURLToPath(
+          new URL("../generic-node-contracts/src/operator-halt/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "@zucoins/generic-node-contracts",
         replacement: fileURLToPath(
           new URL("../generic-node-contracts/src/index.ts", import.meta.url),

@@ -6,6 +6,10 @@ import type {
   OperationInventoryDetail,
   OperationInventoryListItem,
 } from "@zucoins/generic-node-contracts/admin-inventory";
+import {
+  OPERATOR_RECOVERY_ACTIONS,
+  RESERVED_RECOVERY_ACTIONS as CONTRACT_RESERVED_RECOVERY_ACTIONS,
+} from "@zucoins/generic-node-contracts/operator-halt";
 import { api, apiOrDemo, ApiError, type ApiFailureDetail, toApiFailureDetail } from "./api.js";
 import { useAuth } from "../store/auth.js";
 
@@ -306,24 +310,26 @@ export async function postRecoveryAction(
 }
 
 /**
- * Closed catalog of recovery actions the SQL recovery store can commit today.
- * UI must never offer a silent success for kinds outside this set.
+ * Reserved at launch — admitted in the frozen catalog but not grantable without a
+ * positive non-landing oracle. Re-exported from the contract so the SPA cannot drift.
  */
-export const LIVE_RECOVERY_ACTIONS = [
-  "RETRY_OBSERVATION",
-  "REDELIVER_EXACT_PARTIAL",
-  "CONTINUE_EXTERNAL_WAIT",
-  "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
-  "RELEASE_EXPIRED_RECEIVE",
-  "QUARANTINE_WALLETS",
-  "ACKNOWLEDGE_KEEP_PINNED",
-] as const;
+export const RESERVED_RECOVERY_ACTIONS = CONTRACT_RESERVED_RECOVERY_ACTIONS;
 
-/** Reserved at launch — admitted in catalog but not grantable without a non-landing oracle. */
-export const RESERVED_RECOVERY_ACTIONS = [
-  "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
-  "REBUILD_INTERNAL_MOVE",
-] as const;
+/**
+ * Live recovery actions the operator console may POST today: the frozen closed catalog
+ * minus RESERVED. Derived as a set difference so a tenth action or a promotion out of
+ * RESERVED fails the catalog-equality test rather than silently hiding a button.
+ */
+export const LIVE_RECOVERY_ACTIONS = OPERATOR_RECOVERY_ACTIONS.filter(
+  (action) =>
+    !(CONTRACT_RESERVED_RECOVERY_ACTIONS as readonly string[]).includes(action),
+) as readonly Exclude<
+  (typeof OPERATOR_RECOVERY_ACTIONS)[number],
+  (typeof CONTRACT_RESERVED_RECOVERY_ACTIONS)[number]
+>[];
+
+/** Full frozen catalog — LIVE ∪ RESERVED. Re-exported for equality gates. */
+export { OPERATOR_RECOVERY_ACTIONS };
 
 const RECOVERY_ACTION_LABELS: Readonly<Record<string, string>> = {
   RETRY_OBSERVATION: "Retry observation",

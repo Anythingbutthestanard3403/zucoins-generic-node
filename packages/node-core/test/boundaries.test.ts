@@ -436,6 +436,7 @@ describe("node-core dependency boundaries", () => {
         // Frozen observation wire vocabulary for SQL anomaly/stream persistence (ZTR-1127).
         "@zucoins/generic-node-contracts/observation",
         "@zucoins/generic-node-contracts/operations",
+        "@zucoins/generic-node-contracts/operator-halt",
         "@zucoins/node-core",
         "@zucoins/node-core/data",
         // scrubErrorDetails for the process-level fatal net, and the redacting

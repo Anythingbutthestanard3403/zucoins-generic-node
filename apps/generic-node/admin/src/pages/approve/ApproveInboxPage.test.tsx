@@ -5,7 +5,8 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TotpPromptProvider } from "../../totp/TotpPromptProvider.js";
 import { useAuth } from "../../store/auth.js";
-import { ApproveInboxPage, IMPLEMENTED_RECOVERY_ACTIONS } from "./ApproveInboxPage.js";
+import { isLiveRecoveryAction, LIVE_RECOVERY_ACTIONS } from "../../lib/money.js";
+import { ApproveInboxPage } from "./ApproveInboxPage.js";
 
 const OP_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -98,9 +99,14 @@ describe("ApproveInboxPage", () => {
     cleanup();
   });
 
-  it("exports only implemented recovery action kinds", () => {
-    expect(IMPLEMENTED_RECOVERY_ACTIONS.has("RETRY_OBSERVATION")).toBe(true);
-    expect(IMPLEMENTED_RECOVERY_ACTIONS.has("CLOSE_NEVER_STARTED_EXTERNAL_SEND")).toBe(false);
+  it("treats the three previously-hidden live kinds as live", () => {
+    expect(isLiveRecoveryAction("RETRY_OBSERVATION")).toBe(true);
+    expect(isLiveRecoveryAction("REDELIVER_EXACT_PARTIAL")).toBe(true);
+    expect(isLiveRecoveryAction("CONTINUE_EXTERNAL_WAIT")).toBe(true);
+    expect(isLiveRecoveryAction("CLOSE_NEVER_STARTED_EXTERNAL_SEND")).toBe(true);
+    expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(false);
+    expect(isLiveRecoveryAction("REBUILD_INTERNAL_MOVE")).toBe(false);
+    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(7);
   });
 
   it("never paints pending fetch as clear or unavailable", () => {
@@ -290,7 +296,7 @@ describe("ApproveInboxPage", () => {
     });
   });
 
-  it("marks unimplemented recovery actions honestly", async () => {
+  it("renders live recovery actions as clickable and reserved/unknown as disabled with reasons", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -308,7 +314,14 @@ describe("ApproveInboxPage", () => {
                   classification: "INDETERMINATE",
                   classification_rationale: "needs operator",
                   severity: "P1",
-                  permitted_actions: ["RETRY_OBSERVATION", "CLOSE_NEVER_STARTED_EXTERNAL_SEND"],
+                  permitted_actions: [
+                    "RETRY_OBSERVATION",
+                    "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+                    "REDELIVER_EXACT_PARTIAL",
+                    "CONTINUE_EXTERNAL_WAIT",
+                    "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+                    "FORCE_LANDED",
+                  ],
                   row_version: 5,
                   lease_epoch: null,
                   attention_since: "2026-08-02T00:00:00.000Z",
@@ -325,11 +338,17 @@ describe("ApproveInboxPage", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByTestId("approve-recovery-card")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "RETRY_OBSERVATION" })).toBeEnabled();
-    expect(screen.getByTestId("approve-recovery-unimplemented").textContent).toMatch(
-      /CLOSE_NEVER_STARTED_EXTERNAL_SEND/,
-    );
-    expect(screen.getByTestId("approve-recovery-unimplemented").textContent).toMatch(/Not yet implemented/);
-    expect(screen.queryByRole("button", { name: "CLOSE_NEVER_STARTED_EXTERNAL_SEND" })).not.toBeInTheDocument();
+    // Live kinds (including the three previously hidden) are clickable.
+    expect(screen.getByRole("button", { name: "Retry observation" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Close never-started send" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Re-send exact transfer code" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continue waiting for redemption" })).toBeEnabled();
+    // Reserved + unknown stay disabled with honest reasons; never POSTable as enabled.
+    const unavailable = screen.getByTestId("approve-recovery-unimplemented");
+    expect(unavailable.textContent).toMatch(/Close send \(proven not landed\)/);
+    expect(unavailable.textContent).toMatch(/Reserved until positive non-landing proof/);
+    expect(unavailable.textContent).toMatch(/FORCE_LANDED|Not implemented on this node/);
+    expect(screen.getByRole("button", { name: "Close send (proven not landed)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "FORCE_LANDED" })).toBeDisabled();
   });
 });

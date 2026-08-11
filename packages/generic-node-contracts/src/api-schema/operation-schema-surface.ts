@@ -60,7 +60,10 @@ export const PUBLIC_OPERATION_SCHEMA_SURFACE = [
       "destination_id",
       "spawned_from_operation_id",
       "lease_status",
+      "execution_phase",
       "expected_artifact",
+      "source_terminal_observation_id",
+      "destination_terminal_observation_id",
     ],
   },
   {

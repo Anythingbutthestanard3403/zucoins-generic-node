@@ -19,11 +19,13 @@ import type {
   MoveDestinationRecord,
   MoveDestinationState,
   MoveInsertOutcome,
+  MoveReadProjection,
   MoveSourceWalletRecord,
   MoveWalletState,
   StoredMoveOperation,
 } from "./create.js";
 import { MOVE_OPERATION_KIND } from "./create.js";
+import { readTransactionMaterialFacts } from "../core/transaction-material-store.js";
 
 export interface SqlQueryResult<R> {
   readonly rows: R[];
@@ -133,6 +135,27 @@ export const STATEMENTS = {
     `JOIN destinations d ON d.id = o.destination_id ` +
     `LEFT JOIN lease_group_operations lgo ON lgo.operation_id = o.id ` +
     `WHERE o.id = $1 AND o.kind = 'MOVE_INTERNAL'::operation_kind`,
+
+  SELECT_READ_PROJECTION:
+    `SELECT o.attention_reason, ` +
+    `EXTRACT(EPOCH FROM o.terminal_at) * 1000 AS terminal_at_ms, ` +
+    `EXTRACT(EPOCH FROM o.verification_material_available_until) * 1000 AS verification_until_ms, ` +
+    `(SELECT count(*)::int FROM wallet_active_leases wal ` +
+    ` WHERE wal.operation_id = o.id AND wal.wallet_id IN (o.source_wallet_id, d.wallet_id)) AS active_lease_count, ` +
+    `a.signing_key_id, a.preimage_text, a.preimage_sha256, a.signature, ` +
+    `(SELECT e.source_terminal_observation_id FROM move_observation_evidence e ` +
+    ` WHERE e.operation_id = o.id) AS source_terminal_observation_id, ` +
+    `(SELECT e.destination_terminal_observation_id FROM move_observation_evidence e ` +
+    ` WHERE e.operation_id = o.id) AS destination_terminal_observation_id, ` +
+    `EXISTS (SELECT 1 FROM gateway_submit_attempts s ` +
+    ` WHERE s.operation_id = o.id AND s.started_at IS NOT NULL) AS submit_started, ` +
+    `EXISTS (SELECT 1 FROM gateway_submit_attempts s ` +
+    ` WHERE s.operation_id = o.id AND s.completed_at IS NOT NULL) AS submit_returned, ` +
+    `EXISTS (SELECT 1 FROM operation_verifications v ` +
+    ` WHERE v.operation_id = o.id AND v.verdict = 'VERIFIED') AS verification_accepted ` +
+    `FROM operations o JOIN destinations d ON d.id = o.destination_id ` +
+    `LEFT JOIN operation_expected_artifacts a ON a.operation_id = o.id ` +
+    `WHERE o.id = $1 AND o.kind = 'MOVE_INTERNAL'::operation_kind`,
 } as const;
 
 /**
@@ -192,6 +215,25 @@ interface OperationRow {
   readonly created_at_ms: string | number;
   readonly updated_at_ms: string | number;
 }
+
+interface ReadProjectionRow {
+  readonly attention_reason: string | null;
+  readonly terminal_at_ms: string | number | null;
+  readonly verification_until_ms: string | number | null;
+  readonly active_lease_count: string | number;
+  readonly signing_key_id: string | null;
+  readonly preimage_text: string | null;
+  readonly preimage_sha256: string | null;
+  readonly signature: string | null;
+  readonly source_terminal_observation_id: string | null;
+  readonly destination_terminal_observation_id: string | null;
+  readonly submit_started: boolean | string;
+  readonly submit_returned: boolean | string;
+  readonly verification_accepted: boolean | string;
+}
+
+const isoOrNull = (value: string | number | null): string | null =>
+  value === null ? null : new Date(Number(value)).toISOString();
 
 function toSource(row: WalletRow): MoveSourceWalletRecord {
   return {
@@ -386,5 +428,54 @@ export class SqlMoveCreateStore implements MoveCreateStore {
     ]);
     const row = result.rows[0];
     return row === undefined ? null : toStored(row);
+  }
+
+  async readProjection(operationId: string): Promise<MoveReadProjection> {
+    const [material, result] = await Promise.all([
+      readTransactionMaterialFacts(
+        async (text, params) =>
+          (await this.sql.query<Record<string, unknown>>(text, params)).rows,
+        operationId,
+      ),
+      this.sql.query<ReadProjectionRow>(STATEMENTS.SELECT_READ_PROJECTION, [operationId]),
+    ]);
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new Error(`move read projection not found for operation ${operationId}`);
+    }
+    const sourceTerminalObservationId = row.source_terminal_observation_id;
+    const destinationTerminalObservationId = row.destination_terminal_observation_id;
+    const artifactPresent = row.signing_key_id !== null;
+    if (
+      artifactPresent !==
+      [row.preimage_text, row.preimage_sha256, row.signature].every((value) => value !== null)
+    ) {
+      throw new Error(`incomplete expected artifact for operation ${operationId}`);
+    }
+    return {
+      attentionReason: row.attention_reason,
+      terminalAt: isoOrNull(row.terminal_at_ms),
+      verificationMaterialAvailableUntil: isoOrNull(row.verification_until_ms),
+      activeLeaseCount: Number(row.active_lease_count),
+      expectedArtifact: artifactPresent
+        ? {
+            keyId: row.signing_key_id as string,
+            preimageText: row.preimage_text as string,
+            preimageSha256: row.preimage_sha256 as string,
+            signature: row.signature as string,
+          }
+        : null,
+      executionFacts: {
+        operationKind: "MOVE_INTERNAL",
+        ...material,
+        submitStarted: pgBool(row.submit_started),
+        submitReturned: pgBool(row.submit_returned),
+        verificationAccepted: pgBool(row.verification_accepted),
+        terminalObservationsPresent:
+          sourceTerminalObservationId !== null && destinationTerminalObservationId !== null,
+      },
+      sourceTerminalObservationId,
+      destinationTerminalObservationId,
+    };
   }
 }

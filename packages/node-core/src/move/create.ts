@@ -20,6 +20,11 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { parsePositiveZkzAmount } from "../protocol/amounts.js";
 import { parseUuid } from "../protocol/scalars.js";
+import {
+  deriveExecutionPhase,
+  type DurableExecutionFacts,
+  type ExecutionPhase,
+} from "../core/execution-phase.js";
 
 // The idempotency scope includes the HTTP method and the canonical
 // route. This slice serves exactly one public route.
@@ -111,6 +116,26 @@ export interface StoredMoveOperation {
   readonly updatedAt: number;
 }
 
+export interface MoveExpectedArtifact {
+  readonly keyId: string;
+  /** Exact persisted signed preimage. Never parse and reconstruct this value. */
+  readonly preimageText: string;
+  readonly preimageSha256: string;
+  readonly signature: string;
+}
+
+export interface MoveReadProjection {
+  readonly attentionReason: string | null;
+  readonly terminalAt: string | null;
+  readonly verificationMaterialAvailableUntil: string | null;
+  /** MOVE_INTERNAL owns exactly source + destination leases. */
+  readonly activeLeaseCount: number;
+  readonly expectedArtifact: MoveExpectedArtifact | null;
+  readonly executionFacts: DurableExecutionFacts;
+  readonly sourceTerminalObservationId: string | null;
+  readonly destinationTerminalObservationId: string | null;
+}
+
 export type MoveRejectionCode =
   | "missing_idempotency_key"
   | "invalid_tenant_id"
@@ -173,6 +198,8 @@ export interface MoveCreateStore {
     idempotencyKey: string,
   ): Promise<StoredMoveOperation | null>;
   findByOperationId(operationId: string): Promise<StoredMoveOperation | null>;
+  /** Live GET overlay. Optional only for narrow admission-only test stores. */
+  readProjection?(operationId: string): Promise<MoveReadProjection>;
 }
 
 // Frozen API grammar (api/scalars.ts): idempotency key 16–255 visible ASCII.
@@ -500,6 +527,12 @@ async function resolveIdempotencyConflict(
 
 // Response body. expected_artifact stays null until baseline acquisition binds it;
 // lease_status is WAITING until dual-lease acquisition.
+export type MoveLeaseStatus =
+  | "WAITING"
+  | "HELD"
+  | "RELEASED"
+  | "PINNED_FOR_ATTENTION";
+
 export interface InternalMoveCreateResponse {
   readonly operation: {
     readonly operation_id: string;
@@ -508,18 +541,38 @@ export interface InternalMoveCreateResponse {
     readonly amount_zkz: string;
     readonly row_version: number;
     readonly attention_required: boolean;
-    readonly attention_reason: null;
+    readonly attention_reason: string | null;
     readonly created_at: string;
     readonly updated_at: string;
-    readonly terminal_at: null;
-    readonly verification_material_available_until: null;
+    readonly terminal_at: string | null;
+    readonly verification_material_available_until: string | null;
   };
   readonly source_wallet_id: string;
   readonly destination_id: string;
   readonly spawned_from_operation_id: string | null;
-  readonly lease_status: "WAITING";
-  readonly expected_artifact: null;
+  readonly lease_status: MoveLeaseStatus;
+  readonly execution_phase: ExecutionPhase;
+  readonly expected_artifact: {
+    readonly key_id: string;
+    readonly preimage_text: string;
+    readonly preimage_sha256: string;
+    readonly signature: string;
+  } | null;
+  readonly source_terminal_observation_id: string | null;
+  readonly destination_terminal_observation_id: string | null;
 }
+
+const emptyMoveExecutionFacts = (): DurableExecutionFacts => ({
+  operationKind: "MOVE_INTERNAL",
+  attemptPhase: null,
+  signIntentPersisted: false,
+  partialPersisted: false,
+  partialFirstDelivered: false,
+  submitStarted: false,
+  submitReturned: false,
+  verificationAccepted: false,
+  terminalObservationsPresent: false,
+});
 
 export function buildInternalMoveResponse(
   operation: MoveOperation | StoredMoveOperation,
@@ -547,8 +600,27 @@ export function buildInternalMoveResponse(
     destination_id: operation.destinationId,
     spawned_from_operation_id: operation.spawnedFromOperationId,
     lease_status: "WAITING",
+    execution_phase: deriveExecutionPhase(emptyMoveExecutionFacts()),
     expected_artifact: null,
+    source_terminal_observation_id: null,
+    destination_terminal_observation_id: null,
   };
+}
+
+function projectMoveLeaseStatus(
+  operation: StoredMoveOperation,
+  projection: MoveReadProjection,
+): MoveLeaseStatus {
+  // A move is a two-lease unit. Any disagreement (exactly one live lease) is
+  // projected as pinned rather than laundering a split group into HELD/RELEASED.
+  if (operation.attentionRequired || projection.activeLeaseCount === 1) {
+    return "PINNED_FOR_ATTENTION";
+  }
+  if (projection.activeLeaseCount === 2) return "HELD";
+  if (projection.activeLeaseCount === 0) {
+    return operation.status === "CREATED" ? "WAITING" : "RELEASED";
+  }
+  return "PINNED_FOR_ATTENTION";
 }
 
 export type InternalMoveReadOutcome =
@@ -561,7 +633,36 @@ export async function readInternalMove(
 ): Promise<InternalMoveReadOutcome> {
   const found = await store.findByOperationId(operationId);
   if (found === null) return { outcome: "NOT_FOUND" };
-  return { outcome: "FOUND", response: buildInternalMoveResponse(found) };
+  const body = buildInternalMoveResponse(found);
+  const projection = await store.readProjection?.(operationId);
+  if (projection === undefined) return { outcome: "FOUND", response: body };
+  const artifact = projection.expectedArtifact;
+  return {
+    outcome: "FOUND",
+    response: {
+      ...body,
+      operation: {
+        ...body.operation,
+        attention_reason: projection.attentionReason,
+        terminal_at: projection.terminalAt,
+        verification_material_available_until:
+          projection.verificationMaterialAvailableUntil,
+      },
+      lease_status: projectMoveLeaseStatus(found, projection),
+      execution_phase: deriveExecutionPhase(projection.executionFacts),
+      expected_artifact:
+        artifact === null
+          ? null
+          : {
+              key_id: artifact.keyId,
+              preimage_text: artifact.preimageText,
+              preimage_sha256: artifact.preimageSha256,
+              signature: artifact.signature,
+            },
+      source_terminal_observation_id: projection.sourceTerminalObservationId,
+      destination_terminal_observation_id: projection.destinationTerminalObservationId,
+    },
+  };
 }
 
 /**

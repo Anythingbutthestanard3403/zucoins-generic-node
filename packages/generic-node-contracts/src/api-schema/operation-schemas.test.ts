@@ -108,12 +108,20 @@ const MOVE_REQUEST = {
 };
 
 const MOVE_RESPONSE = {
-  operation: operation("MOVE_INTERNAL"),
+  operation: {
+    ...operation("MOVE_INTERNAL"),
+    state: "INTERNAL_MOVE_LANDED",
+    terminal_at: TIMESTAMP,
+    verification_material_available_until: TIMESTAMP,
+  },
   source_wallet_id: UUID_A,
   destination_id: UUID_B,
   spawned_from_operation_id: null,
-  lease_status: "WAITING",
+  lease_status: "RELEASED",
+  execution_phase: "LANDED_VERIFIED",
   expected_artifact: EXPECTED_ARTIFACT,
+  source_terminal_observation_id: UUID_A,
+  destination_terminal_observation_id: UUID_B,
 };
 
 const SEND_REQUEST = {

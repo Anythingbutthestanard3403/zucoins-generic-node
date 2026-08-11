@@ -14,18 +14,34 @@ export const MoveInternalRequestSchema = z
   })
   .strict();
 
-const MoveInternalCreatedOperationSchema = MoveInternalOperationSchema.extend({
-  state: z.literal("CREATED"),
-}).strict();
+export const MoveLeaseStatusSchema = z.enum([
+  "WAITING",
+  "HELD",
+  "RELEASED",
+  "PINNED_FOR_ATTENTION",
+]);
+
+export const ExecutionPhaseSchema = z.enum([
+  "NOT_STARTED",
+  "PREIMAGE_PERSISTED",
+  "SIGNED_PERSISTED",
+  "DELIVERED",
+  "SUBMIT_STARTED",
+  "SUBMIT_RETURNED",
+  "LANDED_VERIFIED",
+]);
 
 export const MoveInternalResponseSchema = z
   .object({
-    operation: MoveInternalCreatedOperationSchema,
+    operation: MoveInternalOperationSchema,
     source_wallet_id: UuidSchema,
     destination_id: UuidSchema,
-    spawned_from_operation_id: z.null(),
-    lease_status: z.literal("WAITING"),
-    expected_artifact: ExpectedArtifactSchema,
+    spawned_from_operation_id: UuidSchema.nullable(),
+    lease_status: MoveLeaseStatusSchema,
+    execution_phase: ExecutionPhaseSchema,
+    expected_artifact: ExpectedArtifactSchema.nullable(),
+    source_terminal_observation_id: UuidSchema.nullable(),
+    destination_terminal_observation_id: UuidSchema.nullable(),
   })
   .strict();
 

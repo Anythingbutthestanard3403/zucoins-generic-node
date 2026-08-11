@@ -595,7 +595,10 @@ function componentsBlock(
           "destination_id",
           "spawned_from_operation_id",
           "lease_status",
+          "execution_phase",
           "expected_artifact",
+          "source_terminal_observation_id",
+          "destination_terminal_observation_id",
         ],
         properties: {
           operation: { $ref: "#/components/schemas/OperationObject" },
@@ -606,11 +609,33 @@ function componentsBlock(
             type: "string",
             enum: ["WAITING", "HELD", "RELEASED", "PINNED_FOR_ATTENTION"],
           },
+          execution_phase: {
+            type: "string",
+            enum: [
+              "NOT_STARTED",
+              "PREIMAGE_PERSISTED",
+              "SIGNED_PERSISTED",
+              "DELIVERED",
+              "SUBMIT_STARTED",
+              "SUBMIT_RETURNED",
+              "LANDED_VERIFIED",
+            ],
+          },
           expected_artifact: {
             oneOf: [
               { $ref: "#/components/schemas/ExpectedArtifact" },
               { type: "null" },
             ],
+          },
+          source_terminal_observation_id: {
+            type: "string",
+            format: "uuid",
+            nullable: true,
+          },
+          destination_terminal_observation_id: {
+            type: "string",
+            format: "uuid",
+            nullable: true,
           },
         },
       },

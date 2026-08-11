@@ -121,6 +121,41 @@ CREATE TABLE lease_group_operations (
 );
 `;
 
+const PROJECTION_FRAGMENT = `
+CREATE TABLE operation_transactions (
+  operation_id uuid NOT NULL REFERENCES operations(id),
+  attempt_no integer NOT NULL CHECK (attempt_no = 1),
+  attempt_phase text NOT NULL,
+  PRIMARY KEY (operation_id, attempt_no)
+);
+CREATE TABLE external_send_sign_intents (
+  operation_id uuid PRIMARY KEY REFERENCES operations(id)
+);
+CREATE TABLE external_send_partials (
+  operation_id uuid PRIMARY KEY REFERENCES operations(id),
+  first_delivered_at timestamptz
+);
+CREATE TABLE operation_expected_artifacts (
+  id uuid PRIMARY KEY,
+  operation_id uuid NOT NULL UNIQUE REFERENCES operations(id),
+  signing_key_id uuid NOT NULL,
+  preimage_text text NOT NULL,
+  preimage_sha256 sha256_hex NOT NULL,
+  signature padded_base64url_signature NOT NULL
+);
+CREATE TABLE gateway_submit_attempts (
+  id uuid PRIMARY KEY,
+  operation_id uuid NOT NULL REFERENCES operations(id),
+  started_at timestamptz,
+  completed_at timestamptz
+);
+CREATE TABLE operation_verifications (
+  id uuid PRIMARY KEY,
+  operation_id uuid NOT NULL REFERENCES operations(id),
+  verdict verification_verdict NOT NULL
+);
+`;
+
 const NODE_ID = "c9210000-0000-4000-8000-000000000001";
 const IMPLEMENTER_A = "c9210000-0000-4000-8000-00000000000a";
 const IMPLEMENTER_B = "c9210000-0000-4000-8000-00000000000b";
@@ -324,6 +359,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
+    applyDdl(scratchDb, PROJECTION_FRAGMENT);
     applyDdl(scratchDb, SEND_DDL);
 
     psqlMust(
@@ -472,6 +508,13 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     const got = await ops.getInternalMove(id, IMPLEMENTER_A);
     expect(got).not.toBeNull();
     expect(got!.operation.operation_id).toBe(id);
+    expect(got).toMatchObject({
+      lease_status: "WAITING",
+      execution_phase: "NOT_STARTED",
+      expected_artifact: null,
+      source_terminal_observation_id: null,
+      destination_terminal_observation_id: null,
+    });
     expect(await ops.getInternalMove(id, IMPLEMENTER_B)).toBeNull();
 
     const replay = await ops.createInternalMove({

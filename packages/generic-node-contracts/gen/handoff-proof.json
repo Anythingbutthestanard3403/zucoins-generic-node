@@ -19,6 +19,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -30,6 +31,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": false
           }
         },
@@ -62,6 +64,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": false
           }
         },
@@ -73,6 +76,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -105,6 +109,7 @@
             "vaultKeyRingLoaded": false,
             "vaultCensusVerified": false,
             "observationReadCapable": false,
+            "restoreHoldClear": true,
             "leadershipLockHeld": false
           }
         },
@@ -116,6 +121,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -148,6 +154,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -159,6 +166,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -191,6 +199,7 @@
             "vaultKeyRingLoaded": true,
             "vaultCensusVerified": true,
             "observationReadCapable": true,
+            "restoreHoldClear": true,
             "leadershipLockHeld": true
           }
         },
@@ -202,6 +211,7 @@
             "vaultKeyRingLoaded": false,
             "vaultCensusVerified": false,
             "observationReadCapable": false,
+            "restoreHoldClear": true,
             "leadershipLockHeld": false
           }
         },

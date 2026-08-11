@@ -105,7 +105,12 @@ function unquote(val: string): string {
  */
 export function isYamlTruthy(raw: string): boolean {
   const t = unquote(raw).trim().toLowerCase();
-  return t === "true" || t === "yes" || t === "on" || t === "y" || t === "1";
+  if (t === "true" || t === "yes" || t === "on" || t === "y" || t === "1") return true;
+  // GHA expression forms that always enable continue-on-error (Review B r4 D1).
+  // Collapse whitespace inside ${{ }} so `${{true}}` / `${{  true  }}` match.
+  const expr = t.replace(/\s+/g, "");
+  if (expr === "${{true}}" || expr === "${{always()}}") return true;
+  return false;
 }
 
 /**

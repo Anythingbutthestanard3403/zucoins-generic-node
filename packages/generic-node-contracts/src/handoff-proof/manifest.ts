@@ -29,7 +29,7 @@ export const HANDOFF_PROOF_CONCERN_MANIFEST = defineConcernManifest({
   goldenRefs: [
     {
       path: "gen/handoff-proof.json",
-      sha256: "28234953278707bdd4234fc78fee34cf5a2b92d79670eda6c96abb285cd400e1",
+      sha256: "3b4e7667fa26a6525252803abb0dd9d1eaaa80da5b9164e73ded0f5e1ebe4e83",
     },
   ],
   scanRules: [

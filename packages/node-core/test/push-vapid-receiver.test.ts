@@ -18,8 +18,6 @@ import {
 
 const NODE_ORIGIN = "https://node.merchant.example";
 const ENDPOINT = "wp_" + "A".repeat(32);
-const NOW = new Date("2026-07-14T00:00:00Z");
-
 function b64url(value: ArrayBuffer | Buffer): string {
   return (Buffer.isBuffer(value) ? value : Buffer.from(value)).toString("base64url");
 }
@@ -34,23 +32,6 @@ async function keypair() {
     privateKey: pair.privateKey,
     publicKey: b64url(await webcrypto.subtle.exportKey("raw", pair.publicKey)),
   };
-}
-
-async function jwt(
-  privateKey: webcrypto.CryptoKey,
-  aud = NODE_ORIGIN,
-  expDelta = 3600,
-): Promise<string> {
-  const header = b64url(Buffer.from(JSON.stringify({ typ: "JWT", alg: "ES256" })));
-  const payload = b64url(
-    Buffer.from(JSON.stringify({ aud, exp: Math.floor(NOW.getTime() / 1000) + expDelta })),
-  );
-  const signature = await webcrypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    Buffer.from(`${header}.${payload}`),
-  );
-  return `${header}.${payload}.${b64url(signature)}`;
 }
 
 function makeStore(row: PushSubscriptionRow | null): PushSubscriptionStore {
@@ -123,7 +104,6 @@ const CLEARTEXT_WITH_CODE = JSON.stringify({
 describe("createPushReceiver VAPID gate (ZTR-1161)", () => {
   it("observe + verified header: decrypts and enqueues; counts verified", async () => {
     const app = await keypair();
-    const token = await jwt(app.privateKey);
     const outcomes: PushVapidOutcome[] = [];
     const audit = makeAudit();
     const sunk: string[] = [];

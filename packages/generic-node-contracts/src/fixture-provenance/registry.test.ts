@@ -43,6 +43,7 @@ const EXPECTATIONS: Readonly<Record<string, FixtureExpectation>> = {
   "recovery/manifest": { byteClass: "suite-tuple", originKind: "canonical-constructor", captureDate: "2026-07-21" },
   "recovery/zp-backup-wallet-export-v1": { byteClass: "suite-tuple", originKind: "canonical-constructor", captureDate: "2026-07-21" },
   "recovery/zp-recovery-verification-v1": { byteClass: "suite-tuple", originKind: "canonical-constructor", captureDate: "2026-07-21" },
+  "send-redemption/a83-send-external-redemption": { byteClass: "signed-preimage", originKind: "canonical-constructor", captureDate: "2026-08-11" },
   "transfer-code/receive-code.v1": { byteClass: "signed-preimage", originKind: "wallet-capture", captureDate: "2026-07-19" },
   "transfer-code/send-code.v1": { byteClass: "signed-preimage", originKind: "wallet-capture", captureDate: "2026-07-19" },
 };

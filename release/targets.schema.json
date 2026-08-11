@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "release-targets-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "controlGlobs", "ignoredGlobs", "targets"],
+  "properties": {
+    "$schema": { "const": "./targets.schema.json" },
+    "schemaVersion": { "const": 1 },
+    "controlGlobs": { "$ref": "#/$defs/stringArray" },
+    "ignoredGlobs": { "$ref": "#/$defs/stringArray" },
+    "targets": {
+      "type": "array",
+      "minItems": 7,
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "nullablePath": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" }
+      ]
+    },
+    "healthGate": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "expectedStatus", "stabilization"],
+          "properties": {
+            "path": { "type": "string", "pattern": "^/" },
+            "expectedStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+            "stabilization": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "externalBinding": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["driftCheck", "logicalService", "logicalEnvironment", "sourceMode", "branch", "configPath"],
+          "properties": {
+            "driftCheck": { "enum": ["scheduled-read-only", "manual-riley-gated-read-only", "manual-cli-publish"] },
+            "logicalService": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "logicalEnvironment": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "sourceMode": { "enum": ["repository", "docker-image"] },
+            "branch": { "anyOf": [{ "type": "null" }, { "type": "string", "pattern": "^[A-Za-z0-9._/-]+$" }] },
+            "configPath": { "$ref": "#/$defs/nullablePath" }
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "active", "provider", "deployMode", "classificationGlobs", "configPath", "dockerfilePath", "watchPatterns", "healthGate", "migrationRequired", "approval", "liveAcceptance", "rollbackRef", "externalBinding"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "active": { "type": "boolean" },
+        "provider": { "enum": ["railway", "vercel", "ghcr", "none"] },
+        "deployMode": { "enum": ["automatic", "manual-riley-gated", "manual-cli-publish", "manual-offline-publish", "publish-only", "none"] },
+        "classificationGlobs": { "$ref": "#/$defs/stringArray" },
+        "configPath": { "$ref": "#/$defs/nullablePath" },
+        "dockerfilePath": { "$ref": "#/$defs/nullablePath" },
+        "watchPatterns": { "$ref": "#/$defs/stringArray" },
+        "healthGate": { "$ref": "#/$defs/healthGate" },
+        "migrationRequired": { "type": "boolean" },
+        "approval": { "type": "string", "minLength": 1 },
+        "liveAcceptance": { "type": "string", "minLength": 1 },
+        "rollbackRef": { "type": "string", "pattern": "^[A-Za-z0-9._/#-]+$" },
+        "externalBinding": { "$ref": "#/$defs/externalBinding" }
+      }
+    }
+  }
+}

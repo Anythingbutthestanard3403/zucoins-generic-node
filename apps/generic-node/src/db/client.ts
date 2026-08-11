@@ -1,5 +1,7 @@
 import { Pool, type PoolClient, type PoolConfig } from "pg";
 
+import { createSafeConsoleLogger } from "../boot/safe-logger.js";
+
 export class PostgresDeadlineExceededError extends Error {
   constructor(budgetMs: number) {
     super(`PostgreSQL operation exceeded ${budgetMs}ms monotonic budget`);
@@ -196,9 +198,11 @@ export function createPool(databaseUrl: string, options: CreatePoolOptions = {})
   // An idle client hard-dropped by the OS (container kill, network RST) emits an unhandled pool
   // 'error' event; Node's EventEmitter throws when an 'error' event has no listener, crashing the
   // process. Log-and-continue instead — pg recycles the dead client and later queries surface as
-  // normal rejections.
+  // normal rejections. Route through the redactor chokepoint so a driver message that quotes a
+  // DSN credential cannot reach the platform log store raw (ZTR-1215).
+  const poolErrorLog = createSafeConsoleLogger();
   pool.on("error", (err) => {
-    console.error(
+    poolErrorLog.error(
       "generic-node database lost an idle PostgreSQL connection; the pool will replace it automatically. This is usually transient, but inspect DATABASE_URL connectivity and readiness if it repeats.",
       err,
     );

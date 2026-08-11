@@ -97,17 +97,90 @@ export function truncate(kind: TruncateKind, value: string): string {
 const TEXT_ASSIGNMENT = /([A-Za-z0-9_.-]{1,64})(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;)}]+)/g;
 
 /**
+ * URL userinfo with a password (`scheme://user:pass@host`). The whole userinfo
+ * segment is censored. Delimiters:
+ * - last `@` before the host (passwords may themselves contain `@`, e.g. `P@ssw0rd`)
+ * - a `:` required inside userinfo so username-only forms (`scheme://user@host`)
+ *   and path forms that happen to contain `@` (pnpm `file:///…/pkg@1.2.3`) are
+ *   left alone: the former is uncommon in free-text diagnostics, the latter is
+ *   ordinary stack material that must not be chewed.
+ * - `/ ? #` are excluded from the userinfo class so the greedy last-`@` stop is
+ *   authority-scoped: a Windows `file:///C:/…/vitest@3.2.7` frame and a real
+ *   credential URL followed by a path `@` (`…@host/path/pkg@1.2.3`) must not
+ *   let path material extend the match past the authority boundary.
+ * Greedy `*` on a class that permits `@` (but not `/ ? #`) makes the engine
+ * take the rightmost authority `@` that still leaves a `:` in userinfo —
+ * first-`@` stop would leak the password tail
+ * (`postgres://u:P@ssw0rd@h` → `…[redacted]@ssw0rd@h`).
+ */
+const TEXT_URL_USERINFO = /([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'<>/?#]*:[^\s"'<>/?#]*)@/g;
+
+/**
+ * Candidate bare tokens for the high-entropy pass. Length floor is deliberate:
+ * ordinary prose words and short ids stay under it; the entropy gate below
+ * still rejects long pure-decimal / pure-lowercase runs. `/` is deliberately
+ * excluded so filesystem paths and URL path segments are not chewed as tokens
+ * (stack frames must stay readable).
+ */
+const BARE_TOKEN_CANDIDATE = /\b([A-Za-z0-9_+=.-]{24,})\b/g;
+
+/**
+ * True when a bare token is secret-shaped enough to censor without a field
+ * name: long hex, mixed-case+digit material, or base64/base64url-like runs.
+ * Pure decimal and ordinary lowercase identifiers stay put so prose and
+ * money-path decimal strings are not chewed.
+ */
+export function isHighEntropyToken(token: string): boolean {
+  if (token.length < 24) return false;
+  if (token === REDACTED) return false;
+  // Pure digits — amounts, counters, timestamps — are not secret-shaped.
+  if (/^\d+$/.test(token)) return false;
+  // Standard UUID form is an identifier operators need in diagnostics, not a secret.
+  if (
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+      token,
+    )
+  ) {
+    return false;
+  }
+  const hexBody = token.replace(/-/g, "");
+  // 32+ continuous hex (raw key material / hashes). Hyphenated UUIDs already returned.
+  if (/^[0-9a-fA-F]+$/.test(hexBody) && hexBody.length >= 32 && !token.includes("-")) return true;
+  const hasLower = /[a-z]/.test(token);
+  const hasUpper = /[A-Z]/.test(token);
+  const hasDigit = /[0-9]/.test(token);
+  // Mixed case + digit is the ordinary shape of an API key / random secret.
+  if (hasLower && hasUpper && hasDigit) return true;
+  // Base64 / base64url alphabet: require an uppercase class so long lowercase
+  // identifiers (`postgresql-connection-string-name…`) are not chewed.
+  if (
+    /^[A-Za-z0-9_+=/-]+$/.test(token) &&
+    token.length >= 28 &&
+    hasUpper &&
+    (hasLower || hasDigit)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Free-text counterpart of the field-name redactor, for strings that were
  * already formatted before anyone could redact them structurally — log
  * messages, `Error.message`, `Error.stack`.
  *
- * ponytail: assignment-shaped fragments only. A secret pasted as a bare token,
- * or embedded in a URL credential (`postgres://u:p@h`), is not matched — widen
- * the pattern here, never at a call site, if that turns out to be reachable.
+ * Three passes, each idempotent and ordered so later passes cannot undo earlier
+ * ones: URL userinfo → never-log assignments → bare high-entropy tokens.
  */
 export function scrubText(text: string): string {
-  return text.replace(TEXT_ASSIGNMENT, (match, key: string, separator: string) =>
-    isNeverLog(normalizeKey(key)) ? `${key}${separator}${REDACTED}` : match,
+  const withUrls = text.replace(TEXT_URL_USERINFO, (_m, scheme: string) => `${scheme}${REDACTED}@`);
+  const withAssignments = withUrls.replace(
+    TEXT_ASSIGNMENT,
+    (match, key: string, separator: string) =>
+      isNeverLog(normalizeKey(key)) ? `${key}${separator}${REDACTED}` : match,
+  );
+  return withAssignments.replace(BARE_TOKEN_CANDIDATE, (token) =>
+    isHighEntropyToken(token) ? REDACTED : token,
   );
 }
 

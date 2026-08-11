@@ -11,6 +11,7 @@ import {
   type TransactionIsolationLevel,
 } from "@zucoins/node-core/data";
 
+import { createSafeConsoleLogger, safeFormatError } from "../boot/safe-logger.js";
 import { createPool } from "./client.js";
 import { assertMigrationLockAcquired, releaseMigrationLock } from "./migration-lock.js";
 import { runOverlapGuard } from "./overlap-guard.js";
@@ -287,20 +288,24 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   // The CLI has no outer composition root, so it is the sole remaining caller that reads
   // process.env.DATABASE_URL directly — through the schema above, once.
+  // Same redactor chokepoint as main/stage1 (ZTR-1215).
+  const cliLog = createSafeConsoleLogger();
   let databaseUrl: string;
   try {
     databaseUrl = resolveCliDatabaseUrl();
   } catch (err) {
-    console.error(`generic-node database migrations did not complete; ${(err as Error).message}`);
+    cliLog.error(
+      `generic-node database migrations did not complete; ${err instanceof Error ? err.message : safeFormatError(err)}`,
+    );
     process.exit(1);
   }
   // runMigrations() owns its own pool's lifecycle (construct → use → end), see above.
   runMigrations(databaseUrl)
     .then(() => {
-      console.log("generic-node migrations applied");
+      cliLog.info("generic-node migrations applied");
     })
     .catch((err: unknown) => {
-      console.error(
+      cliLog.error(
         "generic-node database migrations did not complete; service startup is blocked to prevent running against an incompatible schema. Inspect the migration error, database connectivity, lock contention, and migration journal before retrying.",
         err,
       );

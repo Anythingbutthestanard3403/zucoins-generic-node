@@ -93,3 +93,65 @@ export function createSafeConsoleLogger(sink: SafeLoggerSink = console): BootLog
     },
   };
 }
+
+/**
+ * One-shot free-text write through the same redactor the BootLogger uses.
+ * Operator/DR CLIs that only need `log`/`error` line sinks use this so they
+ * cannot bypass the chokepoint by talking to `console` directly.
+ */
+export function createSafeCliIo(sink: SafeLoggerSink = console): {
+  log(line: string): void;
+  error(line: string): void;
+} {
+  return {
+    log: (line) => {
+      sink.log(redactMessage(line));
+    },
+    error: (line) => {
+      sink.error(redactMessage(line));
+    },
+  };
+}
+
+/**
+ * RotationLogger adapter: structured fields go through redactLogFields so a
+ * never-log key cannot reach stdout even when the CLI builds the payload.
+ */
+export function createSafeRotationLogger(sink: SafeLoggerSink = console): {
+  info(obj: Record<string, unknown>, msg?: string): void;
+  error(obj: Record<string, unknown>, msg?: string): void;
+} {
+  const emit = (level: "info" | "error", obj: Record<string, unknown>, msg?: string) => {
+    const line = safeJsonLine({ level, msg, ...obj });
+    if (level === "info") sink.log(line);
+    else sink.error(line);
+  };
+  return {
+    info: (obj, msg) => emit("info", obj, msg),
+    error: (obj, msg) => emit("error", obj, msg),
+  };
+}
+
+/**
+ * Redact a free-text diagnostic line (no structured fields). Shared by CLI
+ * helpers that still format a single string before writing.
+ */
+export function safeConsoleText(line: string): string {
+  return redactMessage(line);
+}
+
+/**
+ * Format an unknown error for a text sink: message+stack go through scrubText
+ * via the Error branch of scrubErrorDetails. Returns a single string so CLI
+ * paths that only accept lines stay simple.
+ */
+export function safeFormatError(err: unknown): string {
+  if (err === undefined || err === null) return "";
+  const scrubbed = scrubErrorDetails({ err }) as {
+    err?: { type?: string; message?: string; stack?: string } | string;
+  };
+  const body = scrubbed.err;
+  if (body === undefined) return safeConsoleText(String(err));
+  if (typeof body === "string") return body;
+  return body.stack ?? body.message ?? body.type ?? "";
+}

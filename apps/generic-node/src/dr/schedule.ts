@@ -3,6 +3,7 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
+import { createSafeConsoleLogger } from "../boot/safe-logger.js";
 import { exportEncryptedBackup, type BackupResult } from "./encrypted-backup.js";
 import {
   BACKUP_ENVELOPE_EXTENSION,
@@ -156,13 +157,9 @@ export async function newestBackupArtifactMtimeMs(outputDir: string): Promise<nu
 export function createBackupScheduler(config: BackupScheduleConfig): BackupSchedulerHandle {
   const policy = config.policy ?? DEFAULT_BACKUP_POLICY;
   const nowMs = config.nowMs ?? (() => Date.now());
-  const log = config.logger ?? {
-    info: (m: string) => console.log(m),
-    error: (m: string, err?: unknown) => {
-      if (err === undefined) console.error(m);
-      else console.error(m, err);
-    },
-  };
+  // Default sink is the same redacting BootLogger main/stage1 inject; a caller
+  // that omits `logger` still cannot emit a raw secret (ZTR-1215).
+  const log = config.logger ?? createSafeConsoleLogger();
 
   let stopped = true;
   let lastSuccessAtMs: number | null = null;

@@ -1,0 +1,16 @@
+{
+  "concern": "send-redemption",
+  "spec": "A.8.3 SEND_EXTERNAL redemption golden",
+  "files": {
+    "step1_preimage": "a83-send-external-redemption.step1.preimage.txt",
+    "step1_sig": "a83-send-external-redemption.step1.sig.b64"
+  },
+  "digests": {
+    "step_1_sha256": "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d",
+    "step1_preimage_file_sha256": "46ba7528a9a757bd2bf50e2950256663aae9d20a51b485b71d511ac74b38662d"
+  },
+  "step_1_signature": "KKyZRQpHR7Xt3QhUXe0eki2iJC9sGYJ13tDzMN5lpQXA3ets0_7PPHZgOmbxDq2R9Hd7TPN_8Su-QVkuLcFyBA==",
+  "provenance": {
+    "note": "Offline re-sign of A.8.0 inner with expiry 1784333100 (= formation 1784332800 + SEND_REDEMPTION_WINDOW_SECS 300). No committed test writes this golden."
+  }
+}

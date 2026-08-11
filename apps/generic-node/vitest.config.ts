@@ -26,6 +26,20 @@ export default defineConfig({
         ),
       },
       {
+        // Boot golden-fixture refusal (ZTR-1174) imports the consumer kit matcher.
+        // Must precede the package-root alias (prefix match).
+        find: "@zucoins/node-core/verifier/consumer/pinning",
+        replacement: fileURLToPath(
+          new URL("../../packages/node-core/src/verifier/consumer/pinning/index.ts", import.meta.url),
+        ),
+      },
+      {
+        find: "@zucoins/node-core/verifier/consumer",
+        replacement: fileURLToPath(
+          new URL("../../packages/node-core/src/verifier/consumer/index.ts", import.meta.url),
+        ),
+      },
+      {
         find: "@zucoins/node-core",
         replacement: fileURLToPath(
           new URL("../../packages/node-core/src/index.ts", import.meta.url),

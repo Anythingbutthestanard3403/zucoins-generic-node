@@ -433,6 +433,8 @@ describe("node-core dependency boundaries", () => {
         // (ZTR-1202: destination_address was read off a summary row nothing populated).
         "@zucoins/generic-node-contracts/admin-inventory",
         "@zucoins/generic-node-contracts/admin-auth-errors",
+        // Frozen observation wire vocabulary for SQL anomaly/stream persistence (ZTR-1127).
+        "@zucoins/generic-node-contracts/observation",
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/node-core",
         "@zucoins/node-core/data",

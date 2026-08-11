@@ -241,23 +241,6 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       pinned: "pool.connect() → BEGIN → work(sql) → COMMIT on one client",
     },
   ],
-  "apps/generic-node/src/money-workers/gateway-t0-observer.ts": [
-    {
-      site: "createGatewayT0Observer.observe",
-      pathClass: "money-path",
-      isolation: "READ COMMITTED",
-      mechanism: "ROW_LOCK",
-      covering:
-        "appends to gateway_observations (authoritative byte ledger) through the serialized " +
-        "stream writer built with `takeAdvisoryLock: true`, i.e. " +
-        "`pg_advisory_xact_lock(hashtext(observer), hashtext(walletPublicKey))` " +
-        "(observation/stream-writer-sql.ts:98), backed by " +
-        "UNIQUE (observer_id, wallet_public_key, wallet_seq) (schema/observation-ledger.sql:102).",
-      pinned:
-        "the writer's effects issue every statement through this client; the gateway read " +
-        "completes BEFORE BEGIN, so no network call sits inside the transaction",
-    },
-  ],
   "apps/generic-node/src/money-workers/genesis-t0-observer.ts": [
     {
       site: "captureGenesisObservation",
@@ -319,6 +302,21 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "`withTransaction: async (body) => body(tx)` rather than opening a second BEGIN",
     },
   ],
+  "apps/generic-node/src/money-workers/receive-landing-step.ts": [
+    {
+      site: "setAttentionForIndeterminate",
+      pathClass: "money-path",
+      isolation: "READ COMMITTED",
+      mechanism: "ROW_LOCK",
+      covering:
+        "atomic CTE CAS `operations.attention_required false→true` with closed-set reason " +
+        "plus insert into receive_expiry_attention_events; concurrent loser matches zero " +
+        "rows (idempotent). dual-chain operation.needs_attention appends on the same client " +
+        "when the CAS wins (ZTR-1146).",
+      pinned:
+        "pool.connect() → BEGIN → CAS+mirror → appendDurableDualChainEvent → COMMIT on one client",
+    },
+  ],
   "apps/generic-node/src/money-workers/send-completion-lander.ts": [
     {
       site: "parkSendOnHeadAnomaly",
@@ -331,7 +329,9 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "row lock and re-evaluates its predicate against the committed row, so a concurrent " +
         "loser returns zero rows and this path ROLLBACKs. The operations mirror sync runs in " +
         "the same transaction.",
-      pinned: "pool.connect() → BEGIN → CAS → mirror → COMMIT on one client",
+      pinned:
+        "pool.connect() → BEGIN → CAS → mirror → appendDurableDualChainEvent → COMMIT on one " +
+        "client (ZTR-1146 park dual-chain)",
     },
   ],
   "apps/generic-node/src/money-workers/send-signer-deps.ts": [
@@ -380,17 +380,18 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "hands back this client verbatim",
     },
   ],
-  "apps/generic-node/src/money-workers/sql-fresh-head-reader.ts": [
+  "apps/generic-node/src/money-workers/sql-observation-persistence.ts": [
     {
-      site: "confirm-read + observation-ledger append",
+      site: "persistSqlObservation",
       pathClass: "money-path",
       isolation: "READ COMMITTED",
       mechanism: "ROW_LOCK",
       covering:
-        "same serialized stream writer and same `takeAdvisoryLock: true` as " +
-        "gateway-t0-observer.ts — pg_advisory_xact_lock keyed on (observer, walletPublicKey), " +
-        "held to COMMIT.",
-      pinned: "pool.connect() → BEGIN; the writer's effects run on this client only",
+        "same serialized stream writer path as gateway-t0-observer — observation row, " +
+        "paired anomaly, quarantine/attention plan and cursor commit share one client; " +
+        "advisory/row locks taken by the stream writer are held to COMMIT.",
+      pinned:
+        "pool.connect() → BEGIN → applyMoneyPathStatementTimeout → effects → COMMIT on one client",
     },
   ],
   "apps/generic-node/src/money-workers/sql-landing-store.ts": [

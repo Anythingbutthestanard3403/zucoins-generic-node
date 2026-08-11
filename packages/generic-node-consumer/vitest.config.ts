@@ -4,14 +4,20 @@ import { defineConfig } from "vitest/config";
 
 import { packageSourceAliases } from "../../vitest.aliases.ts";
 
-// Resolve @zucoins/node-core to src/ rather than the dist/ its package.json `exports` point at.
-// `pnpm build` and `pnpm test` are separate commands with no ordering guarantee, so a stale or
-// absent dist/ let this suite — the one proving the consumer trust boundary — pass or fail on
-// yesterday's bytes. packageSourceAliases derives and orders the entries; see its doc comment.
+// Resolve @zucoins/node-core and @zucoins/generic-node-contracts to src/ rather than the dist/
+// their package.json `exports` point at. `pnpm build` and `pnpm test` are separate commands with
+// no ordering guarantee, so a stale or absent dist/ let this suite — the one proving the consumer
+// trust boundary — pass or fail on yesterday's bytes (or fail to collect at all when contracts
+// dist is missing). packageSourceAliases derives and orders the entries; see its doc comment.
+// Contracts aliases are listed first so longest-find-first ordering stays package-local: each
+// call already sorts its own subpaths above its package root.
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   resolve: {
-    alias: packageSourceAliases(new URL("../node-core/", import.meta.url)),
+    alias: [
+      ...packageSourceAliases(new URL("../generic-node-contracts/", import.meta.url)),
+      ...packageSourceAliases(new URL("../node-core/", import.meta.url)),
+    ],
   },
   test: {
     // Load-bearing for the aggregate root run: `pnpm exec vitest run <a node-core test file>`

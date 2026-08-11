@@ -38,9 +38,12 @@ import {
  * additionally cross-checked against the actual spec bytes (the "spec cross-check" test).
  *
  * Catalog classes #14 (device-sig-without-totp) and #16 (golden-key-live-chain) are covered by
- * production enforcement in node-core (ZTR-1174): send/approve.ts always requires a fresh TOTP
- * alongside any device signature, and verifier/consumer/verify.ts refuses A.8 golden keys under
- * liveChain. covered ∪ uncovered == all 41; EXPECTED_UNCOVERED is empty.
+ * real mutation tests (ZTR-1174 r2), not production-src title substrings alone:
+ *   #14 — approveExternalSend rejects valid device sig + empty/non-digit TOTP; HTTP omits x-zp-totp.
+ *   #16 — boot refuseGoldenThenProbeIdentity / refuseGoldenEventSigningKey refuse A.8 goldens
+ *         before arm (node live path); consumer assertNotGoldenKey under liveChain remains.
+ * covered ∪ uncovered == all 41; EXPECTED_UNCOVERED is empty. A covered rejection class MUST
+ * cite at least one *.test.ts mutation ref (production .ts alone cannot cover).
  *
  * Governing contract: the negative-vector inventory and its canonical decisions.
  */
@@ -100,10 +103,10 @@ const AC = "packages/generic-node-contracts/src/approval/approval-tuple.census.t
 const MM = "packages/generic-node-contracts/src/machine-manifests/negative-vectors.census.test.ts";
 const RP = "packages/generic-node-contracts/src/reporting-persistence/decisions.test.ts";
 const A9 = "packages/generic-node-contracts/src/crypto-goldens/a9-covering-mutations.test.ts";
-// node-core production enforcement sites for A.9 #14 / #16 (ZTR-1174).
-const APPR = "packages/node-core/src/send/approve.ts";
+// A.9 #14 / #16 covering mutation suites (ZTR-1174 r2) — tests only; production .ts is not sole coverage.
 const APPR_T = "packages/node-core/src/send/approve.test.ts";
-const VFY = "packages/node-core/src/verifier/consumer/verify.ts";
+const APPR_HTTP = "apps/generic-node/test/admin-never-403-auth.gate.test.ts";
+const BOOT_T = "apps/generic-node/test/refuse-golden-fixture-keys.test.ts";
 const VFY_T = "packages/node-core/src/verifier/consumer/consumer.test.ts";
 // node-core covering suites for the ceremony-window + device-label families (read by path, cross-package).
 const HW = "packages/node-core/test/protocol-suite-hardening.test.ts";
@@ -227,13 +230,20 @@ const A9_COVERAGE: Readonly<Record<string, CoverageEntry>> = {
     status: "covered",
     kind: "real-verifier-rejection",
     tests: [
-      { file: APPR, title: "matchTotp" },
-      { file: APPR_T, title: "TOTP_AND_DEVICE verifies signature; rejects bad sig and XOR fields" },
+      {
+        file: APPR_T,
+        title: "A.9 #14: valid device sig without fresh TOTP is rejected (empty / missing / non-digit)",
+      },
+      {
+        file: APPR_HTTP,
+        title: "A.9 #14 HTTP: valid device fields with missing x-zp-totp are refused (no approve)",
+      },
       { file: AC, title: "TOTP-authenticates-mutation semantics" },
     ],
     note:
-      "ZTR-1174: packages/node-core/src/send/approve.ts always requires a fresh TOTP (matchTotp) " +
-      "before approving; device signature alone cannot authorize (deviceSignatureAloneAuthorizes === false).",
+      "ZTR-1174 r2: approveExternalSend rejects well-formed device sig when totpCode is empty/non-digit " +
+      "(request_invalid); admin approve route refuses missing x-zp-totp at HTTP before mutation. " +
+      "deviceSignatureAloneAuthorizes === false remains the policy anchor.",
   },
   "jsonb-reconstruction": {
     status: "covered",
@@ -244,12 +254,20 @@ const A9_COVERAGE: Readonly<Record<string, CoverageEntry>> = {
     status: "covered",
     kind: "real-verifier-rejection",
     tests: [
-      { file: VFY, title: "A.9 item 16" },
+      {
+        file: BOOT_T,
+        title: "refuses a sealed golden NODE_IDENTITY before sign/probe runs (no arm side-effects)",
+      },
+      {
+        file: BOOT_T,
+        title: "refuses every A.8 golden public key as EVENT_SIGNING before arm",
+      },
       { file: VFY_T, title: "refuses A.8 seed key under liveChain=true via assertNotGoldenKey" },
     ],
     note:
-      "ZTR-1174: packages/node-core/src/verifier/consumer/verify.ts assertNotGoldenKey refuses A.8 " +
-      "fixture keys when liveChain is set; consumer.test.ts covers the gate.",
+      "ZTR-1174 r2: generic-node boot live path refuseGoldenThenProbeIdentity / refuseGoldenEventSigningKey " +
+      "refuse A.8 goldens BEFORE identity.sign, sendSignerHolder, identityEnsured, and installEventSigner arm. " +
+      "Consumer assertNotGoldenKey(liveChain) remains the inbound verifier gate.",
   },
   "funded-sender-genesis-predecessor": {
     status: "covered",
@@ -713,6 +731,38 @@ describe("A.9 vector coverage census (the fixture-provenance drift gate /, Case 
     const src = readRepoFile(RA);
     expect(src).not.toBeNull();
     expect(src?.includes("this covering test title does not exist anywhere")).toBe(false);
+  });
+
+  // Anti-launder (ZTR-1174 Review B): a rejection-class "covered" mark must cite at least one
+  // *.test.ts mutation. Production source titles (e.g. matchTotp in approve.ts) alone cannot cover.
+  it("fail-first: production-src title alone cannot cover a rejection class (#14 anti-launder)", () => {
+    const isTestFile = (f: string): boolean => /\.test\.ts$/.test(f) || /\.spec\.ts$/.test(f);
+    const laundered: string[] = [];
+    for (const [id, entry] of Object.entries(A9_COVERAGE)) {
+      if (entry.status !== "covered") continue;
+      if (entry.kind === "positive-admission") continue;
+      const hasMutationTest = entry.tests.some((t) => isTestFile(t.file));
+      if (!hasMutationTest) {
+        laundered.push(`${id}: only non-test refs: ${entry.tests.map((t) => t.file).join(", ")}`);
+      }
+    }
+    expect(laundered, laundered.join("\n")).toEqual([]);
+
+    // Explicit #14 phantom: a covered entry that ONLY pointed at packages/node-core/src/send/approve.ts
+    // would fail the gate above. Pin the structural check on a synthetic entry shape.
+    const phantomOnlyProd: CoveredEntry = {
+      status: "covered",
+      kind: "real-verifier-rejection",
+      tests: [{ file: "packages/node-core/src/send/approve.ts", title: "matchTotp" }],
+    };
+    expect(phantomOnlyProd.tests.some((t) => isTestFile(t.file))).toBe(false);
+    // And the real #14 entry must pass.
+    const real14 = A9_COVERAGE["device-sig-without-totp"];
+    expect(real14?.status).toBe("covered");
+    if (real14?.status === "covered") {
+      expect(real14.tests.some((t) => isTestFile(t.file))).toBe(true);
+      expect(real14.tests.some((t) => t.title.includes("A.9 #14"))).toBe(true);
+    }
   });
 
   it("fail-first: a covered class whose file lacks the required idiom would be flagged (window class vs a positive-only file)", () => {

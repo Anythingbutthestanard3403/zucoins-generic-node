@@ -288,6 +288,42 @@ describe("ZTR-1191 served-surface never-403-for-auth gate", () => {
     expect(body.error.code).toBe(APPROVAL_FACTOR_FAILURE_CODE);
   });
 
+  it("A.9 #14 HTTP: valid device fields with missing x-zp-totp are refused (no approve)", async () => {
+    // Served-surface counterpart of the approveExternalSend empty-TOTP mutation:
+    // device_key_id + device_signature present, TOTP header absent → 401 before mutation.
+    const { router, userStore } = makeRouter({
+      dualMode: "single_operator",
+      loadOperation: async (id) => (id === OP_ID ? SAMPLE_OP : null),
+      challengeStoreOverride: new InMemoryApprovalChallengeStore(),
+    });
+    const auth = await login(router, userStore);
+    const res = await router(
+      "POST",
+      `/admin/v1/external-sends/${OP_ID}/approve`,
+      Buffer.from(
+        JSON.stringify({
+          challenge_nonce: randomUUID(),
+          expected_row_version: 1,
+          preimage_sha256: "a".repeat(64),
+          device_key_id: randomUUID(),
+          device_signature: `${"A".repeat(86)}==`,
+        }),
+      ),
+      {
+        cookie: auth.cookie,
+        origin: ORIGIN,
+        "x-csrf-token": auth.csrf,
+        "content-type": "application/json",
+        "idempotency-key": randomUUID(),
+        // deliberately omit x-zp-totp
+      },
+    );
+    expect(res.status).toBe(401);
+    expect(res.status).not.toBe(200);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe("invalid_credentials");
+  });
+
   it("authenticated-but-refused table: no auth 403 outside carve-out", async () => {
     type Case = {
       label: string;

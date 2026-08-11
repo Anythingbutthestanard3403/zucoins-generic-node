@@ -197,7 +197,11 @@ import {
 } from "./money-workers/index.js";
 import { createMoveAdvancedPorts } from "./money-workers/move-advanced-ports.js";
 import { createSafeConsoleLogger, safeJsonLine } from "./boot/safe-logger.js";
-import { assertNoGoldenFixtureKeysAtBoot } from "./boot/refuse-golden-fixture-keys.js";
+import {
+  assertNoGoldenFixtureKeysAtBoot,
+  refuseGoldenEventSigningKey,
+  refuseGoldenThenProbeIdentity,
+} from "./boot/refuse-golden-fixture-keys.js";
 
 // Every log line this entry point writes goes through the central redactor.
 // Raw console calls here are what let vault, driver and gateway values reach
@@ -1152,22 +1156,17 @@ async function main(): Promise<void> {
           seedOverride: identitySeed ?? undefined,
         }),
       );
-      // Prove the returned authority can reopen and sign before installing it.
-      // The boot-local signature is discarded and never persisted or logged.
-      identity.sign(new Uint8Array());
+      // Golden refuse BEFORE probe/arm (ZTR-1174 r2). seedOverride poison is already
+      // refused early via NODE_IDENTITY_SEED public-key check; this catches a sealed
+      // golden row loaded without seed env so identity.sign / sendSignerHolder /
+      // identityEnsured never observe it.
+      const armedIdentity = refuseGoldenThenProbeIdentity(identity);
       sendSignerHolder.current = {
-        signingKeyId: identity.signingKeyId,
-        sign: (preimageBytes: Uint8Array) => identity.sign(preimageBytes),
+        signingKeyId: armedIdentity.signingKeyId,
+        sign: (preimageBytes: Uint8Array) => armedIdentity.sign(preimageBytes),
       };
-      identityPublicKey = identity.publicKey;
+      identityPublicKey = armedIdentity.publicKey;
       identityEnsured = true;
-      assertNoGoldenFixtureKeysAtBoot([
-        {
-          keyId: identity.signingKeyId,
-          publicKey: identity.publicKey,
-          role: "NODE_IDENTITY",
-        },
-      ]);
       // Wallet custody public keys — refuse any A.8 golden fixture key held as a wallet.
       {
         const walletRows = await pool.query<{ public_key: string; id: string }>(
@@ -1182,12 +1181,13 @@ async function main(): Promise<void> {
         );
       }
       logger.info(
-        `boot: NODE_IDENTITY active signingKeyId=${identity.signingKeyId} (sealed-store; public only logged)`,
+        `boot: NODE_IDENTITY active signingKeyId=${armedIdentity.signingKeyId} (sealed-store; public only logged)`,
       );
 
       // EVENT_SIGNING is a boot prerequisite, not a preferred
-      // sibling. ensure → correspondence probe → arm lives in installEventSigner so
-      // it is executable in a test; any failure in it propagates out of boot recovery
+      // sibling. ensure → golden-refuse → correspondence probe → arm. Refuse runs on the
+      // ensure result BEFORE installEventSigner probes or arms, so a sealed A.8 golden
+      // EVENT_SIGNING row never becomes authority. Failure propagates out of boot recovery
       // exactly like NODE_IDENTITY above, so readiness stays closed and money workers
       // never start. A node that cannot sign events must not run engines that commit
       // the custody transitions those events are supposed to evidence (Byte-exact).
@@ -1201,6 +1201,7 @@ async function main(): Promise<void> {
               purpose: "EVENT_SIGNING",
             }),
           );
+          refuseGoldenEventSigningKey(eventKey);
           return {
             signingKeyId: eventKey.signingKeyId,
             sign: (preimageBytes: Uint8Array) =>

@@ -652,6 +652,40 @@ describe("approveExternalSend — guarded mutation", () => {
     expect(xor).toEqual({ outcome: "REJECTED", reason: "request_invalid" });
   });
 
+  it("A.9 #14: valid device sig without fresh TOTP is rejected (empty / missing / non-digit)", async () => {
+    // Covering mutation for device-sig-without-totp: device material is well-formed and
+    // would verify, but TOTP is absent or not a fresh 6-digit code. approveExternalSend
+    // must refuse — device signature alone never authorizes.
+    const store = new InMemoryApprovalChallengeStore();
+    const op = baseOp();
+    const challenge = await issueFixture(store, op);
+    const { key, sign } = generateDevice();
+    const deviceStore = makeDeviceStore(key);
+    const goodSig = sign(challenge.preimageText);
+    const deps = approveDeps(store, { deviceStore, requireDeviceSignature: true });
+
+    for (const totpCode of ["", "abcdef", "12345", "1234567"] as const) {
+      const outcome = await approveExternalSend(
+        {
+          operationId: OPERATION_ID,
+          challengeNonce: challenge.nonce,
+          expectedRowVersion: 1,
+          preimageSha256: challenge.preimageSha256,
+          deviceKeyId: DEVICE_ID,
+          deviceSignature: goodSig,
+          totpCode,
+        },
+        deps,
+      );
+      expect(outcome.outcome).toBe("REJECTED");
+      if (outcome.outcome === "REJECTED") {
+        expect(outcome.reason).toBe("request_invalid");
+      }
+      // Operation must stay CREATED — no approve transition without fresh TOTP.
+      expect(store.getOperationState(OPERATION_ID)?.status).toBe("CREATED");
+    }
+  });
+
   it("golden device signature wire values match A.8", () => {
     expect(GOLDEN_SIG).toBe(
       "HLd6EN7uw2KHCgRAryuyEh6ljmHsjgvCJ6Ke1Gq3fb0PDV1Vsn3QCzuo51o0VnH9LCbDI3c_s6AFK3NO013ZCA==",

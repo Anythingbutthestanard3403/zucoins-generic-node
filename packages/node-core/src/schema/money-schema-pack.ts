@@ -208,6 +208,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // approval-stores AUTO_POLICY method arm (ZTR-1233). Greenfield CREATE already has the
   // three-arm shape; this ALTER converges already-applied DBs. Appended only.
   "approval-stores-auto-policy",
+  // Platform-initiated integration request store (ZTR-1238). Durable PENDING→…→CLAIMED
+  // handshake; FK targets nodes/implementers/implementer_credentials (all earlier).
+  // Appended; never renumber prior slices.
+  "integration-requests",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

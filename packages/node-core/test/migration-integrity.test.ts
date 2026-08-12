@@ -206,6 +206,9 @@ const SCHEMA_FILES = [
   "approval-method-auto-policy-enum.sql",
   // approval-stores AUTO_POLICY amendment (ZTR-1233). ALTER/DO only on operation_approvals.
   "approval-stores-auto-policy.sql",
+  // Platform-initiated integration request store (ZTR-1238). Prerequisite-bound on nodes
+  // (and implementers / implementer_credentials); pack-appended after credentials.
+  "integration-requests.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -524,6 +527,11 @@ const GREENFIELD: Record<
   "approval-stores-auto-policy.sql": {
     applies: false,
     missingFragment: "approval-stores-auto-policy requires operation_approvals",
+  },
+  // FKs nodes(id); nodes is not created by this slice.
+  "integration-requests.sql": {
+    applies: false,
+    missingRelation: "nodes",
   },
 };
 

@@ -160,6 +160,39 @@ export async function loadApprovedUnsignedSendIds(pool: Pool): Promise<readonly 
   return result.rows.map((r) => r.operation_id);
 }
 
+/** CREATED + APPROVAL_PENDING candidates for auto-approve (ZTR-1235). Bounded batch. */
+export interface ApprovalPendingSendCandidate {
+  readonly operationId: string;
+  readonly implementerId: string;
+  readonly amountZkz: string;
+}
+
+const AUTO_APPROVE_PENDING_BATCH = 100;
+
+export async function loadApprovalPendingSendCandidates(
+  pool: Pool,
+): Promise<readonly ApprovalPendingSendCandidate[]> {
+  const result = await pool.query<{
+    operation_id: string;
+    implementer_id: string;
+    amount_zkz: string;
+  }>(
+    `SELECT operation_id::text AS operation_id,
+            implementer_id::text AS implementer_id,
+            amount_zkz::text AS amount_zkz
+       FROM send_operations
+      WHERE status = 'CREATED'
+        AND formation_state = 'APPROVAL_PENDING'
+      ORDER BY created_at ASC, operation_id ASC -- contract-allow:order:frozen structural vocabulary
+      LIMIT ${AUTO_APPROVE_PENDING_BATCH}`,
+  );
+  return result.rows.map((r) => ({
+    operationId: r.operation_id,
+    implementerId: r.implementer_id,
+    amountZkz: r.amount_zkz,
+  }));
+}
+
 export function createSqlApprovedSendClaimPort(pool: Pool): ApprovedSendClaimPort {
   return {
     async claimApproved(operationId: string) {

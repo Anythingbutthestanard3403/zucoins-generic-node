@@ -63,6 +63,16 @@ describe("money-workers composition", () => {
     // SEND post-approve formation is wired into the same tick loop.
     expect(workers).toMatch(/runSendPostApproveFormation/);
     expect(workers).toMatch(/tickSendCompletionLander/);
+    // ZTR-1235: auto-approve step runs immediately before advanceApprovedSends.
+    expect(workers).toMatch(/autoApprovePendingSends/);
+    expect(workers).toMatch(/commitAutoApproval/);
+    expect(workers).toMatch(/loadApprovalPendingSendCandidates/);
+    {
+      const autoIdx = workers.indexOf("autoApprovePendingSends");
+      const advanceIdx = workers.indexOf("advanceApprovedSends({");
+      expect(autoIdx).toBeGreaterThan(-1);
+      expect(advanceIdx).toBeGreaterThan(autoIdx);
+    }
     expect(workers).not.toMatch(/submit_transaction/);
     // Receive expiry-release service is wired into the tick.
     expect(workers).toMatch(/SqlReceiveExpiryReleaseService/);

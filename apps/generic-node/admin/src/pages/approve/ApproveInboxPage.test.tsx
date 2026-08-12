@@ -7,6 +7,7 @@ import { TotpPromptProvider } from "../../totp/TotpPromptProvider.js";
 import { useAuth } from "../../store/auth.js";
 import { isLiveRecoveryAction, LIVE_RECOVERY_ACTIONS } from "../../lib/money.js";
 import { ApproveInboxPage } from "./ApproveInboxPage.js";
+import * as approveDeviceSign from "../../lib/approve-device-sign.js";
 
 const OP_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
@@ -93,6 +94,15 @@ describe("ApproveInboxPage", () => {
   beforeEach(() => {
     liveSession();
     vi.restoreAllMocks();
+    vi.spyOn(approveDeviceSign, "getLocalApproveDeviceAvailability").mockResolvedValue({
+      enrolledCount: 1,
+      localMatchCount: 1,
+      canSign: true,
+    });
+    vi.spyOn(approveDeviceSign, "signApproveChallengePreimage").mockResolvedValue({
+      device_key_id: "device-e2e-1",
+      device_signature: "sig-from-device==",
+    });
   });
   afterEach(() => {
     cleanup();
@@ -231,6 +241,12 @@ describe("ApproveInboxPage", () => {
           const headers = new Headers(init.headers);
           expect(headers.get("X-ZP-TOTP")).toBe("123456");
           expect(headers.get("X-CSRF-Token")).toBe("csrf-test");
+          const body = JSON.parse(String(init.body ?? "{}")) as {
+            device_key_id: string | null;
+            device_signature: string | null;
+          };
+          expect(body.device_key_id).toBe("device-e2e-1");
+          expect(body.device_signature).toBe("sig-from-device==");
           return new Response(
             JSON.stringify({
               operation_id: OP_ID,
@@ -272,7 +288,7 @@ describe("ApproveInboxPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review & decide/i }));
     await waitFor(() => expect(screen.getByTestId("approve-send-actions")).toBeInTheDocument());
     expect(screen.getByTitle("c".repeat(64))).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Approve \(TOTP\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Approve \(device \+ TOTP\)/i }));
     await enterTotp("123456");
     await waitFor(() => expect(approveCalls).toBe(1));
     await waitFor(() => {
@@ -412,4 +428,79 @@ describe("ApproveInboxPage", () => {
     expect(body.rule.per_send_max_zkz).toBe("5");
   });
 
+
+  it("disables Approve and links to /devices when no local device key (ZTR-1256)", async () => {
+    vi.spyOn(approveDeviceSign, "getLocalApproveDeviceAvailability").mockResolvedValue({
+      enrolledCount: 0,
+      localMatchCount: 0,
+      canSign: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("needs-attention")) return emptyAttention();
+        if (url.includes("/destinations")) return emptyList();
+        if (url.includes("/operations") && (!init?.method || init.method === "GET")) {
+          return new Response(
+            JSON.stringify({ object: "list", data: [sendRow], has_more: false, next_cursor: null }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/approval-challenge")) {
+          return new Response(JSON.stringify(challenge), { status: 200 });
+        }
+        return emptyList();
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("approve-send-card")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Review & decide/i }));
+    await waitFor(() => expect(screen.getByTestId("approve-send-actions")).toBeInTheDocument());
+    expect(screen.getByTestId("approve-send-no-device")).toBeInTheDocument();
+    const enrol = screen.getByRole("link", { name: /Open devices/i });
+    expect(enrol).toHaveAttribute("href", "/devices");
+    expect(screen.getByTestId("approve-send-submit")).toBeDisabled();
+  });
+
+  it("surfaces same_operator_both_sides with actionable copy (ZTR-1256)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("needs-attention")) return emptyAttention();
+        if (url.includes("/destinations")) return emptyList();
+        if (url.includes("/operations") && (!init?.method || init.method === "GET")) {
+          return new Response(
+            JSON.stringify({ object: "list", data: [sendRow], has_more: false, next_cursor: null }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/approval-challenge")) {
+          return new Response(JSON.stringify(challenge), { status: 200 });
+        }
+        if (url.includes("/approve") && init?.method === "POST") {
+          return new Response(
+            JSON.stringify({
+              error: {
+                code: "same_operator_both_sides",
+                message: "Two-human dual control requires a different admin operator.",
+              },
+            }),
+            { status: 401 },
+          );
+        }
+        return emptyList();
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("approve-send-card")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Review & decide/i }));
+    await waitFor(() => expect(screen.getByTestId("approve-send-actions")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("approve-send-submit"));
+    await enterTotp("123456");
+    await waitFor(() =>
+      expect(screen.getByText(/different (admin )?operator/i)).toBeInTheDocument(),
+    );
+  });
 });

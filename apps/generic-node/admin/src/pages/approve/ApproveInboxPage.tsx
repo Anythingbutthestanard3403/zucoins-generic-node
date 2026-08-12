@@ -11,11 +11,16 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { apiSoftRead } from "../../lib/api.js";
+import {
+  formatApproveFailure,
+  getLocalApproveDeviceAvailability,
+  signApproveChallengePreimage,
+} from "../../lib/approve-device-sign.js";
 import { truncatePubkey } from "../../lib/format.js";
 import {
   formatMoneyError,
@@ -204,11 +209,37 @@ export function ApproveInboxPage() {
     }
   }
 
+  // Device signature over challenge preimage — held across TOTP re-prompts (ZTR-1194 / ZTR-1256).
+  const approveDeviceRef = useRef<{
+    operationId: string;
+    nonce: string;
+    device_key_id: string | null;
+    device_signature: string | null;
+  } | null>(null);
+
+  const localDeviceQ = useQuery({
+    queryKey: ["approve-inbox-local-device"],
+    queryFn: getLocalApproveDeviceAvailability,
+    staleTime: 15_000,
+  });
+  const canDeviceSign = localDeviceQ.data?.canSign === true;
+
   const approve = useTotpGatedMutation(
     async (operationId: string, totp: string) => {
       const c = expandedSend?.challenge;
       if (!c || c.operation_id !== operationId) {
         throw new Error("Open the approval challenge before approving");
+      }
+      let held = approveDeviceRef.current;
+      if (held === null || held.operationId !== operationId || held.nonce !== c.nonce) {
+        const signed = await signApproveChallengePreimage(c.preimage_text);
+        held = {
+          operationId,
+          nonce: c.nonce,
+          device_key_id: signed.device_key_id,
+          device_signature: signed.device_signature,
+        };
+        approveDeviceRef.current = held;
       }
       const result = await postApprove(
         operationId,
@@ -216,11 +247,12 @@ export function ApproveInboxPage() {
           challenge_nonce: c.nonce,
           expected_row_version: c.row_version,
           preimage_sha256: c.preimage_sha256,
-          device_key_id: null,
-          device_signature: null,
+          device_key_id: held.device_key_id,
+          device_signature: held.device_signature,
         },
         totp,
       );
+      approveDeviceRef.current = null;
       const polled = await pollSendState(operationId);
       setPollNote(
         polled.status === "unknown"
@@ -231,8 +263,9 @@ export function ApproveInboxPage() {
     },
     {
       title: "Approve outgoing send",
-      detail: (id) => `Confirm dual-control approve for ${id}`,
+      detail: (id) => `Device sign + fresh TOTP for ${id}`,
       onSuccess: () => {
+        approveDeviceRef.current = null;
         setErr(null);
         setMsg(
           "Approved. Formation may run next; the node never submits SEND_EXTERNAL on-chain. Approve ≠ redeemed ≠ paid.",
@@ -246,8 +279,9 @@ export function ApproveInboxPage() {
       },
       onError: (e) => {
         if (isCancelled(e)) return;
+        approveDeviceRef.current = null;
         setMsg(null);
-        setErr(formatMoneyError(e, "Approve failed"));
+        setErr(formatApproveFailure(e, "Approve failed"));
       },
     },
   );
@@ -724,8 +758,22 @@ export function ApproveInboxPage() {
                   {open && challenge  ? (
                     <div className="approve-actions" data-testid="approve-send-actions">
                       <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-                        TOTP required. Approve starts formation only — not settlement.
+                        Device signature + TOTP required. Approve starts formation only — not
+                        settlement.
                       </p>
+                      {!localDeviceQ.isLoading && !canDeviceSign ? (
+                        <p
+                          className="banner banner-error"
+                          role="status"
+                          data-testid="approve-send-no-device"
+                          style={{ marginBottom: 8 }}
+                        >
+                          No enrolled device key on this browser — enrol a device before approving.{" "}
+                          <Link to="/devices" className="linkish">
+                            Open devices
+                          </Link>
+                        </p>
+                      ) : null}
                       <div className="field">
                         <label htmlFor={`reject-reason-${s.operation_id}`}>Reject reason</label>
                         <input
@@ -739,14 +787,25 @@ export function ApproveInboxPage() {
                         <button
                           type="button"
                           className="mini-btn primary approve-primary"
-                          disabled={approve.isPending || reject.isPending}
+                          data-testid="approve-send-submit"
+                          disabled={
+                            approve.isPending ||
+                            reject.isPending ||
+                            localDeviceQ.isLoading ||
+                            !canDeviceSign
+                          }
+                          title={
+                            !canDeviceSign
+                              ? "Enrol a device key on this browser first"
+                              : undefined
+                          }
                           onClick={() => {
                             setErr(null);
                             setMsg(null);
                             approve.mutate(s.operation_id);
                           }}
                         >
-                          {approve.isPending ? "Approving…" : "Approve (TOTP)"}
+                          {approve.isPending ? "Approving…" : "Approve (device + TOTP)"}
                         </button>
                         <button
                           type="button"

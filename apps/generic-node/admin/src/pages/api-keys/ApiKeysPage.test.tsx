@@ -20,6 +20,7 @@ function renderPage() {
     [
       { path: "/api-keys", element: <ApiKeysPage /> },
       { path: "/integration", element: <IntegrationStateProbe /> },
+      { path: "/connect", element: <IntegrationStateProbe /> },
     ],
     { initialEntries: ["/api-keys"] },
   );
@@ -98,7 +99,7 @@ describe("ApiKeysPage", () => {
     renderPage();
     expect(await screen.findByText("ik_abcdef12…")).toBeInTheDocument();
     expect(screen.getByText("receive:create, receive:read")).toBeInTheDocument();
-    expect(screen.getByText("ACTIVE")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
     // The raw key never appears in the list response shape.
     expect(listSpy).toHaveBeenCalled();
 

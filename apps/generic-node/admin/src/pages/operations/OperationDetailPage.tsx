@@ -308,6 +308,16 @@ export function OperationDetailPage() {
               Open transfer controls
             </Link>
           ) : null}
+          <Link
+            className="mini-btn"
+            to={`/audit?operation_id=${encodeURIComponent(id)}`}
+            data-testid="operation-audit-link"
+          >
+            Audit for this operation
+          </Link>
+          <Link className="mini-btn" to="/approve">
+            Approve inbox
+          </Link>
         </div>
       </div>
 

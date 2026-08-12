@@ -16,7 +16,7 @@ import {
   postRevokeApiKey,
   type ApiKeyIssueResult,
 } from "../../lib/money.js";
-import { credentialPrefixKind } from "../../lib/labels.js";
+import { credentialPrefixKind, statusLabel } from "../../lib/labels.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 const QUERY_KEY = ["api-keys"] as const;
@@ -212,7 +212,7 @@ export function ApiKeysPage() {
               className="pill primary"
               onClick={() => {
                 stageIssuedIntegrationKey(issued.raw_key);
-                void navigate("/integration");
+                void navigate("/connect");
               }}
             >
               Build Connect kit
@@ -234,7 +234,6 @@ export function ApiKeysPage() {
                 <th>Status</th>
                 <th>Scopes</th>
                 <th>Created</th>
-                <th>Last used</th>
                 <th>
                   <span className="visually-hidden">Actions</span>
                 </th>
@@ -243,7 +242,7 @@ export function ApiKeysPage() {
             <tbody>
               {keys.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={6} className="muted">
                     No API keys listed
                   </td>
                 </tr>
@@ -263,12 +262,11 @@ export function ApiKeysPage() {
                     </td>
                     <td>
                       <span className={`tag ${k.status === "ACTIVE" ? "ok" : "muted"}`}>
-                        {k.status}
+                        {statusLabel(k.status)}
                       </span>
                     </td>
                     <td>{k.scopes.join(", ")}</td>
                     <td>{k.issued_at}</td>
-                    <td className="muted">—</td>
                     <td>
                       {k.status === "ACTIVE" ? (
                         revokeId === k.id ? (

@@ -316,6 +316,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/devices/enrol" element={<DevicesPage />} />
                   <Route path="/reporting-keys" element={<ReportingKeysPage />} />
                   <Route path="/integration" element={<IntegrationPage />} />
+                  <Route path="/connect" element={<IntegrationPage />} />
                   <Route path="/lab/receive" element={<LabReceivePage />} />
                   <Route path="/destinations" element={<DestinationsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />

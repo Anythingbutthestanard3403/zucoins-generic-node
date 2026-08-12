@@ -146,7 +146,7 @@ describe("buildReadinessChecklist truth table", () => {
     expect(never.status).toBe("amber");
     expect(never.detail).toMatch(/no successful backup/i);
     expect(never.detail).toMatch(/recovery/i);
-    expect(never.href).toBe("/backup");
+    expect(never.href).toBe("/recovery-ceremony");
 
     // Standby (non-leader) is optional — not amber RPO failure (ZTR-1183).
     const standby = buildReadinessChecklist({

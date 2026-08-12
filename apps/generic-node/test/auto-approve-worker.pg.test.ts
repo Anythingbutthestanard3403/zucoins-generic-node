@@ -320,6 +320,11 @@ describe.skipIf(!PG_AVAILABLE)("money worker autoApprovePendingSends (disposable
       eventSigner: () => eventSigner,
       // Default: no signer leadership → formation defers; auto-approve still runs.
       sendSignerDeps: null,
+      onApprovedSendSignerUnavailable: (info) => {
+        logs.push(
+          `signal:approved_send_signer_unavailable count=${info.approvedCount}`,
+        );
+      },
     });
 
     // Mint pool. Cap count is DB-global (not per-node), so later fixtures in the same
@@ -557,7 +562,11 @@ describe.skipIf(!PG_AVAILABLE)("money worker autoApprovePendingSends (disposable
         expect(await fx.autoAuditCount(okId)).toBe(1);
         expect(fx.logs.some((l) => l.includes(`SEND auto-approved op=${okId}`))).toBe(true);
         // Signer deps null → formation deferred (still APPROVED_UNSIGNED).
-        expect(fx.logs.some((l) => l.includes("skip SEND form"))).toBe(true);
+        // ZTR-1231: surface at error level + operator callback (throttled).
+        expect(fx.logs.some((l) => l.includes("skip SEND form") && l.startsWith("err:"))).toBe(true);
+        expect(
+          fx.logs.some((l) => l.includes("signal:approved_send_signer_unavailable")),
+        ).toBe(true);
 
         // Over-cap (window already spent 0.5, cap 1, amount 0.6 → 1.1 > 1).
         const overId = await fx.createSend("0.6", "over");

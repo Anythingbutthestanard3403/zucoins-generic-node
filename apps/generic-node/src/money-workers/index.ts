@@ -37,6 +37,8 @@ export {
   type ReceiveChildHandoffLogger,
 } from "./receive-child-handoff-step.js";
 export {
+  APPROVED_SEND_SIGNER_UNAVAILABLE_SIGNAL_COOLDOWN_MS,
+  resetApprovedSendSignerUnavailableSignalForTests,
   resolveMoneyPathT0Observer,
   startMoneyWorkers,
   type MoneyWorkerConfig,

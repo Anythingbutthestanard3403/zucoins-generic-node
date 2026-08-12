@@ -1497,6 +1497,34 @@ async function main(): Promise<void> {
           gatewayUrls: config.SPLITCHAIN_GATEWAY_URLS,
         },
         logger,
+        // ZTR-1231: APPROVED sends stall when NODE_IDENTITY / leadership not armed.
+        onApprovedSendSignerUnavailable: (info) => {
+          const message =
+            `APPROVED external sends cannot form: signer deps unavailable ` +
+            `(count=${info.approvedCount}). Arm NODE_IDENTITY sealed-store signer and hold ` +
+            `leadership; until then payouts stay APPROVED without forming.`;
+          logger.error(`node: operator-alert signal=approved_send_signer_unavailable severity=P1 ${message}`);
+          const wh = custodyAlertChannels.webhook;
+          if (wh !== undefined) {
+            void wh
+              .deliver({
+                signal: "signer_loss",
+                severity: "P1",
+                value: info.approvedCount,
+                threshold: 0,
+                direction: "above",
+                firedAtMs: Date.now(),
+                message,
+                citation: "ZTR-1231 APPROVED send formation requires armed NODE_IDENTITY signer",
+                posture: "operator_action_required",
+                diagnosticOnly: false,
+                automaticRelease: false,
+              } as never)
+              .catch((err: unknown) => {
+                logger.error("node: approved_send_signer_unavailable webhook failed", err);
+              });
+          }
+        },
         // Subscribe every freshly minted wallet, post-commit.
         onWalletsMinted: (walletIds) => push?.onWalletsMinted(walletIds),
         // Hard gate for EXTERNAL receive — wallet must hold ACTIVE push subscription.

@@ -179,16 +179,29 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
   });
 
 
-  test("QUARANTINED wallet renders danger severity; AVAILABLE is not bare busy (ZTR-1255)", async ({ page }) => {
+  test("all four wallet states render correctly (ZTR-1264 / ZTR-1255)", async ({ page }) => {
     await authenticated(page, "/wallets");
-    const qTag = page.getByTestId("status-tag-quarantined");
-    await expect(qTag).toBeVisible();
-    await expect(qTag).toHaveAttribute("data-severity", "danger");
-    await expect(page.getByText(/QUARANTINED: REGRESSION/)).toBeVisible();
+    // AVAILABLE — free, not busy
     const aTag = page.getByTestId("status-tag-available");
     await expect(aTag).toBeVisible();
     await expect(aTag).toHaveAttribute("data-severity", "ok");
     await expect(page.getByText(/^busy$/i)).toHaveCount(0);
+    // PINNED — held with cause (lease)
+    const pTag = page.getByTestId("status-tag-pinned");
+    await expect(pTag).toBeVisible();
+    await expect(pTag).toHaveAttribute("data-severity", "warn");
+    await expect(page.getByTestId("wallet-hold-cause").filter({ hasText: /Held by/i })).toBeVisible();
+    await expect(page.getByTestId("wallet-hold-op-link").first()).toBeVisible();
+    // QUARANTINED — danger + reason
+    const qTag = page.getByTestId("status-tag-quarantined");
+    await expect(qTag).toBeVisible();
+    await expect(qTag).toHaveAttribute("data-severity", "danger");
+    await expect(page.getByText(/QUARANTINED: REGRESSION/)).toBeVisible();
+    // RETIRED — muted terminal
+    const rTag = page.getByTestId("status-tag-retired");
+    await expect(rTag).toBeVisible();
+    await expect(rTag).toHaveAttribute("data-severity", "muted");
+    await expect(page.getByText(/^Retired$/i)).toBeVisible();
   });
 
   test("Wallets table scrolls horizontally and keyboard focus scrolls its link into view", async ({ page }) => {

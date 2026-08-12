@@ -6,7 +6,9 @@ import type { Page } from "@playwright/test";
 import {
   OPERATION_INVENTORY_DETAIL_FIELDS,
   OPERATION_INVENTORY_LIST_FIELDS,
+  type WalletInventoryItem,
 } from "@zucoins/generic-node-contracts/admin-inventory";
+import type { WalletKeyOrigin, WalletState } from "@zucoins/generic-node-contracts/custody";
 
 export const E2E_WALLET_PUBKEY =
   "zkz1qe2emobilewalletpublickey0000000000000000000001";
@@ -35,37 +37,79 @@ const NEEDS_ATTENTION = {
   summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
 };
 
-const WALLET = {
+const KEY_ORIGIN_NODE: WalletKeyOrigin = "node_generated";
+
+function walletFixture(
+  partial: Partial<WalletInventoryItem> &
+    Pick<WalletInventoryItem, "wallet_id" | "public_key" | "state">,
+): WalletInventoryItem {
+  return {
+    node_id: "node-e2e-0000000000000000000001",
+    key_origin: KEY_ORIGIN_NODE,
+    created_at: "2026-07-30T00:00:00.000Z",
+    retired_at: null,
+    quarantine_reason: null,
+    recovery_verified: true,
+    recovery_verified_at: "2026-07-30T00:00:00.000Z",
+    recovery_verification: null,
+    observed_balance_zkz: "0.0000",
+    holding_operation_id: null,
+    holding_operation_status: null,
+    holding_operation_expiry_unix_time_secs: null,
+    holding_operation_attention_required: false,
+    holding_operation_terminal_at: null,
+    holding_lease_role: null,
+    holding_operation_type: null,
+    ...partial,
+  };
+}
+
+/** AVAILABLE — idle free pool wallet (not busy). */
+const WALLET: WalletInventoryItem = walletFixture({
   wallet_id: "wallet-e2e-0000000000000000000001",
   public_key: E2E_WALLET_PUBKEY,
-  state: "AVAILABLE",
-  key_origin: "NODE_GENERATED",
-  recovery_verified: true,
+  state: "AVAILABLE" satisfies WalletState,
   observed_balance_zkz: "1248.4200",
-  quarantine_reason: null,
-  holding_operation_id: null,
-  holding_operation_status: null,
-  holding_operation_expiry_unix_time_secs: null,
+});
+
+/** PINNED with active lease — hold cause must surface. */
+const WALLET_PINNED: WalletInventoryItem = walletFixture({
+  wallet_id: "wallet-e2e-pinned-0000000000000001",
+  public_key: `${E2E_WALLET_PUBKEY.slice(0, -1)}3`,
+  state: "PINNED" satisfies WalletState,
+  observed_balance_zkz: "10.0000",
+  holding_operation_id: "operation-e2e-hold-000000000001",
+  holding_operation_status: "AWAITING_REDEMPTION",
+  holding_operation_expiry_unix_time_secs: "9999999999",
   holding_operation_attention_required: false,
   holding_operation_terminal_at: null,
-  holding_lease_role: null,
-  holding_operation_type: null,
-  created_at: "2026-07-30T00:00:00.000Z",
-};
+  holding_lease_role: "RECEIVE_WINDOW",
+  holding_operation_type: "RECEIVE_EXTERNAL",
+});
 
-/** Quarantined sibling so e2e can assert danger styling (ZTR-1255). */
-const WALLET_QUARANTINED = {
-  ...WALLET,
+/** QUARANTINED — danger severity + reason text (ZTR-1255). */
+const WALLET_QUARANTINED: WalletInventoryItem = walletFixture({
   wallet_id: "wallet-e2e-quarantined-0000000000001",
   public_key: `${E2E_WALLET_PUBKEY.slice(0, -1)}2`,
-  state: "QUARANTINED",
+  state: "QUARANTINED" satisfies WalletState,
   quarantine_reason: "REGRESSION",
   observed_balance_zkz: "0.0000",
-};
+});
+
+/** RETIRED — terminal custody standing. */
+const WALLET_RETIRED: WalletInventoryItem = walletFixture({
+  wallet_id: "wallet-e2e-retired-0000000000000001",
+  public_key: `${E2E_WALLET_PUBKEY.slice(0, -1)}4`,
+  state: "RETIRED" satisfies WalletState,
+  retired_at: "2026-07-31T00:00:00.000Z",
+  recovery_verified: false,
+  recovery_verified_at: null,
+  observed_balance_zkz: null,
+});
 
 const WALLETS_LIST = {
   object: "list",
-  data: [WALLET, WALLET_QUARANTINED],
+  data: [WALLET, WALLET_PINNED, WALLET_QUARANTINED, WALLET_RETIRED],
   has_more: false,
   next_cursor: null,
 };

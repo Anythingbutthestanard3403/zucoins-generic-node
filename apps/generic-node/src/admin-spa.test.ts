@@ -89,6 +89,23 @@ describe("tryServeAdminSpa", () => {
     expect(headerGet(headRes.headers, "content-type")).toContain("text/html");
   });
 
+  it("missing /assets/* returns 404 plain text, never index.html (ZTR-1252)", () => {
+    const dist = mkdtempSync(join(tmpdir(), "spa-"));
+    writeFileSync(join(dist, "index.html"), "<!doctype html><title>zu</title>");
+    mkdirSync(join(dist, "assets"), { recursive: true });
+    const res = mockRes();
+    const ok = tryServeAdminSpa(
+      { method: "HEAD", url: "/assets/NoSuchChunk-abc.js" } as never,
+      res as never,
+      dist,
+    );
+    expect(ok).toBe(true);
+    expect(res.status).toBe(404);
+    expect(headerGet(res.headers, "content-type")).toMatch(/text\/plain/);
+    expect(headerGet(res.headers, "content-type")).not.toMatch(/html/i);
+    expect(headerGet(res.headers, "cache-control")).toBe("no-store");
+  });
+
   it("sets CSP frame-ancestors none and X-Frame-Options DENY", () => {
     const dist = mkdtempSync(join(tmpdir(), "spa-"));
     writeFileSync(join(dist, "index.html"), "<!doctype html><title>zu</title>");

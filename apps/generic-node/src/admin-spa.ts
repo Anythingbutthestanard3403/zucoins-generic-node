@@ -109,6 +109,16 @@ export function tryServeAdminSpa(
   }
 
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+    // ZTR-1252: missing hashed build assets must 404 — never fall back to
+    // index.html (that returns 200 + text/html under a .js URL, which the SW
+    // then durable-caches and bricks the route across redeploys).
+    if (pathname.startsWith("/assets/")) {
+      response.writeHead(404, {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store",
+      }).end("Not found");
+      return true;
+    }
     // client-side route → index.html
     filePath = join(distRoot, "index.html");
     if (!existsSync(filePath)) return false;

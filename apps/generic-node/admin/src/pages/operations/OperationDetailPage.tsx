@@ -8,12 +8,14 @@ import { StatusTag } from "../../components/StatusTag.js";
 import { ApiError, toApiFailureDetail } from "../../lib/api.js";
 import { relativeTime } from "../../lib/format.js";
 import {
+  canRetractAttention,
   formatMoneyError,
   getOperationInventory,
   getRecovery,
   isCancelled,
   isSendOperationType,
   partitionRecoveryActions,
+  postAttentionRetraction,
   postRecoveryAction,
   recoveryActionLabel,
   type EvidenceManifestItem,
@@ -148,6 +150,9 @@ export function OperationDetailPage() {
   const qc = useQueryClient();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [retractReason, setRetractReason] = useState(
+    "False-positive attention after LANDED_VERIFIED — classifier residue",
+  );
 
   const q = useQuery({
     queryKey: ["operation-detail", id],
@@ -189,6 +194,48 @@ export function OperationDetailPage() {
         if (isCancelled(e)) return;
         setMsg(null);
         setErr(formatMoneyError(e, "Recovery action failed"));
+      },
+    },
+  );
+
+  const retract = useTotpGatedMutation(
+    async (_: void, totp: string) => {
+      const fresh = await getRecovery(id);
+      const reason = retractReason.trim();
+      if (reason.length === 0) {
+        throw new Error("Retraction reason is required");
+      }
+      return postAttentionRetraction(
+        id,
+        {
+          reason,
+          expected_row_version: fresh.row_version,
+        },
+        totp,
+      );
+    },
+    {
+      title: "Retract attention flag",
+      detail: "Clear false-positive attention_required (audited). Does not acknowledge a real problem.",
+      onSuccess: (body) => {
+        setErr(null);
+        setMsg(
+          `Attention retracted at ${body.retracted_at}` +
+            (body.prior_attention_reason
+              ? ` · prior reason: ${body.prior_attention_reason}`
+              : ""),
+        );
+        void qc.invalidateQueries({ queryKey: ["operation-detail", id] });
+        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
+        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
+        void qc.invalidateQueries({ queryKey: ["needs-attention-overview"] });
+        void qc.invalidateQueries({ queryKey: ["overview-operations"] });
+        void qc.invalidateQueries({ queryKey: ["operations-history"] });
+      },
+      onError: (e) => {
+        if (isCancelled(e)) return;
+        setMsg(null);
+        setErr(formatMoneyError(e, "Attention retraction failed"));
       },
     },
   );
@@ -420,6 +467,43 @@ export function OperationDetailPage() {
             Nonce issued {recovery.recovery_nonce_issued_at} · expires{" "}
             {recovery.recovery_nonce_expires_at} · row {recovery.row_version}
           </p>
+          {canRetractAttention(recovery) ? (
+            <div
+              className="form-card"
+              style={{ marginTop: 12, padding: 12, border: "1px solid var(--border, #333)" }}
+              data-testid="attention-retraction"
+            >
+              <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+                Classification is healthy but the attention flag is still set. Retract clears the
+                false-positive without acknowledging a real problem (audited).
+              </p>
+              <label className="field" style={{ display: "block", marginBottom: 8 }}>
+                <span className="k" style={{ display: "block", marginBottom: 4 }}>
+                  Retraction reason
+                </span>
+                <input
+                  type="text"
+                  value={retractReason}
+                  onChange={(e) => setRetractReason(e.target.value)}
+                  maxLength={2000}
+                  style={{ width: "100%" }}
+                  aria-label="Retraction reason"
+                />
+              </label>
+              <button
+                type="button"
+                className="mini-btn primary"
+                disabled={retract.isPending || retractReason.trim().length === 0}
+                onClick={() => {
+                  setErr(null);
+                  setMsg(null);
+                  retract.mutate();
+                }}
+              >
+                Retract attention flag
+              </button>
+            </div>
+          ) : null}
           {(recovery.permitted_actions ?? []).length === 0 ? (
             <p className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>
               {isSuccessLand
@@ -560,6 +644,8 @@ export function OperationDetailPage() {
         <code className="mono">GET …/recovery</code>
         {" · "}
         actions <code className="mono">POST …/recovery-actions</code>
+        {" · "}
+        <code className="mono">POST …/attention-retraction</code>
       </p>
     </div>
   );

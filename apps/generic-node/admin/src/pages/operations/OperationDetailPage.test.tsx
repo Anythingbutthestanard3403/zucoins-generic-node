@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OperationDetailPage } from "./OperationDetailPage.js";
@@ -80,6 +80,13 @@ function renderDetail(id = OP_ID) {
       </TotpPromptProvider>
     </QueryClientProvider>,
   );
+}
+
+async function enterTotp(code = "123456") {
+  for (let i = 0; i < 6; i++) {
+    const input = await screen.findByLabelText(i === 0 ? "Verification code" : `Digit ${i + 1}`);
+    fireEvent.change(input, { target: { value: code[i]! } });
+  }
 }
 
 describe("OperationDetailPage", () => {
@@ -209,3 +216,109 @@ describe("OperationDetailPage", () => {
   });
 
 });
+  it("offers attention retraction only for LANDED_VERIFIED + attention_required (ZTR-1260)", async () => {
+    const flagged = {
+      ...recovery,
+      attention_required: true,
+      attention_reason: "STALE_CLASSIFIER",
+      permitted_actions: [] as string[],
+    };
+    let retracted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("attention-retraction") && init?.method === "POST") {
+        retracted = true;
+        const body = JSON.parse(String(init.body));
+        expect(body.reason.length).toBeGreaterThan(0);
+        expect(body.expected_row_version).toBe(4);
+        expect(init.headers instanceof Headers ? init.headers.get("X-ZP-TOTP") : null).toBe("123456");
+        return new Response(
+          JSON.stringify({
+            operation_id: OP_ID,
+            row_version: 5,
+            retracted_at: "2026-08-12T12:00:00.000Z",
+            prior_attention_reason: "STALE_CLASSIFIER",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes(`/operations/${OP_ID}/recovery`)) {
+        return new Response(
+          JSON.stringify(
+            retracted
+              ? { ...flagged, attention_required: false, attention_reason: null, row_version: 5 }
+              : flagged,
+          ),
+          { status: 200 },
+        );
+      }
+      if (url.match(new RegExp(`/operations/${OP_ID}$`))) {
+        return new Response(JSON.stringify({ ...inventory, attention_required: !retracted }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ error: { code: "not_found", message: url } }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail();
+    expect(await screen.findByTestId("attention-retraction")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Retract attention flag/i }));
+    await enterTotp("123456");
+    await waitFor(() => {
+      expect(retracted).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Attention retracted/i)).toBeTruthy();
+    });
+  });
+
+  it("does not show retract button when attention_required but not LANDED_VERIFIED", async () => {
+    const breach = {
+      ...recovery,
+      classification: "INVARIANT_BREACH",
+      attention_required: true,
+      attention_reason: "REAL",
+      permitted_actions: ["ACKNOWLEDGE_KEEP_PINNED"],
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(`/operations/${OP_ID}/recovery`)) {
+        return new Response(JSON.stringify(breach), { status: 200 });
+      }
+      if (url.match(new RegExp(`/operations/${OP_ID}$`))) {
+        return new Response(JSON.stringify({ ...inventory, attention_required: true }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ error: { code: "not_found", message: url } }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderDetail();
+    await screen.findByText(/Attention required/i);
+    expect(screen.queryByTestId("attention-retraction")).toBeNull();
+  });
+
+  it("does not show retract when LANDED_VERIFIED without attention flag", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(`/operations/${OP_ID}/recovery`)) {
+        return new Response(JSON.stringify(recovery), { status: 200 });
+      }
+      if (url.match(new RegExp(`/operations/${OP_ID}$`))) {
+        return new Response(JSON.stringify(inventory), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: { code: "not_found", message: url } }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderDetail();
+    await screen.findByText(/No operator action required/i);
+    expect(screen.queryByTestId("attention-retraction")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Retract attention flag/i })).toBeNull();
+  });

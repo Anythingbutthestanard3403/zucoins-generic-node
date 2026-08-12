@@ -5,12 +5,14 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import {
+  canRetractAttention,
   formatMoneyError,
   getRecovery,
   isCancelled,
   listOperationsInventory,
   operationDetailPath,
   partitionRecoveryActions,
+  postAttentionRetraction,
   postRecoveryAction,
   recoveryActionLabel,
   type OperationListItem,
@@ -32,6 +34,9 @@ export function OperationsPage() {
   const [detailErr, setDetailErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [retractReason, setRetractReason] = useState(
+    "False-positive attention after LANDED_VERIFIED — classifier residue",
+  );
 
   const attentionQ = useQuery({
     queryKey: ["needs-attention"],
@@ -120,6 +125,50 @@ export function OperationsPage() {
         if (isCancelled(e)) return;
         setMsg(null);
         setErr(formatMoneyError(e, "Recovery action failed"));
+      },
+    },
+  );
+
+  const retract = useTotpGatedMutation(
+    async (_: void, totp: string) => {
+      if (!detail) throw new Error("No recovery detail");
+      const fresh = await getRecovery(detail.operation_id);
+      const reason = retractReason.trim();
+      if (reason.length === 0) throw new Error("Retraction reason is required");
+      return postAttentionRetraction(
+        detail.operation_id,
+        { reason, expected_row_version: fresh.row_version },
+        totp,
+      );
+    },
+    {
+      title: "Retract attention flag",
+      detail: "Clear false-positive attention_required (audited).",
+      onSuccess: async (body) => {
+        setErr(null);
+        setMsg(
+          `Attention retracted at ${body.retracted_at}` +
+            (body.prior_attention_reason
+              ? ` · prior: ${body.prior_attention_reason}`
+              : ""),
+        );
+        if (detail) {
+          try {
+            setDetail(await getRecovery(detail.operation_id));
+          } catch {
+            /* keep */
+          }
+        }
+        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
+        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
+        void qc.invalidateQueries({ queryKey: ["needs-attention-overview"] });
+        void qc.invalidateQueries({ queryKey: ["operations-history"] });
+        void qc.invalidateQueries({ queryKey: ["overview-operations"] });
+      },
+      onError: (e) => {
+        if (isCancelled(e)) return;
+        setMsg(null);
+        setErr(formatMoneyError(e, "Attention retraction failed"));
       },
     },
   );
@@ -243,6 +292,35 @@ export function OperationsPage() {
                           <p style={{ marginTop: 8, fontSize: 13 }}>
                             {detail.classification}: {detail.classification_rationale}
                           </p>
+                          {canRetractAttention(detail) ? (
+                            <div style={{ marginTop: 10 }} data-testid="attention-retraction-quick">
+                              <label className="field" style={{ display: "block", marginBottom: 8 }}>
+                                <span className="k" style={{ display: "block", marginBottom: 4 }}>
+                                  Retraction reason
+                                </span>
+                                <input
+                                  type="text"
+                                  value={retractReason}
+                                  onChange={(e) => setRetractReason(e.target.value)}
+                                  maxLength={2000}
+                                  style={{ width: "100%" }}
+                                  aria-label="Retraction reason"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                className="mini-btn primary"
+                                disabled={retract.isPending || retractReason.trim().length === 0}
+                                onClick={() => {
+                                  setErr(null);
+                                  setMsg(null);
+                                  retract.mutate();
+                                }}
+                              >
+                                Retract attention flag
+                              </button>
+                            </div>
+                          ) : null}
                           {detail.permitted_actions.length === 0 ? (
                             <p className="muted" style={{ marginTop: 8 }}>
                               No permitted actions

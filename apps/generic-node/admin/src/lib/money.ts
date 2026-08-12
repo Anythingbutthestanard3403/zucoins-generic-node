@@ -277,6 +277,53 @@ export async function postRecoveryAction(
   );
 }
 
+export interface AttentionRetractionSuccess {
+  operation_id: string;
+  row_version: number;
+  retracted_at: string;
+  prior_attention_reason: string;
+}
+
+/**
+ * Clear a false-positive attention_required flag (ZTR-1260).
+ * Distinct from recovery-actions — does not acknowledge a real problem.
+ * Server refuses when the row is not flagged (422 not_flagged).
+ */
+export async function postAttentionRetraction(
+  operationId: string,
+  body: {
+    reason: string;
+    expected_row_version: number;
+    superseded_by?: string | null;
+  },
+  totp: string,
+): Promise<AttentionRetractionSuccess> {
+  return api<AttentionRetractionSuccess>(
+    `/operations/${encodeURIComponent(operationId)}/attention-retraction`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reason: body.reason,
+        expected_row_version: body.expected_row_version,
+        ...(body.superseded_by != null && body.superseded_by !== ""
+          ? { superseded_by: body.superseded_by }
+          : {}),
+      }),
+      totp,
+      idempotencyKey: newIdempotencyKey(),
+    },
+  );
+}
+
+/** UI gate: retract only healthy false-positive leftovers (LANDED_VERIFIED + flagged). */
+export function canRetractAttention(recovery: {
+  readonly attention_required: boolean;
+  readonly classification: string;
+} | null | undefined): boolean {
+  if (!recovery?.attention_required) return false;
+  return recovery.classification.toUpperCase() === "LANDED_VERIFIED";
+}
+
 /**
  * Still reserved at launch (REBUILD_INTERNAL_MOVE). CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED
  * was promoted live under ZTR-1226's bounded oracle. Re-exported from the contract so the

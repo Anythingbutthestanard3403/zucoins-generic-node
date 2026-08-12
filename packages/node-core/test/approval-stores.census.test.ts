@@ -28,9 +28,9 @@ describe("approval-stores schema census", () => {
     expect(missing).toEqual([]);
   });
 
-  it("exactly two approval methods are owned by the shared foundation", () => {
+  it("exactly three approval methods are owned by the shared foundation", () => {
     expect(baseSql).toContain(
-      "CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE');",
+      "CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE', 'AUTO_POLICY');",
     );
     expect(sql).not.toContain("CREATE TYPE approval_method");
   });
@@ -56,22 +56,29 @@ describe("approval-stores schema census", () => {
     expect(sql).toContain("WHERE status = 'ISSUED';");
   });
 
-  it("TOTP single-use — partial unique index on (node_id, totp_timestep)", () => {
+  it("TOTP single-use — partial unique index on (node_id, totp_timestep) WHERE non-null", () => {
     expect(sql).toContain("CREATE UNIQUE INDEX operation_approvals_totp_single_use");
-    expect(sql).toContain("ON operation_approvals (node_id, totp_timestep);");
+    expect(sql).toContain("ON operation_approvals (node_id, totp_timestep)");
+    expect(sql).toContain("WHERE totp_timestep IS NOT NULL;");
   });
 
   it("approval operation_id is UNIQUE — one approval per operation", () => {
     expect(sql).toContain("operation_id uuid NOT NULL UNIQUE REFERENCES operations(id),");
   });
 
-  it("challenge_id is UNIQUE on operation_approvals", () => {
-    expect(sql).toContain("challenge_id uuid NOT NULL UNIQUE,");
+  it("challenge_id is UNIQUE and nullable on operation_approvals", () => {
+    expect(sql).toContain("challenge_id uuid UNIQUE,");
+    expect(sql).not.toContain("challenge_id uuid NOT NULL UNIQUE,");
   });
 
-  it("device-key biconditional CHECK is present", () => {
-    expect(sql).toContain("method = 'TOTP_AND_DEVICE' AND device_key_id IS NOT NULL");
-    expect(sql).toContain("method = 'TOTP_ONLY' AND device_key_id IS NULL");
+  it("three-arm method CHECK is present (TOTP_AND_DEVICE / TOTP_ONLY / AUTO_POLICY)", () => {
+    expect(sql).toContain("method = 'TOTP_AND_DEVICE'");
+    expect(sql).toContain("method = 'TOTP_ONLY'");
+    expect(sql).toContain("method = 'AUTO_POLICY'");
+    expect(sql).toContain("challenge_id IS NOT NULL");
+    expect(sql).toContain("totp_timestep IS NOT NULL");
+    expect(sql).toContain("challenge_id IS NULL");
+    expect(sql).toContain("totp_timestep IS NULL");
   });
 
   it("composite FK from approval to challenge is present", () => {
@@ -96,7 +103,7 @@ describe("approval-stores schema census", () => {
 
   it("mutation negative: dropping the TOTP single-use index is caught", () => {
     const removed = sql.replace(
-      "CREATE UNIQUE INDEX operation_approvals_totp_single_use\n  ON operation_approvals (node_id, totp_timestep);",
+      "CREATE UNIQUE INDEX operation_approvals_totp_single_use\n  ON operation_approvals (node_id, totp_timestep)\n  WHERE totp_timestep IS NOT NULL;",
       "",
     );
     const missing = APPROVAL_STORES_INVARIANTS.filter(
@@ -105,15 +112,15 @@ describe("approval-stores schema census", () => {
     expect(missing).toContain("APPROVAL_TOTP_SINGLE_USE");
   });
 
-  it("mutation negative: dropping the device biconditional is caught", () => {
+  it("mutation negative: dropping the three-arm method CHECK is caught", () => {
     const removed = sql.replace(
-      "CHECK (\n    (method = 'TOTP_AND_DEVICE' AND device_key_id IS NOT NULL\n      AND device_signature IS NOT NULL)\n    OR\n    (method = 'TOTP_ONLY' AND device_key_id IS NULL\n      AND device_signature IS NULL)\n  ),",
+      "CHECK (\n    (method = 'TOTP_AND_DEVICE'\n      AND challenge_id IS NOT NULL\n      AND totp_timestep IS NOT NULL\n      AND device_key_id IS NOT NULL\n      AND device_signature IS NOT NULL)\n    OR\n    (method = 'TOTP_ONLY'\n      AND challenge_id IS NOT NULL\n      AND totp_timestep IS NOT NULL\n      AND device_key_id IS NULL\n      AND device_signature IS NULL)\n    OR\n    (method = 'AUTO_POLICY'\n      AND challenge_id IS NULL\n      AND totp_timestep IS NULL\n      AND device_key_id IS NULL\n      AND device_signature IS NULL)\n  ),",
       "",
     );
     const missing = APPROVAL_STORES_INVARIANTS.filter(
       (invariant) => !removed.includes(invariant.sqlAnchor),
     ).map((invariant) => invariant.id);
-    expect(missing).toContain("APPROVAL_METHOD_DEVICE_BICONDITIONAL");
+    expect(missing).toContain("APPROVAL_METHOD_THREE_ARMS");
   });
 
   it("three mutability regimes are inventoried", () => {

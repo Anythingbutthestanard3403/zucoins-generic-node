@@ -136,7 +136,8 @@
       ],
       "approval_method": [
         "TOTP_ONLY",
-        "TOTP_AND_DEVICE"
+        "TOTP_AND_DEVICE",
+        "AUTO_POLICY"
       ],
       "approval_challenge_status": [
         "ISSUED",

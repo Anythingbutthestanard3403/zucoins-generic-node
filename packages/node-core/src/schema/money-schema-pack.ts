@@ -202,6 +202,12 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // Dual-control policy durable home (ZTR-1214). Pins pack order after node_settings +
   // audit_log; does not seed a default (boot env remains pre-mutation truth). Appended.
   "dual-control-policy",
+  // approval_method += AUTO_POLICY (ZTR-1233). Own slice so ADD VALUE commits before
+  // the three-arm CHECK references the label. Appended only.
+  "approval-method-auto-policy-enum",
+  // approval-stores AUTO_POLICY method arm (ZTR-1233). Greenfield CREATE already has the
+  // three-arm shape; this ALTER converges already-applied DBs. Appended only.
+  "approval-stores-auto-policy",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

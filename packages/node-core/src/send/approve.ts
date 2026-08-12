@@ -85,7 +85,7 @@ export const APPROVAL_POLICY_DENIAL_HTTP_STATUS = 401 as const;
 export const APPROVAL_POLICY_DENIAL_CODE = "same_operator_both_sides" as const;
 
 export type ApprovalChallengeStatus = "ISSUED" | "CONSUMED" | "SUPERSEDED" | "EXPIRED";
-export type ApprovalMethod = "TOTP_ONLY" | "TOTP_AND_DEVICE";
+export type ApprovalMethod = "TOTP_ONLY" | "TOTP_AND_DEVICE" | "AUTO_POLICY";
 
 /** TOTP config for external-send approval — same shape as the shared matcher. */
 export type ApprovalTotpConfig = TotpConfig;

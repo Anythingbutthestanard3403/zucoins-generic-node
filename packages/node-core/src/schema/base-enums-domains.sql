@@ -77,7 +77,7 @@ CREATE TYPE wallet_lease_role AS ENUM (
   'SEND_SOURCE',
   'RECONCILIATION'
 );
-CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE');
+CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE', 'AUTO_POLICY');
 CREATE TYPE approval_challenge_status AS ENUM ('ISSUED', 'CONSUMED', 'SUPERSEDED', 'EXPIRED');
 CREATE TYPE external_formation_state AS ENUM (
   'NOT_REQUIRED',

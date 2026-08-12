@@ -80,8 +80,8 @@ export const BASE_ENUMS_DOMAINS_INVARIANTS: readonly BaseEnumsDomainsInvariant[]
   },
   {
     id: "ENUM_APPROVAL_METHOD",
-    sqlAnchor: "CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE');",
-    rule: "approval_method is a closed 2-value enum: TOTP_ONLY, TOTP_AND_DEVICE.",
+    sqlAnchor: "CREATE TYPE approval_method AS ENUM ('TOTP_ONLY', 'TOTP_AND_DEVICE', 'AUTO_POLICY');",
+    rule: "approval_method is a closed 3-value enum: TOTP_ONLY, TOTP_AND_DEVICE, AUTO_POLICY.",
   },
   {
     id: "ENUM_APPROVAL_CHALLENGE_STATUS",

@@ -668,13 +668,16 @@ export function createSqlExternalSendLandingStore(
         }
 
         // Sync the operations mirror from send_operations in this same
-        // DB-TX: status, formation_state, terminal_observation_id, row_version, updated_at.
+        // DB-TX: status, formation_state, terminal_observation_id, terminal_at,
+        // row_version, updated_at. terminal_at must land with EXTERNAL_SEND_LANDED
+        // so the SPA in-flight predicate (terminal_at IS NULL) drops the row (ZTR-1249).
         await client.query(
           `UPDATE operations o
               SET status = s.status::operation_status,
                   formation_state = s.formation_state::external_formation_state,
                   terminal_observation_id = s.terminal_observation_id,
                   verification_material_available_until = s.verification_material_available_until,
+                  terminal_at = COALESCE(o.terminal_at, now()),
                   row_version = s.row_version,
                   updated_at = now()
              FROM send_operations s

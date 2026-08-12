@@ -218,6 +218,10 @@ describe("receive-pool scale-up and pressure policy (real PG / separate processe
     expect(POOL_SCALER_STATEMENTS.SELECT_QUEUE_EXPIRED_RECEIVES).not.toContain(
       "o.created_at <= now() - make_interval(secs => $1)",
     );
+    // ZTR-1249: queue-age EXPIRE stamps terminal_at in the same UPDATE as status.
+    expect(POOL_SCALER_STATEMENTS.EXPIRE_QUEUE_AGED_RECEIVE).toContain(
+      "terminal_at = COALESCE(terminal_at, now())",
+    );
   });
 
   // ── 2. The cap rule, as arithmetic ────────────────────────────────────────
@@ -866,7 +870,7 @@ describe("receive-pool scale-up and pressure policy (real PG / separate processe
       expect(countRows(dbUrl, "operations", `id = '${OP(1202)}' AND status = 'EXPIRED'`)).toBe(1);
       expect(countRows(dbUrl, "operations", `id = '${OP(1203)}' AND status = 'CREATED'`)).toBe(1);
       expect(countRows(dbUrl, "operations", `id = '${assigned}' AND status = 'CREATED'`)).toBe(1);
-      // Walletless EXPIRED: no receiver_wallet_id, no expiry, no T0.
+      // Walletless EXPIRED: no receiver_wallet_id, no expiry, no T0; terminal_at stamped (ZTR-1249).
       expect(
         countRows(
           dbUrl,
@@ -874,7 +878,8 @@ describe("receive-pool scale-up and pressure policy (real PG / separate processe
           `id IN ('${OP(1201)}','${OP(1202)}')
              AND receiver_wallet_id IS NULL
              AND expiry_unix_time_secs IS NULL
-             AND t0_observation_id IS NULL`,
+             AND t0_observation_id IS NULL
+             AND terminal_at IS NOT NULL`,
         ),
       ).toBe(2);
       // Zero wallet/lease churn from the expiry path itself — the assigned receive's one lease

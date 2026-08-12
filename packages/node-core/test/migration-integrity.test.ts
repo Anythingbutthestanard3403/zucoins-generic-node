@@ -209,6 +209,8 @@ const SCHEMA_FILES = [
   // Platform-initiated integration request store (ZTR-1238). Prerequisite-bound on nodes
   // (and implementers / implementer_credentials); pack-appended after credentials.
   "integration-requests.sql",
+  // ZTR-1249: pure data backfill of terminal_at on EXPIRED ops. Appended after operations.
+  "operations-expired-terminal-at-backfill.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -228,6 +230,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "destinations-label.sql",
   "lease-role-enum.sql",
   "transaction-material-byte-immutability.sql",
+  "operations-expired-terminal-at-backfill.sql",
   "lease-operation-foreign-keys.sql",
   "attention-reason-enum.sql",
   "dual-control-policy.sql",
@@ -532,6 +535,11 @@ const GREENFIELD: Record<
   "integration-requests.sql": {
     applies: false,
     missingRelation: "nodes",
+  },
+  // DO block RAISE when operations is absent (same pattern as dual-control-policy).
+  "operations-expired-terminal-at-backfill.sql": {
+    applies: false,
+    missingFragment: "operations-expired-terminal-at-backfill requires operations",
   },
 };
 

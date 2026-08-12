@@ -1067,6 +1067,8 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const futureOp = operationId(31);
       const nullExpiryOldOp = operationId(32);
       const alreadyReleasedOp = operationId(33);
+      // ZTR-1249 ghost: walletless EXPIRED + terminal_at set must not re-enter the scan.
+      const terminalizedExpiredOp = operationId(34);
 
       // The frozen operations CHECKs pin the shapes: a RECEIVE_EXTERNAL row with
       // expiry_unix_time_secs set must carry the READY receiver triple, and
@@ -1077,20 +1079,23 @@ describe("receive expiry/release PostgreSQL drills", () => {
         `INSERT INTO operations (
            id, node_id, implementer_id, kind, status, row_version, amount_zkz,
            receiver_wallet_id, after_landing, discriminator, anchor, idempotency_key,
-           request_sha256, expiry_unix_time_secs, t0_observation_id, created_at
+           request_sha256, expiry_unix_time_secs, t0_observation_id, created_at, terminal_at
          ) VALUES
            ('${expiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
             '${WALLET}', 'HOLD', '${expiredOp}', 'expiryscan-expired', 'expiryscan-idem-30', '${SHA}',
-            '1000000000', '${T0}', to_timestamp(0)),
+            '1000000000', '${T0}', to_timestamp(0), NULL),
            ('${futureOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
             '${WALLET}', 'HOLD', '${futureOp}', 'expiryscan-future', 'expiryscan-idem-31', '${SHA}',
-            '9999999999', '${T0}', now()),
+            '9999999999', '${T0}', now(), NULL),
            ('${nullExpiryOldOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
             NULL, 'HOLD', '${nullExpiryOldOp}', 'expiryscan-null-expiry', 'expiryscan-idem-32', '${SHA}',
-            NULL, NULL, to_timestamp(0)),
+            NULL, NULL, to_timestamp(0), NULL),
            ('${alreadyReleasedOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'EXPIRED', 1, '1',
             NULL, 'HOLD', '${alreadyReleasedOp}', 'expiryscan-released', 'expiryscan-idem-33', '${SHA}',
-            NULL, NULL, to_timestamp(0));
+            NULL, NULL, to_timestamp(0), NULL),
+           ('${terminalizedExpiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'EXPIRED', 1, '1',
+            NULL, 'HOLD', '${terminalizedExpiredOp}', 'expiryscan-terminalized', 'expiryscan-idem-34', '${SHA}',
+            NULL, NULL, to_timestamp(0), now());
          UPDATE operations SET receive_release_status = 'RELEASED_T0_UNCHANGED'
           WHERE id = '${alreadyReleasedOp}';`,
       );
@@ -1099,11 +1104,12 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const ids = candidates.map((c) => c.operationId).sort();
 
       // Expired text expiry and NULL-expiry old created_at should appear;
-      // future expiry and already-released must not.
+      // future expiry, already-released, and terminalized walletless EXPIRED must not.
       expect(ids).toContain(expiredOp);
       expect(ids).toContain(nullExpiryOldOp);
       expect(ids).not.toContain(futureOp);
       expect(ids).not.toContain(alreadyReleasedOp);
+      expect(ids).not.toContain(terminalizedExpiredOp);
 
       // Verify the expired-op row carries the text expiry value through.
       const expiredCandidate = candidates.find((c) => c.operationId === expiredOp);

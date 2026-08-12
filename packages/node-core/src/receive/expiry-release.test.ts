@@ -11,6 +11,7 @@ import {
 } from "../../../generic-node-contracts/src/receive-expiry/consumer.js";
 
 import {
+  LOAD_EXPIRED_RECEIVE_CANDIDATES,
   POST_EXPIRY_RECONCILING,
   RECEIVE_EXPIRY_RELEASE_STATEMENTS,
   RECEIVE_QUEUE_MAX_WAIT_MS,
@@ -73,6 +74,9 @@ describe("release predicate mutation matrix", () => {
     expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.CAS_TO_EXPIRED).toMatch(
       /NOT EXISTS .*receive_landing_proofs/i,
     );
+    expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.CAS_TO_EXPIRED).toContain(
+      "terminal_at = COALESCE(terminal_at, now())",
+    );
   });
 
   it("does not infer walletless expiry from the nullable operation projection", () => {
@@ -91,5 +95,14 @@ describe("release predicate mutation matrix", () => {
     expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.CAS_UNASSIGNED_TO_EXPIRED).toMatch(
       /NOT EXISTS .*receive_landing_proofs/i,
     );
+    expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.CAS_UNASSIGNED_TO_EXPIRED).toContain(
+      "terminal_at = COALESCE(terminal_at, now())",
+    );
+  });
+
+  it("excludes terminalized walletless EXPIRED from the expiry candidate scan (ZTR-1249)", () => {
+    expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.status = 'EXPIRED'");
+    expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.terminal_at IS NOT NULL");
+    expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.receiver_wallet_id IS NULL");
   });
 });

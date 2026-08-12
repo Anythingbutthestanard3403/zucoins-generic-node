@@ -297,6 +297,24 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     );
   });
 
+  it("appends ZTR-1249 EXPIRED terminal_at backfill after operations", () => {
+    const opsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operations");
+    const backfillIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(
+      "operations-expired-terminal-at-backfill",
+    );
+    expect(backfillIdx).toBeGreaterThan(opsIdx);
+    expect(backfillIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[backfillIdx]!.sql).toContain(
+      "SET terminal_at = COALESCE(terminal_at, updated_at)",
+    );
+    expect(files[backfillIdx]!.sql).toContain("status = 'EXPIRED'");
+    expect(files[backfillIdx]!.sql).toContain("terminal_at IS NULL");
+    expect(files[backfillIdx]!.sql).toContain(
+      "operations-expired-terminal-at-backfill requires operations",
+    );
+  });
+
   it("pack lands transaction-material byte-immutability triggers after the tables", () => {
     const tablesIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("transaction-material");
     const guardsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(

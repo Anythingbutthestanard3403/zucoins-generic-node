@@ -212,6 +212,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // handshake; FK targets nodes/implementers/implementer_credentials (all earlier).
   // Appended; never renumber prior slices.
   "integration-requests",
+  // ZTR-1249: stamp terminal_at on EXPIRED ops left NULL by queue-age expiry.
+  // Pure data fix-forward on operations; appended only.
+  "operations-expired-terminal-at-backfill",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

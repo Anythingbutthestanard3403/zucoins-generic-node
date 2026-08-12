@@ -206,12 +206,13 @@ SELECT o.id::text AS operation_id,
    * Step 5 / walletless-receive expiry — guarded CREATED→EXPIRED for one never-assigned receive.
    * The WHERE restates the queued-receive predicate so a concurrent assigner that won the
    * race matches zero rows (no reopen, no wallet-touch). row_version bumps once; terminal_at
-   * stays null — it is reserved for landed terminals, not EXPIRED.
+   * is stamped with the same UPDATE (SPA in-flight = terminal_at IS NULL — ZTR-1249).
    */
   EXPIRE_QUEUE_AGED_RECEIVE: `
 UPDATE operations
    SET status = 'EXPIRED',
        row_version = row_version + 1,
+       terminal_at = COALESCE(terminal_at, now()),
        updated_at = now()
  WHERE id = $1::uuid
    AND kind = 'RECEIVE_EXTERNAL'

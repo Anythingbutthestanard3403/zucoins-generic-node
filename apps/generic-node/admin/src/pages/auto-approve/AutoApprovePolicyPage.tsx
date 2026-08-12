@@ -67,7 +67,7 @@ function draftsToBody(enabled: boolean, drafts: readonly DraftRule[]): AutoAppro
       implementer_id: d.implementer_id.trim(),
       per_send_max_zkz: d.per_send_max_zkz.trim(),
       per_send_min_zkz: d.per_send_min_zkz.trim() === "" ? null : d.per_send_min_zkz.trim(),
-      window_hours: Number(d.window_hours),
+      window_hours: Number.parseInt(d.window_hours, 10),
       window_cap_zkz: d.window_cap_zkz.trim(),
       expires_at: d.expires_at.trim() === "" ? null : d.expires_at.trim(),
       enabled: d.enabled,

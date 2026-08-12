@@ -94,7 +94,7 @@ function pendingRow(over: Partial<IntegrationRequestRecord> = {}): IntegrationRe
     status: "PENDING",
     row_version: 1,
     created_at: "2026-08-01T00:00:00.000Z",
-    expires_at: "2026-08-08T00:00:00.000Z",
+    expires_at: "2099-08-08T00:00:00.000Z",
     decided_at: null,
     decided_by: null,
     implementer_id: null,
@@ -481,5 +481,103 @@ describe("admin integration-requests", () => {
     );
     expect(declineRes.status).toBe(409);
     expect((await store.get(REQ_ID))!.status).toBe("APPROVED");
+  });
+
+  it("approve against parked enabled:false policy keeps document disabled and adds rule (ZTR-1258)", async () => {
+    const store = new InMemoryIntegrationRequestStore();
+    store.seed(pendingRow());
+    const registry = new InMemoryImplementerRegistry();
+    const policy = new InMemoryAutoApprovePolicy({
+      status: "disabled",
+      disabledReason: "off",
+      rules: [],
+    });
+    const { router, userStore } = makeRouter({ store, registry, policy });
+    const { cookie, csrf } = await login(router, userStore);
+    const res = await router(
+      "POST",
+      `/admin/v1/integration-requests/${REQ_ID}/approve`,
+      Buffer.from(JSON.stringify({ expected_row_version: 1, rule: validRule({ per_send_max_zkz: "3" }) })),
+      {
+        origin: ORIGIN,
+        cookie,
+        "x-csrf-token": csrf,
+        "x-zp-totp": totpNow(),
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(200);
+    const pol = policy.getPolicy();
+    expect(pol.status).toBe("disabled");
+    if (pol.status === "disabled") {
+      expect(pol.disabledReason).toBe("off");
+      expect(pol.rules).toBeDefined();
+      expect(pol.rules!.length).toBe(1);
+      expect(pol.rules![0]!.per_send_max_zkz).toBe("3");
+    }
+  });
+
+  it("approve refuses expired PENDING with integration_request_expired (ZTR-1258)", async () => {
+    const store = new InMemoryIntegrationRequestStore();
+    store.seed(
+      pendingRow({
+        expires_at: "2020-01-01T00:00:00.000Z",
+      }),
+    );
+    const registry = new InMemoryImplementerRegistry();
+    const { router, userStore } = makeRouter({ store, registry });
+    const { cookie, csrf } = await login(router, userStore);
+    const res = await router(
+      "POST",
+      `/admin/v1/integration-requests/${REQ_ID}/approve`,
+      Buffer.from(JSON.stringify({ expected_row_version: 1, rule: validRule() })),
+      {
+        origin: ORIGIN,
+        cookie,
+        "x-csrf-token": csrf,
+        "x-zp-totp": totpNow(),
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(409);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe("integration_request_expired");
+    expect((await store.get(REQ_ID))!.status).toBe("PENDING");
+    expect(await registry.list()).toHaveLength(0);
+  });
+
+  it("GET PENDING omits clock-expired rows; they appear as EXPIRED (ZTR-1258)", async () => {
+    const store = new InMemoryIntegrationRequestStore();
+    store.seed(pendingRow({ expires_at: "2020-01-01T00:00:00.000Z" }));
+    store.seed(
+      pendingRow({
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        display_name: "Still Live",
+      }),
+    );
+    const { router, userStore } = makeRouter({ store });
+    const { cookie, csrf } = await login(router, userStore);
+    const pendingRes = await router("GET", "/admin/v1/integration-requests?status=PENDING", new Uint8Array(), {
+      origin: ORIGIN,
+      cookie,
+      "x-csrf-token": csrf,
+    });
+    expect(pendingRes.status).toBe(200);
+    const pendingBody = JSON.parse(pendingRes.body) as { data: Array<{ id: string; display_name: string }> };
+    expect(pendingBody.data).toHaveLength(1);
+    expect(pendingBody.data[0]!.display_name).toBe("Still Live");
+
+    const expiredRes = await router("GET", "/admin/v1/integration-requests?status=EXPIRED", new Uint8Array(), {
+      origin: ORIGIN,
+      cookie,
+      "x-csrf-token": csrf,
+    });
+    expect(expiredRes.status).toBe(200);
+    const expiredBody = JSON.parse(expiredRes.body) as { data: Array<{ id: string; status: string }> };
+    // list filter EXPIRED only returns durable EXPIRED; projection maps PENDING→EXPIRED when status filter is EXPIRED
+    expect(expiredBody.data.some((r) => r.id === REQ_ID && r.status === "EXPIRED")).toBe(true);
   });
 });

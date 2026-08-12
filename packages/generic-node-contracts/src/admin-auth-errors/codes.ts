@@ -53,6 +53,8 @@ export const ADMIN_ERROR_CODES = [
   { code: "authorizer_unknown", http: 404 },
   { code: "signature_invalid", http: 400 },
   { code: "challenge_unknown", http: 404 },
+  /** Integration-request approve refused past expires_at (ZTR-1258). */
+  { code: "integration_request_expired", http: 409 },
 
   // Reporting credentials.
   { code: "reporting_key_already_active", http: 409 },

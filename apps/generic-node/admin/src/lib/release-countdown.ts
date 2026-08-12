@@ -22,9 +22,11 @@ const TERMINAL = /^(RECEIVE_LANDED|INTERNAL_MOVE_LANDED|EXTERNAL_SEND_LANDED|EXP
 
 export function parseExpiryUnixSecs(raw: string | null | undefined): number | null {
   if (raw == null || raw === "") return null;
-  const n = Number(raw);
+  // Integer unix seconds only — never Number() (amounts-admin/no-float-amount).
+  if (!/^[0-9]+$/.test(raw)) return null;
+  const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.trunc(n);
+  return n;
 }
 
 export function formatRemaining(ms: number): string {

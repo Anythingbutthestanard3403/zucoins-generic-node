@@ -1297,8 +1297,12 @@ async function commitRelease(
 // The money worker tick calls this to discover operations the expiry-release
 // service should process. The query is deliberately generous: it selects any
 // RECEIVE_EXTERNAL that might need expiry work (status CREATED/READY/EXPIRED,
-// no release yet, past expiry + safety margin). The service itself re-derives
-// every predicate under SERIALIZABLE isolation; this scan is selection only.
+// no release yet, past expiry + safety margin). Walletless EXPIRED rows that
+// already carry terminal_at are fully done (queue-age path stamps both in one
+// UPDATE) — re-selecting them only re-appends receive_expiry_events forever
+// (ZTR-1249). EXPIRED + receiver still assigned stays in the scan so lease
+// release can finish. The service itself re-derives every predicate under
+// SERIALIZABLE isolation; this scan is selection only.
 
 export const LOAD_EXPIRED_RECEIVE_CANDIDATES = `
 SELECT o.id::text AS operation_id,
@@ -1311,6 +1315,11 @@ SELECT o.id::text AS operation_id,
  WHERE o.kind = 'RECEIVE_EXTERNAL'
    AND o.status IN ('CREATED','READY','EXPIRED')
    AND o.receive_release_status IS NULL
+   AND NOT (
+         o.status = 'EXPIRED'
+         AND o.terminal_at IS NOT NULL
+         AND o.receiver_wallet_id IS NULL
+       )
    AND (
          (o.expiry_unix_time_secs IS NOT NULL AND
           o.expiry_unix_time_secs::numeric < EXTRACT(EPOCH FROM (now() - interval '30 seconds')))

@@ -39,6 +39,7 @@
     "observation-relationship-adjudications.sql",
     "observation-stores.sql",
     "operational-stores.sql",
+    "operations-expired-terminal-at-backfill.sql",
     "operations-indexes.sql",
     "operations-response-columns.sql",
     "operations.sql",

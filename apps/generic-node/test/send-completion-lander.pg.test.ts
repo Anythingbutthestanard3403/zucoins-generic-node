@@ -816,6 +816,14 @@ async function opsTerminalObsOf(operationId: string): Promise<string | null> {
   return row.rows[0]!.terminal_observation_id;
 }
 
+async function opsTerminalAtOf(operationId: string): Promise<string | null> {
+  const row = await pool.query<{ terminal_at: string | null }>(
+    `SELECT terminal_at::text AS terminal_at FROM operations WHERE id = $1::uuid`,
+    [operationId],
+  );
+  return row.rows[0]!.terminal_at;
+}
+
 async function attentionReasonOf(operationId: string): Promise<string | null> {
   const row = await pool.query<{ attention_reason: string | null }>(
     `SELECT attention_reason FROM send_operations WHERE operation_id = $1::uuid`,
@@ -950,6 +958,8 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       expect(await sendStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
       expect(await opsStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
       expect(await opsTerminalObsOf(parked.operationId)).not.toBeNull();
+      // ZTR-1249: land mirror stamps terminal_at so SPA in-flight drops the row.
+      expect(await opsTerminalAtOf(parked.operationId)).not.toBeNull();
 
       const record = await pool.query(
         `SELECT 1 FROM external_send_landing_records WHERE operation_id = $1::uuid`,

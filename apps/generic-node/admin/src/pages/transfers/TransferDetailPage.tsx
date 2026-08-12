@@ -4,6 +4,7 @@ import { Link, Navigate, useParams } from "react-router";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { ApiError } from "../../lib/api.js";
+import { RecoveryActions } from "../../components/RecoveryActions.js";
 import {
   fetchDualControlPolicy,
   formatMoneyError,
@@ -12,18 +13,17 @@ import {
   getRecovery,
   isCancelled,
   isSendOperationType,
-  partitionRecoveryActions,
   pollSendState,
   postApprove,
   postRecoveryAction,
   postReject,
-  recoveryActionLabel,
   type ApprovalChallenge,
   type OperationInventoryDetail,
   type RecoveryDetail,
 } from "../../lib/money.js";
 import { APPROVE_SUCCESS_NOTE, operationKindLabel, statusLabel } from "../../lib/labels.js";
 import { signApproveChallengePreimage } from "../../lib/approve-device-sign.js";
+import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type LoadState =
@@ -180,7 +180,7 @@ export function TransferDetailPage() {
         setErr(null);
         setMsg("Approved. Polling state…");
         void qc.invalidateQueries({ queryKey: ["transfer-detail", id] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -245,6 +245,7 @@ export function TransferDetailPage() {
         setErr(null);
         setMsg("Recovery action accepted.");
         void qc.invalidateQueries({ queryKey: ["transfer-detail", id] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -485,41 +486,15 @@ export function TransferDetailPage() {
                 : "No permitted recovery actions."}
             </p>
           ) : (
-            (() => {
-              const { live, unavailable } = partitionRecoveryActions(recovery.permitted_actions);
-              return (
-                <div style={{ marginTop: 12 }}>
-                  {live.length > 0 ? (
-                    <div className="form-actions" style={{ flexWrap: "wrap" }}>
-                      {live.map((a) => (
-                        <button
-                          key={a}
-                          type="button"
-                          className="mini-btn"
-                          disabled={recoveryAction.isPending}
-                          onClick={() => {
-                            setErr(null);
-                            setMsg(null);
-                            recoveryAction.mutate(a);
-                          }}
-                        >
-                          {recoveryActionLabel(a)}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {unavailable.map(({ action, reason }) => (
-                    <p key={action} className="muted" style={{ fontSize: 12.5, margin: "4px 0" }}>
-                      <button type="button" className="mini-btn" disabled aria-disabled="true">
-                        {recoveryActionLabel(action)}
-                      </button>
-                      {" — "}
-                      {reason}
-                    </p>
-                  ))}
-                </div>
-              );
-            })()
+            <RecoveryActions
+              permittedActions={recovery.permitted_actions}
+              disabled={recoveryAction.isPending}
+              onAction={(a) => {
+                setErr(null);
+                setMsg(null);
+                recoveryAction.mutate(a);
+              }}
+            />
           )}
         </div>
       ) : null}

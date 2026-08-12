@@ -14,15 +14,23 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
+import { RecoveryActions } from "../../components/RecoveryActions.js";
 import { StatusTag } from "../../components/StatusTag.js";
-import { apiSoftRead } from "../../lib/api.js";
 import { countApproveInboxItems } from "../../lib/approve-inbox-count.js";
 import {
   formatApproveFailure,
   getLocalApproveDeviceAvailability,
   signApproveChallengePreimage,
 } from "../../lib/approve-device-sign.js";
+import {
+  buildDestinationBlessPreimage,
+  ceremonyWindowFromNow,
+  getDeviceRecord,
+  randomUuid,
+  signPreimage,
+} from "../../lib/device-crypto.js";
 import { truncatePubkey } from "../../lib/format.js";
+import { operationKindLabel } from "../../lib/labels.js";
 import {
   formatMoneyError,
   getApprovalChallenge,
@@ -34,7 +42,6 @@ import {
   listSendOperationsInventory,
   operationDetailPath,
   parseProposedIntegrationRule,
-  partitionRecoveryActions,
   pollSendState,
   postApprove,
   postBless,
@@ -43,31 +50,22 @@ import {
   postRecoveryAction,
   postReject,
   getRecovery,
-  recoveryActionLabel,
   type ApprovalChallenge,
   type DestinationItem,
   type IntegrationRequestItem,
   type OperationListItem,
 } from "../../lib/money.js";
 import {
-  EMPTY_NEEDS_ATTENTION,
-  type NeedsAttentionListItem,
-  type NeedsAttentionResponse,
-} from "../../lib/ops.js";
+  invalidateNeedsAttention,
+  useNeedsAttention,
+} from "../../lib/needs-attention.js";
+import type { NeedsAttentionListItem } from "../../lib/ops.js";
 import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 function shortDigest(hex: string | null | undefined): string {
   if (!hex || hex.length < 12) return hex ?? "—";
   return `${hex.slice(0, 8)}…${hex.slice(-4)}`;
-}
-
-function opLabel(kind: string): string {
-  const k = kind.toUpperCase();
-  if (k === "SEND_EXTERNAL" || k.includes("SEND")) return "Outgoing (needs approval)";
-  if (k.includes("RECEIVE")) return "Incoming";
-  if (k.includes("MOVE")) return "Internal transfer";
-  return kind;
 }
 
 type ExpandedSend = {
@@ -88,11 +86,12 @@ export function ApproveInboxPage() {
 
   // Bless form fields (when acting on a PENDING destination)
   const [blessTarget, setBlessTarget] = useState<string | null>(null);
-  const [blessNonce, setBlessNonce] = useState("");
-  const [blessIssued, setBlessIssued] = useState("");
-  const [blessExpires, setBlessExpires] = useState("");
   const [deviceKeyId, setDeviceKeyId] = useState("");
-  const [deviceSig, setDeviceSig] = useState("");
+  const [showBlessBreakGlass, setShowBlessBreakGlass] = useState(false);
+  const [manualBlessNonce, setManualBlessNonce] = useState("");
+  const [manualBlessIssued, setManualBlessIssued] = useState("");
+  const [manualBlessExpires, setManualBlessExpires] = useState("");
+  const [manualBlessSig, setManualBlessSig] = useState("");
 
   // Integration-request edit draft (operator may tighten/loosen caps before approve).
   const [irExpandedId, setIrExpandedId] = useState<string | null>(null);
@@ -115,12 +114,7 @@ export function ApproveInboxPage() {
     refetchInterval: 15_000,
   });
 
-  const attentionQ = useQuery({
-    queryKey: ["approve-inbox-attention"],
-    queryFn: async () =>
-      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: 15_000,
-  });
+  const attentionQ = useNeedsAttention({ refetchIntervalMs: 15_000 });
 
   const destinationsQ = useQuery({
     queryKey: ["approve-inbox-destinations"],
@@ -278,9 +272,7 @@ export function ApproveInboxPage() {
         setExpandedId(null);
         setExpandedSend(null);
         void qc.invalidateQueries({ queryKey: ["approve-inbox-sends"] });
-        void qc.invalidateQueries({ queryKey: ["approve-inbox-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -311,7 +303,7 @@ export function ApproveInboxPage() {
         setExpandedId(null);
         setExpandedSend(null);
         void qc.invalidateQueries({ queryKey: ["approve-inbox-sends"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -421,9 +413,7 @@ export function ApproveInboxPage() {
       onSuccess: () => {
         setErr(null);
         setMsg("Recovery action accepted.");
-        void qc.invalidateQueries({ queryKey: ["approve-inbox-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -437,33 +427,75 @@ export function ApproveInboxPage() {
     async (
       body: {
         destinationId: string;
-        nonce: string;
-        issued_at: string;
-        expires_at: string;
         device_key_id: string;
-        device_signature: string;
+        dest: DestinationItem;
       },
       totp: string,
-    ) =>
-      postBless(
+    ) => {
+      const dest = body.dest;
+      if (!dest.node_id) {
+        throw new Error("Destination missing node_id — cannot build bless preimage.");
+      }
+
+      let nonce: string;
+      let issued_at: string;
+      let expires_at: string;
+      let device_signature: string;
+
+      if (showBlessBreakGlass && manualBlessSig.trim().length > 0) {
+        nonce = manualBlessNonce.trim();
+        issued_at = manualBlessIssued.trim();
+        expires_at = manualBlessExpires.trim();
+        device_signature = manualBlessSig.trim();
+      } else {
+        const local = await getDeviceRecord(body.device_key_id);
+        if (local === null) {
+          throw new Error(
+            "No local private key for this device. Open Devices on the enrolled browser, or use break-glass advanced paste.",
+          );
+        }
+        const window = ceremonyWindowFromNow();
+        nonce = randomUuid();
+        issued_at = window.issued_at;
+        expires_at = window.expires_at;
+        const preimage = buildDestinationBlessPreimage({
+          node_id: dest.node_id,
+          destination_id: dest.destination_id,
+          wallet_id: dest.wallet_id,
+          wallet_pubkey: dest.wallet_public_key,
+          nonce,
+          issued_at,
+          expires_at,
+        });
+        device_signature = await signPreimage(local.privateKey, preimage);
+      }
+
+      return postBless(
         body.destinationId,
         {
-          nonce: body.nonce,
-          issued_at: body.issued_at,
-          expires_at: body.expires_at,
+          nonce,
+          issued_at,
+          expires_at,
           device_key_id: body.device_key_id,
-          device_signature: body.device_signature,
+          device_signature,
         },
         totp,
-      ),
+      );
+    },
     {
       title: "Bless destination",
-      detail: "Device signature + fresh TOTP (TOTP alone cannot bless)",
+      detail: "Review → device sign → fresh TOTP (TOTP alone cannot bless)",
       onSuccess: () => {
         setErr(null);
         setMsg("Bless accepted.");
         setBlessTarget(null);
+        setShowBlessBreakGlass(false);
+        setManualBlessNonce("");
+        setManualBlessIssued("");
+        setManualBlessExpires("");
+        setManualBlessSig("");
         void qc.invalidateQueries({ queryKey: ["approve-inbox-destinations"] });
+        invalidateNeedsAttention(qc);
       },
       onError: (e) => {
         if (isCancelled(e)) return;
@@ -717,7 +749,7 @@ export function ApproveInboxPage() {
               return (
                 <li key={s.operation_id} className="approve-card" data-testid="approve-send-card">
                   <div className="approve-card-head">
-                    <span className="approve-op-label">{opLabel(s.operation_type)}</span>
+                    <span className="approve-op-label">{operationKindLabel(s.operation_type)}</span>
                     <StatusTag status={s.status} />
                   </div>
                   <div className="approve-card-body">
@@ -884,31 +916,10 @@ export function ApproveInboxPage() {
                     </div>
                   </div>
                   {open ? (
-                    <form
-                      className="approve-actions"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        setErr(null);
-                        setMsg(null);
-                        if (selectedDeviceKeyId.length === 0) {
-                          setErr(
-                            "No enrolled device key — enrol a device before blessing (device signature is required; TOTP alone is rejected).",
-                          );
-                          return;
-                        }
-                        bless.mutate({
-                          destinationId: d.destination_id,
-                          nonce: blessNonce.trim(),
-                          issued_at: blessIssued.trim(),
-                          expires_at: blessExpires.trim(),
-                          device_key_id: selectedDeviceKeyId,
-                          device_signature: deviceSig.trim(),
-                        });
-                      }}
-                    >
+                    <div className="approve-actions">
                       <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-                        Bless requires device signature + TOTP. Device enrolment is separate from
-                        this inbox.
+                        One-tap bless: this browser signs with the enrolled device key, then fresh
+                        TOTP. Manual nonce/signature paste is break-glass only.
                       </p>
                       {(deviceKeysQ.data?.length ?? 0) === 0 && !deviceKeysQ.isLoading ? (
                         <p className="muted" data-testid="approve-bless-no-device">
@@ -916,36 +927,6 @@ export function ApproveInboxPage() {
                         </p>
                       ) : (
                         <>
-                          <div className="field">
-                            <label htmlFor={`bless-nonce-${d.destination_id}`}>Nonce</label>
-                            <input
-                              id={`bless-nonce-${d.destination_id}`}
-                              className="mono"
-                              value={blessNonce}
-                              onChange={(e) => setBlessNonce(e.target.value)}
-                              required
-                            />
-                          </div>
-                          <div className="field">
-                            <label htmlFor={`bless-issued-${d.destination_id}`}>Issued at (ISO)</label>
-                            <input
-                              id={`bless-issued-${d.destination_id}`}
-                              className="mono"
-                              value={blessIssued}
-                              onChange={(e) => setBlessIssued(e.target.value)}
-                              required
-                            />
-                          </div>
-                          <div className="field">
-                            <label htmlFor={`bless-expires-${d.destination_id}`}>Expires at (ISO)</label>
-                            <input
-                              id={`bless-expires-${d.destination_id}`}
-                              className="mono"
-                              value={blessExpires}
-                              onChange={(e) => setBlessExpires(e.target.value)}
-                              required
-                            />
-                          </div>
                           <div className="field">
                             <label htmlFor={`bless-device-${d.destination_id}`}>Device key</label>
                             <select
@@ -962,32 +943,114 @@ export function ApproveInboxPage() {
                               ))}
                             </select>
                           </div>
-                          <div className="field">
-                            <label htmlFor={`bless-sig-${d.destination_id}`}>Device signature</label>
-                            <input
-                              id={`bless-sig-${d.destination_id}`}
-                              className="mono"
-                              value={deviceSig}
-                              onChange={(e) => setDeviceSig(e.target.value)}
-                              required
-                            />
-                          </div>
                           <div className="approve-action-bar">
                             <button
-                              type="submit"
+                              type="button"
                               className="mini-btn primary approve-primary"
+                              data-testid="approve-bless-one-tap"
                               disabled={
                                 bless.isPending ||
                                 deviceKeysQ.isLoading ||
                                 selectedDeviceKeyId.length === 0
                               }
+                              onClick={() => {
+                                setErr(null);
+                                setMsg(null);
+                                if (selectedDeviceKeyId.length === 0) {
+                                  setErr(
+                                    "No enrolled device key — enrol a device before blessing (device signature is required; TOTP alone is rejected).",
+                                  );
+                                  return;
+                                }
+                                bless.mutate({
+                                  destinationId: d.destination_id,
+                                  device_key_id: selectedDeviceKeyId,
+                                  dest: d,
+                                });
+                              }}
                             >
-                              {bless.isPending ? "Blessing…" : "Bless (TOTP)"}
+                              {bless.isPending ? "Blessing…" : "Bless (device + TOTP)"}
                             </button>
                           </div>
+                          <details
+                            style={{ marginTop: 10 }}
+                            open={showBlessBreakGlass}
+                            onToggle={(e) =>
+                              setShowBlessBreakGlass((e.target as HTMLDetailsElement).open)
+                            }
+                          >
+                            <summary className="muted" style={{ fontSize: 12, cursor: "pointer" }}>
+                              Break-glass: paste nonce / timestamps / signature
+                            </summary>
+                            <div style={{ marginTop: 8 }}>
+                              <div className="field">
+                                <label htmlFor={`bless-nonce-${d.destination_id}`}>Nonce</label>
+                                <input
+                                  id={`bless-nonce-${d.destination_id}`}
+                                  className="mono"
+                                  value={manualBlessNonce}
+                                  onChange={(e) => setManualBlessNonce(e.target.value)}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`bless-issued-${d.destination_id}`}>
+                                  Issued at (ISO)
+                                </label>
+                                <input
+                                  id={`bless-issued-${d.destination_id}`}
+                                  className="mono"
+                                  value={manualBlessIssued}
+                                  onChange={(e) => setManualBlessIssued(e.target.value)}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`bless-expires-${d.destination_id}`}>
+                                  Expires at (ISO)
+                                </label>
+                                <input
+                                  id={`bless-expires-${d.destination_id}`}
+                                  className="mono"
+                                  value={manualBlessExpires}
+                                  onChange={(e) => setManualBlessExpires(e.target.value)}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`bless-sig-${d.destination_id}`}>
+                                  Device signature
+                                </label>
+                                <input
+                                  id={`bless-sig-${d.destination_id}`}
+                                  className="mono"
+                                  value={manualBlessSig}
+                                  onChange={(e) => setManualBlessSig(e.target.value)}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="mini-btn"
+                                disabled={
+                                  bless.isPending ||
+                                  selectedDeviceKeyId.length === 0 ||
+                                  manualBlessSig.trim().length === 0
+                                }
+                                onClick={() => {
+                                  setErr(null);
+                                  setMsg(null);
+                                  setShowBlessBreakGlass(true);
+                                  bless.mutate({
+                                    destinationId: d.destination_id,
+                                    device_key_id: selectedDeviceKeyId,
+                                    dest: d,
+                                  });
+                                }}
+                              >
+                                Bless with pasted signature (TOTP)
+                              </button>
+                            </div>
+                          </details>
                         </>
                       )}
-                    </form>
+                    </div>
                   ) : null}
                   <div className="approve-card-foot">
                     <button
@@ -1018,12 +1081,10 @@ export function ApproveInboxPage() {
             Recovery
           </h2>
           <ul className="approve-cards">
-            {recoveryCards.map((a) => {
-              const { live, unavailable } = partitionRecoveryActions(a.permitted_actions);
-              return (
+            {recoveryCards.map((a) => (
                 <li key={a.operation_id} className="approve-card" data-testid="approve-recovery-card">
                   <div className="approve-card-head">
-                    <span className="approve-op-label">{opLabel(a.operation_type)}</span>
+                    <span className="approve-op-label">{operationKindLabel(a.operation_type)}</span>
                     <StatusTag status={a.classification} />
                   </div>
                   <div className="approve-card-body">
@@ -1045,50 +1106,16 @@ export function ApproveInboxPage() {
                       {a.classification_rationale}
                     </p>
                   </div>
-                  {live.length > 0 ? (
-                    <div className="approve-action-bar" style={{ marginTop: 10 }}>
-                      {live.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          className="mini-btn"
-                          disabled={recoveryAction.isPending}
-                          onClick={() => {
-                            setErr(null);
-                            setMsg(null);
-                            recoveryAction.mutate({ operationId: a.operation_id, action });
-                          }}
-                        >
-                          {recoveryActionLabel(action)}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                      No live recovery actions available on this row.
-                    </p>
-                  )}
-                  {unavailable.length > 0 ? (
-                    <div
-                      style={{ marginTop: 6 }}
-                      data-testid="approve-recovery-unimplemented"
-                    >
-                      {unavailable.map(({ action, reason }) => (
-                        <p
-                          key={action}
-                          className="muted"
-                          style={{ fontSize: 12, margin: "4px 0" }}
-                          data-testid="approve-recovery-unavailable-item"
-                        >
-                          <button type="button" className="mini-btn" disabled aria-disabled="true">
-                            {recoveryActionLabel(action)}
-                          </button>
-                          {" — "}
-                          {reason}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
+                  <RecoveryActions
+                    permittedActions={a.permitted_actions}
+                    disabled={recoveryAction.isPending}
+                    testIdPrefix="approve-recovery"
+                    onAction={(action) => {
+                      setErr(null);
+                      setMsg(null);
+                      recoveryAction.mutate({ operationId: a.operation_id, action });
+                    }}
+                  />
                   <div className="approve-card-foot">
                     <Link
                       className="mini-btn"
@@ -1098,8 +1125,7 @@ export function ApproveInboxPage() {
                     </Link>
                   </div>
                 </li>
-              );
-            })}
+            ))}
           </ul>
         </section>
       ) : null}

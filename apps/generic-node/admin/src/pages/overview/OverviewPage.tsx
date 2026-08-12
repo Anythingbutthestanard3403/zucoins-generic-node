@@ -28,9 +28,12 @@ import {
 } from "../../lib/money.js";
 import { operationKindLabel, statusLabel } from "../../lib/labels.js";
 import {
+  fetchNeedsAttentionSoft,
+  NEEDS_ATTENTION_KEY,
+} from "../../lib/needs-attention.js";
+import {
   EMPTY_NEEDS_ATTENTION,
   type NeedsAttentionListItem,
-  type NeedsAttentionResponse,
 } from "../../lib/ops.js";
 import {
   loadEnabledPacks,
@@ -152,9 +155,8 @@ function exportActivityCsv(
 export function OverviewPage() {
   const [tab, setTab] = useState<ActivityTab>("attention");
   const attentionQ = useQuery({
-    queryKey: ["needs-attention-overview"],
-    queryFn: async () =>
-      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
+    queryKey: [...NEEDS_ATTENTION_KEY],
+    queryFn: fetchNeedsAttentionSoft,
     refetchInterval: 30_000,
   });
   const walletsQ = useQuery({

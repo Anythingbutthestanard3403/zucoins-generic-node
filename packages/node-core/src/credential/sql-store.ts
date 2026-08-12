@@ -44,7 +44,9 @@ export const CREDENTIAL_STATEMENTS = {
   RETURNING id`,
   SELECT_BY_HASH: `SELECT ${CREDENTIAL_SELECT} FROM implementer_credentials WHERE credential_hash = $1`,
   SELECT_BY_ID: `SELECT ${CREDENTIAL_SELECT} FROM implementer_credentials WHERE id = $1 AND implementer_id = $2`,
+  SELECT_BY_CREDENTIAL_ID: `SELECT ${CREDENTIAL_SELECT} FROM implementer_credentials WHERE id = $1`,
   SELECT_BY_IMPLEMENTER: `SELECT ${CREDENTIAL_SELECT} FROM implementer_credentials WHERE implementer_id = $1 ORDER BY issued_at DESC`, // contract-allow:frozen-sql-text
+  SELECT_ALL: `SELECT ${CREDENTIAL_SELECT} FROM implementer_credentials ORDER BY issued_at DESC`, // contract-allow:order:frozen-sql-text
   ROTATE: `WITH locked AS (
     SELECT id FROM implementer_credentials
     WHERE id = $1 AND implementer_id = $2 AND status = 'ACTIVE'
@@ -198,6 +200,19 @@ export class SqlCredentialStore implements CredentialStore {
       CREDENTIAL_STATEMENTS.SELECT_BY_IMPLEMENTER,
       [implementerId],
     );
+    return rows.map(toStoredCredential);
+  }
+
+  async findByCredentialId(credentialId: string): Promise<StoredCredential | null> {
+    const { rows } = await this.sql.query<CredentialRow>(
+      CREDENTIAL_STATEMENTS.SELECT_BY_CREDENTIAL_ID,
+      [credentialId],
+    );
+    return rows[0] === undefined ? null : toStoredCredential(rows[0]);
+  }
+
+  async listAll(): Promise<StoredCredential[]> {
+    const { rows } = await this.sql.query<CredentialRow>(CREDENTIAL_STATEMENTS.SELECT_ALL, []);
     return rows.map(toStoredCredential);
   }
 

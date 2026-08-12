@@ -1,16 +1,17 @@
-// SPA Keys — live implementer API key management.
+// SPA Keys — live implementer API key management with integration picker.
 // Issue returns the raw key exactly once (shown + copyable, never re-fetched); list
 // never includes the secret or hash; revoke takes effect on the next bearer auth.
 // Demo sessions never show fixture keys as real (error-honesty rule).
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { stageIssuedIntegrationKey } from "../../lib/integration-handoff.js";
 import {
   formatMoneyError,
   isCancelled,
   listApiKeys,
+  listImplementers,
   postIssueApiKey,
   postRevokeApiKey,
   type ApiKeyIssueResult,
@@ -19,6 +20,7 @@ import { credentialPrefixKind } from "../../lib/labels.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 const QUERY_KEY = ["api-keys"] as const;
+const IMPLEMENTERS_KEY = ["implementers"] as const;
 
 export function ApiKeysPage() {
   const navigate = useNavigate();
@@ -28,15 +30,45 @@ export function ApiKeysPage() {
   const [issueError, setIssueError] = useState<string | null>(null);
   const [revokeId, setRevokeId] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  /** Empty string = genesis default (server resolves). */
+  const [selectedImplementerId, setSelectedImplementerId] = useState("");
 
-  const list = useQuery({
-    queryKey: [...QUERY_KEY],
-    queryFn: listApiKeys,
-    
+  const implementersQ = useQuery({
+    queryKey: [...IMPLEMENTERS_KEY],
+    queryFn: listImplementers,
   });
 
+  const list = useQuery({
+    queryKey: [...QUERY_KEY, selectedImplementerId],
+    queryFn: () =>
+      listApiKeys(
+        selectedImplementerId.length > 0
+          ? { implementerId: selectedImplementerId }
+          : undefined,
+      ),
+  });
+
+  const activeImplementers = useMemo(
+    () => (implementersQ.data?.implementers ?? []).filter((i) => i.retired_at === null),
+    [implementersQ.data],
+  );
+
+  const implementerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const row of implementersQ.data?.implementers ?? []) {
+      map.set(row.id, row.name);
+    }
+    return map;
+  }, [implementersQ.data]);
+
   const issue = useTotpGatedMutation<ApiKeyIssueResult, void>(
-    (_v, totp) => postIssueApiKey(undefined, totp),
+    (_v, totp) =>
+      postIssueApiKey(
+        selectedImplementerId.length > 0
+          ? { implementerId: selectedImplementerId }
+          : undefined,
+        totp,
+      ),
     {
       title: "Issue API key",
       detail: "Enter a fresh TOTP to mint a new implementer bearer key.",
@@ -94,6 +126,8 @@ export function ApiKeysPage() {
       </div>
 
       <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+        Integrations: <Link to="/integrations">Manage integrations</Link>
+        {" · "}
         Operator device keys: <Link to="/devices">Devices</Link>
         {" · "}
         Dual-control &amp; operator push: <Link to="/operator-security">Operator security</Link>
@@ -101,10 +135,32 @@ export function ApiKeysPage() {
 
       <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
         This list shows prefixes only — the full <code>ik_…</code> secret is returned once when
-        you issue a key. A key already present after first boot was seeded at genesis for the
-        node process; if you never copied a raw secret, issue a new key (or rotate by issuing
-        then revoking the old one) and store that secret in your implementer backend.
+        you issue a key. Pick an integration to scope issue/list, or leave the default to use
+        the genesis integration. A key already present after first boot was seeded at genesis;
+        if you never copied a raw secret, issue a new key and store that secret in your
+        integration backend.
       </p>
+
+      {implementersQ.isSuccess && implementersQ.data?.live === true && activeImplementers.length > 0 ? (
+        <label style={{ display: "block", marginBottom: 12, fontSize: 13 }}>
+          <span className="muted" style={{ display: "block", marginBottom: 4 }}>
+            Integration
+          </span>
+          <select
+            aria-label="Integration"
+            value={selectedImplementerId}
+            onChange={(e) => setSelectedImplementerId(e.target.value)}
+            style={{ minWidth: 220 }}
+          >
+            <option value="">Genesis default</option>
+            {activeImplementers.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {list.isPending ? <p className="muted">Loading…</p> : null}
 
@@ -129,7 +185,7 @@ export function ApiKeysPage() {
         <div className="card" data-testid="api-key-once" style={{ marginTop: 12 }}>
           <h2>New API key — copy it now</h2>
           <p className="muted">
-            This is shown once and never stored in plaintext. Paste it into your implementer
+            This is shown once and never stored in plaintext. Paste it into your integration
             website backend env — never customer browser JS.
           </p>
           <code
@@ -168,83 +224,94 @@ export function ApiKeysPage() {
         </div>
       ) : null}
 
-      {(list.isSuccess && !unavailable) ? (
+      {list.isSuccess && !unavailable ? (
         <div className="table-wrap" style={{ marginTop: 12 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Prefix</th>
-              <th>Status</th>
-              <th>Scopes</th>
-              <th>Created</th>
-              <th>Last used</th>
-              <th><span className="visually-hidden">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {keys.length === 0 ? (
+          <table>
+            <thead>
               <tr>
-                <td colSpan={6} className="muted">
-                  No API keys listed
-                </td>
+                <th>Prefix</th>
+                <th>Integration</th>
+                <th>Status</th>
+                <th>Scopes</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th>
+                  <span className="visually-hidden">Actions</span>
+                </th>
               </tr>
-            ) : (
-              keys.map((k) => (
-                <tr key={k.id}>
-                  <td>
-                    <span className="muted" style={{ marginRight: 6 }}>{credentialPrefixKind(k.prefix)}</span><code>{k.prefix}…</code>
+            </thead>
+            <tbody>
+              {keys.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    No API keys listed
                   </td>
-                  <td>
-                    <span className={`tag ${k.status === "ACTIVE" ? "ok" : "muted"}`}>
-                      {k.status}
-                    </span>
-                  </td>
-                  <td>{k.scopes.join(", ")}</td>
-                  <td>{k.issued_at}</td>
-                  <td className="muted">—</td>
-                  <td>
-                    {k.status === "ACTIVE" ? (
-                      revokeId === k.id ? (
-                        <span>
-                          <button
-                            type="button"
-                            className="pill danger"
-                            disabled={revoke.isPending}
-                            onClick={() => revoke.mutate(k.id)}
-                          >
-                            {revoke.isPending ? "Revoking…" : "Confirm revoke"}
-                          </button>{" "}
+                </tr>
+              ) : (
+                keys.map((k) => (
+                  <tr key={k.id}>
+                    <td>
+                      <span className="muted" style={{ marginRight: 6 }}>
+                        {credentialPrefixKind(k.prefix)}
+                      </span>
+                      <code>{k.prefix}…</code>
+                    </td>
+                    <td>
+                      {implementerNameById.get(k.implementer_id) ?? (
+                        <code className="muted">{k.implementer_id.slice(0, 8)}…</code>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`tag ${k.status === "ACTIVE" ? "ok" : "muted"}`}>
+                        {k.status}
+                      </span>
+                    </td>
+                    <td>{k.scopes.join(", ")}</td>
+                    <td>{k.issued_at}</td>
+                    <td className="muted">—</td>
+                    <td>
+                      {k.status === "ACTIVE" ? (
+                        revokeId === k.id ? (
+                          <span>
+                            <button
+                              type="button"
+                              className="pill danger"
+                              disabled={revoke.isPending}
+                              onClick={() => revoke.mutate(k.id)}
+                            >
+                              {revoke.isPending ? "Revoking…" : "Confirm revoke"}
+                            </button>{" "}
+                            <button
+                              type="button"
+                              className="pill"
+                              disabled={revoke.isPending}
+                              onClick={() => {
+                                setRevokeId(null);
+                                setRevokeError(null);
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
                           <button
                             type="button"
                             className="pill"
-                            disabled={revoke.isPending}
                             onClick={() => {
-                              setRevokeId(null);
                               setRevokeError(null);
+                              setRevokeId(k.id);
                             }}
                           >
-                            Cancel
+                            Revoke
                           </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="pill"
-                          onClick={() => {
-                            setRevokeError(null);
-                            setRevokeId(k.id);
-                          }}
-                        >
-                          Revoke
-                        </button>
-                      )
-                    ) : null}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                        )
+                      ) : null}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       ) : null}
       {revokeError ? (

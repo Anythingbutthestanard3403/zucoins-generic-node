@@ -133,7 +133,16 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
     expect(
       surface.liveOperatorParkRoutes.map((r) => `${r.method} ${r.path}`),
     ).toEqual(["POST /admin/v1/operations/:operation_id/operator-park"]);
+    expect(surface.liveImplementerRoutes.map((r) => `${r.method} ${r.path}`)).toEqual([
+      "GET /admin/v1/implementers",
+      "POST /admin/v1/implementers",
+      "POST /admin/v1/implementers/:id/retire",
+      "GET /admin/v1/api-keys",
+      "POST /admin/v1/api-keys",
+      "POST /admin/v1/api-keys/:id/revoke",
+    ]);
     expect(surface.adminRouteDeps.halt).toBeDefined();
+    expect(surface.adminRouteDeps.implementerRegistry).toBeDefined();
     expect(surface.adminRouteDeps.adminIdempotencyStore).toBeDefined();
     expect(surface.adminRouteDeps.atomicAdminMutation).toBeDefined();
     expect((await surface.discoveryDocument()).node_id).toBe(

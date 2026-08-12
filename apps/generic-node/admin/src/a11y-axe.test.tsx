@@ -18,6 +18,7 @@ import { OverviewPage } from "./pages/overview/OverviewPage.js";
 import { DestinationsPage } from "./pages/destinations/DestinationsPage.js";
 import { WalletsPage } from "./pages/wallets/WalletsPage.js";
 import { ApiKeysPage } from "./pages/api-keys/ApiKeysPage.js";
+import { IntegrationsPage } from "./pages/integrations/IntegrationsPage.js";
 import { BackupPage } from "./pages/backup/BackupPage.js";
 import { ApproveInboxPage } from "./pages/approve/ApproveInboxPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
@@ -115,6 +116,9 @@ function emptyLiveFetch() {
           JSON.stringify({ error: { code: "not_found", message: "missing" } }),
           { status: 404 },
         );
+      }
+      if (url.includes("/implementers")) {
+        return new Response(JSON.stringify({ implementers: [] }), { status: 200 });
       }
       if (
         url.includes("/operations")
@@ -369,6 +373,15 @@ describe("axe smoke — Settings workflow", () => {
 // genuine blocker, only a gap in this file. Covers both the demo-mode empty state and a
 // live row with the revoke control, so the action-column <th> and the issue/revoke pills
 // are exercised, not just the page shell.
+describe("axe smoke — Integrations workflow", () => {
+  it("has no axe violations", async () => {
+    liveSession();
+    emptyLiveFetch();
+    const { container } = renderPage(<IntegrationsPage />);
+    await expectNoAxeViolations(container);
+  });
+});
+
 describe("axe smoke — Keys workflow (ApiKeysPage, empty live)", () => {
   it("has no axe violations", async () => {
     liveSession();
@@ -384,12 +397,29 @@ describe("axe smoke — Keys workflow (ApiKeysPage, live row)", () => {
   it("has no axe violations with a live key row", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/implementers")) {
+          return new Response(
+            JSON.stringify({
+              implementers: [
+                {
+                  id: "11111111-1111-4111-8111-111111111111",
+                  name: "genesis",
+                  created_at: "2026-01-01T00:00:00Z",
+                  retired_at: null,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
           JSON.stringify({
             keys: [
               {
                 id: "k1",
+                implementer_id: "11111111-1111-4111-8111-111111111111",
                 prefix: "ik_abcdef12",
                 scopes: ["receive:create", "receive:read"],
                 status: "ACTIVE",
@@ -402,8 +432,8 @@ describe("axe smoke — Keys workflow (ApiKeysPage, live row)", () => {
             ],
           }),
           { status: 200 },
-        ),
-      ),
+        );
+      }),
     );
     const { container } = renderPage(<ApiKeysPage />);
     await screen.findByText("ik_abcdef12…");

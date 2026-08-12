@@ -83,11 +83,19 @@ class MemoryCredentialStore implements CredentialStore {
   async findByHash(): Promise<StoredCredential | null> {
     return null; // unused by the admin routes (no validate path here)
   }
-  async findById(credentialId: string): Promise<StoredCredential | null> {
+  async findById(credentialId: string, implementerId: string): Promise<StoredCredential | null> {
+    const row = this.rows.get(credentialId);
+    if (row === undefined || row.implementer_id !== implementerId) return null;
+    return row;
+  }
+  async findByCredentialId(credentialId: string): Promise<StoredCredential | null> {
     return this.rows.get(credentialId) ?? null;
   }
   async listByImplementer(implementerId: string): Promise<StoredCredential[]> {
     return [...this.rows.values()].filter((r) => r.implementer_id === implementerId);
+  }
+  async listAll(): Promise<StoredCredential[]> {
+    return [...this.rows.values()];
   }
   async rotate(): Promise<boolean> {
     throw new Error("rotate unused");

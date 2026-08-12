@@ -84,7 +84,14 @@ export interface CredentialStore {
   issue(row: StoredCredential, audit: CredentialAuditEntry): Promise<void>;
   findByHash(credentialHash: string): Promise<StoredCredential | null>;
   findById(credentialId: string, implementerId: string): Promise<StoredCredential | null>;
+  /**
+   * Lookup by credential id alone (admin multi-implementer revoke/list).
+   * Absent when the store has no global id index (tests may stub null).
+   */
+  findByCredentialId?(credentialId: string): Promise<StoredCredential | null>;
   listByImplementer(implementerId: string): Promise<StoredCredential[]>;
+  /** Every credential across implementers (admin inventory). Optional for unit stubs. */
+  listAll?(): Promise<StoredCredential[]>;
   rotate(
     credentialId: string,
     implementerId: string,
@@ -379,6 +386,29 @@ export class CredentialService {
 
   async list(implementerId: string): Promise<StoredCredential[]> {
     return this.store.listByImplementer(implementerId);
+  }
+
+  /** Cross-implementer inventory for the admin list surface. */
+  async listAll(): Promise<StoredCredential[]> {
+    if (this.store.listAll !== undefined) {
+      return this.store.listAll();
+    }
+    return [];
+  }
+
+  /**
+   * Resolve a credential by id alone so admin revoke can target any implementer's key.
+   * Falls back to CREDENTIAL_NOT_FOUND when the store has no global id lookup.
+   */
+  async findByCredentialId(credentialId: string): Promise<StoredCredential> {
+    if (this.store.findByCredentialId === undefined) {
+      throw new CredentialError("credential not found", "CREDENTIAL_NOT_FOUND");
+    }
+    const row = await this.store.findByCredentialId(credentialId);
+    if (row === null) {
+      throw new CredentialError("credential not found", "CREDENTIAL_NOT_FOUND");
+    }
+    return row;
   }
 
   async authorize(

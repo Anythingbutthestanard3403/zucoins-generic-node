@@ -186,6 +186,7 @@ const API_KEYS_LIST = {
   keys: [
     {
       id: "k1",
+      implementer_id: "11111111-1111-4111-8111-111111111111",
       prefix: "ik_e2emobilekeyprefix",
       scopes: ["receive:create", "receive:read"],
       status: "ACTIVE",
@@ -194,6 +195,17 @@ const API_KEYS_LIST = {
       expires_at: null,
       revoked_at: null,
       last_used_at: null,
+    },
+  ],
+};
+
+const IMPLEMENTERS_LIST = {
+  implementers: [
+    {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "genesis",
+      created_at: "2026-01-01T00:00:00Z",
+      retired_at: null,
     },
   ],
 };
@@ -325,6 +337,7 @@ export async function registerAdminApiRoutes(
     if (key === "GET /admin/v1/destinations") return json(DESTINATIONS_LIST);
     if (key === "GET /admin/v1/audit") return json(AUDIT_LIST);
     if (key === "GET /admin/v1/api-keys") return json(API_KEYS_LIST);
+    if (key === "GET /admin/v1/implementers") return json(IMPLEMENTERS_LIST);
     if (key === "GET /admin/v1/halt") return json(HALT_STATE);
     if (key === "GET /admin/v1/settings")
       return json({

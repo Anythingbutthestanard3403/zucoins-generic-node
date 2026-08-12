@@ -185,6 +185,17 @@ export interface AcknowledgementStore<Tx> {
   insertAcknowledgement(tx: Tx, draft: AcknowledgementDraft): Promise<void>;
   /** Stamp this leg terminal in `lease_group_operations`. One-way; never un-stamps. */
   completeGroupOperation(tx: Tx, leaseGroupId: string, operationId: string): Promise<void>;
+  /**
+   * ZTR-1246 — denormalize the ack verdict onto `operations.verification_verdict`.
+   * First-write only; must not run on replay. ZTR-1245 — when verdict is VERIFIED, clear
+   * provisional attention (e.g. LINEAGE_GAP left from an empty-ACK episode) so landed +
+   * verification-complete ops do not keep operator noise.
+   */
+  applyOperationVerificationVerdict(
+    tx: Tx,
+    operationId: string,
+    verdict: AckVerdict,
+  ): Promise<void>;
   /** Group facts read AFTER this request's write, so the predicate sees its own leg. */
   readGroupReleaseFacts(tx: Tx, leaseGroupId: string): Promise<GroupReleaseFacts>;
   /** Still-open memberships of the group; the release directive's subjects. */
@@ -540,6 +551,9 @@ export function createAcknowledgementService<Tx>(
 
     // The acknowledgement is what makes a leg terminal. First write only.
     await store.completeGroupOperation(tx, leaseGroupId, operation.operationId);
+    // ZTR-1246 / ZTR-1245: mirror verdict onto operations and clear provisional attention
+    // when VERIFIED. First-write only (this function is not on the replay path).
+    await store.applyOperationVerificationVerdict(tx, operation.operationId, verdict);
 
     const facts = await store.readGroupReleaseFacts(tx, leaseGroupId);
     const decision = evaluateGroupRelease(facts);

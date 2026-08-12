@@ -269,6 +269,9 @@ export function createMoveInternalLeaseAndProgressPorts(deps: {
     reconcileAndLand:
       advanced.reconcileAndLand ??
       (async () => ({ ...unbound("reconcileAndLand"), holdReconcile: true })),
+    ...(advanced.redeliverIdenticalSubmit !== undefined
+      ? { redeliverIdenticalSubmit: advanced.redeliverIdenticalSubmit }
+      : {}),
   };
 }
 

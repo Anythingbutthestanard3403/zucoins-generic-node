@@ -135,6 +135,25 @@ export const ACK_STATEMENTS = {
        SET completed_at = $3
      WHERE lease_group_id = $1 AND operation_id = $2 AND completed_at IS NULL`,
 
+  // ZTR-1246: denormalize ack verdict. ZTR-1245: VERIFIED clears provisional attention.
+  APPLY_OPERATION_VERIFICATION_VERDICT: `
+    UPDATE operations
+       SET verification_verdict = $2::verification_verdict,
+           attention_required = CASE
+             WHEN $2::text = 'VERIFIED' THEN false
+             ELSE attention_required
+           END,
+           attention_reason = CASE
+             WHEN $2::text = 'VERIFIED' THEN NULL
+             ELSE attention_reason
+           END,
+           attention_detail = CASE
+             WHEN $2::text = 'VERIFIED' THEN NULL
+             ELSE attention_detail
+           END,
+           updated_at = now()
+     WHERE id = $1::uuid`,
+
   SELECT_GROUP_CHILD_DISPOSITION: `
     SELECT child_disposition FROM lease_groups WHERE id = $1 FOR UPDATE`,
 
@@ -407,6 +426,13 @@ export function createSqlAcknowledgementStore(): AcknowledgementStore<AckSqlExec
         leaseGroupId,
         operationId,
         new Date().toISOString(),
+      ]);
+    },
+
+    async applyOperationVerificationVerdict(tx, operationId, verdict): Promise<void> {
+      await tx.query(ACK_STATEMENTS.APPLY_OPERATION_VERIFICATION_VERDICT, [
+        operationId,
+        verdict,
       ]);
     },
 

@@ -21,8 +21,12 @@
 import { Buffer } from "node:buffer";
 
 import { buildGatewayActionRequest } from "../gateway/request.js";
+import { type NowIsoFn, defaultNowIso } from "../gateway/records.js";
+import { redeliverIdenticalSignedRequest } from "../gateway/identical-byte-redelivery.js";
+import type { SubmitGatewayActionOptions } from "../gateway/submit.js";
 import { verifyRawEd25519 } from "../protocol/ed25519-verify.js";
 import type { ReconcileIndeterminateReason } from "../protocol/reconcile/types.js";
+import type { GatewayRequest } from "../protocol/index.js";
 import type { MetricsHooks } from "./metrics.js";
 import {
   receiveSubmitOnce,
@@ -47,8 +51,6 @@ import {
 import type { AttemptPhase } from "./execution-phase.js";
 import type { SqlQueryFn } from "./sql-query-fn.js";
 import { advanceAttemptPhase } from "./transaction-material-store.js";
-import type { SubmitGatewayActionOptions } from "../gateway/submit.js";
-import { type NowIsoFn, defaultNowIso } from "../gateway/records.js";
 
 /** The frozen submit action name. Mirrors @zucoins/generic-node-contracts SUBMIT_ACTION_NAME;
  * node-core carries no dependency on the contracts package, so the equality is
@@ -274,11 +276,19 @@ const reject = (operationId: string, reason: ReceiveSettleRejection): ReceiveSet
  * leadership and the operate gate itself before it observes or submits — see below.
  *
  * The never-blind-retry rule is enforced twice over. {@link receiveSubmitOnce}'s arbitrated claim is the
- * structural half: this function calls it once and has no retry branch, so a second pass over
- * an attempt whose submit already started finds the claim lost and skips the gateway entirely.
- * The observational half is {@link ReceiveSettleDeps.readReceiverHeadStep2Signature}: a pass
- * entered at `STEP2_SIGNATURE_PERSISTED` confirm-reads the receiver head before it goes near
- * the submit path at all, so the ambiguous case is reconciled rather than retried.
+ * structural half: this function calls it at most once for mint+first POST, so a concurrent
+ * second worker loses the mint and never opens a second authorization. The observational half
+ * is {@link ReceiveSettleDeps.readReceiverHeadStep2Signature}: a pass entered at
+ * `STEP2_SIGNATURE_PERSISTED` confirm-reads the receiver head before any submit path, and after
+ * any first-shot outcome that did not already prove the head.
+ *
+ * Identical-byte redelivery (not a blind retry): when the durable claim already exists and the
+ * confirm-read shows the receiver head is still NOT this attempt's body, the node may POST the
+ * exact same signed request bytes one more time without minting a second claim and without
+ * inserting a second `gateway_submit_attempts` row (schema UNIQUE forbids that row). Staging
+ * saw empty-body / non-applying gateway receipts leave the claim burned and the chain unmoved —
+ * observation alone cannot unstick that; only the same bytes can. A different body, a second
+ * decision, or a POST without a prior unmoved confirm-read remains forbidden.
  */
 export async function settleReceiveAttempt(
   attempt: ReceiveSettleAttempt,
@@ -392,16 +402,14 @@ export async function settleReceiveAttempt(
 
     // Confirm-read / the never-blind-retry rule. This body was durable before this pass began, so a submit
     // MAY already have crossed the wire. Observe the receiver's authoritative head BEFORE any
-    // submit path is entered: a resumed attempt is never blind-resubmitted.
+    // submit path is entered: a resumed attempt is never blind-resubmitted with a new body.
     const headSignature = await deps.readReceiverHeadStep2Signature(attempt.receiverPublicKey);
     if (headSignature !== null && isSameSignature(headSignature, step2Signature)) {
       return { kind: "OBSERVED_AT_HEAD", ...material };
     }
-    // A head that is not this body proves neither landed nor non-landed (the closing rule),
-    // so it is deliberately NOT what authorises the submit below. That authority is the durable
-    // claim: receiveSubmitOnce mints before crossing the irreversible boundary, so a claim
-    // exists if and only if a submit was started. The mint therefore submits only when no
-    // submit ever started, and otherwise returns AMBIGUOUS without touching the gateway.
+    // A head that is not this body proves neither landed nor non-landed (the closing rule).
+    // Authority for the first POST remains the durable claim mint below. If the claim already
+    // exists, receiveSubmitOnce returns AMBIGUOUS and the identical-byte redelivery path runs.
   }
 
   // Step 12 — claim and invoke SUBMIT(attempt_1) once. The request carries the three-key
@@ -424,11 +432,50 @@ export async function settleReceiveAttempt(
     metricsHooks: deps.metricsHooks,
   });
 
+  // After the mint path, a first-pass (entry below STEP2_SIGNATURE_PERSISTED) that already
+  // got a definite SUBMITTED returns that fact; landing still waits on the landing tick.
+  // Resume at STEP2_SIGNATURE_PERSISTED (or any AMBIGUOUS outcome on that resume) must answer
+  // the resubmit question from the head: empty-body / malformed 2xx is INDETERMINATE at the
+  // transport layer and arrives as AMBIGUOUS; a lost mint is also AMBIGUOUS. Observation alone
+  // cannot unstick a burned claim slot while the head is unmoved — identical-byte redelivery
+  // (same request bytes, no second claim, no second attempt row) is the only recovery that is
+  // not a blind retry of a different authorization. Concurrent first-pass losers stay on the
+  // claim path only (no redelivery) so two workers still produce one gateway POST.
+  if (attempt.attemptPhase === "STEP2_SIGNATURE_PERSISTED") {
+    if (await confirmHeadIsThisBody(deps, attempt.receiverPublicKey, step2Signature)) {
+      return { kind: "OBSERVED_AT_HEAD", ...material };
+    }
+    if (result.kind === "AMBIGUOUS") {
+      await redeliverIdenticalSignedRequest(signedRequest, deps.submitOptions);
+      if (await confirmHeadIsThisBody(deps, attempt.receiverPublicKey, step2Signature)) {
+        return { kind: "OBSERVED_AT_HEAD", ...material };
+      }
+    }
+  } else if (result.kind === "AMBIGUOUS") {
+    // First-pass ambiguity (empty ACK on this shot, transport error, lost mint race): confirm
+    // head once; do not redeliver here — the next tick resumes at STEP2_SIGNATURE_PERSISTED
+    // where identical-byte redelivery is gated on the unmoved head.
+    if (await confirmHeadIsThisBody(deps, attempt.receiverPublicKey, step2Signature)) {
+      return { kind: "OBSERVED_AT_HEAD", ...material };
+    }
+  }
+
   if (result.kind === "AMBIGUOUS") {
-    // Step 13 / the never-blind-retry rule. No resubmit, no rebuild — the caller reconciles by
-    // observation and the receiver lease stays held.
+    // Step 13 / the never-blind-retry rule. No new body, no rebuild — the caller keeps
+    // reconciling by observation and the receiver lease stays held.
     return { kind: "RECONCILE_REQUIRED", claim: result.claim, reason: result.reason, ...material };
   }
 
   return { kind: "SUBMITTED", claim: result.claim, ...material };
 }
+
+async function confirmHeadIsThisBody(
+  deps: ReceiveSettleDeps,
+  receiverPublicKey: string,
+  step2Signature: string,
+): Promise<boolean> {
+  const headSignature = await deps.readReceiverHeadStep2Signature(receiverPublicKey);
+  return headSignature !== null && isSameSignature(headSignature, step2Signature);
+}
+
+

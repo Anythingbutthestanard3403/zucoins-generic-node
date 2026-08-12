@@ -96,6 +96,7 @@ export {
   runMoveInternalMoneyWorker,
   createSqlMoveWorkerProgressLoader,
   bindExecuteMoveSubmitClaimOnce,
+  bindMoveIdenticalByteRedelivery,
   type MoveMoneyWorkerStep,
   type MoveWorkerDurableProgress,
   type MoveHeldLeasePair,

@@ -2675,13 +2675,18 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         "EXPIRED",
         "CLAIMED",
       ]);
-      let status: "PENDING" | "APPROVED" | "DECLINED" | "EXPIRED" | "CLAIMED" | undefined =
-        "PENDING";
+      type IntegrationListStatus =
+        | "PENDING"
+        | "APPROVED"
+        | "DECLINED"
+        | "EXPIRED"
+        | "CLAIMED";
+      let status: IntegrationListStatus | undefined = "PENDING";
       if (statusRaw !== null && statusRaw !== "") {
         if (!allowedStatuses.has(statusRaw)) {
           return fail(400, "invalid_scalar", "status filter is not a known value", requestId);
         }
-        status = statusRaw as typeof status;
+        status = statusRaw as IntegrationListStatus;
       }
       try {
         const now = nowMs();

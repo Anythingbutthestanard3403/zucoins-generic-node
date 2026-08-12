@@ -17,6 +17,7 @@ import {
   CredentialError,
   CredentialService,
   ImplementerRegistryError,
+  IntegrationRequestStoreError,
   disengageHalt,
   engageHalt,
   executeAttentionRetraction,
@@ -56,6 +57,8 @@ import {
   type DestinationService,
   type ImplementerRecord,
   type ImplementerRegistry,
+  type IntegrationRequestRecord,
+  type IntegrationRequestStore,
   type DeviceRevocationAuditLog,
   type DeviceRevocationSideEffects,
   InMemoryEnrollmentAuditLog,
@@ -107,10 +110,10 @@ import {
   type DeviceSignaturePolicyPort,
   parseAutoApprovePolicyStructure,
   serializeAutoApprovePolicyDocument,
-  queryWindowSpend,
   type AutoApproveDisabledReason,
   type AutoApprovePolicyPort,
   type AutoApproveRule,
+  type AutoApprovePolicyDocument,
   type ApprovalChallengeIssuerStore,
   type SecondDeviceCeremonyStore,
   type OperatorPushSubscriptionStore,
@@ -661,6 +664,168 @@ function parseIssueApiKeyBody(
     }
   }
   return { ok: true, body: { scopes, implementer_id: implementerId } };
+}
+
+/**
+ * Single-rule body for integration-request approve. Operator may edit caps;
+ * implementer_id is stamped server-side after create (client value ignored).
+ * Shape matches one AutoApproveRule (ZTR-1234 parser).
+ */
+function parseIntegrationRequestApproveBody(
+  raw: unknown,
+): ParseOk<{
+  readonly expected_row_version: number;
+  readonly rule: Omit<AutoApproveRule, "implementer_id"> & {
+    readonly implementer_id?: string;
+  };
+  readonly ruleJsonTemplate: Record<string, unknown>;
+}> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (
+    typeof raw.expected_row_version !== "number" ||
+    !Number.isInteger(raw.expected_row_version) ||
+    raw.expected_row_version < 1
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "expected_row_version must be a positive integer",
+    };
+  }
+  if (!isRecord(raw.rule)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "rule is required" };
+  }
+  // Placeholder implementer_id so structure parse accepts the rule; stamped later.
+  const PLACEHOLDER_IMPL = "00000000-0000-4000-8000-000000000001";
+  const ruleForParse = {
+    ...raw.rule,
+    implementer_id:
+      typeof raw.rule.implementer_id === "string" && LOWER_UUID_RE.test(raw.rule.implementer_id)
+        ? raw.rule.implementer_id
+        : PLACEHOLDER_IMPL,
+  };
+  const documentJson = JSON.stringify({ enabled: true, rules: [ruleForParse] });
+  const structured = parseAutoApprovePolicyStructure(documentJson);
+  if (!structured.ok || structured.rules.length !== 1) {
+    return {
+      ok: false,
+      status: 422,
+      code: "validation_error",
+      message: "final rule is invalid",
+    };
+  }
+  const known = new Set(["expected_row_version", "rule"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  const rule = structured.rules[0]!;
+  return {
+    ok: true,
+    body: {
+      expected_row_version: raw.expected_row_version,
+      rule: {
+        rule_id: rule.rule_id,
+        per_send_max_zkz: rule.per_send_max_zkz,
+        per_send_min_zkz: rule.per_send_min_zkz,
+        window_hours: rule.window_hours,
+        window_cap_zkz: rule.window_cap_zkz,
+        expires_at: rule.expires_at,
+        enabled: rule.enabled,
+      },
+      ruleJsonTemplate: {
+        rule_id: rule.rule_id,
+        per_send_max_zkz: rule.per_send_max_zkz,
+        per_send_min_zkz: rule.per_send_min_zkz,
+        window_hours: rule.window_hours,
+        window_cap_zkz: rule.window_cap_zkz,
+        expires_at: rule.expires_at,
+        enabled: rule.enabled,
+      },
+    },
+  };
+}
+
+function parseIntegrationRequestDeclineBody(
+  raw: unknown,
+): ParseOk<{ readonly expected_row_version: number }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (
+    typeof raw.expected_row_version !== "number" ||
+    !Number.isInteger(raw.expected_row_version) ||
+    raw.expected_row_version < 1
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "expected_row_version must be a positive integer",
+    };
+  }
+  const known = new Set(["expected_row_version"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { expected_row_version: raw.expected_row_version } };
+}
+
+function toIntegrationRequestListing(row: IntegrationRequestRecord) {
+  return {
+    id: row.id,
+    display_name: row.display_name,
+    requested_scopes: row.requested_scopes,
+    proposed_rule_json: row.proposed_rule_json,
+    approved_rule_json: row.approved_rule_json,
+    status: row.status,
+    row_version: row.row_version,
+    created_at: row.created_at,
+    expires_at: row.expires_at,
+    decided_at: row.decided_at,
+    decided_by: row.decided_by,
+    implementer_id: row.implementer_id,
+  };
+}
+
+/**
+ * Merge one operator-final rule into the existing auto-approve document.
+ * Rejects when the live document is fail-closed-invalid/unreadable (operator
+ * must fix policy first). Absent or off documents become enabled with the new rule.
+ */
+function mergeRuleIntoAutoApprovePolicy(
+  current: AutoApprovePolicyDocument,
+  rule: AutoApproveRule,
+):
+  | { readonly ok: true; readonly documentJson: string }
+  | { readonly ok: false; readonly code: "policy_invalid"; readonly message: string } {
+  if (current.status === "disabled") {
+    if (current.disabledReason === "invalid" || current.disabledReason === "unreadable") {
+      return {
+        ok: false,
+        code: "policy_invalid",
+        message: "fix the policy document first",
+      };
+    }
+    // absent / off — start (or re-enable) with this single rule.
+    const others = current.rules ?? [];
+    const withoutDup = others.filter((r) => r.implementer_id !== rule.implementer_id);
+    return {
+      ok: true,
+      documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], true),
+    };
+  }
+  const withoutDup = current.rules.filter((r) => r.implementer_id !== rule.implementer_id);
+  return {
+    ok: true,
+    documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], true),
+  };
 }
 
 /** POST /admin/v1/implementers body — `{ name }` only. */
@@ -1244,6 +1409,11 @@ export interface AdminRouteDeps {
    */
   readonly implementerRegistry?: ImplementerRegistry;
   /**
+   * Platform integration-request inbox (ZTR-1240). When omitted, list/approve/
+   * decline fail closed (503).
+   */
+  readonly integrationRequestStore?: IntegrationRequestStore;
+  /**
    * REQUIRED admin-mutation idempotency. Routes check for a completed row before
    * the TOTP burn; the shared executor commits child effects and exact response bytes together.
    * Missing production wiring fails closed with idempotency_unavailable.
@@ -1360,6 +1530,11 @@ export interface AdminMutationTxPorts {
    * use this port so implementers + audit_log commit/roll back with the admin TX.
    */
   readonly implementerRegistry?: ImplementerRegistry;
+  /**
+   * TX-scoped integration-request store (ZTR-1240). Approve/decline CAS + audit
+   * MUST use this port so request row + implementer + policy share one TX.
+   */
+  readonly integrationRequestStore?: IntegrationRequestStore;
   /**
    * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
    * port so node_settings + audit_log commit/roll back with the admin mutation TX.
@@ -2444,6 +2619,51 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         return ok(200, { implementers: rows.map(toImplementerListing) });
       } catch {
         return fail(503, "service_unavailable", "implementer list unavailable", requestId);
+      }
+    }
+
+    // GET /admin/v1/integration-requests — operator inbox feed (ZTR-1240).
+    // Default status=PENDING; optional ?status= filter. Session+CSRF; no TOTP.
+    if (verb === "GET" && pathname === "/admin/v1/integration-requests") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      if (deps.integrationRequestStore === undefined) {
+        return fail(503, "service_unavailable", "integration requests not wired", requestId);
+      }
+      const q = parseQuery(rawPath);
+      const statusRaw = q.get("status");
+      const allowedStatuses = new Set([
+        "PENDING",
+        "APPROVED",
+        "DECLINED",
+        "EXPIRED",
+        "CLAIMED",
+      ]);
+      let status: "PENDING" | "APPROVED" | "DECLINED" | "EXPIRED" | "CLAIMED" | undefined =
+        "PENDING";
+      if (statusRaw !== null && statusRaw !== "") {
+        if (!allowedStatuses.has(statusRaw)) {
+          return fail(400, "invalid_scalar", "status filter is not a known value", requestId);
+        }
+        status = statusRaw as typeof status;
+      }
+      try {
+        const rows = await deps.integrationRequestStore.list({
+          nodeId,
+          ...(status !== undefined ? { status } : {}),
+        });
+        return ok(200, {
+          object: "list",
+          data: rows.map(toIntegrationRequestListing),
+          has_more: false,
+          next_cursor: null,
+        });
+      } catch {
+        return fail(503, "service_unavailable", "integration request list unavailable", requestId);
       }
     }
 
@@ -4211,6 +4431,291 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // POST /admin/v1/integration-requests/:id/approve — operator final rule +
+    // implementer create + policy bind + CAS PENDING→APPROVED (ZTR-1240).
+    {
+      const m = pathname.match(/^\/admin\/v1\/integration-requests\/([^/]+)\/approve$/);
+      if (verb === "POST" && m) {
+        if (
+          deps.integrationRequestStore === undefined ||
+          deps.implementerRegistry === undefined ||
+          deps.autoApprovePolicy === undefined ||
+          deps.autoApprovePolicy.setPolicy === undefined
+        ) {
+          return fail(503, "service_unavailable", "integration request approve not wired", requestId);
+        }
+        const requestIdPath = m[1]!;
+        if (!LOWER_UUID_RE.test(requestIdPath)) {
+          return fail(400, "validation_error", "request id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_integration_requests_approve";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const reqStore = ports.integrationRequestStore ?? deps.integrationRequestStore;
+            const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+            const policyPort = ports.autoApprovePolicy ?? deps.autoApprovePolicy;
+            if (
+              reqStore === undefined ||
+              registry === undefined ||
+              policyPort === undefined ||
+              policyPort.setPolicy === undefined
+            ) {
+              return {
+                outcome: "abort" as const,
+                response: fail(
+                  503,
+                  "service_unavailable",
+                  "transactional integration request approve not wired",
+                  requestId,
+                ),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseIntegrationRequestApproveBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user, session }) => {
+                const pending = await reqStore.get(requestIdPath);
+                if (pending === null || pending.node_id !== nodeId) {
+                  const err = new IntegrationRequestStoreError(
+                    "integration request not found",
+                    "NOT_FOUND",
+                  );
+                  throw err;
+                }
+                if (
+                  pending.status !== "PENDING" ||
+                  pending.row_version !== body.expected_row_version
+                ) {
+                  throw new IntegrationRequestStoreError(
+                    "integration request CAS miss",
+                    "CAS_MISS",
+                  );
+                }
+
+                const created = await registry.create({
+                  name: pending.display_name,
+                  actorId: session.sessionId,
+                  nodeId,
+                });
+
+                const finalRule: AutoApproveRule = {
+                  rule_id: body.rule.rule_id,
+                  implementer_id: created.id,
+                  per_send_max_zkz: body.rule.per_send_max_zkz,
+                  per_send_min_zkz: body.rule.per_send_min_zkz,
+                  window_hours: body.rule.window_hours,
+                  window_cap_zkz: body.rule.window_cap_zkz,
+                  expires_at: body.rule.expires_at,
+                  enabled: body.rule.enabled,
+                };
+                const approvedRuleJson = JSON.stringify(finalRule);
+
+                const currentPolicy = await policyPort.getPolicy();
+                const merged = mergeRuleIntoAutoApprovePolicy(currentPolicy, finalRule);
+                if (!merged.ok) {
+                  throw Object.assign(new Error(merged.message), {
+                    code: "POLICY_INVALID",
+                  });
+                }
+                await policyPort.setPolicy!(merged.documentJson, {
+                  actorId: user.id,
+                  nodeId,
+                });
+
+                const approved = await reqStore.approve({
+                  id: requestIdPath,
+                  nodeId,
+                  expectedRowVersion: body.expected_row_version,
+                  approvedRuleJson,
+                  implementerId: created.id,
+                  decidedBy: user.id,
+                  actorId: user.id,
+                });
+                return {
+                  request: toIntegrationRequestListing(approved),
+                  implementer: toImplementerListing(created),
+                  rule: finalRule,
+                };
+              },
+            });
+            if (!guarded.ok) {
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof IntegrationRequestStoreError
+              ) {
+                if (guarded.error.code === "NOT_FOUND" || guarded.error.code === "WRONG_NODE") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(404, "not_found", "integration request not found", requestId),
+                  };
+                }
+                if (guarded.error.code === "CAS_MISS") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(
+                      409,
+                      "conflict",
+                      "integration request already decided or row_version mismatch",
+                      requestId,
+                    ),
+                  };
+                }
+              }
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof Error &&
+                (guarded.error as { code?: string }).code === "POLICY_INVALID"
+              ) {
+                return {
+                  outcome: "abort" as const,
+                  response: fail(
+                    409,
+                    "conflict",
+                    guarded.error.message,
+                    requestId,
+                  ),
+                };
+              }
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof ImplementerRegistryError &&
+                guarded.error.code === "IMPLEMENTER_NAME_INVALID"
+              ) {
+                return {
+                  outcome: "abort" as const,
+                  response: fail(400, "invalid_scalar", guarded.error.message, requestId),
+                };
+              }
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
+    // POST /admin/v1/integration-requests/:id/decline — CAS PENDING→DECLINED only.
+    {
+      const m = pathname.match(/^\/admin\/v1\/integration-requests\/([^/]+)\/decline$/);
+      if (verb === "POST" && m) {
+        if (deps.integrationRequestStore === undefined) {
+          return fail(503, "service_unavailable", "integration requests not wired", requestId);
+        }
+        const requestIdPath = m[1]!;
+        if (!LOWER_UUID_RE.test(requestIdPath)) {
+          return fail(400, "validation_error", "request id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_integration_requests_decline";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const reqStore = ports.integrationRequestStore ?? deps.integrationRequestStore;
+            if (reqStore === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "integration requests not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseIntegrationRequestDeclineBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user }) => {
+                const declined = await reqStore.decline({
+                  id: requestIdPath,
+                  nodeId,
+                  expectedRowVersion: body.expected_row_version,
+                  decidedBy: user.id,
+                  actorId: user.id,
+                });
+                return { request: toIntegrationRequestListing(declined) };
+              },
+            });
+            if (!guarded.ok) {
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof IntegrationRequestStoreError
+              ) {
+                if (guarded.error.code === "NOT_FOUND" || guarded.error.code === "WRONG_NODE") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(404, "not_found", "integration request not found", requestId),
+                  };
+                }
+                if (guarded.error.code === "CAS_MISS") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(
+                      409,
+                      "conflict",
+                      "integration request already decided or row_version mismatch",
+                      requestId,
+                    ),
+                  };
+                }
+              }
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
     // POST /admin/v1/implementers — create a named integration identity.
     // Session+CSRF+fresh TOTP. Retirement of an implementer is a separate route;
     // create never issues credentials (operator issues keys under the new id next).
@@ -5298,6 +5803,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
   readonly implementerRegistry?: ImplementerRegistry;
+  readonly integrationRequestStore?: IntegrationRequestStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
   readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;
@@ -5392,6 +5898,7 @@ export function createFailClosedAdminRouteDeps(base: {
     credentialService: base.credentialService,
     resolveImplementerId: base.resolveImplementerId,
     implementerRegistry: base.implementerRegistry,
+    integrationRequestStore: base.integrationRequestStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
     reportingCredentialService: base.reportingCredentialService,
@@ -5429,6 +5936,7 @@ export function createLiveAdminRouteDeps(
     readonly credentialService?: CredentialService;
     readonly resolveImplementerId?: () => Promise<string | null>;
     readonly implementerRegistry?: ImplementerRegistry;
+    readonly integrationRequestStore?: IntegrationRequestStore;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
     readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;

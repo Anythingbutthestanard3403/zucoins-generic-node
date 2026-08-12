@@ -45,7 +45,9 @@ import {
   LIVE_OPERATOR_PARK_ROUTES,
   LIVE_IMPLEMENTER_ROUTES,
   LIVE_AUTO_APPROVE_POLICY_ROUTES,
+  LIVE_INTEGRATION_REQUEST_ROUTES,
   createSqlImplementerRegistry,
+  createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
   InMemoryVaultAccessAuditLog,
@@ -265,6 +267,7 @@ export {
   LIVE_OPERATOR_PARK_ROUTES,
   LIVE_IMPLEMENTER_ROUTES,
   LIVE_AUTO_APPROVE_POLICY_ROUTES,
+  LIVE_INTEGRATION_REQUEST_ROUTES,
   requiredProductionRouteKeys,
   routeKeyOf,
   createFailClosedAdminRouteDeps,
@@ -484,6 +487,7 @@ export interface ProductionRouteSurface {
   readonly liveHaltRoutes: typeof LIVE_HALT_ROUTES;
   readonly liveImplementerRoutes: typeof LIVE_IMPLEMENTER_ROUTES;
   readonly liveAutoApprovePolicyRoutes: typeof LIVE_AUTO_APPROVE_POLICY_ROUTES;
+  readonly liveIntegrationRequestRoutes: typeof LIVE_INTEGRATION_REQUEST_ROUTES;
   /** @deprecated prefer liveHaltRoutes; kept for prior greps. */
   readonly deferredHalt: typeof DEFERRED_HALT_ROUTE;
   /** Live attention-retraction surface — always mounted on admin router. */
@@ -712,6 +716,14 @@ export function createProductionRouteSurface(
       return { rows: result.rows as R[] };
     },
   });
+  // Integration-request operator store (list/approve/decline). Pool-scoped for
+  // reads; TX-scoped clone is rebound inside atomicAdminMutation.portsFor.
+  const integrationRequestStore = createSqlIntegrationRequestStore({
+    query: async <R extends Record<string, unknown>>(text: string, params?: readonly unknown[]) => {
+      const result = await config.pool.query(text, params as never);
+      return { rows: result.rows as R[] };
+    },
+  });
   // Genesis default for POST /admin/v1/api-keys when body omits implementer_id:
   // earliest non-retired implementer (created_at, id). Multi-implementer nodes
   // still resolve a stable default; explicit implementer_id is required to target
@@ -823,6 +835,7 @@ export function createProductionRouteSurface(
     credentialService,
     resolveImplementerId,
     implementerRegistry,
+    integrationRequestStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -935,6 +948,15 @@ export function createProductionRouteSurface(
         halt: shadowHalt,
         credentialService: new CredentialService(new SqlCredentialStore(client, config.nodeId)),
         implementerRegistry: createSqlImplementerRegistry({
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        }),
+        integrationRequestStore: createSqlIntegrationRequestStore({
           query: async <R extends Record<string, unknown>>(
             text: string,
             params?: readonly unknown[],
@@ -1113,6 +1135,7 @@ export function createProductionRouteSurface(
     liveHaltRoutes: LIVE_HALT_ROUTES,
     liveImplementerRoutes: LIVE_IMPLEMENTER_ROUTES,
     liveAutoApprovePolicyRoutes: LIVE_AUTO_APPROVE_POLICY_ROUTES,
+    liveIntegrationRequestRoutes: LIVE_INTEGRATION_REQUEST_ROUTES,
     deferredHalt: DEFERRED_HALT_ROUTE,
     liveAttentionRetractionRoutes: LIVE_ATTENTION_RETRACTION_ROUTES,
     liveOperatorParkRoutes: LIVE_OPERATOR_PARK_ROUTES,

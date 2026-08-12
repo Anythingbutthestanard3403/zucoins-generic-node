@@ -24,18 +24,23 @@ import {
   isLiveRecoveryAction,
   listDestinationsInventory,
   listDeviceKeys,
+  listIntegrationRequests,
   listSendOperationsInventory,
   operationDetailPath,
+  parseProposedIntegrationRule,
   partitionRecoveryActions,
   pollSendState,
   postApprove,
   postBless,
+  postIntegrationRequestApprove,
+  postIntegrationRequestDecline,
   postRecoveryAction,
   postReject,
   getRecovery,
   recoveryActionLabel,
   type ApprovalChallenge,
   type DestinationItem,
+  type IntegrationRequestItem,
   type OperationListItem,
 } from "../../lib/money.js";
 import {
@@ -83,6 +88,18 @@ export function ApproveInboxPage() {
   const [deviceKeyId, setDeviceKeyId] = useState("");
   const [deviceSig, setDeviceSig] = useState("");
 
+  // Integration-request edit draft (operator may tighten/loosen caps before approve).
+  const [irExpandedId, setIrExpandedId] = useState<string | null>(null);
+  const [irDraft, setIrDraft] = useState({
+    rule_id: "integration",
+    per_send_max_zkz: "",
+    per_send_min_zkz: "",
+    window_hours: "24",
+    window_cap_zkz: "",
+    expires_at: "",
+    enabled: true,
+  });
+
   const pendingSendsQ = useQuery({
     queryKey: ["approve-inbox-sends"],
     queryFn: async () => {
@@ -108,6 +125,12 @@ export function ApproveInboxPage() {
     refetchInterval: 30_000,
   });
 
+  const integrationReqQ = useQuery({
+    queryKey: ["approve-inbox-integration-requests"],
+    queryFn: async () => listIntegrationRequests({ status: "PENDING" }),
+    refetchInterval: 15_000,
+  });
+
   const deviceKeysQ = useQuery({
     queryKey: ["device-keys"],
     queryFn: listDeviceKeys,
@@ -125,6 +148,10 @@ export function ApproveInboxPage() {
   const pendingBless: readonly DestinationItem[] = destLive
     ? (destinationsQ.data?.data ?? []).filter((d) => d.state === "PENDING")
     : [];
+  const irLive = integrationReqQ.data?.live === true;
+  const pendingIntegration: readonly IntegrationRequestItem[] = irLive
+    ? (integrationReqQ.data?.data ?? [])
+    : [];
 
   /** Recovery cards: attention rows that aren't already listed as CREATED sends. */
   const recoveryCards = useMemo(() => {
@@ -136,16 +163,20 @@ export function ApproveInboxPage() {
   }, [attentionOps, sends]);
 
   /** Primary sources for "is the inbox empty?" — dest is additive. */
-  const primaryLive = sendsLive || attentionLive;
+  const primaryLive = sendsLive || attentionLive || irLive;
   const anySourceLoading =
-    pendingSendsQ.isLoading || attentionQ.isLoading || destinationsQ.isLoading;
+    pendingSendsQ.isLoading ||
+    attentionQ.isLoading ||
+    destinationsQ.isLoading ||
+    integrationReqQ.isLoading;
   const primaryUnavailable =
     !anySourceLoading &&
     !primaryLive &&
     pendingSendsQ.data !== undefined &&
     attentionQ.data !== undefined;
 
-  const totalPending = sends.length + pendingBless.length + recoveryCards.length;
+  const totalPending =
+    sends.length + pendingBless.length + recoveryCards.length + pendingIntegration.length;
   // Both primary sources must be live before claiming clear (partial outage ≠ empty).
   const inboxClear =
     sendsLive && attentionLive && !anySourceLoading && totalPending === 0;
@@ -247,6 +278,84 @@ export function ApproveInboxPage() {
         if (isCancelled(e)) return;
         setMsg(null);
         setErr(formatMoneyError(e, "Reject failed"));
+      },
+    },
+  );
+
+  function openIntegrationRequest(row: IntegrationRequestItem) {
+    setErr(null);
+    setMsg(null);
+    if (irExpandedId === row.id) {
+      setIrExpandedId(null);
+      return;
+    }
+    setIrExpandedId(row.id);
+    setIrDraft(parseProposedIntegrationRule(row.proposed_rule_json));
+  }
+
+  const approveIntegration = useTotpGatedMutation(
+    async (row: IntegrationRequestItem, totp: string) => {
+      const hoursRaw = irDraft.window_hours.trim();
+      if (!/^[1-9][0-9]{0,8}$/.test(hoursRaw)) {
+        throw new Error("window_hours must be a positive integer");
+      }
+      const hours = parseInt(hoursRaw, 10);
+      return postIntegrationRequestApprove(
+        row.id,
+        {
+          expected_row_version: row.row_version,
+          rule: {
+            rule_id: irDraft.rule_id.trim() || "integration",
+            per_send_max_zkz: irDraft.per_send_max_zkz.trim(),
+            per_send_min_zkz:
+              irDraft.per_send_min_zkz.trim() === "" ? null : irDraft.per_send_min_zkz.trim(),
+            window_hours: hours,
+            window_cap_zkz: irDraft.window_cap_zkz.trim(),
+            expires_at: irDraft.expires_at.trim() === "" ? null : irDraft.expires_at.trim(),
+            enabled: irDraft.enabled,
+          },
+        },
+        totp,
+      );
+    },
+    {
+      title: "Approve integration request",
+      detail: (row) => `Bind rule for ${row.display_name}`,
+      onSuccess: () => {
+        setErr(null);
+        setMsg("Integration approved. Platform may claim the key next — no credential issued here.");
+        setIrExpandedId(null);
+        void qc.invalidateQueries({ queryKey: ["approve-inbox-integration-requests"] });
+        void qc.invalidateQueries({ queryKey: ["implementers"] });
+      },
+      onError: (e) => {
+        if (isCancelled(e)) return;
+        setMsg(null);
+        setErr(formatMoneyError(e, "Integration approve failed"));
+      },
+    },
+  );
+
+  const declineIntegration = useTotpGatedMutation(
+    async (row: IntegrationRequestItem, totp: string) =>
+      postIntegrationRequestDecline(
+        row.id,
+        { expected_row_version: row.row_version },
+        totp,
+      ),
+    {
+      title: "Decline integration request",
+      detail: (row) => `Decline ${row.display_name}`,
+      onSuccess: () => {
+        setErr(null);
+        setMsg("Integration request declined.");
+        setIrExpandedId(null);
+        void qc.invalidateQueries({ queryKey: ["approve-inbox-integration-requests"] });
+      },
+      onError: (e) => {
+        if (isCancelled(e)) return;
+        setMsg(null);
+        setErr(formatMoneyError(e, "Integration decline failed"));
       },
     },
   );
@@ -404,6 +513,151 @@ export function ApproveInboxPage() {
             for history.
           </p>
         </div>
+      ) : null}
+
+      {/* ── Pending integration requests (ZTR-1240) ───────────────────── */}
+      {pendingIntegration.length > 0 ? (
+        <section className="approve-section" aria-labelledby="approve-ir-h">
+          <h2 id="approve-ir-h" className="approve-section-title">
+            Integration requests
+          </h2>
+          <ul className="approve-cards">
+            {pendingIntegration.map((row) => {
+              const open = irExpandedId === row.id;
+              const proposed = parseProposedIntegrationRule(row.proposed_rule_json);
+              return (
+                <li
+                  key={row.id}
+                  className="approve-card"
+                  data-testid="approve-integration-card"
+                >
+                  <div className="approve-card-head">
+                    <span className="approve-op-label">{row.display_name}</span>
+                    <StatusTag status={row.status} />
+                  </div>
+                  <div className="approve-card-body">
+                    <div className="approve-row">
+                      <span className="k">Scopes</span>
+                      <span className="v mono" style={{ fontSize: 12 }}>
+                        {row.requested_scopes.join(", ")}
+                      </span>
+                    </div>
+                    <div className="approve-row">
+                      <span className="k">Proposed max</span>
+                      <span className="v money">{proposed.per_send_max_zkz || "—"} ZKZ</span>
+                    </div>
+                    <div className="approve-row">
+                      <span className="k">Proposed window cap</span>
+                      <span className="v money">{proposed.window_cap_zkz || "—"} ZKZ</span>
+                    </div>
+                    <div className="approve-row">
+                      <span className="k">Expires</span>
+                      <span className="v">{row.expires_at}</span>
+                    </div>
+                    <div className="approve-row">
+                      <span className="k">Reference</span>
+                      <span className="v mono">{row.id}</span>
+                    </div>
+                  </div>
+
+                  {open ? (
+                    <div className="approve-actions" data-testid="approve-integration-actions">
+                      <p className="muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
+                        Edit caps before approve. Your values become the binding rule; the
+                        platform proposal stays on record. No credential is issued here.
+                      </p>
+                      <div className="field">
+                        <label htmlFor={`ir-rule-id-${row.id}`}>Rule id</label>
+                        <input
+                          id={`ir-rule-id-${row.id}`}
+                          value={irDraft.rule_id}
+                          onChange={(e) => setIrDraft((d) => ({ ...d, rule_id: e.target.value }))}
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`ir-max-${row.id}`}>Per-send max (ZKZ)</label>
+                        <input
+                          id={`ir-max-${row.id}`}
+                          value={irDraft.per_send_max_zkz}
+                          onChange={(e) =>
+                            setIrDraft((d) => ({ ...d, per_send_max_zkz: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`ir-min-${row.id}`}>Per-send min (optional)</label>
+                        <input
+                          id={`ir-min-${row.id}`}
+                          value={irDraft.per_send_min_zkz}
+                          onChange={(e) =>
+                            setIrDraft((d) => ({ ...d, per_send_min_zkz: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`ir-cap-${row.id}`}>Window cap (ZKZ)</label>
+                        <input
+                          id={`ir-cap-${row.id}`}
+                          value={irDraft.window_cap_zkz}
+                          onChange={(e) =>
+                            setIrDraft((d) => ({ ...d, window_cap_zkz: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor={`ir-hours-${row.id}`}>Window hours</label>
+                        <input
+                          id={`ir-hours-${row.id}`}
+                          value={irDraft.window_hours}
+                          onChange={(e) =>
+                            setIrDraft((d) => ({ ...d, window_hours: e.target.value }))
+                          }
+                        />
+                      </div>
+                      <div className="approve-action-bar">
+                        <button
+                          type="button"
+                          className="mini-btn primary approve-primary"
+                          disabled={approveIntegration.isPending || declineIntegration.isPending}
+                          onClick={() => {
+                            setErr(null);
+                            setMsg(null);
+                            approveIntegration.mutate(row);
+                          }}
+                        >
+                          {approveIntegration.isPending ? "Approving…" : "Approve (TOTP)"}
+                        </button>
+                        <button
+                          type="button"
+                          className="mini-btn danger"
+                          disabled={approveIntegration.isPending || declineIntegration.isPending}
+                          onClick={() => {
+                            setErr(null);
+                            setMsg(null);
+                            declineIntegration.mutate(row);
+                          }}
+                        >
+                          {declineIntegration.isPending ? "Declining…" : "Decline (TOTP)"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="approve-card-foot">
+                    <button
+                      type="button"
+                      className="mini-btn primary approve-primary"
+                      onClick={() => openIntegrationRequest(row)}
+                      aria-expanded={open}
+                    >
+                      {open ? "Close" : "Review & edit"}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ) : null}
 
       {/* ── Pending SEND_EXTERNAL ─────────────────────────────────────── */}

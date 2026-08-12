@@ -145,6 +145,12 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
       "GET /admin/v1/auto-approve-policy",
       "POST /admin/v1/auto-approve-policy",
     ]);
+    expect(surface.liveIntegrationRequestRoutes.map((r) => `${r.method} ${r.path}`)).toEqual([
+      "GET /admin/v1/integration-requests",
+      "POST /admin/v1/integration-requests/:id/approve",
+      "POST /admin/v1/integration-requests/:id/decline",
+    ]);
+    expect(surface.adminRouteDeps.integrationRequestStore).toBeDefined();
     expect(surface.adminRouteDeps.halt).toBeDefined();
     expect(surface.adminRouteDeps.implementerRegistry).toBeDefined();
     expect(surface.adminRouteDeps.adminIdempotencyStore).toBeDefined();

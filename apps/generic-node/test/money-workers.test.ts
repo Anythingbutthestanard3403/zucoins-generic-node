@@ -79,6 +79,10 @@ describe("money-workers composition", () => {
     expect(workers).toMatch(/loadExpiredReceiveCandidates/);
     expect(workers).toMatch(/runReceiveExpiryReleaseStep/);
     expect(workers).toMatch(/receive expiry-release/);
+    // ZTR-1251: fresh head for T0-unchanged release (not hardcoded null forever).
+    expect(workers).toMatch(/readFreshHead/);
+    expect(workers).toMatch(/freshObservationId/);
+    expect(workers).not.toMatch(/freshObservationId:\s*null,\s*\n\s*nowMs/);
     expect(main).toMatch(/signerLeadership:\s*shutdownRegistry\.authority/);
     // Review fix: production producer + retained handle enqueue path.
     expect(workers).toMatch(/runReceiveCandidateIntakeStep/);

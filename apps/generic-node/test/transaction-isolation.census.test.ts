@@ -445,9 +445,10 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
       covering:
         "releases a wallet lease and mints a release proof. Already SERIALIZABLE; ZTR-1155 " +
         "added the missing withSerializationRetry — 40001 is only reachable once the level is " +
-        "raised, and it was surfacing as a tick error. The retried body is DB-only: this pass " +
-        "calls expire() with `freshObservationId: null`, so no gateway read and no chain " +
-        "submit occur inside it (sql-recovery-store.ts:515 wraps this same service).",
+        "raised, and it was surfacing as a tick error. The retried body is DB-only: the " +
+        "gateway fresh-head read (ZTR-1251) runs before expire() and passes an observation " +
+        "id in; no gateway read and no chain submit occur inside the SERIALIZABLE body " +
+        "(sql-recovery-store RELEASE_EXPIRED_RECEIVE uses the same pre-BEGIN pattern).",
       pinned: "pool.connect() → BEGIN → fn(tx) → COMMIT inside each retry attempt",
     },
   ],

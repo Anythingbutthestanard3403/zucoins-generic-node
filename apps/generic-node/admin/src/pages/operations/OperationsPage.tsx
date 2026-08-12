@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { RecoveryActions } from "../../components/RecoveryActions.js";
 import {
   canRetractAttention,
   formatMoneyError,
@@ -13,16 +14,17 @@ import {
   isCancelled,
   listOperationsInventory,
   operationDetailPath,
-  partitionRecoveryActions,
   postAttentionRetraction,
   postRecoveryAction,
-  recoveryActionLabel,
   type OperationListItem,
   type RecoveryDetail,
 } from "../../lib/money.js";
-import { apiSoftRead } from "../../lib/api.js";
 import { relativeTime } from "../../lib/format.js";
-import { EMPTY_NEEDS_ATTENTION, type NeedsAttentionResponse } from "../../lib/ops.js";
+import {
+  invalidateNeedsAttention,
+  useNeedsAttention,
+} from "../../lib/needs-attention.js";
+import { EMPTY_NEEDS_ATTENTION } from "../../lib/ops.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 import { operationKindLabel, statusLabel } from "../../lib/labels.js";
 
@@ -40,12 +42,7 @@ export function OperationsPage() {
     "False-positive attention after LANDED_VERIFIED — classifier residue",
   );
 
-  const attentionQ = useQuery({
-    queryKey: ["needs-attention"],
-    queryFn: async () =>
-      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: 15_000,
-  });
+  const attentionQ = useNeedsAttention({ refetchIntervalMs: 15_000 });
 
   const historyQ = useQuery({
     queryKey: ["operations-history"],
@@ -120,7 +117,7 @@ export function OperationsPage() {
             /* keep prior */
           }
         }
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
+        invalidateNeedsAttention(qc);
         void qc.invalidateQueries({ queryKey: ["operations-history"] });
       },
       onError: (e) => {
@@ -161,9 +158,7 @@ export function OperationsPage() {
             /* keep */
           }
         }
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-overview"] });
+        invalidateNeedsAttention(qc);
         void qc.invalidateQueries({ queryKey: ["operations-history"] });
         void qc.invalidateQueries({ queryKey: ["overview-operations"] });
       },
@@ -323,58 +318,17 @@ export function OperationsPage() {
                               </button>
                             </div>
                           ) : null}
-                          {detail.permitted_actions.length === 0 ? (
-                            <p className="muted" style={{ marginTop: 8 }}>
-                              No permitted actions
-                            </p>
-                          ) : (
-                            (() => {
-                              const { live, unavailable } = partitionRecoveryActions(
-                                detail.permitted_actions,
-                              );
-                              return (
-                                <div style={{ marginTop: 12 }}>
-                                  {live.length > 0 ? (
-                                    <div className="form-actions" style={{ flexWrap: "wrap" }}>
-                                      {live.map((action) => (
-                                        <button
-                                          key={action}
-                                          type="button"
-                                          className="mini-btn primary"
-                                          disabled={act.isPending }
-                                          onClick={() => {
-                                            setErr(null);
-                                            setMsg(null);
-                                            act.mutate(action);
-                                          }}
-                                        >
-                                          {recoveryActionLabel(action)}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                  {unavailable.map(({ action, reason }) => (
-                                    <p
-                                      key={action}
-                                      className="muted"
-                                      style={{ fontSize: 12.5, margin: "4px 0" }}
-                                    >
-                                      <button
-                                        type="button"
-                                        className="mini-btn"
-                                        disabled
-                                        aria-disabled="true"
-                                      >
-                                        {recoveryActionLabel(action)}
-                                      </button>
-                                      {" — "}
-                                      {reason}
-                                    </p>
-                                  ))}
-                                </div>
-                              );
-                            })()
-                          )}
+                          <RecoveryActions
+                            permittedActions={detail.permitted_actions}
+                            disabled={act.isPending}
+                            liveClassName="mini-btn primary"
+                            emptyMessage="No live recovery actions available on this row."
+                            onAction={(action) => {
+                              setErr(null);
+                              setMsg(null);
+                              act.mutate(action);
+                            }}
+                          />
                         </>
                       ) : !detailErr ? (
                         <p className="muted">Loading recovery…</p>

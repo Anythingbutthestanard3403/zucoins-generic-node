@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
+import { RecoveryActions } from "../../components/RecoveryActions.js";
 import { CopyButton } from "../../components/CopyButton.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
@@ -14,15 +15,14 @@ import {
   getRecovery,
   isCancelled,
   isSendOperationType,
-  partitionRecoveryActions,
   postAttentionRetraction,
   postRecoveryAction,
-  recoveryActionLabel,
   type EvidenceManifestItem,
   type OperationInventoryDetail,
   type RecoveryDetail,
 } from "../../lib/money.js";
 import { operationKindLabel } from "../../lib/labels.js";
+import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type LoadResult =
@@ -187,7 +187,7 @@ export function OperationDetailPage() {
         setErr(null);
         setMsg("Recovery action accepted.");
         void qc.invalidateQueries({ queryKey: ["operation-detail", id] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
+        invalidateNeedsAttention(qc);
         void qc.invalidateQueries({ queryKey: ["overview-operations"] });
       },
       onError: (e) => {
@@ -226,9 +226,7 @@ export function OperationDetailPage() {
               : ""),
         );
         void qc.invalidateQueries({ queryKey: ["operation-detail", id] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-nav"] });
-        void qc.invalidateQueries({ queryKey: ["needs-attention-overview"] });
+        invalidateNeedsAttention(qc);
         void qc.invalidateQueries({ queryKey: ["overview-operations"] });
         void qc.invalidateQueries({ queryKey: ["operations-history"] });
       },
@@ -511,45 +509,16 @@ export function OperationDetailPage() {
                 : "No permitted recovery actions right now."}
             </p>
           ) : (
-            (() => {
-              const { live, unavailable } = partitionRecoveryActions(recovery.permitted_actions);
-              return (
-                <div style={{ marginTop: 12 }}>
-                  {live.length > 0 ? (
-                    <div className="form-actions" style={{ flexWrap: "wrap" }}>
-                      {live.map((action) => (
-                        <button
-                          key={action}
-                          type="button"
-                          className="mini-btn primary"
-                          disabled={act.isPending }
-                          onClick={() => {
-                            setErr(null);
-                            setMsg(null);
-                            act.mutate(action);
-                          }}
-                        >
-                          {recoveryActionLabel(action)}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {unavailable.length > 0 ? (
-                    <div style={{ marginTop: live.length > 0 ? 10 : 0 }}>
-                      {unavailable.map(({ action, reason }) => (
-                        <p key={action} className="muted" style={{ fontSize: 12.5, margin: "4px 0" }}>
-                          <button type="button" className="mini-btn" disabled aria-disabled="true">
-                            {recoveryActionLabel(action)}
-                          </button>
-                          {" — "}
-                          {reason}
-                        </p>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })()
+            <RecoveryActions
+              permittedActions={recovery.permitted_actions}
+              disabled={act.isPending}
+              liveClassName="mini-btn primary"
+              onAction={(action) => {
+                setErr(null);
+                setMsg(null);
+                act.mutate(action);
+              }}
+            />
           )}
         </div>
       ) : (

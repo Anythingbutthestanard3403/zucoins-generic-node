@@ -5,7 +5,6 @@
  */
 
 import { useQueries } from "@tanstack/react-query";
-import { apiSoftRead } from "./api.js";
 import {
   listDestinationsInventory,
   listIntegrationRequests,
@@ -15,20 +14,21 @@ import {
   type OperationListItem,
 } from "./money.js";
 import {
-  EMPTY_NEEDS_ATTENTION,
-  type NeedsAttentionListItem,
-  type NeedsAttentionResponse,
-} from "./ops.js";
+  fetchNeedsAttentionSoft,
+  NEEDS_ATTENTION_KEY,
+} from "./needs-attention.js";
+import type { NeedsAttentionListItem } from "./ops.js";
 
 export const APPROVE_INBOX_SENDS_KEY = ["approve-inbox-sends"] as const;
-export const APPROVE_INBOX_ATTENTION_KEY = ["approve-inbox-attention"] as const;
+/** @deprecated Use NEEDS_ATTENTION_KEY — kept as alias for any lingering invalidations. */
+export const APPROVE_INBOX_ATTENTION_KEY = NEEDS_ATTENTION_KEY;
 export const APPROVE_INBOX_DESTINATIONS_KEY = ["approve-inbox-destinations"] as const;
 export const APPROVE_INBOX_INTEGRATION_KEY = ["approve-inbox-integration-requests"] as const;
 
 /** Query keys the inbox mutates — keep nav badge in sync via invalidation. */
 export const APPROVE_INBOX_QUERY_KEYS = [
   APPROVE_INBOX_SENDS_KEY,
-  APPROVE_INBOX_ATTENTION_KEY,
+  NEEDS_ATTENTION_KEY,
   APPROVE_INBOX_DESTINATIONS_KEY,
   APPROVE_INBOX_INTEGRATION_KEY,
 ] as const;
@@ -66,12 +66,8 @@ export function useApproveInboxBadgeCount(enabled: boolean): number | undefined 
         enabled,
       },
       {
-        queryKey: [...APPROVE_INBOX_ATTENTION_KEY],
-        queryFn: () =>
-          apiSoftRead<NeedsAttentionResponse>(
-            "/operations/needs-attention",
-            EMPTY_NEEDS_ATTENTION,
-          ),
+        queryKey: [...NEEDS_ATTENTION_KEY],
+        queryFn: fetchNeedsAttentionSoft,
         refetchInterval: 30_000,
         enabled,
       },

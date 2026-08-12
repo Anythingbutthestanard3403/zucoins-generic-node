@@ -230,6 +230,8 @@ function makeDeps(overrides?: {
   readonly signerDeps?: SignerBoundaryDeps & MoneyPathSignerGates;
   /** What the confirm-read reports as the receiver head's step_2_signature. */
   readonly headStep2Signature?: string | null;
+  /** Full confirm-read override (counts / multi-phase scripts). Wraps headReads. */
+  readonly readReceiverHeadStep2Signature?: ReceiveSettleDeps["readReceiverHeadStep2Signature"];
 }): ReceiveSettleDeps & {
   readonly exchange: ReturnType<typeof makeExchange>;
   readonly headReads: string[];
@@ -237,6 +239,9 @@ function makeDeps(overrides?: {
   const material = overrides?.material ?? makeMaterialStore();
   const exchange = overrides?.exchange ?? makeExchange();
   const headReads: string[] = [];
+  const innerRead =
+    overrides?.readReceiverHeadStep2Signature ??
+    (async (_key: string) => overrides?.headStep2Signature ?? null);
   return {
     exchange,
     headReads,
@@ -252,7 +257,7 @@ function makeDeps(overrides?: {
     submitDecisionId: OPERATION_ID,
     readReceiverHeadStep2Signature: async (key) => {
       headReads.push(key);
-      return overrides?.headStep2Signature ?? null;
+      return innerRead(key);
     },
     nowIso: () => NOW,
   };
@@ -445,10 +450,101 @@ describe("settleReceiveAttempt — steps 8–13 offline end to end", () => {
 
     expect(resumed.kind).toBe("OBSERVED_AT_HEAD");
     // The load-bearing assertions: the head was read, nothing was signed again, nothing was
-    // advanced again, and no second body reached the gateway.
+    // advanced again, and no second body reached the gateway (head already matched).
     expect(deps.headReads).toEqual([receiverPublic]);
     expect(material.advances).toEqual([]);
     expect(deps.exchange.calls).toHaveLength(0);
+    expect(claimStore.mints).toBe(1);
+  });
+
+  it("resume with claim burned and head still unmoved: identical-byte redelivery, then OBSERVED_AT_HEAD", async () => {
+    // Staging failure mode: first submit_transaction__v1 returned empty-body 2xx (now
+    // INDETERMINATE) or a receipt that did not apply; the UNIQUE attempt row is spent and the
+    // chain head is still genesis. A blind second authorization is forbidden; POSTing the
+    // exact same signed bytes after an unmoved confirm-read is the recovery.
+    const reference = await settleReceiveAttempt(ATTEMPT, makeDeps());
+    expect(reference.kind).toBe("SUBMITTED");
+    if (reference.kind === "REJECTED") return;
+
+    const claimStore = makeClaimStore();
+    await claimStore.claimSubmitOnce({
+      attemptId: OPERATION_ID,
+      operationId: OPERATION_ID,
+      transactionAttemptNo: 1,
+      claimedAt: NOW,
+    });
+
+    let headReads = 0;
+    const exchange = makeExchange();
+    const deps = makeDeps({
+      material: makeMaterialStore("STEP2_SIGNATURE_PERSISTED"),
+      claimStore,
+      exchange,
+      // First confirm-read (resume gate) and second (post-mint) still unmoved; after the
+      // identical-byte redelivery the third read sees this attempt's step-2 signature.
+      readReceiverHeadStep2Signature: async () => {
+        headReads += 1;
+        return headReads >= 3 ? reference.step2Signature : null;
+      },
+    });
+
+    const resumed = await settleReceiveAttempt(
+      {
+        ...ATTEMPT,
+        attemptPhase: "STEP2_SIGNATURE_PERSISTED",
+        step2PreimageText: reference.step2PreimageText,
+        step2Signature: reference.step2Signature,
+        completedTransactionText: reference.completedTransactionText,
+      },
+      deps,
+    );
+
+    expect(resumed.kind).toBe("OBSERVED_AT_HEAD");
+    // One identical-byte redelivery POST (claim was already minted — receiveSubmitOnce did not
+    // open a second authorization or attempt row).
+    expect(exchange.calls).toHaveLength(1);
+    expect(wireBodyOf(exchange.calls[0]!)).toContain(reference.completedTransactionText);
+    expect(claimStore.mints).toBe(1);
+    expect(headReads).toBe(3);
+  });
+
+  it("resume with claim burned and head still unmoved after redelivery: RECONCILE_REQUIRED, no second body", async () => {
+    const reference = await settleReceiveAttempt(ATTEMPT, makeDeps());
+    if (reference.kind === "REJECTED") return;
+
+    const claimStore = makeClaimStore();
+    await claimStore.claimSubmitOnce({
+      attemptId: OPERATION_ID,
+      operationId: OPERATION_ID,
+      transactionAttemptNo: 1,
+      claimedAt: NOW,
+    });
+    const exchange = makeExchange();
+    const deps = makeDeps({
+      material: makeMaterialStore("STEP2_SIGNATURE_PERSISTED"),
+      claimStore,
+      exchange,
+      headStep2Signature: null,
+    });
+
+    const resumed = await settleReceiveAttempt(
+      {
+        ...ATTEMPT,
+        attemptPhase: "STEP2_SIGNATURE_PERSISTED",
+        step2PreimageText: reference.step2PreimageText,
+        step2Signature: reference.step2Signature,
+        completedTransactionText: reference.completedTransactionText,
+      },
+      deps,
+    );
+
+    expect(resumed.kind).toBe("RECONCILE_REQUIRED");
+    if (resumed.kind === "RECONCILE_REQUIRED") {
+      expect(resumed.reason.source).toBe("SUBMIT_OUTCOME_UNKNOWN");
+    }
+    // Exactly one identical-byte redelivery attempt; never a second distinct body.
+    expect(exchange.calls).toHaveLength(1);
+    expect(wireBodyOf(exchange.calls[0]!)).toContain(reference.completedTransactionText);
     expect(claimStore.mints).toBe(1);
   });
 
@@ -572,8 +668,9 @@ describe("settleReceiveAttempt — steps 8–13 offline end to end", () => {
     );
 
     expect(resumed.kind).toBe("SUBMITTED");
-    // The confirm-read happened BEFORE the gateway was touched (the never-blind-retry rule).
-    expect(deps.headReads).toEqual([receiverPublic]);
+    // Confirm-read before the gateway (never-blind-retry) and again after the shot so a
+    // false receipt that actually applied is closed as OBSERVED_AT_HEAD on the same pass.
+    expect(deps.headReads).toEqual([receiverPublic, receiverPublic]);
     expect(deps.exchange.calls).toHaveLength(1);
     expect(wireBodyOf(deps.exchange.calls[0]!)).toContain(reference.completedTransactionText);
     expect(claimStore.mints).toBe(1);

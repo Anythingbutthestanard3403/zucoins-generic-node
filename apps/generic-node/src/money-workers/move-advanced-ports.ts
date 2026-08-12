@@ -33,6 +33,7 @@ import {
   resumeMoveStep2FromPersistedStep1,
   verifySettledTransaction,
   bindExecuteMoveSubmitClaimOnce,
+  bindMoveIdenticalByteRedelivery,
   classifyMoveReconcile,
   createSqlSignerAuditLog,
   GENESIS_PROJECTION,
@@ -489,6 +490,14 @@ export function createMoveAdvancedPorts(
 
   const claimStore = makeSubmitDecisionClaimStore(query);
   const recorder = makeSubmitAttemptRecorder(query);
+  const submitOptions = {
+    endpoint: deps.submitGateway.endpoint,
+    limits: deps.submitGateway.limits,
+    recorder,
+    ...(deps.submitGateway.exchange !== undefined || deps.gatewayExchange !== undefined
+      ? { exchange: deps.submitGateway.exchange ?? deps.gatewayExchange }
+      : {}),
+  };
   const submitOnce = bindExecuteMoveSubmitClaimOnce({
     claimStore,
     authorizationFor: (operationId) => ({
@@ -496,18 +505,38 @@ export function createMoveAdvancedPorts(
       operationId,
       transactionAttemptNo: 1 as const,
     }),
-    submitOptions: {
-      endpoint: deps.submitGateway.endpoint,
-      limits: deps.submitGateway.limits,
-      recorder,
-      ...(deps.submitGateway.exchange !== undefined || deps.gatewayExchange !== undefined
-        ? { exchange: deps.submitGateway.exchange ?? deps.gatewayExchange }
-        : {}),
-    },
+    submitOptions,
     onDuplicateSubmitRejection: () => deps.metricsHooks?.onDuplicateSubmitRejection(),
   });
 
+  // ZTR-1244: identical-byte redelivery when claim burned + heads still unmoved.
+  const redeliverIdenticalSubmit = bindMoveIdenticalByteRedelivery({
+    query,
+    submitOptions,
+    bothHeadsUnmoved: async (operationId) => {
+      const details = await loadMoveDetails(deps.pool, operationId);
+      if (details === null) return false;
+      const attemptRows = await query(
+        `SELECT completed_transaction_sha256
+           FROM operation_transactions
+          WHERE operation_id = $1::uuid AND attempt_no = 1`,
+        [operationId],
+      );
+      const expectedBodySha = (attemptRows[0] as { completed_transaction_sha256?: string } | undefined)
+        ?.completed_transaction_sha256;
+      if (typeof expectedBodySha !== "string" || expectedBodySha.length === 0) return false;
+      // Unmoved = neither leg already proves the expected body at head. If either leg
+      // already landed, skip redelivery and let reconcile land from observation.
+      const [sourceObs, destObs] = await Promise.all([
+        buildPathObservation(details.sourcePublicKey, expectedBodySha, readFreshHead),
+        buildPathObservation(details.destinationPublicKey, expectedBodySha, readFreshHead),
+      ]);
+      return sourceObs.result !== "PROOF" && destObs.result !== "PROOF";
+    },
+  });
+
   return {
+    redeliverIdenticalSubmit,
     captureBaselines: async (operationId, _leases) => {
       const details = await loadMoveDetails(deps.pool, operationId);
       if (details === null) return { ok: false, reason: "operation not found" };

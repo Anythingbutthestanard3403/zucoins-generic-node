@@ -174,6 +174,20 @@ describe("persistMoveOutcome proof-access expiry (step 5)", () => {
     expect(capture.values).toEqual([]);
   });
 
+  it("LANDED_VERIFIED binds null attention_reason so stale LINEAGE_GAP clears (ZTR-1245)", async () => {
+    const capture = capturingQuery();
+    await persistMoveOutcome(capture.query, {
+      operationId: OPERATION_ID,
+      expectedState: "CREATED",
+      expectedRowVersion: 1,
+      outcome: LANDED_VERDICT,
+      event: signedEvent("internal_move.landed"),
+      occurredAt: OCCURRED_AT,
+    });
+    // $3 = attention_reason
+    expect(capture.values[0]![2]).toBeNull();
+  });
+
   it("refuses LANDED_VERIFIED with structural impostor path proofs", async () => {
     const capture = capturingQuery();
     const impostor = {

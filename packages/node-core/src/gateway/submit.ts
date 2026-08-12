@@ -51,6 +51,15 @@ import type { GatewayRequest, GatewayResponse } from "../protocol/index.js";
 
 // 2xx -> ACK (receipt only, never settlement); 4xx -> REJECT (definite gateway
 // answer); everything else (5xx, 3xx, 1xx) -> INDETERMINATE (reconcile-only).
+//
+// Status alone is not enough for ACK: a 2xx with an empty body, non-JSON body, or a
+// body that lacks a boolean `status` field is transport-ambiguous. Staging saw
+// `submit_transaction__v1` return HTTP 200 with zero response bytes (and, separately,
+// `status:true` with no chain apply). Treating empty/malformed 2xx as ACK parked the
+// receive as if the gateway had accepted the shot when the only safe next step is
+// reconcile (and, when the head is still unmoved, identical-byte redelivery — see
+// core/receive-settle.ts). A well-formed envelope with `status: true|false` stays ACK
+// on 2xx: that field is receipt-only and still never settlement.
 export function classifySubmitHttpStatus(statusCode: number): SubmitTransportOutcome {
   if (statusCode >= 200 && statusCode < 300) {
     return "ACK";
@@ -59,6 +68,46 @@ export function classifySubmitHttpStatus(statusCode: number): SubmitTransportOut
     return "REJECT";
   }
   return "INDETERMINATE";
+}
+
+/**
+ * Full transport outcome for one completed exchange: HTTP class plus the empty/malformed
+ * 2xx body gate. 4xx stays REJECT regardless of body (definite gateway answer). Non-2xx
+ * non-4xx stays INDETERMINATE. 2xx requires a non-empty UTF-8 JSON object carrying a
+ * boolean `status` field; anything less is INDETERMINATE (reconcile-only).
+ */
+export function classifySubmitCapture(
+  statusCode: number,
+  responseBytes: Uint8Array | null,
+): SubmitTransportOutcome {
+  const byStatus = classifySubmitHttpStatus(statusCode);
+  if (byStatus !== "ACK") {
+    return byStatus;
+  }
+  if (responseBytes === null || responseBytes.byteLength === 0) {
+    return "INDETERMINATE";
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(responseBytes);
+  } catch {
+    return "INDETERMINATE";
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return "INDETERMINATE";
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    typeof (parsed as { readonly status?: unknown }).status !== "boolean"
+  ) {
+    return "INDETERMINATE";
+  }
+  return "ACK";
 }
 
 // The authorization that permits the single shot: an already-persisted
@@ -140,7 +189,7 @@ export async function submitGatewayRequestOnce(
     return { transportOutcome: "INDETERMINATE", capture: null, recordedAttempt };
   }
 
-  const transportOutcome = classifySubmitHttpStatus(capture.statusCode);
+  const transportOutcome = classifySubmitCapture(capture.statusCode, capture.responseBytes);
   const recordedAttempt: GatewaySubmitAttemptRecord = {
     decisionId: authorization.submitDecisionId,
     operationId: authorization.operationId,

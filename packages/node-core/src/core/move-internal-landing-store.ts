@@ -189,13 +189,18 @@ function landedProofAccessExpiry(occurredAt: string, windowMs: number | undefine
 // $9/$10 (the terminal observation pair) double as the branch discriminator: non-null on the
 // landing branch only. attention_required is derived from $3 inside the statement, so the
 // CHECK (attention_required = (attention_reason IS NOT NULL)) cannot be violated from here.
+// $3 null on LANDED_VERIFIED clears attention (ZTR-1245); non-null parks NEEDS_ATTENTION.
+// attention_detail: clear when attention clears so stale LINEAGE_GAP text does not linger.
 const PERSIST_MOVE_OUTCOME = `WITH cas AS (
   UPDATE operations SET
     status = $2::operation_status,
     row_version = row_version + 1,
     attention_required = ($3::attention_reason IS NOT NULL),
     attention_reason = $3::attention_reason,
-    attention_detail = $4::text,
+    attention_detail = CASE
+      WHEN $3::attention_reason IS NULL THEN NULL
+      ELSE coalesce($4::text, attention_detail)
+    END,
     verification_material_available_until =
       coalesce($5::timestamptz, verification_material_available_until),
     terminal_at = CASE WHEN $2::operation_status = 'INTERNAL_MOVE_LANDED'

@@ -9,9 +9,12 @@ Find flagged operations with `GET /admin/v1/operations/needs-attention`. Act on 
 `POST /admin/v1/operations/:operation_id/recovery-actions` — the nine permitted actions and
 the ten that do not exist are listed in [`incidents.md`](incidents.md).
 
-**Nothing here auto-clears.** Boot does not clear attention, workers do not clear attention,
-and time does not clear attention. Every one of these is resolved by an operator or not at
-all. That is deliberate: the flag exists because a machine could not safely decide.
+**Almost nothing auto-clears.** Boot does not clear attention, and time does not clear
+attention. Most reasons stay until an operator acts — deliberate, because the flag exists
+when a machine could not safely decide. **Exception (ZTR-1245):** provisional `LINEAGE_GAP`
+(and any other attention still on the row) is cleared when the same operation reaches a
+positive land (`RECEIVE_LANDED` / `INTERNAL_MOVE_LANDED`) or verification-complete
+`VERIFIED`, because positive custody evidence supersedes the provisional park.
 
 ## Reasons with deferred writers
 
@@ -78,22 +81,39 @@ the anchor to the target is incomplete. The verdict is `INDETERMINATE`.
 **Resolved by.** `RETRY_OBSERVATION` — the bodies may arrive. A gap that persists is
 escalated as `path_gap`, and the operation stays parked with its lease held.
 
+**Auto-clears (ZTR-1245).** When the same operation later reaches a positive land
+(`RECEIVE_LANDED` / `INTERNAL_MOVE_LANDED`) or verification-complete with verdict
+`VERIFIED`, provisional `LINEAGE_GAP` attention is cleared with the land/ack write. That
+is not a general auto-clear of every attention reason — only the superseding positive
+path. Permanent lineage failures that never land stay parked.
+
 **Never.** Treat the gap as non-landing. `INDETERMINATE` authorizes no landing, no
 non-landing, no retry, no rebuild and no lease release.
 
 ## SUBMIT_OUTCOME_AMBIGUOUS
 
 **Caused by.** The submit call boundary was crossed with an unknown outcome — a timeout, a
-dropped connection, a response the node could not attribute. The transaction may be on the
-chain.
+dropped connection, a response the node could not attribute, or a **2xx with an empty /
+malformed body** (no boolean `status` field). Those empty/malformed 2xx replies are
+classified **INDETERMINATE** at the transport layer, never as a receipt ACK. The transaction
+may still be on the chain.
 
 **Resolved by.** `RETRY_OBSERVATION` until a fresh verified chain read settles it, then the
-normal landing path. For a `MOVE_INTERNAL` where positive non-landing has been *proved*,
-`REBUILD_INTERNAL_MOVE` with the proof id — which archives the old attempt unchanged and
-creates a new attempt number. It never resubmits the old attempt.
+normal landing path. For a receive parked at `STEP2_SIGNATURE_PERSISTED` whose durable claim
+already exists and whose confirm-read still shows an **unmoved** head, the settle step may
+**POST the exact same signed request bytes again** (identical-byte redelivery). That is not a
+second authorization: no second `submit_decisions` row, no second `gateway_submit_attempts`
+row, no rebuilt body. For a `MOVE_INTERNAL` whose claim is burned, last transport outcome is
+AMBIGUOUS/INDETERMINATE, and **both** source and destination heads are still unmoved, the
+LAND step may likewise redeliver the durable `gateway_submit_attempts.request_body` bytes
+(ZTR-1244) before reconcile — again no second claim or attempt row. For a `MOVE_INTERNAL`
+where positive non-landing has been *proved*, `REBUILD_INTERNAL_MOVE` with the proof id —
+which archives the old attempt unchanged and creates a new attempt number. It never
+resubmits a *different* attempt.
 
-**Never.** Retry the submit. This is golden rule 4 and the single most dangerous instinct in
-this runbook: retrying an ambiguous submit is how the same value moves twice.
+**Never.** Blind-retry a *new* submit body or invent a second attempt number. That is golden
+rule 4 and the single most dangerous instinct in this runbook: a second authorization is how
+the same value moves twice.
 
 ## SIGNING_OUTCOME_AMBIGUOUS
 

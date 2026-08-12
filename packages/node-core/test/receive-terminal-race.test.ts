@@ -207,6 +207,9 @@ function harness() {
     async completeGroupOperation(_tx, _g, operationId): Promise<void> {
       completed.add(operationId);
     },
+    async applyOperationVerificationVerdict(): Promise<void> {
+      // ZTR-1246 — unit race harness does not assert denormalized verdict.
+    },
     async readGroupReleaseFacts(): Promise<GroupReleaseFacts> {
       releaseEvals += 1;
       const operations = rows.map((row) => {

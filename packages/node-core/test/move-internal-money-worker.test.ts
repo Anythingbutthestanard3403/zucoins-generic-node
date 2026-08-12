@@ -525,6 +525,111 @@ describe("MOVE_INTERNAL money-worker pipeline", () => {
     expect(harness.submitCalls).toBe(1);
   });
 
+  it("LAND with AMBIGUOUS claim invokes identical-byte redelivery before reconcile (ZTR-1244)", async () => {
+    const progress = emptyProgress({
+      bothLeasesHeld: true,
+      baselinesBound: true,
+      innerPreimagePersisted: true,
+      signaturesComplete: true,
+      submitClaimed: true,
+      submitOutcome: "AMBIGUOUS",
+    });
+    let redeliverCalls = 0;
+    let landCalls = 0;
+    const ports: MoveInternalMoneyWorkerPorts = {
+      loadProgress: async () => ({ ...progress }),
+      acquireDualLeases: async () => ({
+        ok: true,
+        leases: {
+          sourceWalletId: SRC,
+          sourceLeaseEpoch: 1n,
+          destinationWalletId: DST,
+          destinationLeaseEpoch: 1n,
+        },
+      }),
+      captureBaselines: async () => ({ ok: false, reason: "n/a" }),
+      loadBaselineBound: async () => null,
+      formInner: async () => ({ ok: false, reason: "n/a" }),
+      signUnderLeases: async () => ({ ok: false, reason: "n/a" }),
+      loadSignedMaterial: async () => ({ signed: fakeSigned() }),
+      submitOnce: async () => {
+        throw new Error("must not re-enter SUBMIT after claim");
+      },
+      redeliverIdenticalSubmit: async () => {
+        redeliverCalls += 1;
+        return { ok: true, redelivered: true };
+      },
+      reconcileAndLand: async () => {
+        landCalls += 1;
+        progress.landDualPathVerified = true;
+        progress.operationStatus = "INTERNAL_MOVE_LANDED";
+        progress.landed = true;
+        progress.rowVersion = 2;
+        return {
+          ok: true,
+          land: {
+            outcome: dualPathLandedOutcome(),
+            persist: { kind: "PERSISTED", state: "INTERNAL_MOVE_LANDED", rowVersion: 2 },
+          },
+        };
+      },
+    };
+    const result = await advanceMoveInternalMoneyWorker(ports, OP, {});
+    expect(redeliverCalls).toBe(1);
+    expect(landCalls).toBe(1);
+    expect(result.kind).toBe("TERMINAL");
+  });
+
+  it("LAND skips redelivery port when submitOutcome is not AMBIGUOUS", async () => {
+    const progress = emptyProgress({
+      bothLeasesHeld: true,
+      baselinesBound: true,
+      innerPreimagePersisted: true,
+      signaturesComplete: true,
+      submitClaimed: true,
+      submitOutcome: "ACK",
+    });
+    let redeliverCalls = 0;
+    const ports: MoveInternalMoneyWorkerPorts = {
+      loadProgress: async () => ({ ...progress }),
+      acquireDualLeases: async () => ({
+        ok: true,
+        leases: {
+          sourceWalletId: SRC,
+          sourceLeaseEpoch: 1n,
+          destinationWalletId: DST,
+          destinationLeaseEpoch: 1n,
+        },
+      }),
+      captureBaselines: async () => ({ ok: false, reason: "n/a" }),
+      loadBaselineBound: async () => null,
+      formInner: async () => ({ ok: false, reason: "n/a" }),
+      signUnderLeases: async () => ({ ok: false, reason: "n/a" }),
+      loadSignedMaterial: async () => ({ signed: fakeSigned() }),
+      submitOnce: async () => {
+        throw new Error("must not submit");
+      },
+      redeliverIdenticalSubmit: async () => {
+        redeliverCalls += 1;
+        return { ok: true, redelivered: true };
+      },
+      reconcileAndLand: async () => {
+        progress.landDualPathVerified = true;
+        progress.operationStatus = "INTERNAL_MOVE_LANDED";
+        progress.landed = true;
+        return {
+          ok: true,
+          land: {
+            outcome: dualPathLandedOutcome(),
+            persist: { kind: "PERSISTED", state: "INTERNAL_MOVE_LANDED", rowVersion: 2 },
+          },
+        };
+      },
+    };
+    await advanceMoveInternalMoneyWorker(ports, OP, {});
+    expect(redeliverCalls).toBe(0);
+  });
+
   it("post-submit indeterminate land holds with claim set (no resubmit path)", async () => {
     const harness = createOfflinePorts({ landFail: true });
     const { terminal, trail } = await runMoveInternalMoneyWorker(harness.ports, OP);

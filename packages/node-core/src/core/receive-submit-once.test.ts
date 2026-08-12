@@ -129,6 +129,25 @@ describe("receiveSubmitOnce", () => {
     }
   });
 
+  it("returns AMBIGUOUS on empty-body 2xx (never a false ACK receipt)", async () => {
+    const result = await receiveSubmitOnce(
+      makeInput({
+        submitOptions: {
+          endpoint: "https://gw.invalid/",
+          limits: { readTimeoutMs: 1000, maxRequestBytes: 4096, maxResponseBytes: 4096 },
+          recorder: makeRecorder(),
+          exchange: makeFakeExchange(200, ""),
+        },
+      }),
+    );
+    expect(result.kind).toBe("AMBIGUOUS");
+    if (result.kind === "AMBIGUOUS") {
+      expect(result.reason.source).toBe("SUBMIT_OUTCOME_UNKNOWN");
+      expect(result.recordedAttempt.transportOutcome).toBe("INDETERMINATE");
+      expect(result.recordedAttempt.responseBytes?.byteLength ?? 0).toBe(0);
+    }
+  });
+
   it("returns AMBIGUOUS when claim already exists (never blind-retry)", async () => {
     const result = await receiveSubmitOnce(makeInput({ claimStore: makeClaimStore({ preExisting: true }) }));
     expect(result.kind).toBe("AMBIGUOUS");

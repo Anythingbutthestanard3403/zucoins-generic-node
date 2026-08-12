@@ -65,12 +65,17 @@ export const RECEIVE_LANDING_STATEMENTS = {
   // node_id / implementer_id / receiver_wallet_id come back from the CAS itself rather than a
   // second SELECT: the dual-chain append below must be scoped to exactly the row this
   // statement transitioned, and a separate read could observe a different one.
+  // ZTR-1245: positive land clears provisional attention (e.g. LINEAGE_GAP from an
+  // empty-ACK episode). attention_required co-presence CHECK: both columns clear together.
   UPDATE_STATUS:
     "UPDATE operations SET status = $2, " +
     "row_version = row_version + 1, " +
     "terminal_observation_id = $3::uuid, " +
     "verification_material_available_until = to_timestamp($4 / 1000.0), " +
-    "terminal_at = now(), updated_at = now() " +
+    "terminal_at = now(), updated_at = now(), " +
+    "attention_required = false, " +
+    "attention_reason = NULL, " +
+    "attention_detail = NULL " +
     "WHERE id = $1::uuid AND kind = 'RECEIVE_EXTERNAL' " +
     "AND status = $5 AND row_version = $6::bigint " +
     "RETURNING id, row_version, node_id::text AS node_id, " +

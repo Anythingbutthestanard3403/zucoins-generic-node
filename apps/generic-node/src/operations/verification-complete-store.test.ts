@@ -226,6 +226,9 @@ function harness(seed: World) {
       set.add(operationId);
       view.completedOps.set(leaseGroupId, set);
     },
+    async applyOperationVerificationVerdict(_tx, _operationId, _verdict) {
+      // ZTR-1246 — fixture mirrors SQL store; denormalized column not modeled here.
+    },
     async readGroupReleaseFacts(tx, leaseGroupId): Promise<GroupReleaseFacts> {
       const view = viewOf(tx);
       const completed = view.completedOps.get(leaseGroupId) ?? new Set<string>();

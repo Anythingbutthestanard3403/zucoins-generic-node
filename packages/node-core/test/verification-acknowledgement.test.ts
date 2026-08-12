@@ -516,6 +516,8 @@ function harness(options: HarnessOptions = {}) {
   const rows: AcknowledgementDraft[] = [];
   const frozenById = new Map<string, AcknowledgementResponseBody>();
   const completed = new Set<string>();
+  const operationVerdicts = new Map<string, string>();
+  const attentionByOp = new Map<string, string | null>();
   let siblingStillPending = options.siblingUnacknowledged === true;
 
   const defaultExpected: readonly OperationWalletAssignment[] =
@@ -594,6 +596,12 @@ function harness(options: HarnessOptions = {}) {
     },
     async completeGroupOperation(_tx, _groupId, operationId): Promise<void> {
       completed.add(operationId);
+    },
+    async applyOperationVerificationVerdict(_tx, operationId, verdict): Promise<void> {
+      operationVerdicts.set(operationId, verdict);
+      if (verdict === "VERIFIED") {
+        attentionByOp.set(operationId, null);
+      }
     },
     async readGroupReleaseFacts(): Promise<GroupReleaseFacts> {
       const operations = rows.map((row) => {
@@ -680,7 +688,7 @@ function harness(options: HarnessOptions = {}) {
     siblingStillPending = false;
   };
 
-  return { acknowledge, rows, completed, flipSibling, store };
+  return { acknowledge, rows, completed, flipSibling, store, operationVerdicts, attentionByOp };
 }
 
 const baseInput = (overrides: Partial<AcknowledgementInput> = {}): AcknowledgementInput => ({
@@ -704,6 +712,7 @@ const TX: Tx = { label: "unit" };
 describe("createAcknowledgementService (backing implementation)", () => {
   it("writes the acknowledgement, stamps the leg terminal, and releases a proven group", async () => {
     const h = harness();
+    h.attentionByOp.set(RECEIVE_OP, "LINEAGE_GAP");
     const outcome = await h.acknowledge(TX, baseInput());
     expect(outcome.body).toEqual({
       operation_id: RECEIVE_OP,
@@ -715,6 +724,20 @@ describe("createAcknowledgementService (backing implementation)", () => {
     expect(outcome.idempotentReplay).toBe(false);
     expect(h.completed.has(RECEIVE_OP)).toBe(true);
     expect(outcome.releasableMemberships).toHaveLength(1);
+    // ZTR-1246 / ZTR-1245
+    expect(h.operationVerdicts.get(RECEIVE_OP)).toBe("VERIFIED");
+    expect(h.attentionByOp.get(RECEIVE_OP)).toBeNull();
+  });
+
+  it("does not re-apply verification_verdict on identical replay (ZTR-1246)", async () => {
+    const h = harness();
+    await h.acknowledge(TX, baseInput());
+    h.operationVerdicts.clear();
+    h.attentionByOp.set(RECEIVE_OP, "LINEAGE_GAP");
+    const second = await h.acknowledge(TX, baseInput());
+    expect(second.idempotentReplay).toBe(true);
+    expect(h.operationVerdicts.size).toBe(0);
+    expect(h.attentionByOp.get(RECEIVE_OP)).toBe("LINEAGE_GAP");
   });
 
   it("derives evidence_set_sha256 from the supplied set", async () => {

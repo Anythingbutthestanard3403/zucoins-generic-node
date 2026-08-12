@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import * as submitModule from "./submit.js";
 import {
   SubmitIndeterminateError,
+  classifySubmitCapture,
   classifySubmitHttpStatus,
   createSingleShotSubmitTransport,
   submitGatewayActionOnce,
@@ -120,6 +121,38 @@ describe("outcome classification — the table", () => {
   it.each([100, 301, 302, 500, 502, 503, 599])("HTTP %i is INDETERMINATE (reconcile-only)", (status) => {
     expect(classifySubmitHttpStatus(status)).toBe("INDETERMINATE");
   });
+
+  const wellFormedAck = new TextEncoder().encode('{"status":true,"code":"ok","message":"","data":{}}');
+  const wellFormedRejectBody = new TextEncoder().encode(
+    '{"status":false,"code":"invalid","message":"no","data":null}',
+  );
+
+  it("2xx with a well-formed status boolean is ACK", () => {
+    expect(classifySubmitCapture(200, wellFormedAck)).toBe("ACK");
+    expect(classifySubmitCapture(204, wellFormedRejectBody)).toBe("ACK");
+  });
+
+  it("2xx with an empty body is INDETERMINATE (never a false receipt)", () => {
+    expect(classifySubmitCapture(200, new Uint8Array())).toBe("INDETERMINATE");
+    expect(classifySubmitCapture(200, null)).toBe("INDETERMINATE");
+  });
+
+  it("2xx with non-JSON or status-less JSON is INDETERMINATE", () => {
+    expect(classifySubmitCapture(200, new TextEncoder().encode("not-json"))).toBe("INDETERMINATE");
+    expect(classifySubmitCapture(200, new TextEncoder().encode('{"code":"ok"}'))).toBe(
+      "INDETERMINATE",
+    );
+    expect(classifySubmitCapture(200, new TextEncoder().encode('{"status":"true"}'))).toBe(
+      "INDETERMINATE",
+    );
+    expect(classifySubmitCapture(200, new TextEncoder().encode("[]"))).toBe("INDETERMINATE");
+  });
+
+  it("4xx stays REJECT and 5xx stays INDETERMINATE regardless of body", () => {
+    expect(classifySubmitCapture(422, wellFormedRejectBody)).toBe("REJECT");
+    expect(classifySubmitCapture(422, new Uint8Array())).toBe("REJECT");
+    expect(classifySubmitCapture(503, wellFormedAck)).toBe("INDETERMINATE");
+  });
 });
 
 describe("the single shot — one exchange, one record, no second call on any branch", () => {
@@ -151,6 +184,22 @@ describe("the single shot — one exchange, one record, no second call on any br
     expect(result.recordedAttempt.startedAt).toBe("2026-07-21T00:00:01.000Z");
     expect(result.recordedAttempt.completedAt).toBe("2026-07-21T00:00:02.000Z");
     expect(recording.records).toEqual([result.recordedAttempt]);
+  });
+
+  it("INDETERMINATE: a 2xx with an empty body is recorded reconcile-only (never a false ACK)", async () => {
+    const scripted = scriptedExchange({ status: 200, body: new Uint8Array() });
+    const recording = recordingRecorder();
+    const result = await submitGatewayActionOnce(
+      SUBMIT_ACTION_NAME,
+      { transaction: "t" },
+      AUTHORIZATION,
+      options(scripted.exchange, recording.recorder),
+    );
+    expect(result.transportOutcome).toBe("INDETERMINATE");
+    expect(result.capture?.statusCode).toBe(200);
+    expect(result.capture?.responseBytes.byteLength).toBe(0);
+    expect(recording.records[0]?.transportOutcome).toBe("INDETERMINATE");
+    expect(scripted.touched).toEqual([PRIMARY]);
   });
 
   it("REJECT: a definite 4xx is recorded and returned, not retried", async () => {

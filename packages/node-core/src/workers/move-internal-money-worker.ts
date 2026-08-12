@@ -21,6 +21,10 @@ import {
 import type { PersistedExpectedArtifact } from "../core/move-baseline-binding.js";
 import type { MoveOutcomePersistResult } from "../core/move-internal-landing-store.js";
 import type { SqlQueryFn } from "../core/sql-query-fn.js";
+import {
+  gatewayRequestFromPersistedBody,
+  redeliverIdenticalSignedRequest,
+} from "../gateway/identical-byte-redelivery.js";
 
 export const MOVE_MONEY_WORKER_STEPS = [
   "LEASE",
@@ -170,6 +174,17 @@ export interface MoveInternalMoneyWorkerPorts {
   ) => Promise<
     | { readonly ok: true; readonly land: MoveLandMaterial }
     | { readonly ok: false; readonly reason: string; readonly holdReconcile?: boolean }
+  >;
+
+  /**
+   * ZTR-1244 — optional identical-byte redelivery when claim is burned, heads unmoved,
+   * and the last transport outcome was AMBIGUOUS/INDETERMINATE. Must POST exact
+   * `gateway_submit_attempts.request_body` bytes only (no second claim / attempt row).
+   * Omitted in pure offline tests; production binds SQL + exchange.
+   */
+  readonly redeliverIdenticalSubmit?: (operationId: string) => Promise<
+    | { readonly ok: true; readonly redelivered: boolean; readonly reason?: string }
+    | { readonly ok: false; readonly reason: string }
   >;
 }
 
@@ -497,6 +512,23 @@ export async function advanceMoveInternalMoneyWorker(
           operationId,
           reason: "land: could not re-validate held SOURCE+DEST lease epochs",
         };
+      }
+      // ZTR-1244: burned claim + AMBIGUOUS transport + unmoved heads → identical-byte
+      // redelivery before reconcile. Not a second authorization (no new claim/attempt row).
+      if (
+        progress.submitClaimed &&
+        progress.submitOutcome === "AMBIGUOUS" &&
+        ports.redeliverIdenticalSubmit !== undefined
+      ) {
+        const red = await ports.redeliverIdenticalSubmit(operationId);
+        if (!red.ok) {
+          return {
+            kind: "HOLD_RECONCILE",
+            operationId,
+            reason: `identical-byte redelivery failed: ${red.reason}`,
+            submitClaimed: true,
+          };
+        }
       }
       const land = await ports.reconcileAndLand(operationId, progress);
       if (!land.ok) {
@@ -839,4 +871,85 @@ export function bindExecuteMoveSubmitClaimOnce(deps: {
       };
     }
   };
+}
+
+/**
+ * ZTR-1244 — production binding for identical-byte redelivery on MOVE_INTERNAL.
+ *
+ * Loads durable `gateway_submit_attempts.request_body` for attempt 1 and POSTs those
+ * exact bytes when both source and destination heads are still unmoved relative to the
+ * expected completed transaction. Never mints a second claim or attempt row.
+ */
+export function bindMoveIdenticalByteRedelivery(deps: {
+  readonly query: SqlQueryFn;
+  readonly submitOptions: import("../gateway/submit.js").SubmitGatewayActionOptions;
+  /**
+   * Confirm both heads are still unmoved for this body. Return true to POST identical
+   * bytes; false skips redelivery (heads already advanced — reconcile will land).
+   */
+  readonly bothHeadsUnmoved: (operationId: string) => Promise<boolean>;
+}): NonNullable<MoveInternalMoneyWorkerPorts["redeliverIdenticalSubmit"]> {
+  const { query, submitOptions, bothHeadsUnmoved } = deps;
+  return async (operationId) => {
+    let unmoved: boolean;
+    try {
+      unmoved = await bothHeadsUnmoved(operationId);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
+    if (!unmoved) {
+      return { ok: true, redelivered: false, reason: "heads already advanced — skip redelivery" };
+    }
+    const rows = await query(
+      `SELECT request_body AS request_body
+         FROM gateway_submit_attempts
+        WHERE operation_id = $1::uuid AND transaction_attempt_no = $2
+        LIMIT 1`,
+      [operationId, ONLY_ATTEMPT_NO],
+    );
+    const row = rows[0] as { request_body: unknown } | undefined;
+    if (row === undefined || row.request_body === null || row.request_body === undefined) {
+      return {
+        ok: false,
+        reason: "no durable gateway_submit_attempts.request_body for identical-byte redelivery",
+      };
+    }
+    const body = coerceBytea(row.request_body);
+    if (body === null || body.byteLength === 0) {
+      return { ok: false, reason: "gateway_submit_attempts.request_body empty or unreadable" };
+    }
+    await redeliverIdenticalSignedRequest(gatewayRequestFromPersistedBody(body), {
+      endpoint: submitOptions.endpoint,
+      limits: submitOptions.limits,
+      exchange: submitOptions.exchange,
+    });
+    return { ok: true, redelivered: true };
+  };
+}
+
+function coerceBytea(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (typeof value === "string") {
+    // pg may return hex \\x... or base64 depending on type parsers.
+    if (value.startsWith("\\x")) {
+      const hex = value.slice(2);
+      const out = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < out.length; i += 1) {
+        out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      }
+      return out;
+    }
+    try {
+      return Uint8Array.from(Buffer.from(value, "base64"));
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

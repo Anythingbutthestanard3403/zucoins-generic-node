@@ -7,10 +7,9 @@ import {
   IconKey, IconLock, IconLogo, IconLogout, IconMoon, IconPin,
   IconTarget, IconWallet, IconBell, IconSettings,
 } from "./icons.js";
-import { apiSoftRead } from "./lib/api.js";
+import { useApproveInboxBadgeCount } from "./lib/approve-inbox-count.js";
 import { fetchEffectiveConfig } from "./pages/settings/SettingsPage.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "./lib/health.js";
-import { EMPTY_NEEDS_ATTENTION, type NeedsAttentionResponse } from "./lib/ops.js";
 import { useAuth } from "./store/auth.js";
 import { OfflineBanner } from "./components/OfflineBanner.js";
 import { InstallHomeNudge } from "./components/InstallPrompt.js";
@@ -47,7 +46,7 @@ const HEALTH_TEXT_CLASS: Record<NodeHealthUiState, string> = {
 };
 
 /** Production shell sections — Approve inbox / Operations / money rails / vault. */
-export function buildSections(attentionBadge: number | undefined): NavSec[] {
+export function buildSections(approveBadge: number | undefined): NavSec[] {
   return [
     {
       title: "Command",
@@ -57,8 +56,8 @@ export function buildSections(attentionBadge: number | undefined): NavSec[] {
           to: "/approve",
           label: "Approve",
           icon: <IconClipboard />,
-          badge: attentionBadge && attentionBadge > 0 ? attentionBadge : undefined,
-          badgeHot: attentionBadge !== undefined && attentionBadge > 0,
+          badge: approveBadge !== undefined && approveBadge > 0 ? approveBadge : undefined,
+          badgeHot: approveBadge !== undefined && approveBadge > 0,
         },
         {
           to: "/operations",
@@ -94,8 +93,8 @@ export function buildSections(attentionBadge: number | undefined): NavSec[] {
 }
 
 /** Flat label census of production nav (used by boundary tests). */
-export function productionNavLabels(attentionBadge?: number): string[] {
-  return buildSections(attentionBadge).flatMap((s) => s.items.map(({ label }) => label));
+export function productionNavLabels(approveBadge?: number): string[] {
+  return buildSections(approveBadge).flatMap((s) => s.items.map(({ label }) => label));
 }
 
 export function App() {
@@ -113,17 +112,9 @@ export function App() {
 
   useEffect(() => subscribeDeferredInstallPrompt(setDeferredPrompt), []);
 
-  const attentionQ = useQuery({
-    queryKey: ["needs-attention-nav"],
-    queryFn: async () =>
-      apiSoftRead<NeedsAttentionResponse>("/operations/needs-attention", EMPTY_NEEDS_ATTENTION),
-    refetchInterval: 30_000,
-    enabled: Boolean(user),
-  });
-  const attentionBadge = attentionQ.data?.live
-    ? attentionQ.data.data.summary.total
-    : undefined;
-  const sections = buildSections(attentionBadge);
+  // ZTR-1257: badge = Approve inbox actionable sum (not needs-attention total).
+  const approveBadge = useApproveInboxBadgeCount(Boolean(user));
+  const sections = buildSections(approveBadge);
 
   // Real /health/ready probe.
   const healthQ = useQuery({
@@ -239,7 +230,7 @@ export function App() {
           <button
             type="button"
             className="icon-btn"
-            title={attentionBadge && attentionBadge > 0 ? `${attentionBadge} item(s) need attention` : "Approve inbox"}
+            title={approveBadge !== undefined && approveBadge > 0 ? `${approveBadge} item(s) in approve inbox` : "Approve inbox"}
             onClick={() => navigate("/approve")}
           >
             <IconBell />
@@ -268,9 +259,9 @@ export function App() {
           <span>Node <b className={HEALTH_TEXT_CLASS[healthState]}>{HEALTH_LABEL[healthState].toLowerCase()}</b></span>
           <span className="sep">·</span>
           <span>
-            Attention{" "}
-            <b className={attentionBadge && attentionBadge > 0 ? "warn" : "ok"}>
-              {attentionBadge ?? "—"}
+            Approve{" "}
+            <b className={approveBadge !== undefined && approveBadge > 0 ? "warn" : "ok"}>
+              {approveBadge ?? "—"}
             </b>
           </span>
           <span className="sep">·</span>

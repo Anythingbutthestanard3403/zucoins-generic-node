@@ -16,6 +16,7 @@ import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { apiSoftRead } from "../../lib/api.js";
+import { countApproveInboxItems } from "../../lib/approve-inbox-count.js";
 import {
   formatApproveFailure,
   getLocalApproveDeviceAvailability,
@@ -180,8 +181,12 @@ export function ApproveInboxPage() {
     pendingSendsQ.data !== undefined &&
     attentionQ.data !== undefined;
 
-  const totalPending =
-    sends.length + pendingBless.length + recoveryCards.length + pendingIntegration.length;
+  const totalPending = countApproveInboxItems({
+    sends,
+    attentionOps,
+    pendingBless,
+    pendingIntegration,
+  });
   // Both primary sources must be live before claiming clear (partial outage ≠ empty).
   const inboxClear =
     sendsLive && attentionLive && !anySourceLoading && totalPending === 0;

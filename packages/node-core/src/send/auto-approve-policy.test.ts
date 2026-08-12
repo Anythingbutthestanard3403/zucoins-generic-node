@@ -8,6 +8,7 @@ import {
   createSqlAutoApprovePolicy,
   evaluateAutoApproveRule,
   InMemoryAutoApprovePolicy,
+  LOCK_AUTO_APPROVE_WINDOW_SQL,
   parseAutoApprovePolicyDocument,
   serializeAutoApprovePolicyDocument,
   type AutoApproveRule,
@@ -431,5 +432,15 @@ describe("createSqlAutoApprovePolicy", () => {
       nodeId: "11111111-1111-4111-8111-111111111111",
     });
     expect(writeCount).toBe(1);
+  });
+});
+
+describe("LOCK_AUTO_APPROVE_WINDOW_SQL", () => {
+  it("is transaction-scoped advisory lock namespaced by implementer id", () => {
+    expect(LOCK_AUTO_APPROVE_WINDOW_SQL).toContain("pg_advisory_xact_lock");
+    expect(LOCK_AUTO_APPROVE_WINDOW_SQL).toContain("hashtextextended");
+    expect(LOCK_AUTO_APPROVE_WINDOW_SQL).toContain("auto-approve-window:");
+    expect(LOCK_AUTO_APPROVE_WINDOW_SQL).not.toContain("pg_advisory_lock(");
+    expect(LOCK_AUTO_APPROVE_WINDOW_SQL).toMatch(/\$1/);
   });
 });

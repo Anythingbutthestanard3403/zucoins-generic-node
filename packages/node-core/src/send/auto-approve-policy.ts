@@ -1,15 +1,23 @@
 // Auto-approve policy for external sends (ZTR-1234).
 //
-// Bound, operator-configured rules let a single leader-gated worker commit
-// CREATED→APPROVED without a per-send human TOTP factor. Fail closed: the safe
-// state is OFF. Absent key, unreadable store, invalid JSON, unknown fields,
-// bad types, non-canonical amounts, or duplicate implementer ids all resolve
-// the entire policy to DISABLED — every send then falls through to the manual
-// approval queue. Auto-approve never rejects a send.
+// Bound, operator-configured rules let a single leader-gated worker (ZTR-1235)
+// commit CREATED→APPROVED without a per-send human TOTP factor. Fail closed:
+// the safe state is OFF. Absent key, unreadable store, invalid JSON, unknown
+// fields, bad types, non-canonical amounts, or duplicate implementer ids all
+// resolve the entire policy to DISABLED — every send then falls through to the
+// manual approval queue. Auto-approve never rejects a send.
 //
 // Window spend is derived from existing AUTO_POLICY approval rows (no counter
 // table). Spend counts at approval time and is never released — an approved-
 // then-expired unredeemed send still consumes cap. Conservative by design.
+//
+// Race posture: the intended sole *caller* is one leader-gated worker, but the
+// TX itself is multi-writer safe. commitAutoApproval takes an implementer-
+// scoped pg_advisory_xact_lock before reading window spend or writing
+// AUTO_POLICY, so concurrent commits for the same implementer serialize cap
+// accounting. FOR UPDATE on the send row + frozen CAS still arbitrate same-
+// operation contention with a concurrent manual decide. Different implementers
+// use distinct advisory keys and do not block each other.
 //
 // Storage: node_settings key ops.auto_approve_sends + audit_log on change,
 // mirroring dual-control-policy / device-signature-policy.
@@ -317,7 +325,8 @@ export function serializeAutoApprovePolicyDocument(
  * durable spend and belongs in commitAutoApproval / the worker pre-check.
  *
  * `windowSpend` when supplied is checked here too so unit tests and dry-run
- * paths share one predicate; production commit still re-checks under FOR UPDATE.
+ * paths share one predicate; production commit re-checks spend under the
+ * implementer-scoped advisory lock (then FOR UPDATE on the send row).
  */
 export function evaluateAutoApproveRule(
   policy: AutoApprovePolicyDocument,
@@ -532,6 +541,14 @@ export function createSqlAutoApprovePolicy(
 
 // ─── window spend ──────────────────────────────────────────────────────────
 
+/**
+ * Transaction-scoped advisory lock for one implementer's auto-approve window.
+ * Namespaced text key so the bigint does not collide with path_proof / other
+ * hashtextextended(uuid) locks. Released automatically on COMMIT or ROLLBACK.
+ */
+export const LOCK_AUTO_APPROVE_WINDOW_SQL =
+  "SELECT pg_advisory_xact_lock(hashtextextended(('auto-approve-window:' || $1::text), 0))";
+
 export const WINDOW_SPEND_SQL =
   "SELECT COALESCE(SUM(o.amount_zkz::numeric), 0)::text AS spend " +
   "FROM operation_approvals a " +
@@ -539,6 +556,13 @@ export const WINDOW_SPEND_SQL =
   "WHERE a.method = 'AUTO_POLICY' " +
   "  AND o.implementer_id = $1::uuid " +
   "  AND a.consumed_at >= now() - make_interval(hours => $2::int)";
+
+export async function lockAutoApproveWindow(
+  sql: SqlExecutor,
+  implementerId: string,
+): Promise<void> {
+  await sql.query(LOCK_AUTO_APPROVE_WINDOW_SQL, [implementerId]);
+}
 
 export async function queryWindowSpend(
   sql: SqlExecutor,
@@ -627,8 +651,9 @@ const INSERT_AUTO_AUDIT_SQL =
 
 /**
  * One-TX auto-approval commit:
- *   FOR UPDATE → window recheck → build preimage → INSERT AUTO_POLICY →
- *   CREATED→APPROVED CAS → SYSTEM audit → COMMIT (or ROLLBACK on any miss).
+ *   implementer advisory lock → FOR UPDATE → bound recheck → window recheck →
+ *   build preimage → INSERT AUTO_POLICY → CREATED→APPROVED CAS → SYSTEM audit →
+ *   COMMIT (or ROLLBACK on any miss; xact advisory releases with the TX).
  */
 export async function commitAutoApproval(
   input: CommitAutoApprovalInput,
@@ -641,6 +666,11 @@ export async function commitAutoApproval(
 
   try {
     return await deps.withTx(async (tx): Promise<CommitAutoApprovalResult> => {
+    // Serialize same-implementer window spend + AUTO_POLICY insert across writers.
+    // Lock the *rule* implementer up front (known before the send row); mismatch
+    // with the locked row still falls through via evaluateAutoApproveRule.
+    await lockAutoApproveWindow(tx, rule.implementer_id);
+
     const locked = await tx.query<LockedSendRow>(LOCK_SEND_SQL, [input.operationId]);
     const row = locked.rows[0];
     if (row === undefined) {
@@ -650,7 +680,7 @@ export async function commitAutoApproval(
       return { decision: "fall_through", reason: "operation_not_created" };
     }
 
-    // Re-evaluate pure bounds under the lock (amount / implementer may not match rule).
+    // Re-evaluate pure bounds under the locks (amount / implementer may not match rule).
     const bound = evaluateAutoApproveRule(
       { status: "enabled", rules: [rule] },
       { implementerId: row.implementer_id, amountZkz: row.amount_zkz },

@@ -3,12 +3,15 @@
  *
  * Real-PostgreSQL drills for ops.auto_approve_sends + commitAutoApproval (ZTR-1234):
  *   - window cap boundary (spend + amount == cap approves; one more falls through)
+ *   - concurrent same-implementer multi-op commits cannot overshoot window cap
  *   - CAS miss atomicity (no orphan approval / audit row)
  *   - concurrent manual reject beats auto-approve cleanly
  *   - window query excludes TOTP-method approvals and older-than-window rows
  *   - audit row byte-shape (action, actor_kind, details_sha256)
  *
  * No silent skip when PG is reachable. PG_REQUIRED=1 hard-fails if not.
+ * registerPgRequiredGuard is top-level *after* the live describe so beforeAll
+ * can set schemaReady before the guard it runs (leadership.pg pattern).
  */
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -291,12 +294,6 @@ const insertTotpApprovalDirect = (
      '${approvalId}', '${NODE_ID}', '${operationId}', '${challengeId}', 'TOTP_ONLY', '${PURPOSE}', 1,
      'preimage-${approvalId}', '${HEX64}', NULL, NULL, ${timestep}, now()
    );`;
-
-registerPgRequiredGuard({
-  name: "auto-approve-policy PG drills",
-  databaseUrl: process.env.TEST_DATABASE_URL,
-  isReady: () => schemaReady,
-});
 
 describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
   beforeAll(() => {
@@ -791,6 +788,138 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     ).trim();
     expect(method === "AUTO_POLICY|t|t" || method === "AUTO_POLICY|true|true").toBe(true);
   });
+
+  it("concurrent same-implementer commits cannot overshoot window cap", async () => {
+    // Two distinct CREATED sends, each amount = cap = 1. Concurrent writers with
+    // separate withTx sessions must not both AUTO_POLICY-approve (cap overshoot).
+    const imp = "f1000000-0000-4000-8000-0000000000cc";
+    const rule: AutoApproveRule = {
+      ...RULE,
+      implementer_id: imp,
+      per_send_max_zkz: "1",
+      window_cap_zkz: "1",
+      window_hours: 288,
+    };
+
+    const seedOne = (amount: string): string => {
+      const w = randomUUID();
+      const op = randomUUID();
+      const cols = OPERATION_COLUMNS.join(", ");
+      const vals = [
+        lit(op),
+        lit(imp),
+        lit(NODE_ID),
+        lit("SEND_EXTERNAL"),
+        lit("CREATED"),
+        lit(1),
+        lit(false),
+        lit("APPROVAL_PENDING"),
+        lit("POST"),
+        lit("/v1/external-sends"),
+        lit(`race-${op}`),
+        lit(HEX64),
+        lit(w),
+        lit(DESTINATION),
+        lit(amount),
+        lit(null),
+        lit(null),
+        lit(null),
+      ].join(", ");
+      psqlMust(scratchDb, seedWallet(w));
+      psqlMust(
+        scratchDb,
+        `INSERT INTO operations (id) VALUES ('${op}'); ` +
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now()); ` +
+          `INSERT INTO send_operation_expected_artifacts ` +
+          `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
+          `VALUES ('${randomUUID()}', '${op}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
+          `'preimage', '${HEX64}', '${SIG88}');`,
+      );
+      return op;
+    };
+
+    const opA = seedOne("1");
+    const opB = seedOne("1");
+
+    const sql = new AutocommitPsql(scratchDb);
+    // Two independent TX factories — not one shared client / queue.
+    const sessionA = sessionWithTx(dbUrl);
+    const sessionB = sessionWithTx(dbUrl);
+    const nowMs = () => Date.parse("2026-08-01T00:00:00.000Z");
+
+    const [resultA, resultB] = await Promise.all([
+      commitAutoApproval(
+        { operationId: opA, rule },
+        { sql, withTx: sessionA.withTx, nowMs },
+      ),
+      commitAutoApproval(
+        { operationId: opB, rule },
+        { sql, withTx: sessionB.withTx, nowMs },
+      ),
+    ]);
+
+    const decisions = [resultA.decision, resultB.decision].sort();
+    expect(decisions).toEqual(["approve", "fall_through"]);
+    const fall = resultA.decision === "fall_through" ? resultA : resultB;
+    expect(fall).toEqual({ decision: "fall_through", reason: "window_cap" });
+
+    const autoCount = psqlMust(
+      scratchDb,
+      `SELECT count(*) FROM operation_approvals a ` +
+        `JOIN send_operations o ON o.operation_id = a.operation_id ` +
+        `WHERE a.method = 'AUTO_POLICY' AND o.implementer_id = '${imp}' ` +
+        `AND o.operation_id IN ('${opA}', '${opB}');`,
+    ).trim();
+    expect(autoCount).toBe("1");
+
+    const spendSum = psqlMust(
+      scratchDb,
+      `SELECT COALESCE(SUM(o.amount_zkz::numeric), 0)::text FROM operation_approvals a ` +
+        `JOIN send_operations o ON o.operation_id = a.operation_id ` +
+        `WHERE a.method = 'AUTO_POLICY' AND o.implementer_id = '${imp}' ` +
+        `AND o.operation_id IN ('${opA}', '${opB}');`,
+    ).trim();
+    expect(spendSum === "1" || spendSum === "1.0" || spendSum === "1.0000").toBe(true);
+
+    const statuses = psqlMust(
+      scratchDb,
+      `SELECT operation_id || '=' || status FROM send_operations ` +
+        `WHERE operation_id IN ('${opA}', '${opB}') ORDER BY operation_id;`,
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    const statusMap = new Map(
+      statuses.map((line) => {
+        const [id, st] = line.split("=");
+        return [id!, st!] as const;
+      }),
+    );
+    expect(statusMap.get(opA) === "APPROVED" || statusMap.get(opA) === "CREATED").toBe(true);
+    expect(statusMap.get(opB) === "APPROVED" || statusMap.get(opB) === "CREATED").toBe(true);
+    const approvedN = [...statusMap.values()].filter((s) => s === "APPROVED").length;
+    const createdN = [...statusMap.values()].filter((s) => s === "CREATED").length;
+    expect(approvedN).toBe(1);
+    expect(createdN).toBe(1);
+
+    // No orphan approval without CAS (loser stays CREATED with zero approvals).
+    for (const op of [opA, opB]) {
+      if (statusMap.get(op) === "CREATED") {
+        const orphans = psqlMust(
+          scratchDb,
+          `SELECT count(*) FROM operation_approvals WHERE operation_id = '${op}';`,
+        ).trim();
+        expect(orphans).toBe("0");
+      }
+    }
+  });
+});
+
+// Guard after live describe so beforeAll sets schemaReady before this it runs.
+registerPgRequiredGuard({
+  name: "auto-approve-policy PG drills",
+  databaseUrl: process.env.TEST_DATABASE_URL,
+  isReady: () => schemaReady,
 });
 
 // Silence unused import when PG unavailable

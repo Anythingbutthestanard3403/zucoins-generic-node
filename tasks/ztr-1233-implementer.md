@@ -4,7 +4,7 @@
 Approval-stores amendment: `AUTO_POLICY` approval method for machine-committed SEND_EXTERNAL approvals.
 
 ## Head
-See PR for exact full head SHA (this file is committed on the branch tip).
+`e1753c3cbd4137e474595ea82b3ae4bdf738dcef` (product); evidence tip is branch HEAD at PR open.
 
 ## What landed
 - `approval_method` enum gains `AUTO_POLICY` (greenfield `base-enums-domains.sql` + TS `APPROVAL_METHOD` / `ApprovalMethod`).

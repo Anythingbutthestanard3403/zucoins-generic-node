@@ -178,6 +178,19 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     await expectReflowAt320(page);
   });
 
+
+  test("QUARANTINED wallet renders danger severity; AVAILABLE is not bare busy (ZTR-1255)", async ({ page }) => {
+    await authenticated(page, "/wallets");
+    const qTag = page.getByTestId("status-tag-quarantined");
+    await expect(qTag).toBeVisible();
+    await expect(qTag).toHaveAttribute("data-severity", "danger");
+    await expect(page.getByText(/QUARANTINED: REGRESSION/)).toBeVisible();
+    const aTag = page.getByTestId("status-tag-available");
+    await expect(aTag).toBeVisible();
+    await expect(aTag).toHaveAttribute("data-severity", "ok");
+    await expect(page.getByText(/^busy$/i)).toHaveCount(0);
+  });
+
   test("Wallets table scrolls horizontally and keyboard focus scrolls its link into view", async ({ page }) => {
     await authenticated(page, "/wallets");
     await expect(page.getByText("1248.4200")).toBeVisible();

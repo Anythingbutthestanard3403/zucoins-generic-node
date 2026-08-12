@@ -903,6 +903,20 @@
   .tag.warn { background: var(--warn-soft); color: var(--warn); }
   .tag.muted { background: var(--surface-3); color: var(--text-3); }
   .tag.danger { background: var(--danger-soft); color: var(--danger); }
+  .wallet-hold-cause {
+    display: inline;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .wallet-hold-cause-compact {
+    display: block;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .wallet-hold-cause[data-state="QUARANTINED"] .wallet-hold-cause-text {
+    color: var(--danger);
+    font-weight: 550;
+  }
   .sess-row .when {
     font-size: 12px;
     color: var(--text-4);

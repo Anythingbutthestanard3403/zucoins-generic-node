@@ -111,6 +111,8 @@ export interface MemoryWalletSeed {
       | "holding_operation_expiry_unix_time_secs"
       | "holding_operation_attention_required"
       | "holding_operation_terminal_at"
+      | "holding_lease_role"
+      | "holding_operation_type"
     >
   >;
 }
@@ -138,6 +140,8 @@ function emptyHolding(): Pick<
   | "holding_operation_expiry_unix_time_secs"
   | "holding_operation_attention_required"
   | "holding_operation_terminal_at"
+  | "holding_lease_role"
+  | "holding_operation_type"
 > {
   return {
     holding_operation_id: null,
@@ -145,6 +149,8 @@ function emptyHolding(): Pick<
     holding_operation_expiry_unix_time_secs: null,
     holding_operation_attention_required: false,
     holding_operation_terminal_at: null,
+    holding_lease_role: null,
+    holding_operation_type: null,
   };
 }
 
@@ -388,6 +394,9 @@ function mapWalletRow(
         : String(row.holding_operation_expiry_unix_time_secs),
     holding_operation_attention_required: Boolean(row.holding_operation_attention_required),
     holding_operation_terminal_at: tsOrNull(row.holding_operation_terminal_at),
+    holding_lease_role: row.holding_lease_role == null ? null : String(row.holding_lease_role),
+    holding_operation_type:
+      row.holding_operation_type == null ? null : String(row.holding_operation_type),
   };
 }
 
@@ -424,13 +433,15 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
                 w.created_at, w.retired_at, w.quarantine_reason,
                 w.recovery_verified_at, w.recovery_verification_id,
                 l.operation_id::text AS holding_operation_id,
+                l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,
+                o.kind::text AS holding_operation_type,
                 o.expiry_unix_time_secs AS holding_operation_expiry_unix_time_secs,
                 COALESCE(o.attention_required, false) AS holding_operation_attention_required,
                 o.terminal_at AS holding_operation_terminal_at
            FROM wallets w
            LEFT JOIN LATERAL (
-             SELECT wal.operation_id
+             SELECT wal.operation_id, wal.lease_role
                FROM wallet_active_leases wal
               WHERE wal.wallet_id = w.id
               ORDER BY wal.acquired_at DESC NULLS LAST
@@ -456,13 +467,15 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
         `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state, w.created_at, w.retired_at,
                 w.quarantine_reason, w.recovery_verified_at, w.recovery_verification_id,
                 l.operation_id::text AS holding_operation_id,
+                l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,
+                o.kind::text AS holding_operation_type,
                 o.expiry_unix_time_secs AS holding_operation_expiry_unix_time_secs,
                 COALESCE(o.attention_required, false) AS holding_operation_attention_required,
                 o.terminal_at AS holding_operation_terminal_at
            FROM wallets w
            LEFT JOIN LATERAL (
-             SELECT wal.operation_id
+             SELECT wal.operation_id, wal.lease_role
                FROM wallet_active_leases wal
               WHERE wal.wallet_id = w.id
               ORDER BY wal.acquired_at DESC NULLS LAST

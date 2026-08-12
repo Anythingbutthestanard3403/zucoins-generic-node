@@ -425,6 +425,8 @@ describe("getWalletInventory", () => {
         holding_operation_expiry_unix_time_secs: null,
         holding_operation_attention_required: false,
         holding_operation_terminal_at: null,
+        holding_lease_role: null,
+        holding_operation_type: null,
       }),
     );
     vi.stubGlobal("fetch", fetchMock);

@@ -92,6 +92,8 @@ function inventorySeed() {
         holding_operation_expiry_unix_time_secs: null,
         holding_operation_attention_required: false,
         holding_operation_terminal_at: null,
+        holding_lease_role: null,
+        holding_operation_type: null,
       },
       {
         custody: {
@@ -112,6 +114,8 @@ function inventorySeed() {
         holding_operation_expiry_unix_time_secs: null,
         holding_operation_attention_required: false,
         holding_operation_terminal_at: null,
+        holding_lease_role: null,
+        holding_operation_type: null,
       },
     ],
     operations: [
@@ -632,6 +636,7 @@ describe("admin inventory HTTP (contract)", () => {
     // @zucoins/generic-node-contracts/admin-inventory. Dropping a custody key from the shared
     // allowlist must redden this census the same way D3 pins operations.destination_address.
     // ZTR-1253: holding_operation_* projects the active lease op for release countdown.
+    // ZTR-1255: holding_lease_role + holding_operation_type for hold-cause copy.
     expect([...WALLET_INVENTORY_FIELDS]).toEqual([
       ...WALLET_CUSTODY_VIEW_FIELDS,
       "observed_balance_zkz",
@@ -640,6 +645,8 @@ describe("admin inventory HTTP (contract)", () => {
       "holding_operation_expiry_unix_time_secs",
       "holding_operation_attention_required",
       "holding_operation_terminal_at",
+      "holding_lease_role",
+      "holding_operation_type",
     ]);
   });
 

@@ -91,6 +91,8 @@ describe("WalletsPage honesty", () => {
           holding_operation_expiry_unix_time_secs: null,
           holding_operation_attention_required: false,
           holding_operation_terminal_at: null,
+          holding_lease_role: null,
+          holding_operation_type: null,
         }],
         has_more: false,
         next_cursor: null,
@@ -121,6 +123,8 @@ describe("WalletsPage honesty", () => {
                 holding_operation_expiry_unix_time_secs: null,
                 holding_operation_attention_required: false,
                 holding_operation_terminal_at: null,
+                holding_lease_role: null,
+                holding_operation_type: null,
               },
             ],
             has_more: false,
@@ -156,3 +160,79 @@ describe("WalletsPage honesty", () => {
   });
 
 });
+
+  it("renders QUARANTINED with danger tag and cause; AVAILABLE is not busy (ZTR-1255)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                wallet_id: "w-q",
+                public_key: "zkz1qquarantinedwallet",
+                state: "QUARANTINED",
+                key_origin: "node_generated",
+                recovery_verified: true,
+                quarantine_reason: "REGRESSION",
+                observed_balance_zkz: "0",
+                holding_operation_id: null,
+                holding_operation_status: null,
+                holding_operation_expiry_unix_time_secs: null,
+                holding_operation_attention_required: false,
+                holding_operation_terminal_at: null,
+                holding_lease_role: null,
+                holding_operation_type: null,
+              },
+              {
+                wallet_id: "w-a",
+                public_key: "zkz1qavailablewalletxx",
+                state: "AVAILABLE",
+                key_origin: "node_generated",
+                recovery_verified: true,
+                quarantine_reason: null,
+                observed_balance_zkz: "1",
+                holding_operation_id: null,
+                holding_operation_status: null,
+                holding_operation_expiry_unix_time_secs: null,
+                holding_operation_attention_required: false,
+                holding_operation_terminal_at: null,
+                holding_lease_role: null,
+                holding_operation_type: null,
+              },
+              {
+                wallet_id: "w-p",
+                public_key: "zkz1qpinnedwalletxxxxx",
+                state: "PINNED",
+                key_origin: "node_generated",
+                recovery_verified: true,
+                quarantine_reason: null,
+                observed_balance_zkz: "2",
+                holding_operation_id: "4fc07a73-0000-4000-8000-000000000001",
+                holding_operation_status: "AWAITING_REDEMPTION",
+                holding_operation_expiry_unix_time_secs: "9999999999",
+                holding_operation_attention_required: false,
+                holding_operation_terminal_at: null,
+                holding_lease_role: "RECEIVE_WINDOW",
+                holding_operation_type: "RECEIVE_EXTERNAL",
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    renderPage();
+    const qTag = await screen.findByTestId("status-tag-quarantined");
+    expect(qTag).toHaveAttribute("data-severity", "danger");
+    expect(screen.getByText(/QUARANTINED: REGRESSION/)).toBeInTheDocument();
+    expect(screen.getByTestId("status-tag-available")).toHaveAttribute("data-severity", "ok");
+    expect(screen.queryByText(/^busy$/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("status-tag-pinned")).toHaveAttribute("data-severity", "warn");
+    const holdLinks = screen.getAllByTestId("wallet-hold-op-link");
+    expect(holdLinks.length).toBeGreaterThan(0);
+    expect(holdLinks[0]).toHaveAttribute("href", "/operations/4fc07a73-0000-4000-8000-000000000001");
+  });

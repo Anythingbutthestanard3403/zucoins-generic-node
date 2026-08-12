@@ -924,11 +924,29 @@ async function advanceApprovedSends(deps: {
 }
 
 /**
+ * Receiver wallet public key for a receive operation — same join as break-glass
+ * RELEASE_EXPIRED_RECEIVE (sql-recovery-store). Read ahead of the SERIALIZABLE expire
+ * body so the gateway confirm-read can run outside the retry envelope (ZTR-1251).
+ */
+const SQL_EXPIRY_RECEIVER_WALLET_PUBLIC_KEY = `
+  SELECT w.public_key
+    FROM operation_wallets ow
+    JOIN wallets w ON w.id = ow.wallet_id
+   WHERE ow.operation_id = $1::uuid AND ow.operation_role = 'RECEIVER'
+`;
+
+/**
  * Receive expiry-release worker step. Scans for RECEIVE_EXTERNAL
  * operations past their expiry (+ 30s safety margin), drives the proof-backed
  * SqlReceiveExpiryReleaseService for each. The service handles all predicate
  * evaluation, attention routing, and proof-backed lease release (One-in-flight — never
  * a raw DELETE from wallet_active_leases).
+ *
+ * ZTR-1251: when a T0 observation exists, obtain a fresh verified head observation
+ * **before** opening the SERIALIZABLE expire transaction (gateway I/O never inside the
+ * retry body — same discipline as sql-recovery-store RELEASE_EXPIRED_RECEIVE). Passing
+ * null forever made FRESH_VERIFIED_T0_EXACT unsatisfiable and parked every assigned
+ * expiry as T0_RELEASE_MISMATCH.
  */
 async function runReceiveExpiryReleaseStep(deps: {
   readonly pool: Pool;
@@ -939,6 +957,12 @@ async function runReceiveExpiryReleaseStep(deps: {
   readonly eventSigner?: () => NodeEventSigner | null;
   readonly eventQuota?: DualChainEventQuota;
   readonly metricsHooks?: MetricsHooks;
+  /**
+   * Durable get_transaction__v1 reader. Required for T0-unchanged release of assigned
+   * receives. When omitted (no gateway URLs), expire still runs with null fresh id —
+   * PROVEN_NOT_STARTED (no T0) can release; T0-bound ops park attention as before.
+   */
+  readonly readFreshHead?: import("@zucoins/node-core").ReadFreshHead;
 }): Promise<{
   readonly processed: number;
   readonly released: number;
@@ -956,10 +980,10 @@ async function runReceiveExpiryReleaseStep(deps: {
 
   // SERIALIZABLE per CONVENTIONS.md §1 (money-path: releases a wallet lease and mints a
   // release proof), so 40001 is reachable here and must be retried under the one fixed
-  // policy rather than surfacing as a tick error. The retried body is DB-only: the expiry
-  // pass runs with `freshObservationId: null` (below), so no gateway read and no chain
-  // submit can occur inside it — the same discipline sql-recovery-store.ts applies when it
-  // wraps this very service.
+  // policy rather than surfacing as a tick error. The retried body is DB-only: the gateway
+  // fresh-head read runs **before** withTransaction (below), so no network I/O and no
+  // chain submit can occur inside the retry envelope — same discipline as
+  // sql-recovery-store.ts when it wraps this service for break-glass release.
   const expiryStatementTimeoutMs =
     deps.moneyPathStatementTimeoutMs ?? MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT;
   const service = new SqlReceiveExpiryReleaseService(
@@ -1043,9 +1067,35 @@ async function runReceiveExpiryReleaseStep(deps: {
     if (deps.stopped()) break;
     processed++;
     try {
+      // Fresh head OUTSIDE the SERIALIZABLE expire body. Only needed when T0 exists —
+      // PROVEN_NOT_STARTED (null T0 + no formation) still uses freshObservationId: null.
+      let freshObservationId: string | null = null;
+      if (
+        candidate.t0ObservationId !== null &&
+        deps.readFreshHead !== undefined &&
+        candidate.receiverWalletId !== null
+      ) {
+        try {
+          const walletRow = (
+            await deps.pool.query<{ public_key: string }>(SQL_EXPIRY_RECEIVER_WALLET_PUBLIC_KEY, [
+              candidate.operationId,
+            ])
+          ).rows[0];
+          if (walletRow !== undefined) {
+            const fresh = await deps.readFreshHead(walletRow.public_key);
+            freshObservationId = fresh.observationId;
+          }
+        } catch (err) {
+          deps.logger.info(
+            `money-workers: receive expiry fresh-head read failed op=${candidate.operationId} ` +
+              `(${err instanceof Error ? err.message : String(err)}) — expire with null fresh id`,
+          );
+          freshObservationId = null;
+        }
+      }
       const outcome = await service.expire({
         operationId: candidate.operationId,
-        freshObservationId: null,
+        freshObservationId,
         nowMs: Date.now(),
       });
       switch (outcome.kind) {
@@ -1682,6 +1732,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
 
     // Receive expiry-release: past-expiry receives driven through the
     // proof-backed SqlReceiveExpiryReleaseService (One-in-flight — no raw lease DELETE).
+    // ZTR-1251: pass the same durable fresh-head reader landing uses so T0-unchanged
+    // release is satisfiable (never hardcode freshObservationId: null when gateways exist).
     if (!stopped) {
       try {
         const expiryResult = await runReceiveExpiryReleaseStep({
@@ -1693,6 +1745,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           eventSigner: deps.eventSigner,
           ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
           ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
+          ...(receiveLandingDeps !== null
+            ? { readFreshHead: receiveLandingDeps.readFreshHead }
+            : {}),
         });
         if (expiryResult.released > 0) {
           deps.logger.info(

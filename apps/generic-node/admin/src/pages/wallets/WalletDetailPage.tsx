@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
+import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { toApiFailureDetail } from "../../lib/api.js";
 import { getWalletInventory } from "../../lib/money.js";
@@ -74,6 +75,30 @@ export function WalletDetailPage() {
               </>
             )}
           </div>
+
+        {w.holding_operation_id ? (
+          <>
+            <div className="detail-item">
+              <div className="k">Holding operation</div>
+              <div className="v mono">
+                <Link to={`/operations/${w.holding_operation_id}`} className="linkish">
+                  {w.holding_operation_id}
+                </Link>
+              </div>
+            </div>
+            <div className="detail-item">
+              <div className="k">Wallet release</div>
+              <div className="v">
+                <ReleaseCountdown
+                  expiryUnixTimeSecs={w.holding_operation_expiry_unix_time_secs}
+                  status={w.holding_operation_status ?? w.state}
+                  terminalAt={w.holding_operation_terminal_at}
+                  attentionRequired={w.holding_operation_attention_required}
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
         </div>
       </div>
     </div>

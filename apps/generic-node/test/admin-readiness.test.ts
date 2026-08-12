@@ -314,6 +314,11 @@ describe("GET /admin/v1/readiness", () => {
             recoveryVerificationId: null,
           },
           observed_balance_zkz: null,
+          holding_operation_id: null,
+          holding_operation_status: null,
+          holding_operation_expiry_unix_time_secs: null,
+          holding_operation_attention_required: false,
+          holding_operation_terminal_at: null,
         } satisfies MemoryWalletSeed,
       ],
     });

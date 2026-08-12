@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
+import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { listWalletsInventory } from "../../lib/money.js";
@@ -107,6 +108,19 @@ export function WalletsPage() {
                   <td>{w.key_origin}</td>
                   <td>
                     <StatusTag status={w.state} />
+                  </td>
+                  <td>
+                    {w.holding_operation_id ? (
+                      <ReleaseCountdown
+                        compact
+                        expiryUnixTimeSecs={w.holding_operation_expiry_unix_time_secs}
+                        status={w.holding_operation_status ?? w.state}
+                        terminalAt={w.holding_operation_terminal_at}
+                        attentionRequired={w.holding_operation_attention_required}
+                      />
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
                   </td>
                   <td>
                     {w.recovery_verified ? (

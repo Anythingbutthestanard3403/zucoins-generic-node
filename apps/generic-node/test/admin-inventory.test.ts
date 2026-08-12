@@ -87,6 +87,11 @@ function inventorySeed() {
           recoveryVerificationId: null,
         },
         observed_balance_zkz: "1.25",
+        holding_operation_id: null,
+        holding_operation_status: null,
+        holding_operation_expiry_unix_time_secs: null,
+        holding_operation_attention_required: false,
+        holding_operation_terminal_at: null,
       },
       {
         custody: {
@@ -102,6 +107,11 @@ function inventorySeed() {
           recoveryVerificationId: null,
         },
         observed_balance_zkz: null,
+        holding_operation_id: null,
+        holding_operation_status: null,
+        holding_operation_expiry_unix_time_secs: null,
+        holding_operation_attention_required: false,
+        holding_operation_terminal_at: null,
       },
     ],
     operations: [
@@ -117,6 +127,7 @@ function inventorySeed() {
           created_at: "2026-07-03T00:00:00.000Z",
           updated_at: "2026-07-03T00:01:00.000Z",
           terminal_at: null,
+          expiry_unix_time_secs: null,
           destination_address: null,
         },
         detail: {
@@ -143,6 +154,7 @@ function inventorySeed() {
           created_at: "2026-07-03T02:00:00.000Z",
           updated_at: "2026-07-03T02:00:00.000Z",
           terminal_at: null,
+          expiry_unix_time_secs: null,
           destination_address: SEND_DESTINATION_ADDRESS,
         },
       },
@@ -582,6 +594,7 @@ describe("admin inventory HTTP (contract)", () => {
               created_at: "2026-07-03T02:00:00.000Z",
               updated_at: "2026-07-03T02:00:00.000Z",
               terminal_at: null,
+              expiry_unix_time_secs: null,
               destination_address: SEND_DESTINATION_ADDRESS,
             },
             {
@@ -595,6 +608,7 @@ describe("admin inventory HTTP (contract)", () => {
               created_at: "2026-07-03T00:00:00.000Z",
               updated_at: "2026-07-03T00:01:00.000Z",
               terminal_at: null,
+              expiry_unix_time_secs: null,
               destination_address: null,
             },
           ],
@@ -613,13 +627,19 @@ describe("admin inventory HTTP (contract)", () => {
     expect(page.data[1]!.destination_address).toBeNull();
   });
 
-  it("D3: wallet inventory allowlist is custody view + observed_balance (shared contracts)", () => {
+  it("D3: wallet inventory allowlist is custody view + observed_balance + holding op (shared contracts)", () => {
     // ZTR-1217: SPA + node both import WalletInventoryItem / WALLET_INVENTORY_FIELDS from
     // @zucoins/generic-node-contracts/admin-inventory. Dropping a custody key from the shared
     // allowlist must redden this census the same way D3 pins operations.destination_address.
+    // ZTR-1253: holding_operation_* projects the active lease op for release countdown.
     expect([...WALLET_INVENTORY_FIELDS]).toEqual([
       ...WALLET_CUSTODY_VIEW_FIELDS,
       "observed_balance_zkz",
+      "holding_operation_id",
+      "holding_operation_status",
+      "holding_operation_expiry_unix_time_secs",
+      "holding_operation_attention_required",
+      "holding_operation_terminal_at",
     ]);
   });
 

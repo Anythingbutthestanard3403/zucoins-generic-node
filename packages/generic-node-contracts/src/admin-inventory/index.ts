@@ -41,6 +41,12 @@ export interface OperationInventoryListItem {
   readonly updated_at: string;
   readonly terminal_at: string | null;
   /**
+   * Frozen receive/send expiry as unix seconds (text on the wire). Null when the
+   * operation has no expiry (walletless CREATED queue, or kinds that never arm one).
+   * ZTR-1253 — operator countdown authority; never a wall-clock invent.
+   */
+  readonly expiry_unix_time_secs: string | null;
+  /**
    * Public key only — never a transfer code or private key. Null on operations that have no
    * external destination (RECEIVE_EXTERNAL, MOVE_INTERNAL) and on a SEND_EXTERNAL that has not
    * resolved one yet.
@@ -73,6 +79,7 @@ export const OPERATION_INVENTORY_LIST_FIELDS = [
   "created_at",
   "updated_at",
   "terminal_at",
+  "expiry_unix_time_secs",
   "destination_address",
 ] as const;
 
@@ -122,6 +129,15 @@ export interface WalletInventoryItem {
   readonly recovery_verification: WalletRecoveryEvidenceView | null;
   /** Observed balance when known (settled-ledger / observation); never a private key. */
   readonly observed_balance_zkz: string | null;
+  /**
+   * Active lease holding operation when present (ZTR-1253). Null when no
+   * wallet_active_leases row. Never invents a hold from wallet.state alone.
+   */
+  readonly holding_operation_id: string | null;
+  readonly holding_operation_status: string | null;
+  readonly holding_operation_expiry_unix_time_secs: string | null;
+  readonly holding_operation_attention_required: boolean;
+  readonly holding_operation_terminal_at: string | null;
 }
 
 /** Response field allowlist for wallet inventory — never private keys or secret-class tokens. */
@@ -138,6 +154,11 @@ export const WALLET_INVENTORY_FIELDS = [
   "recovery_verified_at",
   "recovery_verification",
   "observed_balance_zkz",
+  "holding_operation_id",
+  "holding_operation_status",
+  "holding_operation_expiry_unix_time_secs",
+  "holding_operation_attention_required",
+  "holding_operation_terminal_at",
 ] as const;
 
 /**

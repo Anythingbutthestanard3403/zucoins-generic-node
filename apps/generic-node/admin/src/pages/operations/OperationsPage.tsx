@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
+import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import {
   formatMoneyError,
@@ -345,6 +346,7 @@ export function OperationsPage() {
                     <th>Reference</th>
                     <th>Amount</th>
                     <th>Status</th>
+                    <th>Release</th>
                     <th>When</th>
                     <th>
                       <span className="visually-hidden">Actions</span>
@@ -371,6 +373,15 @@ export function OperationsPage() {
                             Attention
                           </span>
                         ) : null}
+                      </td>
+                      <td>
+                        <ReleaseCountdown
+                          compact
+                          expiryUnixTimeSecs={o.expiry_unix_time_secs}
+                          status={o.status}
+                          terminalAt={o.terminal_at}
+                          attentionRequired={o.attention_required}
+                        />
                       </td>
                       <td className="quiet">{o.updated_at ?? o.created_at}</td>
                       <td>

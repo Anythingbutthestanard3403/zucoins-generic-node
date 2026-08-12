@@ -16,3 +16,20 @@ export {
   createSqlImplementerRegistry,
   type ImplementerSqlExecutor,
 } from "./sql-store.js";
+
+export {
+  INTEGRATION_REQUEST_APPROVED_ACTION,
+  INTEGRATION_REQUEST_DECLINED_ACTION,
+  IntegrationRequestStoreError,
+  InMemoryIntegrationRequestStore,
+  SqlIntegrationRequestStore,
+  createSqlIntegrationRequestStore,
+  type IntegrationRequestApproveInput,
+  type IntegrationRequestDeclineInput,
+  type IntegrationRequestListFilter,
+  type IntegrationRequestListingStatus,
+  type IntegrationRequestRecord,
+  type IntegrationRequestSqlExecutor,
+  type IntegrationRequestStore,
+  type IntegrationRequestStoreErrorCode,
+} from "./integration-requests.js";

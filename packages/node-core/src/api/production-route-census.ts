@@ -132,6 +132,29 @@ export const LIVE_AUTO_APPROVE_POLICY_ROUTES = Object.freeze([
   },
 ] as const);
 
+/**
+ * Live integration-request operator surface (ZTR-1240). Not in ROUTE_POLICIES;
+ * mounted on the admin dispatcher (session GET; session+CSRF+fresh TOTP for
+ * approve/decline). Approve creates implementer + binds auto-approve rule.
+ */
+export const LIVE_INTEGRATION_REQUEST_ROUTES = Object.freeze([
+  {
+    method: "GET" as const,
+    path: "/admin/v1/integration-requests",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/integration-requests/:id/approve",
+    authMode: "operator_session_totp" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/integration-requests/:id/decline",
+    authMode: "operator_session_totp" as const,
+  },
+] as const);
+
 export type RouteKey = `${string} ${string}`;
 
 export function routeKeyOf(method: string, path: string): RouteKey {

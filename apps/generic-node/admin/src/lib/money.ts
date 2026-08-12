@@ -1893,6 +1893,125 @@ export async function postAutoApprovePolicy(
   });
 }
 
+// --- Integration requests (ZTR-1240 operator inbox) ---
+
+export interface IntegrationRequestItem {
+  readonly id: string;
+  readonly display_name: string;
+  readonly requested_scopes: readonly string[];
+  readonly proposed_rule_json: string;
+  readonly approved_rule_json: string | null;
+  readonly status: string;
+  readonly row_version: number;
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly decided_at: string | null;
+  readonly decided_by: string | null;
+  readonly implementer_id: string | null;
+}
+
+export interface IntegrationRequestListResult {
+  readonly data: readonly IntegrationRequestItem[];
+  readonly live: boolean;
+}
+
+/** Soft-read pending (default) integration requests for the approve inbox. */
+export async function listIntegrationRequests(opts?: {
+  readonly status?: string;
+}): Promise<IntegrationRequestListResult> {
+  const q =
+    opts?.status !== undefined && opts.status.length > 0
+      ? `?status=${encodeURIComponent(opts.status)}`
+      : "?status=PENDING";
+  const r = await apiSoftRead<{
+    readonly object?: string;
+    readonly data?: readonly IntegrationRequestItem[];
+  }>(`/integration-requests${q}`, { object: "list", data: [] });
+  return { data: r.data.data ?? [], live: r.live };
+}
+
+export interface IntegrationRequestApproveRuleBody {
+  readonly rule_id: string;
+  readonly per_send_max_zkz: string;
+  readonly per_send_min_zkz: string | null;
+  readonly window_hours: number;
+  readonly window_cap_zkz: string;
+  readonly expires_at: string | null;
+  readonly enabled: boolean;
+  /** Optional; server stamps the created implementer_id. */
+  readonly implementer_id?: string;
+}
+
+export async function postIntegrationRequestApprove(
+  id: string,
+  body: {
+    readonly expected_row_version: number;
+    readonly rule: IntegrationRequestApproveRuleBody;
+  },
+  totp: string,
+): Promise<unknown> {
+  return api(`/integration-requests/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function postIntegrationRequestDecline(
+  id: string,
+  body: { readonly expected_row_version: number },
+  totp: string,
+): Promise<unknown> {
+  return api(`/integration-requests/${encodeURIComponent(id)}/decline`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+/** Parse proposed_rule_json into editable cap fields (best-effort). */
+export function parseProposedIntegrationRule(raw: string): {
+  readonly rule_id: string;
+  readonly per_send_max_zkz: string;
+  readonly per_send_min_zkz: string;
+  readonly window_hours: string;
+  readonly window_cap_zkz: string;
+  readonly expires_at: string;
+  readonly enabled: boolean;
+} {
+  const empty = {
+    rule_id: "integration",
+    per_send_max_zkz: "",
+    per_send_min_zkz: "",
+    window_hours: "24",
+    window_cap_zkz: "",
+    expires_at: "",
+    enabled: true,
+  };
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      rule_id: typeof o.rule_id === "string" ? o.rule_id : empty.rule_id,
+      per_send_max_zkz:
+        typeof o.per_send_max_zkz === "string" ? o.per_send_max_zkz : empty.per_send_max_zkz,
+      per_send_min_zkz:
+        o.per_send_min_zkz === null || o.per_send_min_zkz === undefined
+          ? ""
+          : String(o.per_send_min_zkz),
+      window_hours:
+        typeof o.window_hours === "number" ? String(o.window_hours) : empty.window_hours,
+      window_cap_zkz:
+        typeof o.window_cap_zkz === "string" ? o.window_cap_zkz : empty.window_cap_zkz,
+      expires_at: typeof o.expires_at === "string" ? o.expires_at : "",
+      enabled: typeof o.enabled === "boolean" ? o.enabled : true,
+    };
+  } catch {
+    return empty;
+  }
+}
+
 // --- Second-device enrolment ---
 
 export interface SecondDeviceIssueResponse {

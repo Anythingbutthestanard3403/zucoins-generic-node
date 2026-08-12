@@ -30,7 +30,10 @@ export const OPERATOR_PUSH_FORBIDDEN_PAYLOAD_KEYS = [
 
 export type OperatorPushAttentionType =
   | "send_pending_approval"
-  | "needs_attention";
+  | "needs_attention"
+  /** Platform filed an integration request; operator inbox is source of truth. */
+  | "integration_request_pending";
+
 
 export interface OperatorPushPayload {
   readonly attention_type: OperatorPushAttentionType;

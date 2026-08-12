@@ -121,6 +121,12 @@ function emptyLiveFetch() {
       if (url.includes("/implementers")) {
         return new Response(JSON.stringify({ implementers: [] }), { status: 200 });
       }
+      if (url.includes("/integration-requests")) {
+        return new Response(
+          JSON.stringify({ object: "list", data: [], has_more: false, next_cursor: null }),
+          { status: 200 },
+        );
+      }
       if (url.includes("/auto-approve-policy")) {
         return new Response(
           JSON.stringify({

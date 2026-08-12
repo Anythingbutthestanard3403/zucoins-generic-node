@@ -341,4 +341,75 @@ describe("ApproveInboxPage", () => {
     expect(screen.getByRole("button", { name: "Rebuild internal transfer" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "FORCE_LANDED" })).toBeDisabled();
   });
+
+  it("renders pending integration request cards with edit-then-approve", async () => {
+    const approveCalls: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/integration-requests/") && url.includes("/approve") && (init?.method ?? "GET") === "POST") {
+          approveCalls.push(JSON.parse(String(init?.body ?? "{}")));
+          return new Response(
+            JSON.stringify({
+              request: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", status: "APPROVED" },
+              implementer: { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Platform Alpha" },
+              rule: { per_send_max_zkz: "5" },
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/integration-requests")) {
+          return new Response(
+            JSON.stringify({
+              object: "list",
+              data: [
+                {
+                  id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                  display_name: "Platform Alpha",
+                  requested_scopes: ["send:create", "send:read"],
+                  proposed_rule_json: JSON.stringify({
+                    rule_id: "r1",
+                    per_send_max_zkz: "10",
+                    per_send_min_zkz: null,
+                    window_hours: 24,
+                    window_cap_zkz: "100",
+                    expires_at: null,
+                    enabled: true,
+                  }),
+                  approved_rule_json: null,
+                  status: "PENDING",
+                  row_version: 1,
+                  created_at: "2026-08-01T00:00:00.000Z",
+                  expires_at: "2026-08-08T00:00:00.000Z",
+                  decided_at: null,
+                  decided_by: null,
+                  implementer_id: null,
+                },
+              ],
+              has_more: false,
+              next_cursor: null,
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("needs-attention")) return emptyAttention();
+        return emptyList();
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("approve-integration-card")).toBeInTheDocument());
+    expect(screen.getByText("Platform Alpha")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Review & edit/i }));
+    await waitFor(() => expect(screen.getByTestId("approve-integration-actions")).toBeInTheDocument());
+    const maxInput = screen.getByLabelText(/Per-send max/i);
+    fireEvent.change(maxInput, { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: /Approve \(TOTP\)/i }));
+    await enterTotp("123456");
+    await waitFor(() => expect(approveCalls.length).toBe(1));
+    const body = approveCalls[0] as { rule: { per_send_max_zkz: string }; expected_row_version: number };
+    expect(body.expected_row_version).toBe(1);
+    expect(body.rule.per_send_max_zkz).toBe("5");
+  });
+
 });

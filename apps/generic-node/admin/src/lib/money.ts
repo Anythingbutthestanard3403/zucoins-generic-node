@@ -675,6 +675,7 @@ export async function postHaltToggle(
 // into their implementer website backend env (never customer browser JS).
 export interface ApiKeyListing {
   readonly id: string;
+  readonly implementer_id: string;
   readonly prefix: string;
   readonly scopes: readonly string[];
   readonly status: string;
@@ -687,6 +688,7 @@ export interface ApiKeyListing {
 
 export interface ApiKeyIssueResult {
   readonly id: string;
+  readonly implementer_id: string;
   readonly raw_key: string;
   readonly prefix: string;
   readonly scopes: readonly string[];
@@ -695,22 +697,43 @@ export interface ApiKeyIssueResult {
   readonly expires_at: string | null;
 }
 
+export interface ImplementerListing {
+  readonly id: string;
+  readonly name: string;
+  readonly created_at: string;
+  readonly retired_at: string | null;
+}
+
 /** Key inventory is empty only after a successful GET; unavailable stays explicit. */
-export async function listApiKeys(): Promise<{
+export async function listApiKeys(opts?: {
+  readonly implementerId?: string;
+}): Promise<{
   readonly keys: readonly ApiKeyListing[];
   readonly live: boolean;
 }> {
-  const r = await apiSoftRead<{ readonly keys: readonly ApiKeyListing[] }>("/api-keys", { keys: [] });
+  const q =
+    opts?.implementerId !== undefined && opts.implementerId.length > 0
+      ? `?implementer_id=${encodeURIComponent(opts.implementerId)}`
+      : "";
+  const r = await apiSoftRead<{ readonly keys: readonly ApiKeyListing[] }>(
+    `/api-keys${q}`,
+    { keys: [] },
+  );
   return { keys: r.data.keys ?? [], live: r.live };
 }
 
 export async function postIssueApiKey(
-  scopes: readonly string[] | undefined,
+  opts: { readonly scopes?: readonly string[]; readonly implementerId?: string } | undefined,
   totp: string,
 ): Promise<ApiKeyIssueResult> {
+  const body: { scopes?: readonly string[]; implementer_id?: string } = {};
+  if (opts?.scopes !== undefined) body.scopes = opts.scopes;
+  if (opts?.implementerId !== undefined && opts.implementerId.length > 0) {
+    body.implementer_id = opts.implementerId;
+  }
   return api<ApiKeyIssueResult>("/api-keys", {
     method: "POST",
-    body: JSON.stringify(scopes === undefined ? {} : { scopes }),
+    body: JSON.stringify(body),
     totp,
     // Server idempotencyGate requires 16–255 visible ASCII (admin_api_keys_issue).
     idempotencyKey: newIdempotencyKey(),
@@ -728,6 +751,45 @@ export async function postRevokeApiKey(
     // Server idempotencyGate requires 16–255 visible ASCII (admin_api_keys_revoke).
     idempotencyKey: newIdempotencyKey(),
   });
+}
+
+/** Named integration identity inventory. */
+export async function listImplementers(): Promise<{
+  readonly implementers: readonly ImplementerListing[];
+  readonly live: boolean;
+}> {
+  const r = await apiSoftRead<{ readonly implementers: readonly ImplementerListing[] }>(
+    "/implementers",
+    { implementers: [] },
+  );
+  return { implementers: r.data.implementers ?? [], live: r.live };
+}
+
+export async function postCreateImplementer(
+  name: string,
+  totp: string,
+): Promise<ImplementerListing> {
+  return api<ImplementerListing>("/implementers", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export async function postRetireImplementer(
+  implementerId: string,
+  totp: string,
+): Promise<ImplementerListing> {
+  return api<ImplementerListing>(
+    `/implementers/${encodeURIComponent(implementerId)}/retire`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+      totp,
+      idempotencyKey: newIdempotencyKey(),
+    },
+  );
 }
 
 // Reporting credential management. Issue node-mints the

@@ -55,6 +55,9 @@ const TransferDetailPage = lazy(() => import("./pages/transfers/TransferDetailPa
 const AuditPage = lazy(() => import("./pages/audit/AuditPage.js").then((m) => ({ default: m.AuditPage })));
 const BackupPage = lazy(() => import("./pages/backup/BackupPage.js").then((m) => ({ default: m.BackupPage })));
 const ApiKeysPage = lazy(() => import("./pages/api-keys/ApiKeysPage.js").then((m) => ({ default: m.ApiKeysPage })));
+const IntegrationsPage = lazy(() =>
+  import("./pages/integrations/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })),
+);
 const ReportingKeysPage = lazy(() => import("./pages/reporting-keys/ReportingKeysPage.js").then((m) => ({ default: m.ReportingKeysPage })));
 const LabReceivePage = lazy(() => import("./pages/lab/LabReceivePage.js").then((m) => ({ default: m.LabReceivePage })));
 const IntegrationPage = lazy(() => import("./pages/integration/IntegrationPage.js").then((m) => ({ default: m.IntegrationPage })));
@@ -302,6 +305,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/backup" element={<BackupPage />} />
                   <Route path="/recovery-ceremony" element={<RecoveryCeremonyPage />} />
                   <Route path="/api-keys" element={<ApiKeysPage />} />
+                  <Route path="/integrations" element={<IntegrationsPage />} />
                   <Route path="/devices" element={<DevicesPage />} />
                   <Route path="/devices/enrol" element={<DevicesPage />} />
                   <Route path="/reporting-keys" element={<ReportingKeysPage />} />

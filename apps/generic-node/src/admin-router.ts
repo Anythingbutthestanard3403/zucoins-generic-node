@@ -16,6 +16,7 @@ import {
   buildDeviceEnrol,
   CredentialError,
   CredentialService,
+  ImplementerRegistryError,
   disengageHalt,
   engageHalt,
   executeAttentionRetraction,
@@ -53,6 +54,8 @@ import {
   type CreateCredentialResult,
   type CsrfConfig,
   type DestinationService,
+  type ImplementerRecord,
+  type ImplementerRegistry,
   type DeviceRevocationAuditLog,
   type DeviceRevocationSideEffects,
   InMemoryEnrollmentAuditLog,
@@ -560,10 +563,14 @@ const LOWER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
  * POST /admin/v1/api-keys body. Scopes default to the full implementer scope set
  * (parity with the genesis bootstrap credential) and must be a non-empty subset of
  * the closed IMPLEMENTER_SCOPES vocabulary. An explicit empty array is rejected.
+ * Optional `implementer_id` targets a non-genesis integration; omitted → genesis default.
  */
 function parseIssueApiKeyBody(
   raw: unknown,
-): ParseOk<{ readonly scopes: readonly ImplementerScope[] }> | ParseFail {
+): ParseOk<{
+  readonly scopes: readonly ImplementerScope[];
+  readonly implementer_id: string | null;
+}> | ParseFail {
   if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
   }
@@ -590,13 +597,79 @@ function parseIssueApiKeyBody(
     }
     scopes = [...new Set(scopes)];
   }
-  const known = new Set(["scopes"]);
+  let implementerId: string | null = null;
+  if (raw.implementer_id !== undefined && raw.implementer_id !== null) {
+    if (typeof raw.implementer_id !== "string" || !LOWER_UUID_RE.test(raw.implementer_id)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "validation_error",
+        message: "implementer_id must be a canonical uuid",
+      };
+    }
+    implementerId = raw.implementer_id;
+  }
+  const known = new Set(["scopes", "implementer_id"]);
   for (const key of Object.keys(raw)) {
     if (!known.has(key)) {
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
-  return { ok: true, body: { scopes } };
+  return { ok: true, body: { scopes, implementer_id: implementerId } };
+}
+
+/** POST /admin/v1/implementers body — `{ name }` only. */
+function parseCreateImplementerBody(
+  raw: unknown,
+): ParseOk<{ readonly name: string }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (typeof raw.name !== "string") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "name is required" };
+  }
+  const name = raw.name.trim();
+  if (name.length === 0 || name.length > 128) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "name must be 1–128 characters after trim",
+    };
+  }
+  const known = new Set(["name"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { name } };
+}
+
+function parseRetireImplementerBody(
+  raw: unknown,
+): ParseOk<Record<string, never>> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  for (const key of Object.keys(raw)) {
+    return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+  }
+  return { ok: true, body: {} };
+}
+
+function toImplementerListing(row: ImplementerRecord): {
+  readonly id: string;
+  readonly name: string;
+  readonly created_at: string;
+  readonly retired_at: string | null;
+} {
+  return {
+    id: row.id,
+    name: row.name,
+    created_at: row.created_at,
+    retired_at: row.retired_at,
+  };
 }
 
 function parseRevokeApiKeyBody(
@@ -614,6 +687,7 @@ function parseRevokeApiKeyBody(
 /** List projection — never the raw key or the hash. last_used_at is null (no schema column). */
 function toApiKeyListing(row: StoredCredential): {
   readonly id: string;
+  readonly implementer_id: string;
   readonly prefix: string;
   readonly scopes: readonly ImplementerScope[];
   readonly status: string;
@@ -625,6 +699,7 @@ function toApiKeyListing(row: StoredCredential): {
 } {
   return {
     id: row.id,
+    implementer_id: row.implementer_id,
     prefix: row.public_prefix,
     scopes: row.scopes,
     status: row.status,
@@ -637,8 +712,12 @@ function toApiKeyListing(row: StoredCredential): {
 }
 
 /** Issue response — the full secret is returned exactly once, never persisted, never logged. */
-function toApiKeyIssueResult(created: CreateCredentialResult): {
+function toApiKeyIssueResult(
+  created: CreateCredentialResult,
+  implementerId: string,
+): {
   readonly id: string;
+  readonly implementer_id: string;
   readonly raw_key: string;
   readonly prefix: string;
   readonly scopes: readonly ImplementerScope[];
@@ -648,6 +727,7 @@ function toApiKeyIssueResult(created: CreateCredentialResult): {
 } {
   return {
     id: created.credential_id,
+    implementer_id: implementerId,
     raw_key: created.raw_key,
     prefix: created.public_prefix,
     scopes: created.scopes,
@@ -1093,12 +1173,17 @@ export interface AdminRouteDeps {
   /**
    * Implementer API key management — issue/list/revoke over the
    * CredentialService bound to the custody pool. When omitted (tests), the
-   * /admin/v1/api-keys routes fail closed (503). The implementer id is the
-   * single non-retired row the genesis bootstrap seeded; resolved per-call so
-   * a reseed after retirement is honoured without a restart.
+   * /admin/v1/api-keys routes fail closed (503).
+   * `resolveImplementerId` is the genesis default (earliest non-retired row)
+   * used when POST /admin/v1/api-keys omits implementer_id.
    */
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
+  /**
+   * Named integration identity registry (create/list/retire). When omitted,
+   * /admin/v1/implementers routes fail closed (503).
+   */
+  readonly implementerRegistry?: ImplementerRegistry;
   /**
    * REQUIRED admin-mutation idempotency. Routes check for a completed row before
    * the TOTP burn; the shared executor commits child effects and exact response bytes together.
@@ -1211,6 +1296,11 @@ export interface AdminMutationTxPorts {
   readonly destinationService: DestinationService;
   readonly halt?: AdminRouteDeps["halt"];
   readonly credentialService: CredentialService;
+  /**
+   * TX-scoped implementer registry (create/retire + audit). Mutation writes MUST
+   * use this port so implementers + audit_log commit/roll back with the admin TX.
+   */
+  readonly implementerRegistry?: ImplementerRegistry;
   /**
    * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
    * port so node_settings + audit_log commit/roll back with the admin mutation TX.
@@ -2212,8 +2302,29 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
-    // GET /admin/v1/api-keys — list implementer credentials (id/prefix/scopes/status;
-    // never the raw key or hash). Session+CSRF; no TOTP on reads (parity with wallets/destinations).
+    // GET /admin/v1/implementers — list named integration identities
+    // (id/name/created_at/retired_at). Session+CSRF; no TOTP on reads.
+    if (verb === "GET" && pathname === "/admin/v1/implementers") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      if (deps.implementerRegistry === undefined) {
+        return fail(503, "service_unavailable", "implementer registry not wired", requestId);
+      }
+      try {
+        const rows = await deps.implementerRegistry.list();
+        return ok(200, { implementers: rows.map(toImplementerListing) });
+      } catch {
+        return fail(503, "service_unavailable", "implementer list unavailable", requestId);
+      }
+    }
+
+    // GET /admin/v1/api-keys — list implementer credentials across all integrations
+    // (id/implementer_id/prefix/scopes/status; never the raw key or hash).
+    // Optional ?implementer_id= filters to one integration. Session+CSRF; no TOTP on reads.
     if (verb === "GET" && pathname === "/admin/v1/api-keys") {
       const gate = await gateMoneyMutation(sessions, authReq, {
         userStore: deps.userStore,
@@ -2221,15 +2332,20 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         labTotp: labTotpOrNull(totp),
       });
       if (!gate.ok) return authFail(gate, requestId);
-      if (deps.credentialService === undefined || deps.resolveImplementerId === undefined) {
+      if (deps.credentialService === undefined) {
         return fail(503, "service_unavailable", "api key management not wired", requestId);
       }
       try {
-        const implementerId = await deps.resolveImplementerId();
-        if (implementerId === null) {
-          return ok(200, { keys: [] });
+        const q = parseQuery(rawPath);
+        const filterId = q.get("implementer_id");
+        if (filterId !== null && filterId !== "") {
+          if (!LOWER_UUID_RE.test(filterId)) {
+            return fail(400, "validation_error", "implementer_id must be a canonical uuid", requestId);
+          }
+          const rows = await deps.credentialService.list(filterId);
+          return ok(200, { keys: rows.map(toApiKeyListing) });
         }
-        const rows = await deps.credentialService.list(implementerId);
+        const rows = await deps.credentialService.listAll();
         return ok(200, { keys: rows.map(toApiKeyListing) });
       } catch {
         return fail(503, "service_unavailable", "api key list unavailable", requestId);
@@ -3877,10 +3993,140 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // POST /admin/v1/implementers — create a named integration identity.
+    // Session+CSRF+fresh TOTP. Retirement of an implementer is a separate route;
+    // create never issues credentials (operator issues keys under the new id next).
+    if (verb === "POST" && pathname === "/admin/v1/implementers") {
+      if (deps.implementerRegistry === undefined) {
+        return fail(503, "service_unavailable", "implementer registry not wired", requestId);
+      }
+      const routeId = "admin_implementers_create";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore, nodeId, routeId, headers, verb, rawPath, rawBody, requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps, nodeId, routeId, idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint, requestId,
+        action: async (ports) => {
+          const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+          if (registry === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "implementer registry not wired", requestId),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions, request: authReq, csrf, totp: labTotpOrNull(totp),
+            userStore: deps.userStore, totpLog, nodeId, rawBody: parsedBody,
+            validateBody: parseCreateImplementerBody, nowMs: nowMs(),
+            mutate: async ({ body, session }) => {
+              const created = await registry.create({
+                name: body.name,
+                actorId: session.sessionId,
+                nodeId,
+              });
+              return toImplementerListing(created);
+            },
+          });
+          if (!guarded.ok) {
+            if (
+              guarded.reason === "mutation_threw" &&
+              guarded.error instanceof ImplementerRegistryError &&
+              guarded.error.code === "IMPLEMENTER_NAME_INVALID"
+            ) {
+              return {
+                outcome: "abort" as const,
+                response: fail(400, "invalid_scalar", guarded.error.message, requestId),
+              };
+            }
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+        },
+      });
+    }
+
+    // POST /admin/v1/implementers/:id/retire — set retired_at. Issuance under a
+    // retired implementer is refused thereafter; existing credentials KEEP working
+    // until revoked/expired (retirement is an issuance gate, not a kill switch).
+    {
+      const m = pathname.match(/^\/admin\/v1\/implementers\/([^/]+)\/retire$/);
+      if (verb === "POST" && m) {
+        if (deps.implementerRegistry === undefined) {
+          return fail(503, "service_unavailable", "implementer registry not wired", requestId);
+        }
+        const implementerId = m[1]!;
+        if (!LOWER_UUID_RE.test(implementerId)) {
+          return fail(400, "validation_error", "implementer id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_implementers_retire";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore, nodeId, routeId, headers, verb, rawPath, rawBody, requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps, nodeId, routeId, idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint, requestId,
+          action: async (ports) => {
+            const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+            if (registry === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "implementer registry not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions, request: authReq, csrf, totp: labTotpOrNull(totp),
+              userStore: deps.userStore, totpLog, nodeId, rawBody: parsedBody,
+              validateBody: parseRetireImplementerBody, nowMs: nowMs(),
+              mutate: async ({ session }) => {
+                const retired = await registry.retire({
+                  id: implementerId,
+                  actorId: session.sessionId,
+                  nodeId,
+                });
+                return toImplementerListing(retired);
+              },
+            });
+            if (!guarded.ok) {
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof ImplementerRegistryError
+              ) {
+                if (guarded.error.code === "IMPLEMENTER_NOT_FOUND") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(404, "not_found", "implementer not found", requestId),
+                  };
+                }
+                if (guarded.error.code === "IMPLEMENTER_ALREADY_RETIRED") {
+                  return {
+                    outcome: "abort" as const,
+                    response: fail(409, "conflict", "implementer already retired", requestId),
+                  };
+                }
+              }
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
     // POST /admin/v1/api-keys — issue a new implementer bearer key.
     // Session+CSRF+fresh TOTP via runGuardedAdminMutation (parity with halt). The full
     // raw key is returned exactly once in the response body; it is never persisted in
     // plaintext and never logged. The audit row is written atomically by SqlCredentialStore.
+    // Optional body.implementer_id targets a named integration; omitted → genesis default
+    // (resolveImplementerId). Issuance under a retired implementer is refused.
     if (verb === "POST" && pathname === "/admin/v1/api-keys") {
       if (deps.credentialService === undefined || deps.resolveImplementerId === undefined) {
         return fail(503, "service_unavailable", "api key management not wired", requestId);
@@ -3891,6 +4137,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
       if (!idem.ok) return idem.response;
       const resolveImplementerId = deps.resolveImplementerId;
+      const implementerRegistry = deps.implementerRegistry;
       return runRequiredAdminMutation({
         deps, nodeId, routeId, idemKey: idem.idemKey,
         fingerprint: idem.fingerprint, requestId,
@@ -3900,16 +4147,78 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             userStore: deps.userStore, totpLog, nodeId, rawBody: parsedBody,
             validateBody: parseIssueApiKeyBody, nowMs: nowMs(),
             mutate: async ({ body, session }) => {
-              const implementerId = await resolveImplementerId();
-              if (implementerId === null) throw new CredentialError("no active implementer", "CREDENTIAL_NOT_FOUND");
-              const created = await ports.credentialService.create(implementerId, body.scopes, null, session.sessionId);
-              return toApiKeyIssueResult(created);
+              let implementerId: string;
+              if (body.implementer_id !== null) {
+                const registry = ports.implementerRegistry ?? implementerRegistry;
+                if (registry === undefined) {
+                  throw Object.assign(new Error("implementer registry not wired"), {
+                    code: "service_unavailable",
+                    status: 503,
+                  });
+                }
+                const active = await registry.getActive(body.implementer_id);
+                if (active === null) {
+                  // Absent and retired collapse: refuse issuance (not a credential kill).
+                  const any = await registry.get(body.implementer_id);
+                  if (any !== null && any.retired_at !== null) {
+                    throw Object.assign(new Error("implementer is retired — issuance refused"), {
+                      code: "conflict",
+                      status: 409,
+                    });
+                  }
+                  throw Object.assign(new Error("implementer not found"), {
+                    code: "not_found",
+                    status: 404,
+                  });
+                }
+                implementerId = active.id;
+              } else {
+                const genesis = await resolveImplementerId();
+                if (genesis === null) {
+                  throw new CredentialError("no active implementer", "CREDENTIAL_NOT_FOUND");
+                }
+                implementerId = genesis;
+              }
+              const created = await ports.credentialService.create(
+                implementerId,
+                body.scopes,
+                null,
+                session.sessionId,
+              );
+              return toApiKeyIssueResult(created, implementerId);
             },
           });
           if (!guarded.ok) {
-            return { outcome: "abort", response: fail(guarded.status, guarded.code, guarded.message, requestId) };
+            if (guarded.reason === "mutation_threw" && guarded.error instanceof CredentialError) {
+              return {
+                outcome: "abort" as const,
+                response: fail(404, "not_found", "no active implementer", requestId),
+              };
+            }
+            if (
+              guarded.reason === "mutation_threw" &&
+              typeof guarded.error === "object" &&
+              guarded.error !== null &&
+              "status" in guarded.error &&
+              typeof (guarded.error as { status: unknown }).status === "number"
+            ) {
+              const nested = guarded.error as { status: number; code?: string; message?: string };
+              return {
+                outcome: "abort" as const,
+                response: fail(
+                  nested.status,
+                  nested.code ?? guarded.code,
+                  nested.message ?? guarded.message,
+                  requestId,
+                ),
+              };
+            }
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
           }
-          return { outcome: "commit", status: 200, responseBody: guarded.result };
+          return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
         },
       });
     }
@@ -4104,13 +4413,14 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
     // POST /admin/v1/api-keys/:id/revoke — revoke a credential so the next
     // bearer auth fails closed. Session+CSRF+fresh TOTP. The store writes the audit
     // row atomically; a foreign/unknown id surfaces as CREDENTIAL_NOT_FOUND (404).
+    // Lookup is by credential id alone so keys issued under any implementer can be
+    // revoked (multi-implementer); the row's own implementer_id scopes the revoke write.
     {
       const m = pathname.match(/^\/admin\/v1\/api-keys\/([^/]+)\/revoke$/);
       if (verb === "POST" && m) {
-        if (deps.credentialService === undefined || deps.resolveImplementerId === undefined) {
+        if (deps.credentialService === undefined) {
           return fail(503, "service_unavailable", "api key management not wired", requestId);
         }
-        const resolveImplementerId = deps.resolveImplementerId;
         const credentialId = m[1]!;
         // validate :id before TOTP burn — a non-UUID must not consume the code.
         if (!LOWER_UUID_RE.test(credentialId)) {
@@ -4131,9 +4441,12 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               userStore: deps.userStore, totpLog, nodeId, rawBody: parsedBody,
               validateBody: parseRevokeApiKeyBody, nowMs: nowMs(),
               mutate: async ({ session }) => {
-                const implementerId = await resolveImplementerId();
-                if (implementerId === null) throw new CredentialError("no active implementer", "CREDENTIAL_NOT_FOUND");
-                await ports.credentialService.revoke(credentialId, implementerId, session.sessionId);
+                const row = await ports.credentialService.findByCredentialId(credentialId);
+                await ports.credentialService.revoke(
+                  credentialId,
+                  row.implementer_id,
+                  session.sessionId,
+                );
                 return { id: credentialId, revoked: true };
               },
             });
@@ -4766,6 +5079,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly halt?: AdminRouteDeps["halt"];
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
+  readonly implementerRegistry?: ImplementerRegistry;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
   readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;
@@ -4853,6 +5167,7 @@ export function createFailClosedAdminRouteDeps(base: {
     halt: base.halt,
     credentialService: base.credentialService,
     resolveImplementerId: base.resolveImplementerId,
+    implementerRegistry: base.implementerRegistry,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
     reportingCredentialService: base.reportingCredentialService,
@@ -4889,6 +5204,7 @@ export function createLiveAdminRouteDeps(
     readonly halt?: AdminRouteDeps["halt"];
     readonly credentialService?: CredentialService;
     readonly resolveImplementerId?: () => Promise<string | null>;
+    readonly implementerRegistry?: ImplementerRegistry;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
     readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;

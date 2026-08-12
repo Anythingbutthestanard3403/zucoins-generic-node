@@ -61,12 +61,24 @@ describe("ApiKeysPage", () => {
 
 
   test("live session lists keys without the raw secret and can revoke", async () => {
+    vi.spyOn(money, "listImplementers").mockResolvedValue({
+      live: true,
+      implementers: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          name: "genesis",
+          created_at: "2026-01-01T00:00:00Z",
+          retired_at: null,
+        },
+      ],
+    });
     const listSpy = vi
       .spyOn(money, "listApiKeys")
       .mockResolvedValue({
         keys: [
           {
             id: "k1",
+            implementer_id: "11111111-1111-4111-8111-111111111111",
             prefix: "ik_abcdef12",
             scopes: ["receive:create", "receive:read"],
             status: "ACTIVE",
@@ -104,11 +116,16 @@ describe("ApiKeysPage", () => {
   });
 
   test("issue returns the raw key once and renders the copy banner", async () => {
+    vi.spyOn(money, "listImplementers").mockResolvedValue({
+      live: true,
+      implementers: [],
+    });
     vi.spyOn(money, "listApiKeys").mockResolvedValue({ keys: [], live: true });
     const issueSpy = vi
       .spyOn(money, "postIssueApiKey")
       .mockResolvedValue({
         id: "k2",
+        implementer_id: "11111111-1111-4111-8111-111111111111",
         raw_key: "ik_s3cr3tvaluethatmustnotleak",
         prefix: "ik_s3cr3tva",
         scopes: ["receive:create"],
@@ -139,5 +156,53 @@ describe("ApiKeysPage", () => {
     expect(observedLocationStates).not.toContainEqual({
       issuedKey: "ik_s3cr3tvaluethatmustnotleak",
     });
+  });
+
+  test("integration picker scopes issue to the selected implementer", async () => {
+    const secondId = "22222222-2222-4222-8222-222222222222";
+    vi.spyOn(money, "listImplementers").mockResolvedValue({
+      live: true,
+      implementers: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          name: "genesis",
+          created_at: "2026-01-01T00:00:00Z",
+          retired_at: null,
+        },
+        {
+          id: secondId,
+          name: "payroll-run",
+          created_at: "2026-02-01T00:00:00Z",
+          retired_at: null,
+        },
+      ],
+    });
+    vi.spyOn(money, "listApiKeys").mockResolvedValue({ keys: [], live: true });
+    const issueSpy = vi.spyOn(money, "postIssueApiKey").mockResolvedValue({
+      id: "k3",
+      implementer_id: secondId,
+      raw_key: "ik_secondkeyvaluexxxxxxxx",
+      prefix: "ik_secondke",
+      scopes: ["receive:create"],
+      key_version: 1,
+      issued_at: "2026-07-30T00:00:00Z",
+      expires_at: null,
+    });
+
+    renderPage();
+    const select = await screen.findByLabelText("Integration");
+    fireEvent.change(select, { target: { value: secondId } });
+    // Query key changes with the picker — wait for the list to settle so Issue reappears.
+    const issueBtn = await screen.findByRole("button", { name: "Issue key" });
+    fireEvent.click(issueBtn);
+    const input = await screen.findByLabelText("Verification code");
+    fireEvent.change(input, { target: { value: "3" } });
+    for (let i = 1; i < 6; i += 1) {
+      const slot = screen.getByLabelText(`Digit ${i + 1}`);
+      fireEvent.change(slot, { target: { value: "3" } });
+    }
+    await waitFor(() =>
+      expect(issueSpy).toHaveBeenCalledWith({ implementerId: secondId }, "333333"),
+    );
   });
 });

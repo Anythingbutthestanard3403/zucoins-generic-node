@@ -75,6 +75,45 @@ export const LIVE_OPERATOR_PARK_ROUTES = Object.freeze([
   },
 ] as const);
 
+/**
+ * Live multi-implementer registry + key issuance surface (ZTR-1236). Not in
+ * ROUTE_POLICIES; mounted on the admin dispatcher (session for GET; session+CSRF+
+ * fresh TOTP for mutations). Retirement is an issuance gate — existing keys keep
+ * authenticating until revoked/expired.
+ */
+export const LIVE_IMPLEMENTER_ROUTES = Object.freeze([
+  {
+    method: "GET" as const,
+    path: "/admin/v1/implementers",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/implementers",
+    authMode: "operator_session_totp" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/implementers/:id/retire",
+    authMode: "operator_session_totp" as const,
+  },
+  {
+    method: "GET" as const,
+    path: "/admin/v1/api-keys",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/api-keys",
+    authMode: "operator_session_totp" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/api-keys/:id/revoke",
+    authMode: "operator_session_totp" as const,
+  },
+] as const);
+
 export type RouteKey = `${string} ${string}`;
 
 export function routeKeyOf(method: string, path: string): RouteKey {

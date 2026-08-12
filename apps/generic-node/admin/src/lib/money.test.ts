@@ -527,6 +527,7 @@ describe("destination blessing device-key contract", () => {
       if (path.endsWith("/api-keys") && !path.includes("revoke")) {
         return jsonRes(200, {
           id: "cred-1",
+          implementer_id: "11111111-1111-4111-8111-111111111111",
           raw_key: "ik_test_once",
           prefix: "ik_test",
           scopes: ["*"],

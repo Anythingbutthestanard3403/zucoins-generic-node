@@ -43,6 +43,8 @@ import {
   LIVE_HALT_ROUTES,
   LIVE_ATTENTION_RETRACTION_ROUTES,
   LIVE_OPERATOR_PARK_ROUTES,
+  LIVE_IMPLEMENTER_ROUTES,
+  createSqlImplementerRegistry,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
   InMemoryVaultAccessAuditLog,
@@ -256,6 +258,7 @@ export {
   LIVE_HALT_ROUTES,
   LIVE_ATTENTION_RETRACTION_ROUTES,
   LIVE_OPERATOR_PARK_ROUTES,
+  LIVE_IMPLEMENTER_ROUTES,
   requiredProductionRouteKeys,
   routeKeyOf,
   createFailClosedAdminRouteDeps,
@@ -465,6 +468,7 @@ export interface ProductionRouteSurface {
   readonly mountedRouteKeys: readonly string[];
   /** Live halt surface — always mounted on admin router. */
   readonly liveHaltRoutes: typeof LIVE_HALT_ROUTES;
+  readonly liveImplementerRoutes: typeof LIVE_IMPLEMENTER_ROUTES;
   /** @deprecated prefer liveHaltRoutes; kept for prior greps. */
   readonly deferredHalt: typeof DEFERRED_HALT_ROUTE;
   /** Live attention-retraction surface — always mounted on admin router. */
@@ -680,17 +684,25 @@ export function createProductionRouteSurface(
 
   // Implementer API key management. The CredentialService is bound to the
   // custody pool via SqlCredentialStore (same store genesis issues the bootstrap key
-  // into). The implementer id is the single non-retired row genesis seeded; resolved
-  // per-call so a reseed after retirement is honoured without a restart. The platform
-  // never receives the raw key or the hash — only the operator SPA does, once, on issue.
+  // into). The platform never receives the raw key or the hash — only the operator
+  // SPA does, once, on issue.
   const credentialService = new CredentialService(
     new SqlCredentialStore(config.pool, config.nodeId),
   );
-  // Review fix: resolve the target implementer through the canonical node-bound
-  // relation (implementer_reporting_keys(node_id, implementer_id)), NOT a global
-  // `implementers` query. Fails closed on BOTH edges — zero rows (no implementer registered for
-  // this node) and more than one row (ambiguous; refuse to pick one). The prior global query let
-  // an operator on node B mint/revoke credentials for an unrelated earlier-sorting implementer.
+  // Named integration identity registry (create/list/retire). Pool-scoped for
+  // reads; TX-scoped clone is rebound inside atomicAdminMutation.portsFor.
+  const implementerRegistry = createSqlImplementerRegistry({
+    query: async <R extends Record<string, unknown>>(text: string, params?: readonly unknown[]) => {
+      const result = await config.pool.query(text, params as never);
+      return { rows: result.rows as R[] };
+    },
+  });
+  // Genesis default for POST /admin/v1/api-keys when body omits implementer_id:
+  // earliest non-retired implementer (created_at, id). Multi-implementer nodes
+  // still resolve a stable default; explicit implementer_id is required to target
+  // any other integration. Prefer the node-bound reporting-key relation when it
+  // yields exactly one active row (day-0 / single-integration nodes); otherwise
+  // fall back to the registry genesis default so multi-implementer issuance works.
   const resolveImplementerId = async (): Promise<string | null> => {
     const { rows } = await config.pool.query<{ id: string }>(
       `SELECT irk.implementer_id AS id
@@ -700,14 +712,8 @@ export function createProductionRouteSurface(
         GROUP BY irk.implementer_id`,
       [config.nodeId],
     );
-    if (rows.length === 0) return null;
-    if (rows.length > 1) {
-      throw new Error(
-        `resolveImplementerId: ${rows.length} non-retired implementers registered for node ${config.nodeId}; ` +
-          "refusing to pick one — resolve the ambiguity before minting or revoking credentials",
-      );
-    }
-    return rows[0]!.id;
+    if (rows.length === 1) return rows[0]!.id;
+    return implementerRegistry.resolveGenesisId();
   };
 
   // Device dual-control registry (list/enrol/revoke + approve signature verify).
@@ -794,6 +800,7 @@ export function createProductionRouteSurface(
     halt: haltBundle,
     credentialService,
     resolveImplementerId,
+    implementerRegistry,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -903,6 +910,15 @@ export function createProductionRouteSurface(
         destinationService: config.destinationServiceForSql?.(client) ?? createFailClosedDestinationService(),
         halt: shadowHalt,
         credentialService: new CredentialService(new SqlCredentialStore(client, config.nodeId)),
+        implementerRegistry: createSqlImplementerRegistry({
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        }),
         deviceSignaturePolicy: txDeviceSignaturePolicy,
         dualControlPolicy: txDualControlPolicy,
       };
@@ -1059,6 +1075,7 @@ export function createProductionRouteSurface(
     subscriptionHandlesKind: liveReads.subscriptionHandlesKind,
     mountedRouteKeys: requiredProductionRouteKeys(),
     liveHaltRoutes: LIVE_HALT_ROUTES,
+    liveImplementerRoutes: LIVE_IMPLEMENTER_ROUTES,
     deferredHalt: DEFERRED_HALT_ROUTE,
     liveAttentionRetractionRoutes: LIVE_ATTENTION_RETRACTION_ROUTES,
     liveOperatorParkRoutes: LIVE_OPERATOR_PARK_ROUTES,

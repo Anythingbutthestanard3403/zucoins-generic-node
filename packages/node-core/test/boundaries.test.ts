@@ -32,6 +32,7 @@ const PRODUCTION_MODULES = [
   "net",
   "observability",
   "credential",
+  "implementer",
   "vault",
   "verification",
   "totp",
@@ -108,6 +109,9 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   net: [],
   observability: [],
   credential: ["proof-body"],
+  // Named integration identity registry (create/list/retire + audit). Imports core only
+  // for the AuditLogRow shape used by the in-memory adapter; SQL store is leaf-over-SQL.
+  implementer: ["core"],
   vault: [],
   // verification-complete acknowledgement: reuses the reporting SHA-256 helper for
   // the evidence-set digest and declares its own SqlExecutor port, like every other

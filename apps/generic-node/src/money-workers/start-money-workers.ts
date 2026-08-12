@@ -270,6 +270,14 @@ export interface StartMoneyWorkersDeps {
    */
   readonly sendSignerDeps?: SignerBoundaryDeps | null | (() => SignerBoundaryDeps | null);
   /**
+   * ZTR-1231: fired (throttled by the worker) when APPROVED sends cannot form because
+   * signer deps are unavailable. Operators must see this — silent skip is a reliability trap.
+   */
+  readonly onApprovedSendSignerUnavailable?: (info: {
+    readonly approvedCount: number;
+    readonly reason: "signer_deps_unavailable";
+  }) => void;
+  /**
    * Leadership latch for default sendSignerDeps composition (main provides stamped latch).
    */
   readonly signerLeadership?: SignerLeadershipLatch;
@@ -838,6 +846,16 @@ async function autoApprovePendingSends(deps: {
   }
 }
 
+/** Throttle operator signal when APPROVED sends stall on missing signer (ZTR-1231). */
+export const APPROVED_SEND_SIGNER_UNAVAILABLE_SIGNAL_COOLDOWN_MS = 5 * 60_000;
+
+let lastApprovedSendSignerUnavailableSignalMs = 0;
+
+/** Test seam — reset throttle between cases. */
+export function resetApprovedSendSignerUnavailableSignalForTests(nowMs = 0): void {
+  lastApprovedSendSignerUnavailableSignalMs = nowMs;
+}
+
 async function advanceApprovedSends(deps: {
   readonly pool: Pool;
   readonly config: MoneyWorkerConfig;
@@ -849,6 +867,11 @@ async function advanceApprovedSends(deps: {
   readonly stopped: () => boolean;
   readonly eventSigner?: () => NodeEventSigner | null;
   readonly eventQuota?: DualChainEventQuota;
+  readonly onApprovedSendSignerUnavailable?: (info: {
+    readonly approvedCount: number;
+    readonly reason: "signer_deps_unavailable";
+  }) => void;
+  readonly nowMs?: () => number;
 }): Promise<void> {
   let approved: readonly string[];
   try {
@@ -863,9 +886,27 @@ async function advanceApprovedSends(deps: {
 
   const signerDeps = deps.resolveSignerDeps();
   if (signerDeps === null) {
-    deps.logger.info(
-      `money-workers: skip SEND form for ${approved.length} APPROVED — signer deps unavailable (vault/leadership residual; NODE_IDENTITY sealed-store signer not armed)`,
-    );
+    const msg =
+      `money-workers: skip SEND form for ${approved.length} APPROVED — signer deps unavailable ` +
+      `(vault/leadership residual; NODE_IDENTITY sealed-store signer not armed). ` +
+      `APPROVED sends will not form until the node identity signer is armed and leadership is held.`;
+    // error-level so default log sinks surface this (info was silent for operators).
+    deps.logger.error(msg);
+    const now = (deps.nowMs ?? Date.now)();
+    if (now - lastApprovedSendSignerUnavailableSignalMs >= APPROVED_SEND_SIGNER_UNAVAILABLE_SIGNAL_COOLDOWN_MS) {
+      lastApprovedSendSignerUnavailableSignalMs = now;
+      try {
+        deps.onApprovedSendSignerUnavailable?.({
+          approvedCount: approved.length,
+          reason: "signer_deps_unavailable",
+        });
+      } catch (err) {
+        deps.logger.error(
+          "money-workers: onApprovedSendSignerUnavailable callback failed",
+          err,
+        );
+      }
+    }
     return;
   }
 
@@ -1576,6 +1617,9 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       stopped: () => stopped,
       eventSigner: deps.eventSigner,
       ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
+      ...(deps.onApprovedSendSignerUnavailable !== undefined
+        ? { onApprovedSendSignerUnavailable: deps.onApprovedSendSignerUnavailable }
+        : {}),
     });
     // SEND completion observe-lander. Requires gateway URLs for the source-head
     // confirm-read; when none are configured (genesis stub / offline) the lander is skipped —

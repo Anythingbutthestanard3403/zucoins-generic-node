@@ -989,6 +989,7 @@ async function main(): Promise<void> {
       metricsSnapshotSource,
       logger: runtimeListenerLogger,
       destinationService: routeSurface.destinationService,
+    integrationRequestStore: routeSurface.integrationRequestStore,
       nodeId: config.NODE_ID,
       adminRouteDeps: routeSurface.adminRouteDeps,
       discoveryDocument: routeSurface.discoveryDocument,

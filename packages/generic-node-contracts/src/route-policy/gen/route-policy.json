@@ -240,6 +240,22 @@
       "idempotency": "REQUIRED"
     },
     {
+      "method": "POST",
+      "path": "/v1/integration-requests",
+      "authClass": "PUBLIC",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/integration-requests/:id",
+      "authClass": "PUBLIC",
+      "scope": null,
+      "tenantScoped": false,
+      "idempotency": "NA"
+    },
+    {
       "method": "GET",
       "path": "/.well-known/zupay-node",
       "authClass": "PUBLIC",
@@ -326,7 +342,7 @@
     "resolve_object_with_tenant_predicate"
   ],
   "pipelineInvariants": [
-    "every response \u2014 2xx and non-2xx \u2014 carries the request_id assigned at stage 1",
+    "every response — 2xx and non-2xx — carries the request_id assigned at stage 1",
     "authorization (scope) runs before any object lookup, so an unauthorized caller cannot probe object existence",
     "every non-2xx body is rendered through the canonical error envelope; no route emits a bespoke error shape",
     "no stage emits a 403 for a scope denial; scope denial is the generic 401",

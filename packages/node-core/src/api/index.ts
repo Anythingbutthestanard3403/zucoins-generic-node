@@ -50,6 +50,7 @@ export {
   CreateInternalMoveBody,
   CreateExternalSendBody,
   CreateDestinationBody,
+  CreateIntegrationRequestBody,
   ListDestinationsQuery,
   ListEventsQuery,
   EventStreamQuery,

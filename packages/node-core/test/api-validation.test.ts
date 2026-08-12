@@ -414,10 +414,18 @@ describe("route schema inventory ", () => {
   });
 
   it("every POST mutation route requires idempotency key", () => {
-    const postRoutes = ROUTE_SCHEMAS.filter((r) => r.method === "POST");
+    // Public intake (Route 2) is intentionally non-idempotent: claim_token is
+    // minted once per request and must not be replay-keyed (ROUTE_POLICIES idempotency NA).
+    const postRoutes = ROUTE_SCHEMAS.filter(
+      (r) => r.method === "POST" && r.path !== "/v1/integration-requests",
+    );
     for (const route of postRoutes) {
       expect(route.requiresIdempotencyKey, `${route.path} must require idempotency`).toBe(true);
     }
+    const intake = ROUTE_SCHEMAS.find(
+      (r) => r.method === "POST" && r.path === "/v1/integration-requests",
+    );
+    expect(intake?.requiresIdempotencyKey).toBe(false);
   });
 
   it("every GET route does not require idempotency key", () => {

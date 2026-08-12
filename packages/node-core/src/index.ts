@@ -8,6 +8,7 @@ export * from "./money-path-admission.js";
 export * from "./operation-route-store.js";
 export * from "./credential/index.js";
 export * from "./implementer/index.js";
+export * from "./integration-request/index.js";
 export * from "./data/index.js";
 export * from "./event-log/index.js";
 export * from "./gateway/index.js";

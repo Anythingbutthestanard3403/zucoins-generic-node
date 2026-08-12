@@ -361,12 +361,42 @@ export const RETIRE_BODY: JsonSchema = {
   properties: {},
 };
 
+
+export const CREATE_INTEGRATION_REQUEST_BODY: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["display_name", "requested_scopes", "proposed_rule"],
+  properties: {
+    display_name: { type: "string", minLength: 1, maxLength: 120 },
+    requested_scopes: {
+      type: "array",
+      minItems: 1,
+      items: { type: "string", enum: ["send:create", "send:read"] },
+    },
+    proposed_rule: {
+      type: "object",
+      additionalProperties: true,
+      description:
+        "Platform-proposed auto-approve rule (ZTR-1234 amount/window grammar; no implementer_id).",
+      properties: {
+        rule_id: { type: "string" },
+        per_send_max_zkz: { type: "string" },
+        per_send_min_zkz: { type: ["string", "null"] },
+        window_hours: { type: "integer", minimum: 1 },
+        window_cap_zkz: { type: "string" },
+        expires_at: { type: ["string", "null"] },
+      },
+    },
+  },
+};
+
 /** Body schema by method+path for routes that accept a JSON body. */
 export const BODY_BY_ROUTE: ReadonlyMap<string, JsonSchema> = new Map([
   ["POST /v1/receives", CREATE_RECEIVE_BODY],
   ["POST /v1/internal-moves", CREATE_INTERNAL_MOVE_BODY],
   ["POST /v1/external-sends", CREATE_EXTERNAL_SEND_BODY],
   ["POST /v1/destinations", CREATE_DESTINATION_BODY],
+  ["POST /v1/integration-requests", CREATE_INTEGRATION_REQUEST_BODY],
   ["POST /v1/operations/:operation_id/armed", ARM_BODY],
   ["POST /v1/operations/:operation_id/verification-complete", VERIFICATION_COMPLETE_BODY],
   ["POST /admin/v1/external-sends/:operation_id/approve", APPROVE_BODY],

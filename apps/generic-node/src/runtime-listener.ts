@@ -23,6 +23,8 @@ import {
   CachedDbProbe,
   consumeOriginRelayAttempt,
   createDestinationsRouter,
+  createIntegrationRequestRouter,
+  type IntegrationRequestStore,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
   enforceTransportGuards,
@@ -177,6 +179,8 @@ export interface NodeRuntimeListenerDeps {
   readonly destinationService?: DestinationService;
   /** Required with destinationService — custody node uuid for destination rows. */
   readonly nodeId?: string;
+  /** Route 2 public handshake store (ZTR-1239). Mounted when nodeId set. */
+  readonly integrationRequestStore?: IntegrationRequestStore;
   readonly adminRouter?: AdminRouter;
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;
@@ -593,6 +597,8 @@ export function runtimeMountedRouteKeys(opts: {
       "GET /admin/v1/operations/:operation_id/recovery",
       "POST /admin/v1/operations/:operation_id/recovery-actions",
       "GET /.well-known/zupay-node",
+      "POST /v1/integration-requests",
+      "GET /v1/integration-requests/:id",
     );
   }
   return keys;
@@ -649,6 +655,15 @@ export function createNodeRuntimeListener(
           auth: operationAuth,
           destinationService: deps.destinationService,
           nodeId: deps.nodeId as never,
+          newRequestId,
+        })
+      : null;
+
+  const integrationRequestRouter =
+    deps.integrationRequestStore !== undefined && deps.nodeId !== undefined
+      ? createIntegrationRequestRouter({
+          store: deps.integrationRequestStore,
+          nodeId: deps.nodeId,
           newRequestId,
         })
       : null;
@@ -933,6 +948,50 @@ export function createNodeRuntimeListener(
         })();
         return;
       }
+    }
+
+    // Route 2 public handshake (intake + claim poll)
+    if (
+      integrationRequestRouter !== null &&
+      (pathname === "/v1/integration-requests" ||
+        pathname.startsWith("/v1/integration-requests/"))
+    ) {
+      const peer =
+        request.socket.remoteAddress === undefined
+          ? null
+          : request.socket.remoteAddress;
+      void (async () => {
+        try {
+          const bodyBytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
+          const headers = normalizeHeaders(request.rawHeaders);
+          const result = await integrationRequestRouter(
+            request.method ?? "GET",
+            pathname,
+            bodyBytes,
+            headers,
+            peer,
+          );
+          writeJson(response, result.status, result.body, { ...result.headers });
+        } catch (cause) {
+          const requestId = newRequestId();
+          const { cause_name, cause_message } = sanitizeFailureCause(cause);
+          emitUnexpectedFailure(logger, {
+            event: "operation_listener_unexpected_failure",
+            request_id: requestId,
+            method: (request.method ?? "UNKNOWN").toUpperCase(),
+            path_class: operationPathClass(request.method ?? "GET", rawUrl),
+            cause_name,
+            cause_message,
+          });
+          const error = apiErrorResponse("service_unavailable", requestId);
+          try {
+            writeJson(response, error.status, error.body, { ...error.headers });
+          } catch {
+            /* committed */
+          }
+        }
+      })();
+      return;
     }
 
     // Destinations (implementer bearer)

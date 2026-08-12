@@ -148,7 +148,7 @@ describe("two-directional route inventory diff", () => {
   it("PUBLIC_ROUTES + ADMIN_ROUTES equal ROUTE_POLICIES (manifest parity)", () => {
     expect(sortedKeys(contract)).toEqual(sortedKeys(policy));
     expect(PUBLIC_ROUTES.length + ADMIN_ROUTES.length).toBe(ROUTE_POLICIES.length);
-    expect(PUBLIC_ROUTES.length).toBe(17);
+    expect(PUBLIC_ROUTES.length).toBe(19);
     expect(ADMIN_ROUTES.length).toBe(8);
   });
 

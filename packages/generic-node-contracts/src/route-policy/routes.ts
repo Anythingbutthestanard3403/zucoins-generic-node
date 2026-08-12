@@ -73,6 +73,9 @@ export const ROUTE_POLICIES = [
   { method: "GET", path: "/admin/v1/operations/needs-attention", authClass: "OPERATOR_SESSION", scope: null, tenantScoped: false, idempotency: "NA" },
   { method: "GET", path: "/admin/v1/operations/:operation_id/recovery", authClass: "OPERATOR_SESSION", scope: null, tenantScoped: false, idempotency: "NA" },
   { method: "POST", path: "/admin/v1/operations/:operation_id/recovery-actions", authClass: "OPERATOR_SESSION", scope: null, tenantScoped: false, idempotency: "REQUIRED" },
+  // Route 2 public handshake (platform intake + one-time claim poll)
+  { method: "POST", path: "/v1/integration-requests", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
+  { method: "GET", path: "/v1/integration-requests/:id", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
   // Discovery
   { method: "GET", path: "/.well-known/zupay-node", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
   // Liveness (public, unauthenticated, no Idempotency-Key) — closes the ROUTE_SCHEMAS census.

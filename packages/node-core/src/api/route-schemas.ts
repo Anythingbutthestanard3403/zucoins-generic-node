@@ -206,6 +206,22 @@ export const RetireBody = z.object({}).strict();
 
 export type RetireBodyInput = z.infer<typeof RetireBody>;
 
+
+// --- Integration requests (Route 2 public handshake) --
+
+/** POST /v1/integration-requests — platform intake (public). */
+export const CreateIntegrationRequestBody = z
+  .object({
+    display_name: z.string().min(1).max(120),
+    requested_scopes: z
+      .array(z.enum(["send:create", "send:read"]))
+      .min(1),
+    proposed_rule: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+export type CreateIntegrationRequestBodyInput = z.infer<typeof CreateIntegrationRequestBody>;
+
 // --- Route schema registry --
 // Maps route method+path to its body schema (POST) or query schema (GET).
 
@@ -241,6 +257,8 @@ export const ROUTE_SCHEMAS: readonly RouteSchema[] = [
   { method: "GET", path: "/admin/v1/operations/needs-attention", querySchema: NeedsAttentionQuerySchema, requiresIdempotencyKey: false },
   { method: "GET", path: "/admin/v1/operations/:operation_id/recovery", requiresIdempotencyKey: false },
   { method: "POST", path: "/admin/v1/operations/:operation_id/recovery-actions", bodySchema: RecoveryActionsBody, requiresIdempotencyKey: true },
+  { method: "POST", path: "/v1/integration-requests", bodySchema: CreateIntegrationRequestBody, requiresIdempotencyKey: false },
+  { method: "GET", path: "/v1/integration-requests/:id", requiresIdempotencyKey: false },
   { method: "GET", path: "/.well-known/zupay-node", requiresIdempotencyKey: false },
   { method: "GET", path: "/health", requiresIdempotencyKey: false },
 ] as const;

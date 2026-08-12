@@ -64,8 +64,8 @@ export const APPROVAL_STORES_INVARIANTS: readonly ApprovalStoresInvariant[] = [
   },
   {
     id: "APPROVAL_CHALLENGE_UNIQUE",
-    sqlAnchor: "challenge_id uuid NOT NULL UNIQUE,",
-    rule: "at most one approval per challenge: a consumed challenge can never back two approvals.",
+    sqlAnchor: "challenge_id uuid UNIQUE,",
+    rule: "at most one approval per challenge when present: UNIQUE allows multiple NULL challenge_id rows (AUTO_POLICY); a consumed challenge can never back two approvals.",
   },
   {
     id: "APPROVAL_CHALLENGE_STATUS_CONSUMED",
@@ -80,22 +80,22 @@ export const APPROVAL_STORES_INVARIANTS: readonly ApprovalStoresInvariant[] = [
     rule: "the approval purpose and version are frozen.",
   },
   {
-    id: "APPROVAL_METHOD_DEVICE_BICONDITIONAL",
+    id: "APPROVAL_METHOD_THREE_ARMS",
     sqlAnchor:
-      "CHECK (\n    (method = 'TOTP_AND_DEVICE' AND device_key_id IS NOT NULL\n      AND device_signature IS NOT NULL)\n    OR\n    (method = 'TOTP_ONLY' AND device_key_id IS NULL\n      AND device_signature IS NULL)\n  ),",
-    rule: "device key and signature are present exactly when method is TOTP_AND_DEVICE, absent exactly when TOTP_ONLY: the additive device-key option is structurally enforced.",
+      "CHECK (\n    (method = 'TOTP_AND_DEVICE'\n      AND challenge_id IS NOT NULL\n      AND totp_timestep IS NOT NULL\n      AND device_key_id IS NOT NULL\n      AND device_signature IS NOT NULL)\n    OR\n    (method = 'TOTP_ONLY'\n      AND challenge_id IS NOT NULL\n      AND totp_timestep IS NOT NULL\n      AND device_key_id IS NULL\n      AND device_signature IS NULL)\n    OR\n    (method = 'AUTO_POLICY'\n      AND challenge_id IS NULL\n      AND totp_timestep IS NULL\n      AND device_key_id IS NULL\n      AND device_signature IS NULL)\n  ),",
+    rule: "three method arms: TOTP_AND_DEVICE requires challenge+timestep+device factors; TOTP_ONLY requires challenge+timestep and null device factors; AUTO_POLICY requires all four factor columns null (machine-committed, no fabricated TOTP/challenge evidence).",
   },
   {
     id: "APPROVAL_TOTP_SINGLE_USE",
     sqlAnchor:
-      "CREATE UNIQUE INDEX operation_approvals_totp_single_use\n  ON operation_approvals (node_id, totp_timestep);",
-    rule: "each (node_id, totp_timestep) pair is globally unique: a TOTP timestep can never be consumed twice on the same node — no TOTP code or secret is stored, only the timestep.",
+      "CREATE UNIQUE INDEX operation_approvals_totp_single_use\n  ON operation_approvals (node_id, totp_timestep)\n  WHERE totp_timestep IS NOT NULL;",
+    rule: "each non-null (node_id, totp_timestep) pair is globally unique: a TOTP timestep can never be consumed twice on the same node; AUTO_POLICY rows with null totp_timestep are excluded from the index.",
   },
   {
     id: "APPROVAL_FK_TO_CHALLENGE",
     sqlAnchor:
       "FOREIGN KEY (challenge_id, node_id, operation_id, challenge_status)\n    REFERENCES approval_challenges(id, node_id, operation_id, status)",
-    rule: "the approval is bound to exactly one consumed challenge with matching node and operation: an approval without a valid challenge is rejected before it exists.",
+    rule: "composite FK MATCH SIMPLE: a non-null challenge_id binds the approval to exactly one consumed challenge with matching node and operation; a null challenge_id (AUTO_POLICY) makes the FK vacuously pass.",
   },
 ] as const;
 
@@ -126,8 +126,8 @@ export const SCHEMA_APPROVAL_STORES_OBLIGATIONS = [
   "negative: a second ISSUED approval_challenges row for the same operation_id violates the partial unique index — refresh must supersede first.",
   "negative: a second operation_approvals row for the same operation_id violates the UNIQUE constraint on operation_id.",
   "negative: a second operation_approvals row for the same challenge_id violates the UNIQUE constraint on challenge_id.",
-  "negative: a second operation_approvals row for the same (node_id, totp_timestep) violates the partial unique index — TOTP single-use is DB-enforced.",
-  "negative: an approval with method TOTP_ONLY but device_key_id set (or device_signature set) is rejected by the biconditional CHECK, and the converse for TOTP_AND_DEVICE with NULL device fields.",
+  "negative: a second operation_approvals row for the same non-null (node_id, totp_timestep) violates the partial unique index — TOTP single-use is DB-enforced; two AUTO_POLICY rows with null totp_timestep do not collide.",
+  "negative: an approval with method TOTP_ONLY but device_key_id set (or device_signature set) is rejected by the three-arm CHECK, and the converse for TOTP_AND_DEVICE with NULL device fields; AUTO_POLICY with any factor column non-NULL is rejected; TOTP arms with NULL challenge_id or totp_timestep are rejected.",
   "negative: a challenge with expires_at <= issued_at is rejected by the CHECK.",
   "negative: a challenge with status SUPERSEDED but superseded_by NULL (or the converse) is rejected by the biconditional CHECK.",
   "negative: an approval whose (challenge_id, node_id, operation_id, challenge_status) does not match an existing approval_challenges row is rejected by the composite FK.",

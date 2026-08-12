@@ -202,6 +202,10 @@ const SCHEMA_FILES = [
   "attention-reason-enum.sql",
   // Dual-control policy home (ZTR-1214). Prerequisite assert only (no CREATE TABLE).
   "dual-control-policy.sql",
+  // approval_method += AUTO_POLICY (ZTR-1233). ALTER TYPE only.
+  "approval-method-auto-policy-enum.sql",
+  // approval-stores AUTO_POLICY amendment (ZTR-1233). ALTER/DO only on operation_approvals.
+  "approval-stores-auto-policy.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -224,6 +228,8 @@ const NO_TABLE_SCHEMA_FILES = [
   "lease-operation-foreign-keys.sql",
   "attention-reason-enum.sql",
   "dual-control-policy.sql",
+  "approval-method-auto-policy-enum.sql",
+  "approval-stores-auto-policy.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -510,6 +516,14 @@ const GREENFIELD: Record<
   "dual-control-policy.sql": {
     applies: false,
     missingFragment: "dual-control-policy requires node_settings",
+  },
+  "approval-method-auto-policy-enum.sql": {
+    applies: false,
+    missingFragment: "approval-method-auto-policy-enum requires approval_method",
+  },
+  "approval-stores-auto-policy.sql": {
+    applies: false,
+    missingFragment: "approval-stores-auto-policy requires operation_approvals",
   },
 };
 

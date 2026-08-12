@@ -319,6 +319,19 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[guardsIdx]!.sql).toContain("EXTERNAL_SEND_PARTIALS_BYTE_IMMUTABLE");
   });
 
+  it("pack lands AUTO_POLICY enum then approval-stores amendment after approval-stores", () => {
+    const storesIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("approval-stores");
+    const enumIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("approval-method-auto-policy-enum");
+    const autoIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("approval-stores-auto-policy");
+    expect(storesIdx).toBeGreaterThanOrEqual(0);
+    expect(enumIdx).toBeGreaterThan(storesIdx);
+    expect(autoIdx).toBeGreaterThan(enumIdx);
+    const files = loadMoneySchemaMigrations();
+    expect(files[enumIdx]!.sql).toContain("ALTER TYPE approval_method ADD VALUE 'AUTO_POLICY'");
+    expect(files[autoIdx]!.sql).toContain("operation_approvals_method_arms_check");
+    expect(files[autoIdx]!.sql).toContain("WHERE totp_timestep IS NOT NULL");
+  });
+
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {
     const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
     const ackIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-acknowledgements");

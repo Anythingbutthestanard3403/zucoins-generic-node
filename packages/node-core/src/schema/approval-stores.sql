@@ -46,7 +46,7 @@ CREATE TABLE operation_approvals (
   id uuid PRIMARY KEY,
   node_id uuid NOT NULL REFERENCES nodes(id),
   operation_id uuid NOT NULL UNIQUE REFERENCES operations(id),
-  challenge_id uuid NOT NULL UNIQUE,
+  challenge_id uuid UNIQUE,
   challenge_status approval_challenge_status NOT NULL DEFAULT 'CONSUMED'
     CHECK (challenge_status = 'CONSUMED'),
   method approval_method NOT NULL,
@@ -56,13 +56,25 @@ CREATE TABLE operation_approvals (
   preimage_sha256 sha256_hex NOT NULL,
   device_key_id uuid REFERENCES operator_device_keys(id),
   device_signature padded_base64url_signature,
-  totp_timestep bigint NOT NULL,
+  totp_timestep bigint,
   consumed_at timestamptz NOT NULL,
   CHECK (
-    (method = 'TOTP_AND_DEVICE' AND device_key_id IS NOT NULL
+    (method = 'TOTP_AND_DEVICE'
+      AND challenge_id IS NOT NULL
+      AND totp_timestep IS NOT NULL
+      AND device_key_id IS NOT NULL
       AND device_signature IS NOT NULL)
     OR
-    (method = 'TOTP_ONLY' AND device_key_id IS NULL
+    (method = 'TOTP_ONLY'
+      AND challenge_id IS NOT NULL
+      AND totp_timestep IS NOT NULL
+      AND device_key_id IS NULL
+      AND device_signature IS NULL)
+    OR
+    (method = 'AUTO_POLICY'
+      AND challenge_id IS NULL
+      AND totp_timestep IS NULL
+      AND device_key_id IS NULL
       AND device_signature IS NULL)
   ),
   FOREIGN KEY (challenge_id, node_id, operation_id, challenge_status)
@@ -70,4 +82,5 @@ CREATE TABLE operation_approvals (
 );
 
 CREATE UNIQUE INDEX operation_approvals_totp_single_use
-  ON operation_approvals (node_id, totp_timestep);
+  ON operation_approvals (node_id, totp_timestep)
+  WHERE totp_timestep IS NOT NULL;

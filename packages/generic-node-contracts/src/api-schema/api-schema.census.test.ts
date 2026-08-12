@@ -163,8 +163,8 @@ describe("the crypto-goldens concern.2 Postgres ENUM census", () => {
     expect(PG_ENUMS.wallet_lease_role).toHaveLength(5);
   });
 
-  it("approval_method has exactly 2 values", () => {
-    expect(PG_ENUMS.approval_method).toHaveLength(2);
+  it("approval_method has exactly 3 values", () => {
+    expect(PG_ENUMS.approval_method).toHaveLength(3);
   });
 
   it("approval_challenge_status has exactly 4 values", () => {
@@ -258,7 +258,7 @@ describe("Postgres ENUM canonical-universe completeness", () => {
     ["wallet_state", ["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"]],
     ["destination_state", ["PENDING", "BLESSED", "RETIRED"]],
     ["wallet_lease_role", ["RECEIVE_WINDOW", "MOVE_SOURCE", "MOVE_DESTINATION", "SEND_SOURCE", "RECONCILIATION"]],
-    ["approval_method", ["TOTP_ONLY", "TOTP_AND_DEVICE"]],
+    ["approval_method", ["TOTP_ONLY", "TOTP_AND_DEVICE", "AUTO_POLICY"]],
     ["approval_challenge_status", ["ISSUED", "CONSUMED", "SUPERSEDED", "EXPIRED"]],
     ["external_formation_state", ["NOT_REQUIRED", "APPROVAL_PENDING", "APPROVED_UNSIGNED", "SIGNING_CLAIMED", "PARTIAL_PERSISTED", "PARTIAL_DELIVERED"]],
     ["observer_domain", ["NODE", "PLATFORM"]],

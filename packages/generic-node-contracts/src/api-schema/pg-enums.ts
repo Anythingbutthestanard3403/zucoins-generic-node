@@ -56,7 +56,7 @@ export const WALLET_LEASE_ROLE = [
   "RECONCILIATION",
 ] as const;
 
-export const APPROVAL_METHOD = ["TOTP_ONLY", "TOTP_AND_DEVICE"] as const;
+export const APPROVAL_METHOD = ["TOTP_ONLY", "TOTP_AND_DEVICE", "AUTO_POLICY"] as const;
 
 export const APPROVAL_CHALLENGE_STATUS = ["ISSUED", "CONSUMED", "SUPERSEDED", "EXPIRED"] as const;
 

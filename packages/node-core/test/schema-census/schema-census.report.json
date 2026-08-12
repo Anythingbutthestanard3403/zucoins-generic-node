@@ -6,6 +6,8 @@
   ],
   "schemaFiles": [
     "admin-sessions-node-id.sql",
+    "approval-method-auto-policy-enum.sql",
+    "approval-stores-auto-policy.sql",
     "approval-stores.sql",
     "attention-reason-enum.sql",
     "audit-log.sql",
@@ -14,6 +16,7 @@
     "destinations-label.sql",
     "device-enrollment-challenges.sql",
     "device-keys.sql",
+    "dual-control-policy.sql",
     "event-ledger.sql",
     "expected-artifacts.sql",
     "gateway-observation-successor-indexes.sql",
@@ -2080,7 +2083,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_121",
+      "satisfiedBy": "index:operations_unique_122",
       "ok": true
     },
     {
@@ -2127,7 +2130,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_65",
+      "satisfiedBy": "index:audit_log_unique_66",
       "ok": true
     },
     {

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { TransferDetailPage } from "./TransferDetailPage.js";
+import * as approveDeviceSign from "../../lib/approve-device-sign.js";
 import { TotpPromptProvider } from "../../totp/TotpPromptProvider.js";
 import { useAuth } from "../../store/auth.js";
 
@@ -87,6 +88,10 @@ describe("TransferDetailPage approve happy path", () => {
       },
     });
     vi.restoreAllMocks();
+    vi.spyOn(approveDeviceSign, "signApproveChallengePreimage").mockResolvedValue({
+      device_key_id: "device-1",
+      device_signature: "sig==",
+    });
   });
 
   afterEach(() => {

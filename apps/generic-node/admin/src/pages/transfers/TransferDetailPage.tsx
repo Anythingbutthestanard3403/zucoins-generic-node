@@ -14,7 +14,6 @@ import {
   isSendOperationType,
   partitionRecoveryActions,
   pollSendState,
-  listDeviceKeys,
   postApprove,
   postRecoveryAction,
   postReject,
@@ -24,7 +23,7 @@ import {
   type RecoveryDetail,
 } from "../../lib/money.js";
 import { APPROVE_SUCCESS_NOTE, operationKindLabel, statusLabel } from "../../lib/labels.js";
-import { getDeviceRecord, listLocalDeviceRecords, signPreimage } from "../../lib/device-crypto.js";
+import { signApproveChallengePreimage } from "../../lib/approve-device-sign.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
 type LoadState =
@@ -147,29 +146,13 @@ export function TransferDetailPage() {
       let held = approveDeviceRef.current;
       if (held === null || held.operationId !== id || held.nonce !== c.nonce) {
         // One-tap device sign over server-issued preimage_text (byte-exact).
-        // TOTP remains required; device signature is additive (TOTP floor).
-        let device_key_id: string | null = null;
-        let device_signature: string | null = null;
-        try {
-          const keys = await listDeviceKeys();
-          const locals = await listLocalDeviceRecords();
-          const localIds = new Set(locals.map((l) => l.id));
-          const match = keys.find((k) => localIds.has(k.id)) ?? keys[0];
-          if (match !== undefined) {
-            const local = await getDeviceRecord(match.id);
-            if (local !== null) {
-              device_key_id = match.id;
-              device_signature = await signPreimage(local.privateKey, c.preimage_text);
-            }
-          }
-        } catch {
-          // Fall through: TOTP-only path if device unavailable (server may still require device).
-        }
+        // TOTP remains required; device signature is additive (TOTP floor). Shared with inbox (ZTR-1256).
+        const signed = await signApproveChallengePreimage(c.preimage_text);
         held = {
           operationId: id,
           nonce: c.nonce,
-          device_key_id,
-          device_signature,
+          device_key_id: signed.device_key_id,
+          device_signature: signed.device_signature,
         };
         approveDeviceRef.current = held;
       }

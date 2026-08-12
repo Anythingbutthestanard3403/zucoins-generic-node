@@ -42,6 +42,11 @@ const WALLET = {
   key_origin: "NODE_GENERATED",
   recovery_verified: true,
   observed_balance_zkz: "1248.4200",
+  holding_operation_id: null,
+  holding_operation_status: null,
+  holding_operation_expiry_unix_time_secs: null,
+  holding_operation_attention_required: false,
+  holding_operation_terminal_at: null,
   created_at: "2026-07-30T00:00:00.000Z",
 };
 
@@ -64,6 +69,7 @@ const OPERATION_RECORD: Readonly<Record<string, unknown>> = {
   created_at: "2026-07-30T00:00:00.000Z",
   updated_at: "2026-07-30T00:00:00.000Z",
   terminal_at: null,
+  expiry_unix_time_secs: null,
   destination_address: E2E_DESTINATION_ADDRESS,
   source_wallet_id: "wallet-e2e-0000000000000000000001",
   receiver_wallet_id: null,

@@ -103,6 +103,16 @@ export interface MemoryWalletSeed {
   readonly custody: WalletCustodyRow;
   readonly evidence?: WalletRecoveryVerificationRow | null;
   readonly observed_balance_zkz?: string | null;
+  readonly holding?: Partial<
+    Pick<
+      WalletInventoryItem,
+      | "holding_operation_id"
+      | "holding_operation_status"
+      | "holding_operation_expiry_unix_time_secs"
+      | "holding_operation_attention_required"
+      | "holding_operation_terminal_at"
+    >
+  >;
 }
 
 export interface MemoryOperationSeed {
@@ -121,11 +131,30 @@ export interface MemoryInventorySeed {
   readonly audit?: readonly MemoryAuditSeed[];
 }
 
+function emptyHolding(): Pick<
+  WalletInventoryItem,
+  | "holding_operation_id"
+  | "holding_operation_status"
+  | "holding_operation_expiry_unix_time_secs"
+  | "holding_operation_attention_required"
+  | "holding_operation_terminal_at"
+> {
+  return {
+    holding_operation_id: null,
+    holding_operation_status: null,
+    holding_operation_expiry_unix_time_secs: null,
+    holding_operation_attention_required: false,
+    holding_operation_terminal_at: null,
+  };
+}
+
 function walletItem(seed: MemoryWalletSeed): WalletInventoryItem {
   const view = buildWalletCustodyView(seed.custody, seed.evidence ?? null);
   return {
     ...view,
     observed_balance_zkz: seed.observed_balance_zkz ?? null,
+    ...emptyHolding(),
+    ...(seed.holding ?? {}),
   };
 }
 
@@ -346,7 +375,20 @@ function mapWalletRow(
         ? null
         : (String(row.recovery_verification_id) as never),
   };
-  return { ...buildWalletCustodyView(custody, evidence), observed_balance_zkz: observed };
+  return {
+    ...buildWalletCustodyView(custody, evidence),
+    observed_balance_zkz: observed,
+    holding_operation_id:
+      row.holding_operation_id == null ? null : String(row.holding_operation_id),
+    holding_operation_status:
+      row.holding_operation_status == null ? null : String(row.holding_operation_status),
+    holding_operation_expiry_unix_time_secs:
+      row.holding_operation_expiry_unix_time_secs == null
+        ? null
+        : String(row.holding_operation_expiry_unix_time_secs),
+    holding_operation_attention_required: Boolean(row.holding_operation_attention_required),
+    holding_operation_terminal_at: tsOrNull(row.holding_operation_terminal_at),
+  };
 }
 
 export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminInventoryStore {
@@ -380,8 +422,21 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
       const result = await sql.query(
         `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state,
                 w.created_at, w.retired_at, w.quarantine_reason,
-                w.recovery_verified_at, w.recovery_verification_id
+                w.recovery_verified_at, w.recovery_verification_id,
+                l.operation_id::text AS holding_operation_id,
+                o.status::text AS holding_operation_status,
+                o.expiry_unix_time_secs AS holding_operation_expiry_unix_time_secs,
+                COALESCE(o.attention_required, false) AS holding_operation_attention_required,
+                o.terminal_at AS holding_operation_terminal_at
            FROM wallets w
+           LEFT JOIN LATERAL (
+             SELECT wal.operation_id
+               FROM wallet_active_leases wal
+              WHERE wal.wallet_id = w.id
+              ORDER BY wal.acquired_at DESC NULLS LAST
+              LIMIT 1
+           ) l ON true
+           LEFT JOIN operations o ON o.id = l.operation_id
           WHERE ${where.join(" AND ")}
           ORDER BY w.created_at DESC, w.id DESC -- contract-allow:order:frozen structural vocabulary
           LIMIT $${params.length}`,
@@ -398,10 +453,23 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
 
     async getWallet(nodeId, idOrPubkey) {
       const byId = await sql.query(
-        `SELECT id, node_id, public_key, key_origin, state, created_at, retired_at,
-                quarantine_reason, recovery_verified_at, recovery_verification_id
-           FROM wallets
-          WHERE node_id = $1 AND (id::text = $2 OR public_key = $2)
+        `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state, w.created_at, w.retired_at,
+                w.quarantine_reason, w.recovery_verified_at, w.recovery_verification_id,
+                l.operation_id::text AS holding_operation_id,
+                o.status::text AS holding_operation_status,
+                o.expiry_unix_time_secs AS holding_operation_expiry_unix_time_secs,
+                COALESCE(o.attention_required, false) AS holding_operation_attention_required,
+                o.terminal_at AS holding_operation_terminal_at
+           FROM wallets w
+           LEFT JOIN LATERAL (
+             SELECT wal.operation_id
+               FROM wallet_active_leases wal
+              WHERE wal.wallet_id = w.id
+              ORDER BY wal.acquired_at DESC NULLS LAST
+              LIMIT 1
+           ) l ON true
+           LEFT JOIN operations o ON o.id = l.operation_id
+          WHERE w.node_id = $1 AND (w.id::text = $2 OR w.public_key = $2)
           LIMIT 1`,
         [nodeId, idOrPubkey],
       );
@@ -441,6 +509,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
         `SELECT o.id, o.kind, o.status, o.amount_zkz, o.row_version,
                 o.attention_required, o.attention_reason,
                 o.created_at, o.updated_at, o.terminal_at,
+                o.expiry_unix_time_secs,
                 o.destination_address
            FROM operations o
           WHERE ${where.join(" AND ")}
@@ -457,6 +526,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
         `SELECT o.id, o.kind, o.status, o.amount_zkz, o.row_version,
                 o.attention_required, o.attention_reason,
                 o.created_at, o.updated_at, o.terminal_at,
+                o.expiry_unix_time_secs,
                 o.source_wallet_id, o.receiver_wallet_id, o.destination_id,
                 o.destination_address, o.after_landing, o.after_landing_destination_id,
                 o.formation_state, o.verification_verdict, o.implementer_id,
@@ -606,6 +676,11 @@ function mapOpList(row: Record<string, unknown>): OperationInventoryListItem {
     created_at: ts(row.created_at),
     updated_at: ts(row.updated_at),
     terminal_at: tsOrNull(row.terminal_at),
+    // ZTR-1253: text unix-seconds expiry for operator countdown (null when unarmed).
+    expiry_unix_time_secs:
+      row.expiry_unix_time_secs === null || row.expiry_unix_time_secs === undefined
+        ? null
+        : String(row.expiry_unix_time_secs),
     // Summary-row field: the operator scanning view renders a destination per row, so the
     // list SELECT above must keep projecting it (admin-inventory.test.ts pins both).
     destination_address: row.destination_address == null ? null : String(row.destination_address),

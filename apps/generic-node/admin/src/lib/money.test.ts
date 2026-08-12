@@ -420,6 +420,11 @@ describe("getWalletInventory", () => {
         key_origin: "node_generated",
         recovery_verified: true,
         observed_balance_zkz: "3",
+        holding_operation_id: null,
+        holding_operation_status: null,
+        holding_operation_expiry_unix_time_secs: null,
+        holding_operation_attention_required: false,
+        holding_operation_terminal_at: null,
       }),
     );
     vi.stubGlobal("fetch", fetchMock);

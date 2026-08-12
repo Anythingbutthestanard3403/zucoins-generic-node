@@ -123,6 +123,7 @@ describe("OperationsPage honesty", () => {
                 created_at: "2026-08-02T15:46:53.940Z",
                 updated_at: "2026-08-02T15:46:59.685Z",
                 terminal_at: "2026-08-02T15:46:59.685Z",
+                expiry_unix_time_secs: null,
               },
             ],
             has_more: false,

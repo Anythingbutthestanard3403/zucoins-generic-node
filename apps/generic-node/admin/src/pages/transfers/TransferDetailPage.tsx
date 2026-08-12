@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
+import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { ApiError } from "../../lib/api.js";
 import {
@@ -416,7 +417,20 @@ export function TransferDetailPage() {
             <div className="v">{inventory.formation_state}</div>
           </div>
         ) : null}
-        {inventory?.terminal_at ? (
+                {inventory ? (
+          <div className="detail-item">
+            <div className="k">Wallet release</div>
+            <div className="v">
+              <ReleaseCountdown
+                expiryUnixTimeSecs={inventory.expiry_unix_time_secs}
+                status={inventory.status}
+                terminalAt={inventory.terminal_at}
+                attentionRequired={inventory.attention_required}
+              />
+            </div>
+          </div>
+        ) : null}
+{inventory?.terminal_at ? (
           <div className="detail-item">
             <div className="k">Terminal at</div>
             <div className="v">{inventory.terminal_at}</div>

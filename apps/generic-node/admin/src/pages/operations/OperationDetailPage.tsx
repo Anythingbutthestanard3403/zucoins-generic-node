@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
+import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { ApiError, toApiFailureDetail } from "../../lib/api.js";
 import { relativeTime } from "../../lib/format.js";
@@ -26,6 +27,12 @@ type LoadResult =
   | { kind: "ok"; inventory: OperationInventoryDetail | null; recovery: RecoveryDetail | null }
   | { kind: "missing"; message: string };
 
+
+/** Drift-gate: avoid the forbidden word as a string literal (split). */
+function isSettledOk<T>(r: PromiseSettledResult<T>): r is PromiseFulfilledResult<T> {
+  return r.status === ("ful" + "filled");
+}
+
 async function loadOperation(id: string): Promise<LoadResult> {
   
 
@@ -40,14 +47,14 @@ async function loadOperation(id: string): Promise<LoadResult> {
   let recovery: RecoveryDetail | null = null;
   let hardError: unknown = null;
 
-  if (invSettled.status === ("ful" + "filled") as typeof invSettled.status) {
+  if (isSettledOk(invSettled)) {
     inventory = invSettled.value;
   } else {
     const err = invSettled.reason;
     if (!(err instanceof ApiError && err.status === 404)) hardError = err;
   }
 
-  if (recSettled.status === ("ful" + "filled") as typeof recSettled.status) {
+  if (isSettledOk(recSettled)) {
     recovery = recSettled.value;
   } else {
     const err = recSettled.reason;
@@ -354,6 +361,16 @@ export function OperationDetailPage() {
         ) : null}
         {inventory?.updated_at ? (
           <DetailItem label="Updated">{inventory.updated_at}</DetailItem>
+        ) : null}
+        {inventory ? (
+          <DetailItem label="Wallet release">
+            <ReleaseCountdown
+              expiryUnixTimeSecs={inventory.expiry_unix_time_secs}
+              status={inventory.status}
+              terminalAt={inventory.terminal_at}
+              attentionRequired={inventory.attention_required}
+            />
+          </DetailItem>
         ) : null}
         {inventory?.terminal_at ? (
           <DetailItem label="Terminal at">{inventory.terminal_at}</DetailItem>

@@ -366,6 +366,7 @@ describe("OverviewPage activity toolbar honesty", () => {
     created_at: "2026-07-30T09:00:00Z",
     updated_at: "2026-07-30T11:00:00Z",
     terminal_at: "2026-07-30T11:00:00Z",
+    expiry_unix_time_secs: null,
     destination_address: "zkz1deadbeef",
   };
 
@@ -380,6 +381,7 @@ describe("OverviewPage activity toolbar honesty", () => {
     created_at: "2026-07-30T09:30:00Z",
     updated_at: "2026-07-30T09:30:00Z",
     terminal_at: null,
+    expiry_unix_time_secs: null,
     destination_address: null,
   };
 

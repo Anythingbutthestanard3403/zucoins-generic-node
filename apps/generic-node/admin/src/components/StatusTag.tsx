@@ -26,12 +26,12 @@ const MAP: Record<string, string> = {
   pending: "warn",
   waiting: "warn",
   indeterminate: "warn",
-  busy: "warn",
   leased: "warn",
   pinned: "warn",
   hold: "warn",
 
-  // Failures
+  // Failures / custody alarms — never mute QUARANTINED (ZTR-1255)
+  quarantined: "danger",
   blocked: "danger",
   exhausted: "danger",
   failed: "danger",
@@ -51,5 +51,9 @@ export function StatusTag({ status }: { status: string }) {
   const key = raw.toLowerCase().replace(/\s+/g, "_");
   const cls = MAP[key] ?? "muted";
   const label = raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  return <span className={`tag ${cls}`}>{label}</span>;
+  return (
+    <span className={`tag ${cls}`} data-testid={`status-tag-${key}`} data-severity={cls}>
+      {label}
+    </span>
+  );
 }

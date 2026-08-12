@@ -132,12 +132,18 @@ export interface WalletInventoryItem {
   /**
    * Active lease holding operation when present (ZTR-1253). Null when no
    * wallet_active_leases row. Never invents a hold from wallet.state alone.
+   * Lease is the sole authority for "why held"; wallets.state remains the
+   * custody standing column (AVAILABLE / PINNED / QUARANTINED / RETIRED).
    */
   readonly holding_operation_id: string | null;
   readonly holding_operation_status: string | null;
   readonly holding_operation_expiry_unix_time_secs: string | null;
   readonly holding_operation_attention_required: boolean;
   readonly holding_operation_terminal_at: string | null;
+  /** wallet_active_leases.lease_role when a lease row exists (ZTR-1255). */
+  readonly holding_lease_role: string | null;
+  /** operations.kind of the holding operation when present (ZTR-1255). */
+  readonly holding_operation_type: string | null;
 }
 
 /** Response field allowlist for wallet inventory — never private keys or secret-class tokens. */
@@ -159,6 +165,8 @@ export const WALLET_INVENTORY_FIELDS = [
   "holding_operation_expiry_unix_time_secs",
   "holding_operation_attention_required",
   "holding_operation_terminal_at",
+  "holding_lease_role",
+  "holding_operation_type",
 ] as const;
 
 /**

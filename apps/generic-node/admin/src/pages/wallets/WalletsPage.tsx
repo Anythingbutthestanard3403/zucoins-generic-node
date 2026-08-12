@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
-import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { listWalletsInventory } from "../../lib/money.js";
 
@@ -81,6 +81,7 @@ export function WalletsPage() {
               <th>Pubkey</th>
               <th>Origin</th>
               <th>State</th>
+              <th>Hold cause</th>
               <th>Recovery</th>
               <th>Observed ZKZ</th>
               <th><span className="visually-hidden">Actions</span></th>
@@ -89,7 +90,7 @@ export function WalletsPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted">
+                <td colSpan={7} className="muted">
                   {loading
                       ? "Loading…"
                       : live
@@ -99,7 +100,7 @@ export function WalletsPage() {
               </tr>
             ) : (
               rows.map((w) => (
-                <tr key={w.wallet_id + w.public_key}>
+                <tr key={w.wallet_id + w.public_key} data-wallet-state={w.state}>
                   <td className="mono">
                     <Link to={`/wallets/${encodeURIComponent(w.public_key)}`} className="linkish">
                       {truncatePubkey(w.public_key, 12, 6)}
@@ -110,17 +111,10 @@ export function WalletsPage() {
                     <StatusTag status={w.state} />
                   </td>
                   <td>
-                    {w.holding_operation_id ? (
-                      <ReleaseCountdown
-                        compact
-                        expiryUnixTimeSecs={w.holding_operation_expiry_unix_time_secs}
-                        status={w.holding_operation_status ?? w.state}
-                        terminalAt={w.holding_operation_terminal_at}
-                        attentionRequired={w.holding_operation_attention_required}
-                      />
-                    ) : (
+                    <WalletHoldCause wallet={w} compact />
+                    {!w.holding_operation_id && (w.state ?? "").toUpperCase() === "AVAILABLE" ? (
                       <span className="muted">—</span>
-                    )}
+                    ) : null}
                   </td>
                   <td>
                     {w.recovery_verified ? (

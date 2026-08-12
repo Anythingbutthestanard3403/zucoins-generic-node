@@ -27,6 +27,9 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = {
   REJECTED: "Rejected",
   NEEDS_ATTENTION: "Needs attention",
   AVAILABLE: "Available",
+  PINNED: "Pinned",
+  QUARANTINED: "Quarantined",
+  RETIRED: "Retired",
   BLOCKED: "Blocked",
   VERIFIED: "Verified",
 };

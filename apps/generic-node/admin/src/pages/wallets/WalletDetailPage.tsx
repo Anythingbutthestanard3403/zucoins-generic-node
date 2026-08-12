@@ -4,6 +4,7 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import { toApiFailureDetail } from "../../lib/api.js";
 import { getWalletInventory } from "../../lib/money.js";
 
@@ -15,8 +16,6 @@ export function WalletDetailPage() {
     enabled: pubkey.length > 0,
   });
   const w = q.data ?? undefined;
-
-  
 
   if (q.isLoading) {
     return (
@@ -56,7 +55,19 @@ export function WalletDetailPage() {
       <div className="card form-card detail-grid">
         <div className="detail-item"><div className="k">Pubkey</div><div className="v mono">{w.public_key}</div></div>
         <div className="detail-item"><div className="k">Origin</div><div className="v">{w.key_origin}</div></div>
-        <div className="detail-item"><div className="k">State</div><div className="v"><StatusTag status={w.state} /></div></div>
+        <div className="detail-item">
+          <div className="k">State</div>
+          <div className="v"><StatusTag status={w.state} /></div>
+        </div>
+        <div className="detail-item">
+          <div className="k">Hold cause</div>
+          <div className="v">
+            <WalletHoldCause wallet={w} />
+            {!w.holding_operation_id && (w.state ?? "").toUpperCase() === "AVAILABLE" ? (
+              <span className="muted">None</span>
+            ) : null}
+          </div>
+        </div>
         <div className="detail-item">
           <div className="k">Observed balance</div>
           <div className="v money">{w.observed_balance_zkz ?? "—"} ZKZ</div>
@@ -75,7 +86,7 @@ export function WalletDetailPage() {
               </>
             )}
           </div>
-
+        </div>
         {w.holding_operation_id ? (
           <>
             <div className="detail-item">
@@ -86,6 +97,12 @@ export function WalletDetailPage() {
                 </Link>
               </div>
             </div>
+            {w.holding_lease_role ? (
+              <div className="detail-item">
+                <div className="k">Lease role</div>
+                <div className="v mono">{w.holding_lease_role}</div>
+              </div>
+            ) : null}
             <div className="detail-item">
               <div className="k">Wallet release</div>
               <div className="v">
@@ -99,7 +116,12 @@ export function WalletDetailPage() {
             </div>
           </>
         ) : null}
-        </div>
+        {w.quarantine_reason ? (
+          <div className="detail-item">
+            <div className="k">Quarantine reason</div>
+            <div className="v" data-testid="wallet-quarantine-reason">{w.quarantine_reason}</div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

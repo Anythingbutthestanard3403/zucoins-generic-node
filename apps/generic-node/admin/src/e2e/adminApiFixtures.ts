@@ -38,21 +38,34 @@ const NEEDS_ATTENTION = {
 const WALLET = {
   wallet_id: "wallet-e2e-0000000000000000000001",
   public_key: E2E_WALLET_PUBKEY,
-  state: "ACTIVE",
+  state: "AVAILABLE",
   key_origin: "NODE_GENERATED",
   recovery_verified: true,
   observed_balance_zkz: "1248.4200",
+  quarantine_reason: null,
   holding_operation_id: null,
   holding_operation_status: null,
   holding_operation_expiry_unix_time_secs: null,
   holding_operation_attention_required: false,
   holding_operation_terminal_at: null,
+  holding_lease_role: null,
+  holding_operation_type: null,
   created_at: "2026-07-30T00:00:00.000Z",
+};
+
+/** Quarantined sibling so e2e can assert danger styling (ZTR-1255). */
+const WALLET_QUARANTINED = {
+  ...WALLET,
+  wallet_id: "wallet-e2e-quarantined-0000000000001",
+  public_key: `${E2E_WALLET_PUBKEY.slice(0, -1)}2`,
+  state: "QUARANTINED",
+  quarantine_reason: "REGRESSION",
+  observed_balance_zkz: "0.0000",
 };
 
 const WALLETS_LIST = {
   object: "list",
-  data: [WALLET],
+  data: [WALLET, WALLET_QUARANTINED],
   has_more: false,
   next_cursor: null,
 };

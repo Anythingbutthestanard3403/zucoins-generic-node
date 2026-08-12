@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import {
   IconArrow, IconHalt, IconMark, IconRefresh,
 } from "../../icons.js";
@@ -218,8 +219,9 @@ export function OverviewPage() {
     id: `W${i + 1}`,
     pubkey: w.public_key,
     balance: w.observed_balance_zkz ?? "—",
-    busy: w.state !== "AVAILABLE",
+    state: w.state,
     role: w.key_origin,
+    wallet: w,
   }));
   const opsLive = opsQ.data?.live === true;
   const opsRows = opsLive ? (opsQ.data?.data ?? []) : [];
@@ -465,14 +467,17 @@ export function OverviewPage() {
             </div>
           ) : (
             walletPreview.map((t) => (
-              <div className="acct" key={t.id + t.pubkey}>
+              <div className="acct" key={t.id + t.pubkey} data-wallet-state={t.state}>
                 <div className={`orb ${t.id.toLowerCase()}`}>{t.id}</div>
                 <div className="meta">
                   <div className="name">
-                    {t.role}
-                    {t.busy ? <span className="busy">busy</span> : null}
+                    {t.role}{" "}
+                    <StatusTag status={t.state} />
                   </div>
-                  <div className="sub">{truncatePubkey(t.pubkey)}</div>
+                  <div className="sub">
+                    {truncatePubkey(t.pubkey)}
+                    <WalletHoldCause wallet={t.wallet} compact />
+                  </div>
                 </div>
                 <div className="bal">{t.balance}</div>
               </div>
@@ -590,11 +595,15 @@ export function OverviewPage() {
                 key={w.wallet_id + w.public_key}
                 to={`/wallets/${encodeURIComponent(w.public_key)}`}
                 className="sess-row"
+                data-wallet-state={w.state}
               >
                 <span className="id">{truncatePubkey(w.public_key)}</span>
                 <span className="amt">{w.observed_balance_zkz ?? "—"}</span>
                 <StatusTag status={w.state} />
-                <span className="when">{w.key_origin}</span>
+                <span className="when">
+                  {w.key_origin}
+                  <WalletHoldCause wallet={w} compact />
+                </span>
               </Link>
             ))
           )}

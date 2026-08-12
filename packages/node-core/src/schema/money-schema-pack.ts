@@ -215,6 +215,8 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1249: stamp terminal_at on EXPIRED ops left NULL by queue-age expiry.
   // Pure data fix-forward on operations; appended only.
   "operations-expired-terminal-at-backfill",
+  // ZTR-1250: clear sticky attention on already-landed ops. Appended only.
+  "operations-landed-attention-clear-backfill",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

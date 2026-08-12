@@ -669,8 +669,12 @@ export function createSqlExternalSendLandingStore(
 
         // Sync the operations mirror from send_operations in this same
         // DB-TX: status, formation_state, terminal_observation_id, terminal_at,
-        // row_version, updated_at. terminal_at must land with EXTERNAL_SEND_LANDED
-        // so the SPA in-flight predicate (terminal_at IS NULL) drops the row (ZTR-1249).
+        // attention clear, row_version, updated_at.
+        // terminal_at must land with EXTERNAL_SEND_LANDED so SPA in-flight drops
+        // the row (ZTR-1249). Positive land also clears provisional attention
+        // (e.g. POST_EXPIRY_RECONCILING) — send_operations already cleared in
+        // landing-sql-store; mirror must not leave operations.attention_required
+        // sticky (ZTR-1250). Co-presence CHECK: required false iff reason null.
         await client.query(
           `UPDATE operations o
               SET status = s.status::operation_status,
@@ -678,6 +682,9 @@ export function createSqlExternalSendLandingStore(
                   terminal_observation_id = s.terminal_observation_id,
                   verification_material_available_until = s.verification_material_available_until,
                   terminal_at = COALESCE(o.terminal_at, now()),
+                  attention_required = false,
+                  attention_reason = NULL,
+                  attention_detail = NULL,
                   row_version = s.row_version,
                   updated_at = now()
              FROM send_operations s

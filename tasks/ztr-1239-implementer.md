@@ -3,6 +3,9 @@
 ## Ticket
 Route 2 public handshake: `POST /v1/integration-requests` + one-time key claim poll.
 
+## PR
+https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/104
+
 ## Claim
 run=`e27b131d-1e96-4b8e-b68d-b2061964b3b8` → release QA-Review
 

@@ -127,8 +127,8 @@ describe("OperationDetailPage", () => {
 
     expect(await screen.findByText(/Money path advanced/i)).toBeInTheDocument();
     expect(screen.getByText("0.01")).toBeInTheDocument();
-    expect(screen.getAllByText(/Receive Landed/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Landed Verified/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Receive landed/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Landed and verified/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/landing_exact/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(inventory.receiver_wallet_id).length).toBeGreaterThan(0);
     expect(screen.getByText(/landing proof verdict LANDED_EXACT/i)).toBeInTheDocument();

@@ -26,7 +26,7 @@ import {
 } from "../../lib/needs-attention.js";
 import { EMPTY_NEEDS_ATTENTION } from "../../lib/ops.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
-import { operationKindLabel, statusLabel } from "../../lib/labels.js";
+import { operationKindLabel, severityShort, statusLabel } from "../../lib/labels.js";
 
 type Tab = "attention" | "history";
 
@@ -245,7 +245,7 @@ export function OperationsPage() {
               ops.map((a) => (
                 <div key={a.operation_id}>
                   <div className="attn">
-                    <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`}>{a.severity}</div>
+                    <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
                     <div className="body-t">
                       <div className="t">
                         {operationKindLabel(a.operation_type)} · {statusLabel(a.status)} <StatusTag status={a.classification} />
@@ -287,7 +287,7 @@ export function OperationsPage() {
                             {detail.recovery_nonce_expires_at} · row {detail.row_version}
                           </p>
                           <p style={{ marginTop: 8, fontSize: 13 }}>
-                            {detail.classification}: {detail.classification_rationale}
+                            {statusLabel(detail.classification)}: {detail.classification_rationale}
                           </p>
                           {canRetractAttention(detail) ? (
                             <div style={{ marginTop: 10 }} data-testid="attention-retraction-quick">
@@ -438,9 +438,9 @@ export function OperationsPage() {
       {msg ? <div className="banner" style={{ marginTop: 12 }}>{msg}</div> : null}
       {err ? <div className="banner banner-error" style={{ marginTop: 12 }}>{err}</div> : null}
       <p className="muted" style={{ fontSize: 12.5 }}>
-        Attention: <code className="mono">GET /admin/v1/operations/needs-attention</code>
+        Attention queue is live from the node operations API.
         {" · "}
-        History: <code className="mono">GET /admin/v1/operations</code>
+        History lists all operations from inventory.
         {" · "}
         Detail: <code className="mono">GET …/operations/{"{id}"}</code> + recovery
       </p>

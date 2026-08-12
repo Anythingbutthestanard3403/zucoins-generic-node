@@ -26,7 +26,7 @@ import {
   type ReadinessRow,
   type WalletInventoryItem,
 } from "../../lib/money.js";
-import { operationKindLabel, statusLabel } from "../../lib/labels.js";
+import { operationKindLabel, severityShort, statusLabel } from "../../lib/labels.js";
 import {
   fetchNeedsAttentionSoft,
   NEEDS_ATTENTION_KEY,
@@ -560,7 +560,7 @@ export function OverviewPage() {
             ) : (
               attentionLive.slice(0, 5).map((a) => (
                 <div className="attn" key={a.operation_id}>
-                  <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`}>{a.severity}</div>
+                  <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
                   <DivBody
                     title={`${operationKindLabel(a.operation_type)} · ${statusLabel(a.status)}`}
                     detail={`${a.operation_id}${a.attention_reason ? ` · ${statusLabel(a.attention_reason)}` : ""} · ${a.operation_type}`}

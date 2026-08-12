@@ -66,7 +66,7 @@ export function TransfersPage() {
       {!loading && !live ? (
         <>
           <p className="muted" style={{ marginBottom: 12, fontSize: 12.5 }}>
-            <code className="mono">GET /admin/v1/operations?kind=SEND_EXTERNAL</code> unavailable.
+            Outgoing send inventory unavailable.
             Paste a CREATED operation id into the URL{" "}
             <code className="mono">{"/transfers/{operation_id}"}</code> to approve/reject.
           </p>

@@ -30,7 +30,7 @@ import {
   signPreimage,
 } from "../../lib/device-crypto.js";
 import { truncatePubkey } from "../../lib/format.js";
-import { operationKindLabel } from "../../lib/labels.js";
+import { operationKindLabel, statusLabel } from "../../lib/labels.js";
 import {
   formatMoneyError,
   getApprovalChallenge,
@@ -1090,7 +1090,7 @@ export function ApproveInboxPage() {
                   <div className="approve-card-body">
                     <div className="approve-row">
                       <span className="k">Status</span>
-                      <span className="v">{a.status}</span>
+                      <span className="v">{statusLabel(a.status)}</span>
                     </div>
                     <div className="approve-row">
                       <span className="k">Reference</span>
@@ -1099,7 +1099,7 @@ export function ApproveInboxPage() {
                     {a.attention_reason ? (
                       <div className="approve-row">
                         <span className="k">Reason</span>
-                        <span className="v">{a.attention_reason}</span>
+                        <span className="v">{statusLabel(a.attention_reason)}</span>
                       </div>
                     ) : null}
                     <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>

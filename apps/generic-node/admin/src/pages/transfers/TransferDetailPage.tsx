@@ -398,7 +398,7 @@ export function TransferDetailPage() {
         {inventory?.formation_state ? (
           <div className="detail-item">
             <div className="k">Formation</div>
-            <div className="v">{inventory.formation_state}</div>
+            <div className="v">{statusLabel(inventory.formation_state)}</div>
           </div>
         ) : null}
                 {inventory ? (

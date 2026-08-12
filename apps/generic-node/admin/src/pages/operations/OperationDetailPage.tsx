@@ -13,6 +13,7 @@ import {
   formatMoneyError,
   getOperationInventory,
   getRecovery,
+  listImplementers,
   isCancelled,
   isSendOperationType,
   postAttentionRetraction,
@@ -21,7 +22,7 @@ import {
   type OperationInventoryDetail,
   type RecoveryDetail,
 } from "../../lib/money.js";
-import { operationKindLabel } from "../../lib/labels.js";
+import { implementerDisplayName, operationKindLabel, statusLabel } from "../../lib/labels.js";
 import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
@@ -148,6 +149,12 @@ function EvidenceList({ items }: { items: readonly EvidenceManifestItem[] }) {
 export function OperationDetailPage() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
+  const implementersQ = useQuery({
+    queryKey: ["implementers"],
+    queryFn: listImplementers,
+    staleTime: 60_000,
+  });
+  const implementerRows = implementersQ.data?.implementers;
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [retractReason, setRetractReason] = useState(
@@ -307,7 +314,7 @@ export function OperationDetailPage() {
       {isSuccessLand && !recovery?.attention_required ? (
         <div className="banner banner-ok" role="status">
           Money path advanced (not fulfilment proof)
-          {classification ? ` · ${classification}` : ""}
+          {classification ? ` · ${statusLabel(classification)}` : ""}
           {recovery?.classification_rationale
             ? ` · ${recovery.classification_rationale}`
             : ""}
@@ -321,8 +328,8 @@ export function OperationDetailPage() {
       {recovery?.attention_required ? (
         <div className="banner banner-error" role="alert">
           Attention required
-          {recovery.attention_reason ? `: ${recovery.attention_reason}` : ""}
-          {classification ? ` · ${classification}` : ""}
+          {recovery.attention_reason ? `: ${statusLabel(recovery.attention_reason)}` : ""}
+          {classification ? ` · ${statusLabel(classification)}` : ""}
         </div>
       ) : null}
 
@@ -349,7 +356,9 @@ export function OperationDetailPage() {
         ) : null}
         <DetailItem label="Attention">
           {recovery?.attention_required || inventory?.attention_required
-            ? recovery?.attention_reason ?? inventory?.attention_reason ?? "required"
+            ? statusLabel(
+                recovery?.attention_reason ?? inventory?.attention_reason ?? "NEEDS_ATTENTION",
+              )
             : "none"}
         </DetailItem>
         <DetailItem label="Receiver wallet" mono>
@@ -365,13 +374,13 @@ export function OperationDetailPage() {
           {inventory ? textOrAbsent(inventory.destination_id) : <Absent />}
         </DetailItem>
         <DetailItem label="After landing">
-          {inventory ? textOrAbsent(inventory.after_landing) : <Absent />}
+          {inventory ? textOrAbsent(inventory.after_landing ? statusLabel(inventory.after_landing) : null) : <Absent />}
         </DetailItem>
         <DetailItem label="After-landing destination" mono>
           {inventory ? textOrAbsent(inventory.after_landing_destination_id) : <Absent />}
         </DetailItem>
         <DetailItem label="Formation">
-          {inventory ? textOrAbsent(inventory.formation_state) : <Absent />}
+          {inventory ? textOrAbsent(inventory.formation_state ? statusLabel(inventory.formation_state) : null) : <Absent />}
         </DetailItem>
         <DetailItem label="Verification verdict">
           {inventory?.verification_verdict ? (
@@ -387,8 +396,17 @@ export function OperationDetailPage() {
             <Absent />
           )}
         </DetailItem>
-        <DetailItem label="Implementer" mono>
-          {inventory ? textOrAbsent(inventory.implementer_id) : <Absent />}
+        <DetailItem label="Implementer">
+          {inventory?.implementer_id ? (
+            <span title={inventory.implementer_id}>
+              {implementerDisplayName(inventory.implementer_id, implementerRows)}
+              <span className="quiet mono" style={{ fontSize: 11, marginLeft: 6 }}>
+                {inventory.implementer_id}
+              </span>
+            </span>
+          ) : (
+            <Absent />
+          )}
         </DetailItem>
         <DetailItem label="Client reference" mono>
           {inventory ? textOrAbsent(inventory.client_reference) : <Absent />}

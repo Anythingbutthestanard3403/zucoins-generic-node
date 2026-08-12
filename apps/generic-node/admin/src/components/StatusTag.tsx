@@ -1,3 +1,5 @@
+import { statusLabel } from "../lib/labels.js";
+
 const MAP: Record<string, string> = {
   // Success / healthy terminals
   settled: "ok",
@@ -50,7 +52,7 @@ export function StatusTag({ status }: { status: string }) {
   const raw = typeof status === "string" && status.length > 0 ? status : "unknown";
   const key = raw.toLowerCase().replace(/\s+/g, "_");
   const cls = MAP[key] ?? "muted";
-  const label = raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = statusLabel(raw);
   return (
     <span className={`tag ${cls}`} data-testid={`status-tag-${key}`} data-severity={cls}>
       {label}

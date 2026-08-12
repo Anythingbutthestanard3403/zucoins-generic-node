@@ -1,6 +1,7 @@
 /**
  * Single-source plain-language maps for the operator SPA.
  * Wire enums / API / DB values are NEVER renamed — these labels are display-only.
+ * Census tests pin coverage against @zucoins/generic-node-contracts enums.
  */
 
 /** Protocol three-ops → primary UI label. */
@@ -12,32 +13,105 @@ export const OPERATION_KIND_LABELS = {
 
 export type OperationKindKey = keyof typeof OPERATION_KIND_LABELS;
 
-/** Status / formation / attention codes → operator text. */
+/** Status / formation / attention / inventory codes → operator text. */
 export const STATUS_LABELS: Readonly<Record<string, string>> = {
-  NO_ELIGIBLE_WALLET: "Wallets not recovery-verified — continue setup",
-  AWAITING_REDEMPTION: "Waiting for recipient to finish",
+  // Operation status (OPERATION_STATUS)
+  CREATED: "Created",
+  READY: "Ready",
+  RECEIVE_LANDED: "Receive landed",
+  INTERNAL_MOVE_LANDED: "Internal transfer landed",
   APPROVED: "Approved — recipient must finish; observe-land is separate",
+  AWAITING_REDEMPTION: "Waiting for recipient to finish",
+  EXTERNAL_SEND_LANDED: "Outgoing landed",
+  EXPIRED: "Expired",
+  REJECTED: "Rejected",
+  NEEDS_ATTENTION: "Needs attention",
+
+  // Recovery classification
   LANDED_VERIFIED: "Landed and verified",
   PROVEN_NOT_STARTED: "Proven not started",
   PROVEN_NOT_LANDED: "Proven not landed",
   WAITING: "Waiting",
   INDETERMINATE: "Indeterminate",
   INVARIANT_BREACH: "Invariant breach",
-  CREATED: "Created",
-  READY: "Ready",
-  REJECTED: "Rejected",
-  EXPIRED: "Expired",
-  RECEIVE_LANDED: "Receive landed",
-  INTERNAL_MOVE_LANDED: "Internal transfer landed",
-  EXTERNAL_SEND_LANDED: "Outgoing landed",
-  NEEDS_ATTENTION: "Needs attention",
+
+  // Wallet / destination / generic inventory
   AVAILABLE: "Available",
   PINNED: "Pinned",
   QUARANTINED: "Quarantined",
   RETIRED: "Retired",
   BLOCKED: "Blocked",
   VERIFIED: "Verified",
+  PENDING: "Pending",
+  BLESSED: "Blessed",
+  ACTIVE: "Active",
+  REVOKED: "Revoked",
+  LOST: "Marked lost",
+  DISABLED: "Disabled",
+  ENABLED: "Enabled",
+
+  // Formation (NO_ELIGIBLE + EXTERNAL_FORMATION_STATE)
+  NO_ELIGIBLE_WALLET: "Wallets not recovery-verified — continue setup",
+  NOT_REQUIRED: "Formation not required",
+  APPROVAL_PENDING: "Approval pending",
+  APPROVED_UNSIGNED: "Approved — signature not yet applied",
+  SIGNING_CLAIMED: "Signing in progress",
+  PARTIAL_PERSISTED: "Partial formation persisted",
+  PARTIAL_DELIVERED: "Partial formation delivered",
+
+  // After-landing policy
+  HOLD: "Hold in receive wallet",
+  INTERNAL_MOVE: "Move to blessed sink after landing",
+
+  // Attention reasons (ATTENTION_REASONS — 15)
+  GATEWAY_RESPONSE_INVALID: "Gateway response invalid",
+  GATEWAY_UNAVAILABLE_BEYOND_BUDGET: "Gateway unavailable beyond budget",
+  UNEXPECTED_HEAD_CHANGE: "Unexpected head change",
+  LINEAGE_GAP: "Lineage gap",
+  SUBMIT_OUTCOME_AMBIGUOUS: "Submit outcome ambiguous",
+  SIGNING_OUTCOME_AMBIGUOUS: "Signing outcome ambiguous",
+  DESTINATION_NO_LONGER_BLESSED: "Destination no longer blessed",
+  T0_RELEASE_MISMATCH: "T0 release mismatch",
+  VERIFICATION_REJECTED: "Verification rejected",
+  VERIFICATION_INDETERMINATE: "Verification indeterminate",
+  VERIFICATION_RESOURCE_EXHAUSTED: "Verification resource exhausted",
+  LEASE_INVARIANT_VIOLATION: "Lease invariant violation",
+  EXACT_BYTES_UNAVAILABLE: "Exact bytes unavailable",
+  OPERATOR_PARKED: "Operator parked",
+  POST_EXPIRY_RECONCILING: "Post-expiry reconciling",
+
+  // Challenge / approval method
+  ISSUED: "Issued",
+  CONSUMED: "Consumed",
+  SUPERSEDED: "Superseded",
+  TOTP_ONLY: "TOTP only",
+  TOTP_AND_DEVICE: "TOTP and device",
+  AUTO_POLICY: "Auto-policy",
+
+  // Audit actor kinds (common)
+  operator: "Operator",
+  OPERATOR: "Operator",
+  system: "System",
+  SYSTEM: "System",
+  implementer: "Integration",
+  IMPLEMENTER: "Integration",
+  service: "Service",
+  SERVICE: "Service",
 };
+
+/** Severity codes from needs-attention rows. */
+export const SEVERITY_LABELS: Readonly<Record<string, string>> = {
+  P0: "P0 — act now",
+  P1: "P1 — act this shift",
+  P2: "P2 — plan soon",
+};
+
+/** Humanize unknown SCREAMING_SNAKE / mixed tokens without claiming product meaning. */
+export function humanizeWire(code: string): string {
+  return code
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /**
  * Primary label for an operation kind. Unknown kinds fall back to a
@@ -69,7 +143,7 @@ export function operationKindDisplay(kind: string | null | undefined): string {
 }
 
 /**
- * Operator-facing status text. Unknown codes keep a light humanize
+ * Operator-facing status / enum text. Unknown codes keep a light humanize
  * (underscores → spaces) without claiming settlement/"paid".
  */
 export function statusLabel(status: string | null | undefined): string {
@@ -78,7 +152,43 @@ export function statusLabel(status: string | null | undefined): string {
   const upper = key.toUpperCase();
   if (upper in STATUS_LABELS) return STATUS_LABELS[upper]!;
   if (key in STATUS_LABELS) return STATUS_LABELS[key]!;
-  return key.replace(/_/g, " ");
+  return humanizeWire(key);
+}
+
+/**
+ * Primary label + optional wire secondary for deliberate pairing
+ * ("Waiting for recipient · AWAITING_REDEMPTION").
+ */
+export function statusLabelWithWire(status: string | null | undefined): {
+  readonly primary: string;
+  readonly wire: string;
+} {
+  if (status == null || status === "") return { primary: "—", wire: "" };
+  const wire = status.trim();
+  const primary = statusLabel(wire);
+  return { primary, wire: primary === wire || primary === humanizeWire(wire) ? "" : wire };
+}
+
+/** Severity badge text — always carries meaning. */
+export function severityLabel(severity: string | null | undefined): string {
+  if (severity == null || severity === "") return "—";
+  const key = severity.trim().toUpperCase();
+  return SEVERITY_LABELS[key] ?? severityLabelFallback(key);
+}
+
+function severityLabelFallback(key: string): string {
+  if (key.startsWith("P") && key.length <= 3) return `${key} — review priority`;
+  return humanizeWire(key);
+}
+
+/** Short severity for compact type-ic chips (still meaningful). */
+export function severityShort(severity: string | null | undefined): string {
+  if (severity == null || severity === "") return "—";
+  const key = severity.trim().toUpperCase();
+  if (key === "P0") return "P0 now";
+  if (key === "P1") return "P1 shift";
+  if (key === "P2") return "P2 plan";
+  return key;
 }
 
 /**
@@ -101,3 +211,15 @@ export function isNoEligibleWallet(code: string | null | undefined): boolean {
 /** Approve/success banners must never say "paid". */
 export const APPROVE_SUCCESS_NOTE =
   "Approval alone is not settlement — recipient must finish; observe-land is separate.";
+
+/** Resolve integration/implementer id → display name; UUID remains title for hover. */
+export function implementerDisplayName(
+  id: string | null | undefined,
+  rows: readonly { readonly id: string; readonly name: string }[] | undefined,
+): string {
+  if (id == null || id === "") return "—";
+  const hit = rows?.find((r) => r.id === id);
+  if (hit?.name) return hit.name;
+  if (id.length > 12) return `${id.slice(0, 8)}…`;
+  return id;
+}

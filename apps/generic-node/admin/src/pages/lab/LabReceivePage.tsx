@@ -8,6 +8,7 @@ import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { TotpQrCode } from "../../components/TotpQrCode.js";
 import { ApiError, api } from "../../lib/api.js";
 import { fetchReadinessChecklist, type ReadinessChecklist } from "../../lib/money.js";
+import { statusLabel } from "../../lib/labels.js";
 
 const LAB_CAP = "0.01";
 
@@ -247,7 +248,7 @@ export function LabReceivePage() {
             operation_id: <code className="mono">{result.operation_id}</code>
             <br />
             amount: <strong className="money">{result.amount_zkz}</strong> ZKZ · status:{" "}
-            {result.code_status} / {result.state}
+            {statusLabel(result.code_status)} / {statusLabel(result.state)}
           </p>
           {result.receiver_pubkey ? (
             <p className="muted" style={{ fontSize: 12.5 }}>

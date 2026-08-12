@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   APPROVE_SUCCESS_NOTE,
   credentialPrefixKind,
+  implementerDisplayName,
   isNoEligibleWallet,
   OPERATION_KIND_LABELS,
   operationKindDisplay,
   operationKindLabel,
   operationKindWire,
+  severityLabel,
+  severityShort,
   statusLabel,
 } from "./labels.js";
 
@@ -59,5 +62,29 @@ describe("credential prefix labels", () => {
   it("labels ik_/sh_ families without echoing full secrets", () => {
     expect(credentialPrefixKind("ik_abcdef12")).toBe("Server API key");
     expect(credentialPrefixKind("sh_xyz")).toBe("Status subscription secret");
+  });
+});
+
+describe("severity and implementer display", () => {
+  it("severity labels carry meaning", () => {
+    expect(severityLabel("P0")).toMatch(/act now/i);
+    expect(severityShort("P1")).toMatch(/shift/i);
+  });
+
+  it("implementerDisplayName prefers name with id fallback", () => {
+    expect(
+      implementerDisplayName("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", [
+        { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "rewards-bot" },
+      ]),
+    ).toBe("rewards-bot");
+    expect(implementerDisplayName("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", [])).toMatch(
+      /^bbbbbbbb/,
+    );
+  });
+
+  it("EXPIRED and formation states are labelled", () => {
+    expect(statusLabel("EXPIRED")).toBe("Expired");
+    expect(statusLabel("APPROVAL_PENDING")).toMatch(/Approval pending/i);
+    expect(statusLabel("UNEXPECTED_HEAD_CHANGE")).toMatch(/Unexpected head/i);
   });
 });

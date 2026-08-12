@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { listAuditInventory } from "../../lib/money.js";
+import { statusLabel } from "../../lib/labels.js";
 
 export function AuditPage() {
   const q = useQuery({
@@ -42,8 +43,8 @@ export function AuditPage() {
             ) : rows.map((row) => (
               <tr key={row.id}>
                 <td>{row.created_at}</td>
-                <td>{row.actor_kind}{row.actor_id ? ` · ${row.actor_id}` : ""}</td>
-                <td>{row.action}</td>
+                <td title={row.actor_kind}>{statusLabel(row.actor_kind)}{row.actor_id ? ` · ${row.actor_id}` : ""}</td>
+                <td title={row.action}>{statusLabel(row.action)}</td>
                 <td className="mono">{row.operation_id ?? row.wallet_id ?? "—"}</td>
                 <td className="mono">—</td>
               </tr>

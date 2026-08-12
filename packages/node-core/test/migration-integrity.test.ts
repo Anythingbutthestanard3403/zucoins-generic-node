@@ -211,6 +211,8 @@ const SCHEMA_FILES = [
   "integration-requests.sql",
   // ZTR-1249: pure data backfill of terminal_at on EXPIRED ops. Appended after operations.
   "operations-expired-terminal-at-backfill.sql",
+  // ZTR-1250: clear sticky attention on landed ops. Appended after operations.
+  "operations-landed-attention-clear-backfill.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -231,6 +233,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "lease-role-enum.sql",
   "transaction-material-byte-immutability.sql",
   "operations-expired-terminal-at-backfill.sql",
+  "operations-landed-attention-clear-backfill.sql",
   "lease-operation-foreign-keys.sql",
   "attention-reason-enum.sql",
   "dual-control-policy.sql",
@@ -540,6 +543,10 @@ const GREENFIELD: Record<
   "operations-expired-terminal-at-backfill.sql": {
     applies: false,
     missingFragment: "operations-expired-terminal-at-backfill requires operations",
+  },
+  "operations-landed-attention-clear-backfill.sql": {
+    applies: false,
+    missingFragment: "operations-landed-attention-clear-backfill requires operations",
   },
 };
 

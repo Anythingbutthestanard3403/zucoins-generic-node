@@ -1540,6 +1540,36 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(facts.map((f) => f.operationId)).toContain(operationId);
   });
 
+  it("listNeedsAttention excludes landed terminals even with sticky attention_required (ZTR-1250)", async () => {
+    const sourceWalletId = await insertWallet();
+    const destinationId = await insertDestination(await insertWallet());
+    const stickyId = await seedMoveOperation({
+      status: "INTERNAL_MOVE_LANDED",
+      attentionReason: "LINEAGE_GAP",
+      sourceWalletId,
+      destinationId,
+    });
+    // Force sticky flag after land-status seed (seed may default attention off).
+    await pool.query(
+      `UPDATE operations
+          SET attention_required = true,
+              attention_reason = 'LINEAGE_GAP'
+        WHERE id = $1::uuid`,
+      [stickyId],
+    );
+    const openId = await seedMoveOperation({
+      status: "NEEDS_ATTENTION",
+      attentionReason: "listed",
+      sourceWalletId: await insertWallet(),
+      destinationId: await insertDestination(await insertWallet()),
+    });
+
+    const facts = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const ids = facts.map((f) => f.operationId);
+    expect(ids).toContain(openId);
+    expect(ids).not.toContain(stickyId);
+  });
+
   it("RELEASE_EXPIRED_RECEIVE releases via SqlReceiveExpiryReleaseService, unpins the wallet, and records dual proof rows", async () => {
     const fx = await seedReleaseableExpiredReceive();
 

@@ -824,6 +824,14 @@ async function opsTerminalAtOf(operationId: string): Promise<string | null> {
   return row.rows[0]!.terminal_at;
 }
 
+async function opsAttentionRequiredOf(operationId: string): Promise<boolean> {
+  const row = await pool.query<{ attention_required: boolean }>(
+    `SELECT attention_required FROM operations WHERE id = $1::uuid`,
+    [operationId],
+  );
+  return row.rows[0]!.attention_required;
+}
+
 async function attentionReasonOf(operationId: string): Promise<string | null> {
   const row = await pool.query<{ attention_reason: string | null }>(
     `SELECT attention_reason FROM send_operations WHERE operation_id = $1::uuid`,
@@ -1067,6 +1075,8 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
       expect(await opsStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
       expect(await opsTerminalObsOf(parked.operationId)).not.toBeNull();
       expect(await attentionReasonOf(parked.operationId)).toBeNull();
+      // ZTR-1250: operations mirror clears sticky attention on land (not just send_operations).
+      expect(await opsAttentionRequiredOf(parked.operationId)).toBe(false);
       // Landing does not release the source lease — verification-complete does.
       expect(await leaseHeld(parked.walletId)).toBe(true);
 

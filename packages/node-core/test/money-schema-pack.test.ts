@@ -303,7 +303,6 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
       "operations-expired-terminal-at-backfill",
     );
     expect(backfillIdx).toBeGreaterThan(opsIdx);
-    expect(backfillIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[backfillIdx]!.sql).toContain(
       "SET terminal_at = COALESCE(terminal_at, updated_at)",
@@ -312,6 +311,22 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[backfillIdx]!.sql).toContain("terminal_at IS NULL");
     expect(files[backfillIdx]!.sql).toContain(
       "operations-expired-terminal-at-backfill requires operations",
+    );
+  });
+
+  it("appends ZTR-1250 landed attention-clear backfill after operations", () => {
+    const opsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operations");
+    const clearIdx = MONEY_SCHEMA_PACK_ORDER.indexOf(
+      "operations-landed-attention-clear-backfill",
+    );
+    expect(clearIdx).toBeGreaterThan(opsIdx);
+    expect(clearIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[clearIdx]!.sql).toContain("attention_required = false");
+    expect(files[clearIdx]!.sql).toContain("'RECEIVE_LANDED'");
+    expect(files[clearIdx]!.sql).toContain("'EXTERNAL_SEND_LANDED'");
+    expect(files[clearIdx]!.sql).toContain(
+      "operations-landed-attention-clear-backfill requires operations",
     );
   });
 

@@ -122,6 +122,10 @@ const SQL_STORE_IDEMPOTENCY = `
   ON CONFLICT (operation_id, idempotency_key) DO NOTHING
 `;
 
+// ZTR-1250: terminal landed/expired/rejected rows must not sit in the operator
+// needs-attention inbox even if a historical attention_required flag stuck
+// (pre-land writers). Positive land clears the flag; this filter is belt-and-
+// braces so ghosts already in the DB disappear without a second operator action.
 const SQL_LIST_NEEDS_ATTENTION = `
   SELECT id::text AS operation_id, kind::text AS kind, status::text AS status,
          attention_required, attention_reason, row_version::int AS row_version,
@@ -130,6 +134,13 @@ const SQL_LIST_NEEDS_ATTENTION = `
          expiry_unix_time_secs, formation_state::text AS formation_state
     FROM operations
    WHERE (attention_required = true OR status = 'NEEDS_ATTENTION')
+     AND status NOT IN (
+           'RECEIVE_LANDED',
+           'INTERNAL_MOVE_LANDED',
+           'EXTERNAL_SEND_LANDED',
+           'EXPIRED',
+           'REJECTED'
+         )
      AND ($2::text IS NULL OR kind::text = $2)
    ORDER BY created_at ASC -- contract-allow:order:frozen structural vocabulary
    LIMIT $1

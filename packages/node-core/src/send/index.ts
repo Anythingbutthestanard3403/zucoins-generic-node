@@ -189,3 +189,33 @@ export {
   type DeviceSignaturePolicySetMeta,
 } from "./device-signature-policy.js";
 
+// Auto-approve policy (ops.auto_approve_sends + one-TX commit — ZTR-1234).
+export {
+  AUTO_APPROVE_SETTING_KEY,
+  AUTO_APPROVE_POLICY_CHANGED_ACTION,
+  AUTO_APPROVE_APPLIED_ACTION,
+  LOCK_AUTO_APPROVE_WINDOW_SQL,
+  WINDOW_SPEND_SQL,
+  lockAutoApproveWindow,
+  parseAutoApprovePolicyDocument,
+  parseAutoApprovePolicyStructure,
+  serializeAutoApprovePolicyDocument,
+  evaluateAutoApproveRule,
+  fixedAutoApprovePolicy,
+  InMemoryAutoApprovePolicy,
+  createSqlAutoApprovePolicy,
+  queryWindowSpend,
+  commitAutoApproval,
+  AutoApproveCasMissError,
+  type AutoApproveDisabledReason,
+  type AutoApproveRule,
+  type AutoApprovePolicyDocument,
+  type AutoApproveFallThroughReason,
+  type AutoApproveEvalResult,
+  type AutoApproveSendFacts,
+  type AutoApprovePolicySetMeta,
+  type AutoApprovePolicyPort,
+  type CommitAutoApprovalInput,
+  type CommitAutoApprovalResult,
+  type CommitAutoApprovalDeps,
+} from "./auto-approve-policy.js";

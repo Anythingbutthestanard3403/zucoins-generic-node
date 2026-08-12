@@ -193,6 +193,70 @@ export function isSendOperationType(operationType: string | null | undefined): b
   return kind === "SEND_EXTERNAL" || kind.includes("SEND");
 }
 
+/**
+ * Terminal Layer-1 statuses from the operations states contract (ZTR-1254).
+ * Kind is accepted for call-site clarity; terminality is status-driven so a
+ * missing terminal_at writer cannot re-poison In flight buckets.
+ */
+export const TERMINAL_OPERATION_STATUSES = [
+  "RECEIVE_LANDED",
+  "INTERNAL_MOVE_LANDED",
+  "EXTERNAL_SEND_LANDED",
+  "EXPIRED",
+  "REJECTED",
+] as const;
+
+export type TerminalOperationStatus = (typeof TERMINAL_OPERATION_STATUSES)[number];
+
+const TERMINAL_STATUS_SET: ReadonlySet<string> = new Set(TERMINAL_OPERATION_STATUSES);
+
+/** True when status is a contract terminal outcome (ignores terminal_at). */
+export function isTerminalStatus(
+  _kind: string | null | undefined,
+  status: string | null | undefined,
+): boolean {
+  if (status == null || status === "") return false;
+  return TERMINAL_STATUS_SET.has(status.trim().toUpperCase());
+}
+
+export type OperationLifecycleBucket = "in_flight" | "landed" | "expired" | "rejected";
+
+/**
+ * Shared SPA bucket for lists. Status wins over terminal_at so EXPIRED with
+ * null terminal_at never appears under In flight (ZTR-1254).
+ */
+export function operationLifecycleBucket(o: {
+  readonly status: string;
+  readonly operation_type?: string | null;
+  readonly terminal_at?: string | null;
+}): OperationLifecycleBucket {
+  const status = (o.status ?? "").trim().toUpperCase();
+  if (status === "EXPIRED") return "expired";
+  if (status === "REJECTED") return "rejected";
+  if (
+    status === "RECEIVE_LANDED" ||
+    status === "INTERNAL_MOVE_LANDED" ||
+    status === "EXTERNAL_SEND_LANDED"
+  ) {
+    return "landed";
+  }
+  // Unknown status: terminal_at is a secondary hint only (never sole truth).
+  if (o.terminal_at != null && o.terminal_at !== "") {
+    if (/EXPIRED/i.test(status)) return "expired";
+    if (/REJECTED/i.test(status)) return "rejected";
+    if (/LANDED/i.test(status)) return "landed";
+  }
+  return "in_flight";
+}
+
+export function isOperationTerminal(o: {
+  readonly status: string;
+  readonly operation_type?: string | null;
+  readonly terminal_at?: string | null;
+}): boolean {
+  return operationLifecycleBucket(o) !== "in_flight";
+}
+
 export function newIdempotencyKey(): string {
   // Idempotency keys must be unique per request; unpredictability is not required.
   // crypto.randomUUID is secure-context-only — fall back on plain HTTP (ZTR-1168).

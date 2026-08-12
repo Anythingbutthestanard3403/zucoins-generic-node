@@ -771,6 +771,138 @@ paths:
         - IMPLEMENTER_BEARER
       x-zupay-scope: "send:read"
       x-zupay-idempotency: NA
+  /v1/integration-requests:
+    post:
+      tags:
+        - IntegrationRequests
+      operationId: postV1Integrationrequests
+      summary: Platform integration request intake
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - display_name
+                - requested_scopes
+                - proposed_rule
+              properties:
+                display_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                requested_scopes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum:
+                      - "send:create"
+                      - "send:read"
+                proposed_rule:
+                  type: object
+                  additionalProperties: true
+                  description: Platform-proposed auto-approve rule (ZTR-1234 amount/window grammar; no implementer_id).
+                  properties:
+                    rule_id:
+                      type: string
+                    per_send_max_zkz:
+                      type: string
+                    per_send_min_zkz:
+                      type:
+                        - string
+                        - "null"
+                    window_hours:
+                      type: integer
+                      minimum: 1
+                    window_cap_zkz:
+                      type: string
+                    expires_at:
+                      type:
+                        - string
+                        - "null"
+      responses:
+        "201":
+          description: Integration request accepted (claim token returned once)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - request_id
+                  - claim_token
+                  - expires_at
+                properties:
+                  request_id:
+                    type: string
+                    format: uuid
+                  claim_token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+      x-zupay-auth-classes:
+        - PUBLIC
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
+  "/v1/integration-requests/{id}":
+    get:
+      tags:
+        - IntegrationRequests
+      operationId: getV1IntegrationrequestsId
+      summary: Poll integration request status / one-time claim
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: id
+      responses:
+        "200":
+          description: Status poll; first APPROVED poll may include one-time api_key
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - PENDING
+                      - APPROVED
+                      - DECLINED
+                      - EXPIRED
+                      - CLAIMED
+                  api_key:
+                    type: string
+                  public_prefix:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+                  approved_rule:
+                    type: object
+                    additionalProperties: true
+                  implementer_id:
+                    type: string
+                    format: uuid
+                  credential_id:
+                    type: string
+                    format: uuid
+      x-zupay-auth-classes:
+        - PUBLIC
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
   /v1/internal-moves:
     post:
       tags:
@@ -1827,7 +1959,7 @@ x-zupay-frozen:
     - "/v1/refunds*"
     - "/admin/v1/drains*"
   retired_routes_non_path_category: any import endpoint
-  public_route_count: 17
+  public_route_count: 19
   admin_route_count: 8
   money_moving_create_paths:
     - /v1/receives

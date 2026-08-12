@@ -380,16 +380,16 @@ describe("the crypto-goldens concern.2 discovery endpoint census", () => {
 });
 
 describe("the crypto-goldens concern.2 route census", () => {
-  it("has exactly 17 public routes", () => {
-    expect(PUBLIC_ROUTES).toHaveLength(17);
+  it("has exactly 19 public routes", () => {
+    expect(PUBLIC_ROUTES).toHaveLength(19);
   });
 
   it("has exactly 8 admin routes", () => {
     expect(ADMIN_ROUTES).toHaveLength(8);
   });
 
-  it("has exactly 25 total active routes", () => {
-    expect(PUBLIC_ROUTES.length + ADMIN_ROUTES.length).toBe(25);
+  it("has exactly 27 total active routes", () => {
+    expect(PUBLIC_ROUTES.length + ADMIN_ROUTES.length).toBe(27);
   });
 
   it("has exactly 5 retired route patterns", () => {

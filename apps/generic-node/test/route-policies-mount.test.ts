@@ -45,8 +45,8 @@ const fakeVerificationAccessStore = {} as SqlVerificationAccessStore;
 const fakeVaultAccessAuditLog: VaultAccessAuditLog = { record: async () => {} };
 
 describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
-  it("ROUTE_POLICIES has 25 frozen entries", () => {
-    expect(ROUTE_POLICIES).toHaveLength(25);
+  it("ROUTE_POLICIES has 27 frozen entries", () => {
+    expect(ROUTE_POLICIES).toHaveLength(27);
   });
 
   it("manifest parity: PUBLIC∪ADMIN === ROUTE_POLICIES (OpenAPI honesty AC6)", () => {

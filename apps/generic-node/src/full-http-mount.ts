@@ -103,6 +103,7 @@ import {
   createSqlDeviceSignaturePolicy,
   createSqlDualControlPolicy,
   createSqlAutoApprovePolicy,
+  SqlIntegrationRequestStore,
   queryWindowSpend,
   type DualControlMode,
   type DualControlPolicyPort,
@@ -446,6 +447,8 @@ export function resolveAdminCsrfOrigins(opts: {
 
 export interface ProductionRouteSurface {
   readonly destinationService: DestinationService;
+  /** Route 2 public handshake store (ZTR-1239). */
+  readonly integrationRequestStore: import("@zucoins/node-core").IntegrationRequestStore;
   readonly adminRouteDeps: AdminRouteDeps;
   readonly adminUserStore: AdminUserStore;
   readonly adminCsrfAllowedOrigins: readonly string[];
@@ -1078,8 +1081,19 @@ export function createProductionRouteSurface(
   const subscribeDeps: OperationSubscribeRouteDeps = liveReads.subscribeDeps;
 
 
+
+  // Route 2 public handshake store (ZTR-1239). Claim TX uses pool transaction runner.
+  const integrationRequestStore = new SqlIntegrationRequestStore(
+    createPoolSqlExecutor(config.pool),
+    async (body) => {
+      const runner = createPoolSqlTransactionRunner(config.pool);
+      return runner.transaction(async (sql) => body(sql));
+    },
+  );
+
   return Object.freeze({
     destinationService,
+    integrationRequestStore,
     adminRouteDeps,
     adminUserStore: userStore,
     adminCsrfAllowedOrigins,

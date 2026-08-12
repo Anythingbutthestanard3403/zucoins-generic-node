@@ -143,6 +143,7 @@ function securityForPolicy(policy: RoutePolicy | undefined, isPublic: boolean): 
 
 function tagForPath(path: string): string {
   if (path.startsWith("/admin/")) return "Admin";
+  if (path.startsWith("/v1/integration-requests")) return "IntegrationRequests";
   if (path.startsWith("/.well-known")) return "Discovery";
   if (path === "/health" || path === "/health/ready") return "Health";
   if (path.includes("/destinations") && !path.includes("/operations")) return "Destinations";
@@ -198,6 +199,8 @@ function summaryFor(method: string, path: string): string {
     "GET /admin/v1/operations/needs-attention": "List operations needing attention",
     "GET /admin/v1/operations/:operation_id/recovery": "Read recovery options",
     "POST /admin/v1/operations/:operation_id/recovery-actions": "Apply a recovery action",
+    "POST /v1/integration-requests": "Platform integration request intake",
+    "GET /v1/integration-requests/:id": "Poll integration request status / one-time claim",
     "GET /.well-known/zupay-node": "Public node identity discovery",
     "GET /health": "Liveness probe",
     "GET /health/ready": "Readiness probe",
@@ -272,6 +275,55 @@ function successResponses(method: string, path: string): Record<string, unknown>
         content: {
           "application/json": {
             schema: { $ref: "#/components/schemas/ExternalSendResponse" },
+          },
+        },
+      },
+    };
+  }
+  if (key === "POST /v1/integration-requests") {
+    return {
+      "201": {
+        description: "Integration request accepted (claim token returned once)",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["request_id", "claim_token", "expires_at"],
+              properties: {
+                request_id: { type: "string", format: "uuid" },
+                claim_token: { type: "string" },
+                expires_at: { type: "string", format: "date-time" },
+              },
+            },
+          },
+        },
+      },
+    };
+  }
+  if (key === "GET /v1/integration-requests/:id") {
+    return {
+      "200": {
+        description: "Status poll; first APPROVED poll may include one-time api_key",
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: true,
+              required: ["status"],
+              properties: {
+                status: {
+                  type: "string",
+                  enum: ["PENDING", "APPROVED", "DECLINED", "EXPIRED", "CLAIMED"],
+                },
+                api_key: { type: "string" },
+                public_prefix: { type: "string" },
+                scopes: { type: "array", items: { type: "string" } },
+                approved_rule: { type: "object", additionalProperties: true },
+                implementer_id: { type: "string", format: "uuid" },
+                credential_id: { type: "string", format: "uuid" },
+              },
+            },
           },
         },
       },
@@ -947,6 +999,7 @@ const NON_MONEY_V1_POST_SUFFIXES = [
   "/armed",
   "/verification-complete",
   "/destinations",
+  "/integration-requests",
 ] as const;
 
 export function moneyMovingCreatePathsInDoc(doc: OpenApiDocument): string[] {

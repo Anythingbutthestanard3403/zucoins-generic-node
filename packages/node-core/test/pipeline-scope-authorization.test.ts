@@ -19,11 +19,31 @@ const routeKey = (route: { readonly method: string; readonly path: string }): st
   `${route.method} ${route.path}`;
 
 function requestFor(route: RouteSchema): PipelineRequest {
+  // PUBLIC POST routes skip authenticate; body validation still runs. Supply a
+  // schema-valid body so the unpoliced check only sees auth/policy failures.
+  const needsBody = route.method === "POST" && route.bodySchema !== undefined;
+  let payload: unknown = {};
+  if (route.path === "/v1/integration-requests") {
+    payload = {
+      display_name: "probe",
+      requested_scopes: ["send:create"],
+      proposed_rule: {
+        per_send_max_zkz: "1",
+        window_hours: 1,
+        window_cap_zkz: "1",
+      },
+    };
+  }
+  const rawBody = needsBody
+    ? new TextEncoder().encode(JSON.stringify(payload))
+    : new Uint8Array();
   return {
     method: route.method,
     path: route.path,
-    rawBody: new Uint8Array(),
-    headers: {},
+    rawBody,
+    headers: needsBody
+      ? { "content-type": "application/json" }
+      : {},
     query: {},
   };
 }

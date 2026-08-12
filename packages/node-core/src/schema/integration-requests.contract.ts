@@ -6,7 +6,7 @@
  * integration-requests.sql. Census tests bind every entry here to the literal
  * SQL text so the inventory and the schema contract cannot drift apart.
  *
- * No public routes in this slice (ZTR-1239). No PWA surface (ZTR-1240).
+ * Public routes: ZTR-1239 (integration-request module). No PWA surface (ZTR-1240).
  */
 
 export const INTEGRATION_REQUESTS_SCHEMA_FILE = "integration-requests.sql" as const;
@@ -205,7 +205,7 @@ export const INTEGRATION_REQUESTS_EXECUTION_OBLIGATIONS: readonly string[] = [
   "secret boundary: claim_token_hash only (never raw claim token); issued API key generated at claim time and returned once - never a column on this table.",
   "duplicate claim_token_hash is rejected with unique_violation (23505).",
   "scope CHECK rejects empty arrays and any scope outside the frozen IMPLEMENTER_SCOPES set.",
-  "no public routes in this slice (ZTR-1239 owns intake/claim HTTP).",
+  "public intake/claim HTTP lives in packages/node-core/src/integration-request (ZTR-1239).",
 ] as const;
 
 export const INTEGRATION_REQUESTS_SOURCE =

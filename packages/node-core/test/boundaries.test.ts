@@ -33,6 +33,7 @@ const PRODUCTION_MODULES = [
   "observability",
   "credential",
   "implementer",
+  "integration-request",
   "vault",
   "verification",
   "totp",
@@ -112,6 +113,11 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // Named integration identity registry (create/list/retire + audit). Imports core only
   // for the AuditLogRow shape used by the in-memory adapter; SQL store is leaf-over-SQL.
   implementer: ["core"],
+  // Route 2 public handshake store + handlers. Imports api (error envelope,
+  // pipeline) + credential (issue shapes) + protocol (amount grammar) +
+  // reporting (rate limiter) + schema (status contract). api does not import
+  // this module — composition root wires the router.
+  "integration-request": ["api", "credential", "protocol", "reporting", "schema"],
   vault: [],
   // verification-complete acknowledgement: reuses the reporting SHA-256 helper for
   // the evidence-set digest and declares its own SqlExecutor port, like every other

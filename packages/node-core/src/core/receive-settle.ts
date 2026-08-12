@@ -26,7 +26,6 @@ import { redeliverIdenticalSignedRequest } from "../gateway/identical-byte-redel
 import type { SubmitGatewayActionOptions } from "../gateway/submit.js";
 import { verifyRawEd25519 } from "../protocol/ed25519-verify.js";
 import type { ReconcileIndeterminateReason } from "../protocol/reconcile/types.js";
-import type { GatewayRequest } from "../protocol/index.js";
 import type { MetricsHooks } from "./metrics.js";
 import {
   receiveSubmitOnce,

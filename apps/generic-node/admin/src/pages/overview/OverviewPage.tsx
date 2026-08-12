@@ -14,7 +14,9 @@ import {
   fetchHaltState,
   fetchReadinessChecklist,
   formatMoneyError,
+  isOperationTerminal,
   listOperationsInventory,
+  operationLifecycleBucket,
   listWalletsInventory,
   operationDetailPath,
   sumObservedEquityZkz,
@@ -56,9 +58,12 @@ function countByKind(
   let landed_today = 0;
   for (const o of ops) {
     if (o.operation_type !== kind) continue;
-    const terminal = o.terminal_at != null && o.terminal_at !== "";
+    const terminal = isOperationTerminal(o);
     if (terminal) {
-      if ((o.terminal_at ?? "").startsWith(today) || (o.updated_at ?? "").startsWith(today)) {
+      if (
+        operationLifecycleBucket(o) === "landed" &&
+        ((o.terminal_at ?? "").startsWith(today) || (o.updated_at ?? "").startsWith(today))
+      ) {
         landed_today += 1;
       }
     } else {
@@ -69,7 +74,7 @@ function countByKind(
 }
 
 function isTerminal(o: OperationListItem): boolean {
-  return o.terminal_at != null && o.terminal_at !== "";
+  return isOperationTerminal(o);
 }
 
 type ActivityTab = "attention" | "in-flight" | "settled" | "all";

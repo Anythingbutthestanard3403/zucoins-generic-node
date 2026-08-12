@@ -7,6 +7,8 @@ import { StatusTag } from "../../components/StatusTag.js";
 import {
   canRetractAttention,
   formatMoneyError,
+  isOperationTerminal,
+  operationLifecycleBucket,
   getRecovery,
   isCancelled,
   listOperationsInventory,
@@ -65,15 +67,15 @@ export function OperationsPage() {
     let landed = 0;
     let open = 0;
     let expired = 0;
+    let rejected = 0;
     for (const o of historyRows) {
-      if (o.terminal_at) {
-        if (/EXPIRED/i.test(o.status)) expired += 1;
-        else landed += 1;
-      } else {
-        open += 1;
-      }
+      const bucket = operationLifecycleBucket(o);
+      if (bucket === "expired") expired += 1;
+      else if (bucket === "rejected") rejected += 1;
+      else if (bucket === "landed") landed += 1;
+      else open += 1;
     }
-    return { landed, open, expired, total: historyRows.length };
+    return { landed, open, expired, rejected, total: historyRows.length };
   }, [historyRows]);
 
   async function openRecovery(operationId: string) {

@@ -548,7 +548,7 @@ function DualControlPolicyBanner() {
   if (q.isError || !q.data) {
     return (
       <p className="muted" style={{ fontSize: 12.5 }} data-testid="dual-control-banner">
-        Dual-control policy unavailable — server defaults to single-operator.
+        Dual-control policy unavailable — enforcement fails closed to two_human.
       </p>
     );
   }

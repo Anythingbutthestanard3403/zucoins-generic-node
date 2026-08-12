@@ -1,6 +1,7 @@
 /**
- * Operator security notes — dual-control policy + optional operator push.
- * Pack P plain-language surface: which mode is active must match server enforcement.
+ * Operator security — dual-control + device-signature policy (honest live values)
+ * and optional operator push. Pack P: mode labels come from the server response;
+ * unavailable endpoints name fail-closed enforcement, never a guessed default.
  *
  * Operator push Enable requires a genuine browser PushManager.subscribe() with a real
  * VAPID applicationServerKey. No fabricated subscription is ever POSTed (ZTR-1168).
@@ -8,12 +9,22 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
+  fetchDeviceSignaturePolicy,
   fetchDualControlPolicy,
   fetchOperatorPushStatus,
   formatMoneyError,
+  isCancelled,
+  postDeviceSignaturePolicy,
+  postDualControlPolicy,
   subscribeOperatorPush,
   unsubscribeOperatorPush,
+  type DeviceSignaturePolicyResponse,
+  type DualControlPolicyResponse,
 } from "../../lib/money.js";
+import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
+
+const DUAL_KEY = ["dual-control-policy"] as const;
+const DEVICE_SIG_KEY = ["device-signature-policy"] as const;
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -39,18 +50,53 @@ export function OperatorSecurityPage() {
   const [pushBusy, setPushBusy] = useState(false);
 
   const policyQ = useQuery({
-    queryKey: ["dual-control-policy"],
-    queryFn: async () => {
-      
-      return fetchDualControlPolicy();
-    },
+    queryKey: [...DUAL_KEY],
+    queryFn: fetchDualControlPolicy,
+  });
+
+  const deviceSigQ = useQuery({
+    queryKey: [...DEVICE_SIG_KEY],
+    queryFn: fetchDeviceSignaturePolicy,
   });
 
   const pushQ = useQuery({
     queryKey: ["operator-push"],
-    queryFn: async () => {
-      
-      return fetchOperatorPushStatus();
+    queryFn: fetchOperatorPushStatus,
+  });
+
+  const setDual = useTotpGatedMutation<
+    DualControlPolicyResponse,
+    "single_operator" | "two_human"
+  >((mode, totp) => postDualControlPolicy({ mode }, totp), {
+    title: "Set dual-control policy",
+    detail: "Enter a fresh TOTP to change dual-control mode. The change is audited.",
+    onSuccess: (result) => {
+      setErr(null);
+      setMsg(`Dual-control set to ${result.short}.`);
+      void queryClient.invalidateQueries({ queryKey: DUAL_KEY });
+    },
+    onError: (e: unknown) => {
+      if (isCancelled(e)) return;
+      setMsg(null);
+      setErr(formatMoneyError(e, "Could not set dual-control policy"));
+    },
+  });
+
+  const setDeviceSig = useTotpGatedMutation<
+    DeviceSignaturePolicyResponse,
+    "required" | "optional"
+  >((mode, totp) => postDeviceSignaturePolicy({ mode }, totp), {
+    title: "Set device-signature policy",
+    detail: "Enter a fresh TOTP to change device-signature requirement. The change is audited.",
+    onSuccess: (result) => {
+      setErr(null);
+      setMsg(`Device-signature policy set to ${result.short}.`);
+      void queryClient.invalidateQueries({ queryKey: DEVICE_SIG_KEY });
+    },
+    onError: (e: unknown) => {
+      if (isCancelled(e)) return;
+      setMsg(null);
+      setErr(formatMoneyError(e, "Could not set device-signature policy"));
     },
   });
 
@@ -65,10 +111,10 @@ export function OperatorSecurityPage() {
   const enableUnavailableReason = !browserPushOk
     ? "This browser does not support Web Push. Use the Approve inbox manually."
     : !pushWired
-        ? "Operator push is not wired on this node (optional). Inbox remains source of truth."
-        : !vapidKey
-          ? "No VAPID application-server key is configured on this node, so a real PushManager.subscribe() cannot run. Inbox remains source of truth."
-          : null;
+      ? "Operator push is not wired on this node (optional). Inbox remains source of truth."
+      : !vapidKey
+        ? "No VAPID application-server key is configured on this node, so a real PushManager.subscribe() cannot run. Inbox remains source of truth."
+        : null;
 
   async function onEnablePush() {
     setErr(null);
@@ -84,7 +130,6 @@ export function OperatorSecurityPage() {
         setMsg("Push denied or dismissed — full manual inbox still works. Operator push is opt-in only.");
         return;
       }
-      
       if (enableUnavailableReason) {
         setMsg(enableUnavailableReason);
         return;
@@ -122,7 +167,6 @@ export function OperatorSecurityPage() {
     setMsg(null);
     setPushBusy(true);
     try {
-      
       const subs = pushQ.data?.subscriptions ?? [];
       if (subs.length === 0) {
         try {
@@ -185,33 +229,43 @@ export function OperatorSecurityPage() {
   }
 
   const policy = policyQ.data;
+  const deviceSig = deviceSigQ.data;
+  const policyBusy = setDual.isPending || setDeviceSig.isPending;
 
   return (
     <div className="page">
       <header className="page-header">
         <h1>Security</h1>
         <p className="muted">
-          Dual-control policy and optional operator notifications. Wallet receiver push is a
-          separate system and never gates SEND approve.
+          Dual-control and device-signature policies (server-enforced) plus optional operator
+          notifications. Wallet receiver push is a separate system and never gates SEND approve.
         </p>
       </header>
 
       {err ? <p className="err">{err}</p> : null}
-      {msg ? <p className="ok">{msg}</p> : null}
+      {msg ? (
+        <p className="ok" data-testid="security-policy-msg">
+          {msg}
+        </p>
+      ) : null}
 
       <section className="card" data-testid="dual-control-policy">
         <h2>Dual-control policy</h2>
         {policyQ.isLoading ? (
           <p className="muted">Loading policy…</p>
         ) : policyQ.isError ? (
-          <p className="muted">Policy endpoint unavailable — server defaults to single-operator.</p>
+          <p className="err" data-testid="dual-control-unavailable" role="alert">
+            Dual-control policy endpoint unavailable — enforcement fails closed to{" "}
+            <strong>two_human</strong> (a second admin operator must approve). Mode is unknown
+            until the endpoint responds.
+          </p>
         ) : policy ? (
           <>
             <p>
               <strong data-testid="dual-control-mode">{policy.short}</strong>
               <span className="muted"> ({policy.mode})</span>
             </p>
-            <p>{policy.long}</p>
+            <p data-testid="dual-control-long">{policy.long}</p>
             <p className="muted">{policy.approve_hint}</p>
             <ul className="muted">
               <li>
@@ -225,8 +279,78 @@ export function OperatorSecurityPage() {
               </li>
             </ul>
             <p className="muted">
-              Mode is a node policy flag (server-enforced). This copy always matches enforcement.
+              Values above are live from the node. If the store is unreadable, the server fails
+              closed to two_human — it never silently becomes single-operator.
             </p>
+            <div className="row gap" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn"
+                data-testid="dual-control-set-single"
+                disabled={policyBusy || policy.mode === "single_operator"}
+                onClick={() => setDual.mutate("single_operator")}
+              >
+                Set single-operator
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                data-testid="dual-control-set-two-human"
+                disabled={policyBusy || policy.mode === "two_human"}
+                onClick={() => setDual.mutate("two_human")}
+              >
+                Set two-human
+              </button>
+            </div>
+          </>
+        ) : null}
+      </section>
+
+      <section className="card" data-testid="device-signature-policy">
+        <h2>Device-signature policy</h2>
+        {deviceSigQ.isLoading ? (
+          <p className="muted">Loading policy…</p>
+        ) : deviceSigQ.isError ? (
+          <p className="err" data-testid="device-signature-unavailable" role="alert">
+            Device-signature policy endpoint unavailable — enforcement fails closed to{" "}
+            <strong>required</strong> (approve needs a signature from an enrolled device). Mode is
+            unknown until the endpoint responds.
+          </p>
+        ) : deviceSig ? (
+          <>
+            <p>
+              <strong data-testid="device-signature-mode">{deviceSig.short}</strong>
+              <span className="muted"> ({deviceSig.mode})</span>
+            </p>
+            <p data-testid="device-signature-long">{deviceSig.long}</p>
+            <p className="muted">{deviceSig.approve_hint}</p>
+            <p className="muted">
+              Requires device signature:{" "}
+              <strong data-testid="device-signature-required-flag">
+                {deviceSig.requires_device_signature ? "yes" : "no"}
+              </strong>
+              . Unreadable or missing store fails closed to required.
+            </p>
+            <div className="row gap" style={{ marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn primary"
+                data-testid="device-signature-set-required"
+                disabled={policyBusy || deviceSig.mode === "required"}
+                onClick={() => setDeviceSig.mutate("required")}
+              >
+                Require device signature
+              </button>
+              <button
+                type="button"
+                className="btn"
+                data-testid="device-signature-set-optional"
+                disabled={policyBusy || deviceSig.mode === "optional"}
+                onClick={() => setDeviceSig.mutate("optional")}
+              >
+                Make optional
+              </button>
+            </div>
           </>
         ) : null}
       </section>
@@ -243,7 +367,7 @@ export function OperatorSecurityPage() {
           {pushQ.data?.subscriptions.length ?? 0}
           {vapidKey ? " · VAPID: configured" : " · VAPID: not configured"}
         </p>
-        {enableUnavailableReason  ? (
+        {enableUnavailableReason ? (
           <p className="muted" data-testid="operator-push-unavailable">
             Enable unavailable: {enableUnavailableReason}
           </p>
@@ -252,7 +376,7 @@ export function OperatorSecurityPage() {
           <button
             type="button"
             className="btn primary"
-            disabled={pushBusy || Boolean(enableUnavailableReason )}
+            disabled={pushBusy || Boolean(enableUnavailableReason)}
             title={enableUnavailableReason ?? undefined}
             onClick={() => void onEnablePush()}
           >

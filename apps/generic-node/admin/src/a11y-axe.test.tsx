@@ -19,6 +19,7 @@ import { DestinationsPage } from "./pages/destinations/DestinationsPage.js";
 import { WalletsPage } from "./pages/wallets/WalletsPage.js";
 import { ApiKeysPage } from "./pages/api-keys/ApiKeysPage.js";
 import { IntegrationsPage } from "./pages/integrations/IntegrationsPage.js";
+import { AutoApprovePolicyPage } from "./pages/auto-approve/AutoApprovePolicyPage.js";
 import { BackupPage } from "./pages/backup/BackupPage.js";
 import { ApproveInboxPage } from "./pages/approve/ApproveInboxPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
@@ -119,6 +120,17 @@ function emptyLiveFetch() {
       }
       if (url.includes("/implementers")) {
         return new Response(JSON.stringify({ implementers: [] }), { status: 200 });
+      }
+      if (url.includes("/auto-approve-policy")) {
+        return new Response(
+          JSON.stringify({
+            status: "disabled",
+            disabledReason: "absent",
+            rules: [],
+            server_time: "2026-01-01T00:00:00.000Z",
+          }),
+          { status: 200 },
+        );
       }
       if (
         url.includes("/operations")
@@ -378,6 +390,15 @@ describe("axe smoke — Integrations workflow", () => {
     liveSession();
     emptyLiveFetch();
     const { container } = renderPage(<IntegrationsPage />);
+    await expectNoAxeViolations(container);
+  });
+});
+
+describe("axe smoke — Auto-approve policy workflow", () => {
+  it("has no axe violations", async () => {
+    liveSession();
+    emptyLiveFetch();
+    const { container } = renderPage(<AutoApprovePolicyPage />);
     await expectNoAxeViolations(container);
   });
 });

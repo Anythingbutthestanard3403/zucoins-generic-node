@@ -1841,6 +1841,58 @@ export async function fetchDualControlPolicy(): Promise<DualControlPolicyRespons
   return api<DualControlPolicyResponse>("/dual-control-policy");
 }
 
+// --- Auto-approve policy (ZTR-1237) ---
+
+export interface AutoApproveRuleView {
+  readonly rule_id: string;
+  readonly implementer_id: string;
+  readonly per_send_max_zkz: string;
+  readonly per_send_min_zkz: string | null;
+  readonly window_hours: number;
+  readonly window_cap_zkz: string;
+  readonly expires_at: string | null;
+  readonly enabled: boolean;
+  readonly current_window_spend_zkz: string;
+}
+
+export interface AutoApprovePolicyResponse {
+  readonly status: "enabled" | "disabled";
+  readonly disabledReason?: "absent" | "unreadable" | "invalid" | "off";
+  readonly rules: readonly AutoApproveRuleView[];
+  readonly server_time: string;
+}
+
+/** Wire body for whole-document replace (no spend fields). */
+export interface AutoApprovePolicyWriteBody {
+  readonly enabled: boolean;
+  readonly rules: readonly {
+    readonly rule_id: string;
+    readonly implementer_id: string;
+    readonly per_send_max_zkz: string;
+    readonly per_send_min_zkz: string | null;
+    readonly window_hours: number;
+    readonly window_cap_zkz: string;
+    readonly expires_at: string | null;
+    readonly enabled: boolean;
+  }[];
+}
+
+export async function fetchAutoApprovePolicy(): Promise<AutoApprovePolicyResponse> {
+  return api<AutoApprovePolicyResponse>("/auto-approve-policy");
+}
+
+export async function postAutoApprovePolicy(
+  body: AutoApprovePolicyWriteBody,
+  totp: string,
+): Promise<AutoApprovePolicyResponse> {
+  return api<AutoApprovePolicyResponse>("/auto-approve-policy", {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
 // --- Second-device enrolment ---
 
 export interface SecondDeviceIssueResponse {

@@ -141,6 +141,10 @@ describe("production ROUTE_POLICIES census (AC1–AC2, AC7–AC8)", () => {
       "POST /admin/v1/api-keys",
       "POST /admin/v1/api-keys/:id/revoke",
     ]);
+    expect(surface.liveAutoApprovePolicyRoutes.map((r) => `${r.method} ${r.path}`)).toEqual([
+      "GET /admin/v1/auto-approve-policy",
+      "POST /admin/v1/auto-approve-policy",
+    ]);
     expect(surface.adminRouteDeps.halt).toBeDefined();
     expect(surface.adminRouteDeps.implementerRegistry).toBeDefined();
     expect(surface.adminRouteDeps.adminIdempotencyStore).toBeDefined();

@@ -5,8 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client, Pool, type PoolClient } from "pg";
 
 import {
+  createSqlAutoApprovePolicy,
   createSqlDeviceSignaturePolicy,
   createSqlDualControlPolicy,
+  AUTO_APPROVE_SETTING_KEY,
   DEVICE_SIGNATURE_POLICY_SETTING_KEY,
   DUAL_CONTROL_SETTING_KEY,
 } from "@zucoins/node-core";
@@ -397,6 +399,86 @@ describe.skipIf(!PG_AVAILABLE)("atomic REQUIRED admin mutation (disposable PG)",
     expect(setting.rows[0]?.setting_value).toBe("single_operator");
     const audits = await pool.query(
       "SELECT 1 FROM audit_log WHERE action = 'ops.dual_control_mode_changed'",
+    );
+    expect(audits.rows).toHaveLength(0);
+  });
+
+  it("rolls back auto-approve policy setPolicy when post-write mutation aborts (ZTR-1237)", async () => {
+    const seedDoc = JSON.stringify({
+      enabled: true,
+      rules: [
+        {
+          rule_id: "seed",
+          implementer_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          per_send_max_zkz: "1",
+          per_send_min_zkz: null,
+          window_hours: 24,
+          window_cap_zkz: "10",
+          expires_at: null,
+          enabled: true,
+        },
+      ],
+    });
+    await pool.query(
+      `INSERT INTO node_settings (setting_key, setting_value, row_version, updated_at)
+       VALUES ($1, $2, 1, now())
+       ON CONFLICT (setting_key) DO UPDATE
+       SET setting_value = EXCLUDED.setting_value,
+           row_version = node_settings.row_version + 1,
+           updated_at = now()`,
+      [AUTO_APPROVE_SETTING_KEY, seedDoc],
+    );
+    const execute = createAtomicAdminMutationExecutor({
+      pool,
+      idempotencyStore: new SqlAdminIdempotencyStore(pool),
+      portsFor: (client: PoolClient) => ({
+        autoApprovePolicy: createSqlAutoApprovePolicy(client),
+      }),
+    });
+    await pool.query("ALTER TABLE admin_mutation_idempotency RENAME TO admin_mutation_idempotency_offline");
+    try {
+      await expect(
+        execute(
+          {
+            nodeId,
+            routeId: "admin_auto_approve_policy",
+            idempotencyKey: `auto-approve-policy-rollback-${randomUUID()}`,
+            fingerprint: fingerprint("b".repeat(64)),
+          },
+          async (ports) => {
+            const next = JSON.stringify({
+              enabled: true,
+              rules: [
+                {
+                  rule_id: "rolled",
+                  implementer_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                  per_send_max_zkz: "9",
+                  per_send_min_zkz: null,
+                  window_hours: 12,
+                  window_cap_zkz: "90",
+                  expires_at: null,
+                  enabled: true,
+                },
+              ],
+            });
+            await ports.autoApprovePolicy!.setPolicy!(next, {
+              actorId: "op-rollback",
+              nodeId,
+            });
+            return { outcome: "commit" as const, status: 200, responseBody: { status: "enabled" } };
+          },
+        ),
+      ).rejects.toMatchObject({ code: "42P01" });
+    } finally {
+      await pool.query("ALTER TABLE admin_mutation_idempotency_offline RENAME TO admin_mutation_idempotency");
+    }
+    const setting = await pool.query<{ setting_value: string }>(
+      "SELECT setting_value FROM node_settings WHERE setting_key = $1",
+      [AUTO_APPROVE_SETTING_KEY],
+    );
+    expect(setting.rows[0]?.setting_value).toBe(seedDoc);
+    const audits = await pool.query(
+      "SELECT 1 FROM audit_log WHERE action = 'ops.auto_approve_sends_changed'",
     );
     expect(audits.rows).toHaveLength(0);
   });

@@ -164,7 +164,10 @@ describe("parseAutoApprovePolicyDocument", () => {
 
   it("document enabled:false → DISABLED off (valid shape parked)", () => {
     const p = parseAutoApprovePolicyDocument(validDoc({ enabled: false }));
-    expect(p).toEqual({ status: "disabled", disabledReason: "off" });
+    expect(p.status).toBe("disabled");
+    if (p.status !== "disabled") return;
+    expect(p.disabledReason).toBe("off");
+    expect(p.rules).toHaveLength(1);
   });
 
   it("valid document round-trips", () => {

@@ -227,6 +227,13 @@ const READINESS = {
   ],
 };
 
+const AUTO_APPROVE_POLICY = {
+  status: "disabled",
+  disabledReason: "absent",
+  rules: [],
+  server_time: "2026-01-01T00:00:00.000Z",
+};
+
 const DUAL_CONTROL_POLICY = {
   mode: "single_operator",
   short: "Single operator",
@@ -332,6 +339,7 @@ export async function registerAdminApiRoutes(
     if (key === `GET /admin/v1/operations/${E2E_OPERATION_ID}`) return json(OPERATION_DETAIL);
     if (key === `GET /admin/v1/operations/${E2E_OPERATION_ID}/recovery`) return json(RECOVERY);
     if (key === "GET /admin/v1/readiness") return json(READINESS);
+    if (key === "GET /admin/v1/auto-approve-policy") return json(AUTO_APPROVE_POLICY);
     if (key === "GET /admin/v1/dual-control-policy") return json(DUAL_CONTROL_POLICY);
     if (key === "GET /admin/v1/vault-master") return json(VAULT_MASTER);
     if (key === "GET /admin/v1/destinations") return json(DESTINATIONS_LIST);

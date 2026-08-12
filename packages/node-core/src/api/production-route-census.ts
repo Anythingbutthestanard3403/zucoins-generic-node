@@ -114,6 +114,24 @@ export const LIVE_IMPLEMENTER_ROUTES = Object.freeze([
   },
 ] as const);
 
+/**
+ * Live auto-approve policy surface (ZTR-1237). Not in ROUTE_POLICIES; mounted on
+ * the admin dispatcher (session for GET; session+CSRF+fresh TOTP for POST).
+ * Operator-only writer of ops.auto_approve_sends.
+ */
+export const LIVE_AUTO_APPROVE_POLICY_ROUTES = Object.freeze([
+  {
+    method: "GET" as const,
+    path: "/admin/v1/auto-approve-policy",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/auto-approve-policy",
+    authMode: "operator_session_totp" as const,
+  },
+] as const);
+
 export type RouteKey = `${string} ${string}`;
 
 export function routeKeyOf(method: string, path: string): RouteKey {

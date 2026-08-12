@@ -1952,6 +1952,46 @@ export async function fetchDualControlPolicy(): Promise<DualControlPolicyRespons
   return api<DualControlPolicyResponse>("/dual-control-policy");
 }
 
+/** POST dual-control mode (fresh TOTP + audit). Server fails closed to two_human on read errors. */
+export async function postDualControlPolicy(
+  body: { readonly mode: "single_operator" | "two_human" },
+  totp: string,
+): Promise<DualControlPolicyResponse> {
+  return api<DualControlPolicyResponse>("/dual-control-policy", {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+// --- Device-signature policy (ZTR-1259) ---
+
+export interface DeviceSignaturePolicyResponse {
+  readonly mode: "required" | "optional";
+  readonly requires_device_signature: boolean;
+  readonly short: string;
+  readonly long: string;
+  readonly approve_hint: string;
+}
+
+export async function fetchDeviceSignaturePolicy(): Promise<DeviceSignaturePolicyResponse> {
+  return api<DeviceSignaturePolicyResponse>("/device-signature-policy");
+}
+
+/** POST device-signature mode (fresh TOTP + audit). Server fails closed to required on read errors. */
+export async function postDeviceSignaturePolicy(
+  body: { readonly mode: "required" | "optional" },
+  totp: string,
+): Promise<DeviceSignaturePolicyResponse> {
+  return api<DeviceSignaturePolicyResponse>("/device-signature-policy", {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
 // --- Auto-approve policy (ZTR-1237) ---
 
 export interface AutoApproveRuleView {

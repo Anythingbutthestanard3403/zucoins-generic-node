@@ -797,9 +797,13 @@ function toIntegrationRequestListing(row: IntegrationRequestRecord) {
 /**
  * Merge one operator-final rule into the existing auto-approve document.
  * Rejects when the live document is fail-closed-invalid/unreadable (operator
- * must fix policy first). Absent or off documents become enabled with the new rule.
+ * must fix policy first).
+ *
+ * ZTR-1258: preserve the document's enabled flag. Approving an integration
+ * request adds/replaces a rule — it must never flip a parked (enabled:false)
+ * policy back on. Only a brand-new (absent) document defaults to enabled:true.
  */
-function mergeRuleIntoAutoApprovePolicy(
+export function mergeRuleIntoAutoApprovePolicy(
   current: AutoApprovePolicyDocument,
   rule: AutoApproveRule,
 ):
@@ -813,12 +817,19 @@ function mergeRuleIntoAutoApprovePolicy(
         message: "fix the policy document first",
       };
     }
-    // absent / off — start (or re-enable) with this single rule.
+    if (current.disabledReason === "absent") {
+      // Brand-new document — default on so the first approved rule is live.
+      return {
+        ok: true,
+        documentJson: serializeAutoApprovePolicyDocument([rule], true),
+      };
+    }
+    // parked (enabled:false) — keep disabled; still attach the rule for later enable.
     const others = current.rules ?? [];
     const withoutDup = others.filter((r) => r.implementer_id !== rule.implementer_id);
     return {
       ok: true,
-      documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], true),
+      documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], false),
     };
   }
   const withoutDup = current.rules.filter((r) => r.implementer_id !== rule.implementer_id);
@@ -826,6 +837,27 @@ function mergeRuleIntoAutoApprovePolicy(
     ok: true,
     documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], true),
   };
+}
+
+/** Operator projection: PENDING past expires_at is not approvable (ZTR-1258). */
+export function projectIntegrationRequestForOperator<
+  T extends { readonly status: string; readonly expires_at: string },
+>(row: T, nowMs: number = Date.now()): T {
+  if (row.status === "PENDING") {
+    const exp = Date.parse(row.expires_at);
+    if (Number.isFinite(exp) && exp <= nowMs) {
+      return { ...row, status: "EXPIRED" };
+    }
+  }
+  return row;
+}
+
+export function isIntegrationRequestExpired(
+  expiresAt: string,
+  nowMs: number = Date.now(),
+): boolean {
+  const exp = Date.parse(expiresAt);
+  return Number.isFinite(exp) && exp <= nowMs;
 }
 
 /** POST /admin/v1/implementers body — `{ name }` only. */
@@ -2652,13 +2684,25 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         status = statusRaw as typeof status;
       }
       try {
+        const now = nowMs();
+        // EXPIRED filter must include clock-expired PENDING rows (not only durable
+        // EXPIRED). PENDING filter excludes those same rows (ZTR-1258).
+        const listStatus =
+          status === "EXPIRED" || status === "PENDING" ? undefined : status;
         const rows = await deps.integrationRequestStore.list({
           nodeId,
-          ...(status !== undefined ? { status } : {}),
+          ...(listStatus !== undefined ? { status: listStatus } : {}),
         });
+        const projected = rows.map((r) => projectIntegrationRequestForOperator(r, now));
+        const data =
+          status === "PENDING"
+            ? projected.filter((r) => r.status === "PENDING")
+            : status === "EXPIRED"
+              ? projected.filter((r) => r.status === "EXPIRED")
+              : projected;
         return ok(200, {
           object: "list",
-          data: rows.map(toIntegrationRequestListing),
+          data: data.map(toIntegrationRequestListing),
           has_more: false,
           next_cursor: null,
         });
@@ -4516,6 +4560,12 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                     "CAS_MISS",
                   );
                 }
+                // ZTR-1258: refuse clock-expired PENDING even if status not yet EXPIRED.
+                if (isIntegrationRequestExpired(pending.expires_at, nowMs())) {
+                  throw Object.assign(new Error("integration request expired"), {
+                    code: "INTEGRATION_REQUEST_EXPIRED",
+                  });
+                }
 
                 const created = await registry.create({
                   name: pending.display_name,
@@ -4585,6 +4635,21 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                     ),
                   };
                 }
+              }
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof Error &&
+                (guarded.error as { code?: string }).code === "INTEGRATION_REQUEST_EXPIRED"
+              ) {
+                return {
+                  outcome: "abort" as const,
+                  response: fail(
+                    409,
+                    "integration_request_expired",
+                    "integration request has expired and cannot be approved",
+                    requestId,
+                  ),
+                };
               }
               if (
                 guarded.reason === "mutation_threw" &&

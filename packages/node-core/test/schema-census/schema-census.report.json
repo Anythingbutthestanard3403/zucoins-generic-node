@@ -22,6 +22,7 @@
     "gateway-observation-successor-indexes.sql",
     "implementer-credentials.sql",
     "implementer-event-stream.sql",
+    "integration-requests.sql",
     "landing-proof-verifications.sql",
     "lease-foundation.sql",
     "lease-operation-foreign-keys.sql",
@@ -73,7 +74,7 @@
     "nounsChecked": 39,
     "nounsOk": 39,
     "nounsFailed": 0,
-    "foreignKeysChecked": 189,
+    "foreignKeysChecked": 192,
     "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
@@ -946,6 +947,27 @@
     },
     {
       "source": "implementer_credentials(rotated_to_id)",
+      "target": "implementer_credentials(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "integration_requests(node_id)",
+      "target": "nodes(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "integration_requests(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "integration_requests(issued_credential_id)",
       "target": "implementer_credentials(id)",
       "onDelete": "UNSPECIFIED",
       "onUpdate": "UNSPECIFIED",
@@ -2083,7 +2105,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_122",
+      "satisfiedBy": "index:operations_unique_125",
       "ok": true
     },
     {
@@ -2130,7 +2152,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_66",
+      "satisfiedBy": "index:audit_log_unique_68",
       "ok": true
     },
     {

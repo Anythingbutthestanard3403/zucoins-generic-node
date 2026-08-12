@@ -332,6 +332,17 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[autoIdx]!.sql).toContain("WHERE totp_timestep IS NOT NULL");
   });
 
+  it("pack lands integration-requests after implementer-credentials", () => {
+    const credIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("implementer-credentials");
+    const reqIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("integration-requests");
+    expect(credIdx).toBeGreaterThanOrEqual(0);
+    expect(reqIdx).toBeGreaterThan(credIdx);
+    const files = loadMoneySchemaMigrations();
+    expect(files[reqIdx]!.sql).toMatch(/CREATE TABLE integration_requests\b/);
+    expect(files[reqIdx]!.sql).toContain("claim_token_hash");
+    expect(files[reqIdx]!.sql).toContain("integration_requests_status_consistency");
+  });
+
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {
     const lineageIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lineage-path-proofs");
     const ackIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-acknowledgements");

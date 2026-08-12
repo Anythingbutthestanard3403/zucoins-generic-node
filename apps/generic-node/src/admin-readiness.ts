@@ -413,7 +413,7 @@ function buildImplementerKey(s: ReadinessSignals): ReadinessRow {
 function buildBackup(s: ReadinessSignals): ReadinessRow {
   // Primary deep-link: Backup page. Stale/missing also point operators at Recovery
   // verify (recovery verification is separate — never claim backup success = recovery_verified).
-  const href = "/backup";
+  const href = "/recovery-ceremony";
   if (s.backup === undefined || s.backup === null) {
     return row(
       "backup_health",

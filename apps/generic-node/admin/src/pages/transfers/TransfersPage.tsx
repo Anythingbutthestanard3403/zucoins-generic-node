@@ -16,7 +16,6 @@ export function TransfersPage() {
         error: r.error,
         data: r.data.map((o) => ({
           operation_id: o.operation_id,
-          from: "—",
           to: o.destination_address ?? "—",
           amount_zkz: o.amount_zkz,
           status: o.status,
@@ -44,8 +43,8 @@ export function TransfersPage() {
                   : "No inventory — open by id"}
           </span>
           <span className="muted" style={{ fontSize: 12.5 }}>
-            Sends are created via implementer{" "}
-            <code className="mono">POST /v1/external-sends</code> — approve/reject below
+            Sends are created by integrations (API). Approve pending work in the{" "}
+            <Link to="/approve" className="linkish">Approve inbox</Link>.
           </span>
         </div>
       </div>
@@ -78,8 +77,7 @@ export function TransfersPage() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>From</th>
-              <th>To</th>
+                            <th>To</th>
               <th>Amount</th>
               <th>Status</th>
             </tr>
@@ -87,7 +85,7 @@ export function TransfersPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={4} className="muted">
                   {loading
                       ? "Loading…"
                       : live
@@ -103,8 +101,7 @@ export function TransfersPage() {
                       {t.operation_id}
                     </Link>
                   </td>
-                  <td>{t.from}</td>
-                  <td className="mono">{t.to}</td>
+                                    <td className="mono">{t.to}</td>
                   <td className="money">{t.amount_zkz}</td>
                   <td>
                     <StatusTag status={t.status} />

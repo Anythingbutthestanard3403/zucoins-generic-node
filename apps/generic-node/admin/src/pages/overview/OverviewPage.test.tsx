@@ -721,7 +721,7 @@ describe("OverviewPage readiness checklist", () => {
                 status: "unknown",
                 title: "Backup health",
                 detail: "Schedule markers unavailable",
-                href: "/backup",
+                href: "/recovery-ceremony",
               },
             ],
           };

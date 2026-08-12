@@ -33,25 +33,16 @@ export function BackupPage() {
           &lt;file&gt;
         </pre>
         <div className="form-actions">
-          <button
-            type="button"
-            className="mini-btn primary"
-            disabled
-            aria-disabled="true"
-            title="Not available in the dashboard — use host DR tooling above when needed."
-          >
-            Export backup
-          </button>
-          <button
-            type="button"
-            className="mini-btn"
-            disabled
-            aria-disabled="true"
-            title="Not available in the dashboard — use host DR tooling above when needed."
-          >
-            Import backup…
-          </button>
+          <Link to="/recovery-ceremony" className="mini-btn primary">
+            Open recovery ceremony
+          </Link>
+          <Link to="/approve" className="mini-btn">
+            Approve inbox
+          </Link>
         </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>
+          Dashboard does not export/import wallet material. Host DR CLI remains break-glass only.
+        </p>
       </div>
     </div>
   );

@@ -282,7 +282,7 @@ export function OverviewPage() {
           </p>
         </div>
         <div className="pill-row">
-          <Link to="/transfers" className="pill primary"><IconArrow /> Send</Link>
+          <Link to="/approve" className="pill primary"><IconArrow /> Approve inbox</Link>
           <button type="button" className="pill" onClick={() => void attentionQ.refetch()}>
             <IconRefresh /> Refresh
           </button>
@@ -394,7 +394,7 @@ export function OverviewPage() {
             <p className="muted" style={{ margin: "6px 0 0", fontSize: 12.5 }}>
               From Connect enablement — compositions of Incoming, Internal transfer, and
               Outgoing only.{" "}
-              <Link to="/integration" className="linkish">Manage packs</Link>
+              <Link to="/connect" className="linkish">Manage packs</Link> <span className="muted">(pack flags are device-local)</span>
             </p>
           </div>
           <ul className="readiness-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
@@ -433,21 +433,9 @@ export function OverviewPage() {
             )}
           </div>
           {!walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
-          <div className="chart" aria-hidden>
-            <svg viewBox="0 0 600 72" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="eq" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--accent)" stopOpacity=".35" />
-                  <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d="M0 58 C40 56, 70 52, 100 48 C140 42, 160 44, 200 36 C240 28, 280 40, 320 30 C360 20, 400 24, 440 18 C480 12, 520 22, 560 14 L600 10 L600 72 L0 72 Z" fill="url(#eq)" />
-              <path d="M0 58 C40 56, 70 52, 100 48 C140 42, 160 44, 200 36 C240 28, 280 40, 320 30 C360 20, 400 24, 440 18 C480 12, 520 22, 560 14 L600 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </div>
           <div className="mini-actions">
             <Link to="/lab/receive" className="mini-btn">Lab receive</Link>
-            <Link to="/transfers" className="mini-btn primary">Send transfer</Link>
+            <Link to="/approve" className="mini-btn primary">Approve inbox</Link>
             <Link to="/wallets" className="mini-btn">View wallets</Link>
             <button type="button" className="mini-btn" onClick={() => void walletsQ.refetch()}>
               Resync balances

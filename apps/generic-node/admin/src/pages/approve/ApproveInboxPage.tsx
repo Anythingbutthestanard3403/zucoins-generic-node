@@ -509,6 +509,16 @@ export function ApproveInboxPage() {
 
   return (
     <div className="page approve-inbox">
+      <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }} data-testid="approve-auto-approve-link">
+        Auto-approve policy:{" "}
+        <Link className="linkish" to="/auto-approve">
+          configure rules
+        </Link>
+        {" · "}
+        <Link className="linkish" to="/operator-security">
+          dual-control & device signature
+        </Link>
+      </p>
       <div className="page-title-row">
         <h1>Approve</h1>
         <div className="toolbar">
@@ -737,6 +747,14 @@ export function ApproveInboxPage() {
           <h2 id="approve-sends-h" className="approve-section-title">
             Outgoing (needs approval)
           </h2>
+          <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }} data-testid="approve-auto-policy-hint">
+            Auto-approve fall-through reasons are not published per send by the node.
+            Review{" "}
+            <Link className="linkish" to="/auto-approve">
+              auto-approve policy
+            </Link>{" "}
+            if a send stayed in this inbox unexpectedly.
+          </p>
           <ul className="approve-cards">
             {sends.map((s) => {
               const open = expandedId === s.operation_id;

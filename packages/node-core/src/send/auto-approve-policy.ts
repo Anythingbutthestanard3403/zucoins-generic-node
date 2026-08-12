@@ -57,7 +57,12 @@ export interface AutoApproveRule {
 }
 
 export type AutoApprovePolicyDocument =
-  | { readonly status: "disabled"; readonly disabledReason: AutoApproveDisabledReason }
+  | {
+      readonly status: "disabled";
+      readonly disabledReason: AutoApproveDisabledReason;
+      /** Present when disabledReason is "off" so operators can edit parked rules. */
+      readonly rules?: readonly AutoApproveRule[];
+    }
   | { readonly status: "enabled"; readonly rules: readonly AutoApproveRule[] };
 
 export type AutoApproveFallThroughReason =
@@ -291,7 +296,7 @@ export function parseAutoApprovePolicyDocument(
     return { status: "disabled", disabledReason: structured.reason };
   }
   if (!structured.enabled) {
-    return { status: "disabled", disabledReason: "off" };
+    return { status: "disabled", disabledReason: "off", rules: structured.rules };
   }
   return { status: "enabled", rules: structured.rules };
 }
@@ -427,7 +432,7 @@ export class InMemoryAutoApprovePolicy implements AutoApprovePolicyPort {
     }
     this.policy = structured.enabled
       ? { status: "enabled", rules: structured.rules }
-      : { status: "disabled", disabledReason: "off" };
+      : { status: "disabled", disabledReason: "off", rules: structured.rules };
     this.auditEntries.push({
       documentJson,
       actorId: meta.actorId,

@@ -58,6 +58,11 @@ const ApiKeysPage = lazy(() => import("./pages/api-keys/ApiKeysPage.js").then((m
 const IntegrationsPage = lazy(() =>
   import("./pages/integrations/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })),
 );
+const AutoApprovePolicyPage = lazy(() =>
+  import("./pages/auto-approve/AutoApprovePolicyPage.js").then((m) => ({
+    default: m.AutoApprovePolicyPage,
+  })),
+);
 const ReportingKeysPage = lazy(() => import("./pages/reporting-keys/ReportingKeysPage.js").then((m) => ({ default: m.ReportingKeysPage })));
 const LabReceivePage = lazy(() => import("./pages/lab/LabReceivePage.js").then((m) => ({ default: m.LabReceivePage })));
 const IntegrationPage = lazy(() => import("./pages/integration/IntegrationPage.js").then((m) => ({ default: m.IntegrationPage })));
@@ -306,6 +311,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/recovery-ceremony" element={<RecoveryCeremonyPage />} />
                   <Route path="/api-keys" element={<ApiKeysPage />} />
                   <Route path="/integrations" element={<IntegrationsPage />} />
+                  <Route path="/auto-approve" element={<AutoApprovePolicyPage />} />
                   <Route path="/devices" element={<DevicesPage />} />
                   <Route path="/devices/enrol" element={<DevicesPage />} />
                   <Route path="/reporting-keys" element={<ReportingKeysPage />} />

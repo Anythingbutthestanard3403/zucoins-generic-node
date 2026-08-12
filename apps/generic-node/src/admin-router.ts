@@ -105,6 +105,12 @@ import {
   type DualControlPolicyPort,
   type DeviceSignaturePolicyMode,
   type DeviceSignaturePolicyPort,
+  parseAutoApprovePolicyStructure,
+  serializeAutoApprovePolicyDocument,
+  queryWindowSpend,
+  type AutoApproveDisabledReason,
+  type AutoApprovePolicyPort,
+  type AutoApproveRule,
   type ApprovalChallengeIssuerStore,
   type SecondDeviceCeremonyStore,
   type OperatorPushSubscriptionStore,
@@ -278,7 +284,7 @@ type DeviceKeyStoreLike = {
 type ParseOk<T> = { readonly ok: true; readonly body: T };
 type ParseFail = {
   readonly ok: false;
-  readonly status: 400;
+  readonly status: 400 | 422;
   readonly code: string;
   readonly message: string;
 };
@@ -550,6 +556,45 @@ function parseDualControlPolicyBody(
     }
   }
   return { ok: true, body: { mode: raw.mode } };
+}
+
+/**
+ * POST /admin/v1/auto-approve-policy body — whole-document replace.
+ * Shape is validated by ZTR-1234's parseAutoApprovePolicyStructure; a document
+ * that would parse to DISABLED-invalid is 422 (never silently stored).
+ */
+function parseAutoApprovePolicyBody(
+  raw: unknown,
+): ParseOk<{ documentJson: string; enabled: boolean; rules: readonly AutoApproveRule[] }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  // Re-serialise the object so the stored document is JSON text the policy port accepts.
+  let documentJson: string;
+  try {
+    documentJson = JSON.stringify(raw);
+  } catch {
+    return { ok: false, status: 400, code: "invalid_json", message: "body is not JSON-serialisable" };
+  }
+  const structured = parseAutoApprovePolicyStructure(documentJson);
+  if (!structured.ok) {
+    return {
+      ok: false,
+      status: 422,
+      code: "validation_error",
+      message: "auto-approve policy document is invalid",
+    };
+  }
+  // Canonical form for setPolicy (unknown fields already rejected by structure parse).
+  const canonical = serializeAutoApprovePolicyDocument(structured.rules, structured.enabled);
+  return {
+    ok: true,
+    body: {
+      documentJson: canonical,
+      enabled: structured.enabled,
+      rules: structured.rules,
+    },
+  };
 }
 
 const KNOWN_SCOPES = new Set<string>(IMPLEMENTER_SCOPES);
@@ -1119,6 +1164,20 @@ export interface AdminRouteDeps {
    */
   readonly dualControlPolicy?: DualControlPolicyPort;
   /**
+   * Auto-approve policy for external sends (ZTR-1237). When omitted, GET
+   * surfaces disabled/absent and POST fails closed (503).
+   */
+  readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  /**
+   * Optional window-spend reader used by GET auto-approve-policy enrichment.
+   * Production wires queryWindowSpend over the custody pool. When omitted,
+   * spend displays as "0" (fail-soft display; never invents history).
+   */
+  readonly queryAutoApproveWindowSpend?: (
+    implementerId: string,
+    windowHours: number,
+  ) => Promise<string>;
+  /**
    * Additive device-signature policy for external-send approval (doc 07 §17.10).
    * When omitted, approvals fail closed and require a device signature.
    */
@@ -1313,6 +1372,11 @@ export interface AdminMutationTxPorts {
    * GET/approve reads may still use deps.dualControlPolicy.
    */
   readonly dualControlPolicy?: DualControlPolicyPort;
+  /**
+   * TX-scoped auto-approve policy (ZTR-1237). Mutation writes MUST use this port
+   * so node_settings + audit_log commit/roll back with the admin mutation TX.
+   */
+  readonly autoApprovePolicy?: AutoApprovePolicyPort;
 }
 
 export interface AdminRouterResponse {
@@ -2164,6 +2228,67 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // --- Auto-approve policy (ZTR-1237 Route 1 operator setup) ---
+    if (verb === "GET" && pathname === "/admin/v1/auto-approve-policy") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      const server_time = new Date(nowMs()).toISOString();
+      // Fail closed: missing port → disabled/absent (never invents an enabled policy).
+      if (deps.autoApprovePolicy === undefined) {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: "absent" satisfies AutoApproveDisabledReason,
+          rules: [],
+          server_time,
+        });
+      }
+      let policy;
+      try {
+        policy = await deps.autoApprovePolicy.getPolicy();
+      } catch {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: "unreadable" satisfies AutoApproveDisabledReason,
+          rules: [],
+          server_time,
+        });
+      }
+      const baseRules =
+        policy.status === "enabled"
+          ? policy.rules
+          : (policy.rules ?? []);
+      const querySpend =
+        deps.queryAutoApproveWindowSpend ??
+        (async () => "0");
+      const rules = [];
+      for (const rule of baseRules) {
+        let spend = "0";
+        try {
+          spend = await querySpend(rule.implementer_id, rule.window_hours);
+        } catch {
+          spend = "0";
+        }
+        rules.push({ ...rule, current_window_spend_zkz: spend });
+      }
+      if (policy.status === "disabled") {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: policy.disabledReason,
+          rules,
+          server_time,
+        });
+      }
+      return ok(200, {
+        status: "enabled",
+        rules,
+        server_time,
+      });
+    }
+
     // --- Additive device-signature policy (doc 07 §17.10 / ZTR-1143) ---
     if (verb === "GET" && pathname === "/admin/v1/device-signature-policy") {
       const gate = await gateMoneyMutation(sessions, authReq, {
@@ -2907,6 +3032,99 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                 short: copy.short,
                 long: copy.long,
                 approve_hint: copy.approve_hint,
+              };
+            },
+          });
+          if (!guarded.ok) {
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return {
+            outcome: "commit" as const,
+            status: 200,
+            responseBody: guarded.result,
+          };
+        },
+      });
+    }
+
+    // POST /admin/v1/auto-approve-policy — whole-document replace (fresh TOTP + audit). ZTR-1237.
+    if (verb === "POST" && pathname === "/admin/v1/auto-approve-policy") {
+      if (deps.autoApprovePolicy === undefined || deps.autoApprovePolicy.setPolicy === undefined) {
+        return fail(503, "service_unavailable", "auto-approve policy not writable", requestId);
+      }
+      const routeId = "admin_auto_approve_policy";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const policyPort = ports.autoApprovePolicy;
+          if (policyPort === undefined || policyPort.setPolicy === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "transactional auto-approve policy not wired", requestId),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseAutoApprovePolicyBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              await policyPort.setPolicy!(body.documentJson, {
+                actorId: user.id,
+                nodeId,
+              });
+              const server_time = new Date(nowMs()).toISOString();
+              // Response mirrors GET shape (spend re-read best-effort after write).
+              const querySpend =
+                deps.queryAutoApproveWindowSpend ??
+                (async () => "0");
+              const rules = [];
+              for (const rule of body.rules) {
+                let spend = "0";
+                try {
+                  spend = await querySpend(rule.implementer_id, rule.window_hours);
+                } catch {
+                  spend = "0";
+                }
+                rules.push({ ...rule, current_window_spend_zkz: spend });
+              }
+              if (!body.enabled) {
+                return {
+                  status: "disabled" as const,
+                  disabledReason: "off" as const,
+                  rules,
+                  server_time,
+                };
+              }
+              return {
+                status: "enabled" as const,
+                rules,
+                server_time,
               };
             },
           });
@@ -5087,6 +5305,8 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly deviceRevocationSideEffects?: DeviceRevocationSideEffects | null;
   readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
+  readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];
@@ -5141,6 +5361,10 @@ export function createFailClosedAdminRouteDeps(base: {
     deviceRevocationSideEffects: base.deviceRevocationSideEffects ?? null,
     breakGlassStore: base.breakGlassStore ?? null,
     ...(base.dualControlPolicy !== undefined ? { dualControlPolicy: base.dualControlPolicy } : {}),
+    ...(base.autoApprovePolicy !== undefined ? { autoApprovePolicy: base.autoApprovePolicy } : {}),
+    ...(base.queryAutoApproveWindowSpend !== undefined
+      ? { queryAutoApproveWindowSpend: base.queryAutoApproveWindowSpend }
+      : {}),
     ...(base.deviceSignaturePolicy !== undefined
       ? { deviceSignaturePolicy: base.deviceSignaturePolicy }
       : {}),
@@ -5212,6 +5436,8 @@ export function createLiveAdminRouteDeps(
     readonly deviceRevocationSideEffects?: DeviceRevocationSideEffects | null;
     readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
+  readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];

@@ -82,6 +82,7 @@ export function buildSections(attentionBadge: number | undefined): NavSec[] {
         { to: "/recovery-ceremony", label: "Recovery", icon: <IconKey /> },
         { to: "/api-keys", label: "Keys", icon: <IconKey /> },
         { to: "/integrations", label: "Integrations", icon: <IconGrid /> },
+        { to: "/auto-approve", label: "Auto-approve", icon: <IconClipboard /> },
         { to: "/devices", label: "Devices", icon: <IconLock /> },
         { to: "/reporting-keys", label: "Reporting", icon: <IconBell /> },
         { to: "/integration", label: "Connect", icon: <IconFile /> },

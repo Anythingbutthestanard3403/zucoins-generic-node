@@ -40,7 +40,12 @@ export const AUTH_FACTOR_FAILURE = Object.freeze({
 
 export type BodyValidationResult<T> =
   | { readonly ok: true; readonly body: T }
-  | { readonly ok: false; readonly status: 400; readonly code: string; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly status: 400 | 422;
+      readonly code: string;
+      readonly message: string;
+    };
 
 export interface GuardedAdminMutationInput<TBody, TResult> {
   readonly sessions: AdminSessionService;

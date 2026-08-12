@@ -8,6 +8,7 @@ export { createPoolVaultSigner } from "./send-vault-signer.js";
 export {
   mirrorSendOperationsToOperations,
   loadApprovedUnsignedSendIds,
+  loadApprovalPendingSendCandidates,
   createSqlSendPartialLoader,
 } from "./send-sql-ports.js";
 export {

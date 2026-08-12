@@ -30,9 +30,12 @@ import {
   assignReceiveWallet,
   captureReceiveT0,
   commitReceiveReady,
+  commitAutoApproval,
   createMoneySignerBoundaryDeps,
+  createSqlAutoApprovePolicy,
   createSqlSignerAuditLog,
   DEFAULT_SERIALIZATION_RETRY_POLICY,
+  evaluateAutoApproveRule,
   expireQueueAgedReceives,
   formReceiveCodeAndArtifact,
   GENESIS_PROJECTION,
@@ -45,6 +48,7 @@ import {
   SqlReceiveExpiryReleaseService,
   toBase64UrlPadded,
   withSerializationRetry,
+  type AutoApprovePolicyPort,
   type DeviceKeyStore,
   type DualChainEventQuota,
   type EncryptedWalletKeyStore,
@@ -109,8 +113,10 @@ import {
   createSqlPartialPort,
   createSqlSendSourceLeasePort,
   createSqlSignIntentPort,
+  loadApprovalPendingSendCandidates,
   loadApprovedUnsignedSendIds,
   mirrorSendOperationsToOperations,
+  withPoolTransaction,
 } from "./send-sql-ports.js";
 import { createPoolVaultSigner } from "./send-vault-signer.js";
 import {
@@ -284,6 +290,11 @@ export interface StartMoneyWorkersDeps {
    */
   readonly deviceKeyStore?: DeviceKeyStore;
   readonly metricsHooks?: MetricsHooks;
+  /**
+   * Optional auto-approve policy port (tests). Default: SQL-backed
+   * `ops.auto_approve_sends` via createSqlAutoApprovePolicy (ZTR-1234/1235).
+   */
+  readonly autoApprovePolicy?: AutoApprovePolicyPort;
 }
 
 export interface MoneyWorkersHandle {
@@ -733,6 +744,100 @@ async function advanceAssignedReceive(deps: {
 }
 
 
+/**
+ * Auto-approve CREATED + APPROVAL_PENDING external sends under ops.auto_approve_sends
+ * (ZTR-1235). Runs before advanceApprovedSends so a send approved in this tick can form
+ * in the same tick. No signer deps — formation may still defer when vault is unarmed.
+ */
+async function autoApprovePendingSends(deps: {
+  readonly pool: Pool;
+  readonly logger: MoneyWorkerLogger;
+  readonly moneyPathGates: WorkerMoneyPathGates;
+  readonly policy: AutoApprovePolicyPort;
+  readonly moneyPathStatementTimeoutMs: number;
+  readonly stopped: () => boolean;
+}): Promise<void> {
+  let candidates: Awaited<ReturnType<typeof loadApprovalPendingSendCandidates>>;
+  try {
+    candidates = await loadApprovalPendingSendCandidates(deps.pool);
+  } catch (err) {
+    deps.logger.info(
+      `money-workers: SEND auto-approve load skipped (${err instanceof Error ? err.message : "err"})`,
+    );
+    return;
+  }
+  if (candidates.length === 0) return;
+
+  let policy;
+  try {
+    policy = await deps.policy.getPolicy();
+  } catch (err) {
+    deps.logger.info(
+      `money-workers: SEND auto-approve policy read skipped (${err instanceof Error ? err.message : "err"})`,
+    );
+    return;
+  }
+  if (policy.status !== "enabled") {
+    deps.logger.info(
+      `money-workers: SEND auto-approve idle policy=disabled reason=${policy.disabledReason}`,
+    );
+    return;
+  }
+
+  const sql = {
+    query: async <R>(text: string, params: readonly unknown[] = []) => {
+      const result = await deps.pool.query(text, params as never);
+      return { rows: result.rows as R[] };
+    },
+  };
+  const withTx = <T>(body: (tx: {
+    query: <R>(text: string, params: readonly unknown[]) => Promise<{ rows: R[] }>;
+  }) => Promise<T>): Promise<T> =>
+    withPoolTransaction(
+      deps.pool,
+      async (tx) =>
+        body({
+          query: async <R>(text: string, params: readonly unknown[] = []) => {
+            const result = await tx.query(text, params);
+            return { rows: result.rows as R[] };
+          },
+        }),
+      deps.moneyPathStatementTimeoutMs,
+    );
+
+  for (const candidate of candidates) {
+    if (deps.stopped()) break;
+    try {
+      deps.moneyPathGates.assertMoneyAdmitted();
+      deps.moneyPathGates.assertHaltAdmitsKind("SEND_EXTERNAL");
+
+      const evalResult = evaluateAutoApproveRule(policy, {
+        implementerId: candidate.implementerId,
+        amountZkz: candidate.amountZkz,
+      });
+      if (evalResult.decision !== "approve") {
+        // Fall-throughs stay in the manual queue — silent per AC.
+        continue;
+      }
+
+      const result = await commitAutoApproval(
+        { operationId: candidate.operationId, rule: evalResult.rule },
+        { sql, withTx },
+      );
+      if (result.decision === "approve") {
+        deps.logger.info(
+          `money-workers: SEND auto-approved op=${candidate.operationId} rule=${evalResult.rule.rule_id} approval=${result.approvalId} window_spend_before=${result.windowSpendBefore}`,
+        );
+      }
+    } catch (err) {
+      deps.logger.error(
+        `money-workers: SEND auto-approve failed op=${candidate.operationId}`,
+        err,
+      );
+    }
+  }
+}
+
 async function advanceApprovedSends(deps: {
   readonly pool: Pool;
   readonly config: MoneyWorkerConfig;
@@ -1107,6 +1212,15 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
   const sendObserver =
     deps.sendFormationObserver ?? createSendFormationObserverFromReceiveT0(observer);
 
+  const autoApprovePolicy: AutoApprovePolicyPort =
+    deps.autoApprovePolicy ??
+    createSqlAutoApprovePolicy({
+      query: async <R>(text: string, params: readonly unknown[] = []) => {
+        const result = await deps.pool.query(text, params as never);
+        return { rows: result.rows as R[] };
+      },
+    });
+
   const resolveSendSignerDeps = (): SignerBoundaryDeps | null => {
     if (deps.sendSignerDeps === null) return null;
     if (typeof deps.sendSignerDeps === "function") return deps.sendSignerDeps();
@@ -1389,8 +1503,18 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       }
     }
 
-    // SEND_EXTERNAL post-approve formation. Node never submits.
+    // SEND_EXTERNAL: auto-approve pending (ZTR-1235) then post-approve formation.
+    // Auto-approve runs first so a send approved this tick can form in the same tick.
+    // Node never submits.
     await mirrorSendOperationsToOperations(deps.pool, deps.logger);
+    await autoApprovePendingSends({
+      pool: deps.pool,
+      logger: deps.logger,
+      moneyPathGates: deps.moneyPathGates,
+      policy: autoApprovePolicy,
+      moneyPathStatementTimeoutMs: statementTimeoutMs,
+      stopped: () => stopped,
+    });
     await advanceApprovedSends({
       pool: deps.pool,
       config: deps.config,

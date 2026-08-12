@@ -8,7 +8,45 @@ export * from "./money-path-admission.js";
 export * from "./operation-route-store.js";
 export * from "./credential/index.js";
 export * from "./implementer/index.js";
-export * from "./integration-request/index.js";
+// Public Route-2 handshake module (ZTR-1239). Colliding store type/class names with the
+// implementer operator inbox store (ZTR-1240) are aliased at the package boundary so both
+// can ship from one barrel without TS2308 ambiguity.
+export {
+  CLAIM_TOKEN_PREFIX,
+  INTEGRATION_REQUEST_INTAKE_SCOPES,
+  INTEGRATION_REQUEST_PENDING_CAP,
+  INTEGRATION_REQUEST_READ_GRACE_MS,
+  INTEGRATION_REQUEST_TTL_MS,
+  INTEGRATION_REQUEST_RATE_MAX_REQUESTS,
+  INTEGRATION_REQUEST_RATE_WINDOW_MS,
+  _resetIntegrationRequestRateLimitForTests,
+  consumeIntegrationRequestAttempt,
+  parseProposedIntegrationRule,
+  serializeProposedRule,
+  claimTokenHashesEqual,
+  generateClaimToken,
+  hashClaimToken,
+  extractClaimToken,
+  handleCreateIntegrationRequest,
+  handleGetIntegrationRequest,
+  createIntegrationRequestRouter,
+  type ClaimOutcome,
+  type IntegrationRequestIntakeInput,
+  type IntegrationRequestIntakeResult,
+  type IntegrationRequestIntakeScope,
+  type IntegrationRequestRow,
+  type IntegrationRequestStatus,
+  type ProposedIntegrationRule,
+  type IntegrationRequestHandlerDeps,
+  type IntegrationRequestRouter,
+  type IntegrationRequestRouterDeps,
+  type IntegrationRequestTxFn,
+  // Aliased — bare names belong to implementer/operator inbox store
+  type IntegrationRequestStore as PublicIntegrationRequestStore,
+  type IntegrationRequestSqlExecutor as PublicIntegrationRequestSqlExecutor,
+  SqlIntegrationRequestStore as PublicSqlIntegrationRequestStore,
+  InMemoryIntegrationRequestStore as PublicInMemoryIntegrationRequestStore,
+} from "./integration-request/index.js";
 export * from "./data/index.js";
 export * from "./event-log/index.js";
 export * from "./gateway/index.js";

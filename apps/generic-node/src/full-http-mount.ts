@@ -105,7 +105,7 @@ import {
   createSqlDeviceSignaturePolicy,
   createSqlDualControlPolicy,
   createSqlAutoApprovePolicy,
-  SqlIntegrationRequestStore,
+  PublicSqlIntegrationRequestStore,
   queryWindowSpend,
   type DualControlMode,
   type DualControlPolicyPort,
@@ -451,7 +451,7 @@ export function resolveAdminCsrfOrigins(opts: {
 export interface ProductionRouteSurface {
   readonly destinationService: DestinationService;
   /** Route 2 public handshake store (ZTR-1239). */
-  readonly integrationRequestStore: import("@zucoins/node-core").IntegrationRequestStore;
+  readonly integrationRequestStore: import("@zucoins/node-core").PublicIntegrationRequestStore;
   readonly adminRouteDeps: AdminRouteDeps;
   readonly adminUserStore: AdminUserStore;
   readonly adminCsrfAllowedOrigins: readonly string[];
@@ -718,7 +718,7 @@ export function createProductionRouteSurface(
   });
   // Integration-request operator store (list/approve/decline). Pool-scoped for
   // reads; TX-scoped clone is rebound inside atomicAdminMutation.portsFor.
-  const integrationRequestStore = createSqlIntegrationRequestStore({
+  const adminIntegrationRequestStore = createSqlIntegrationRequestStore({
     query: async <R extends Record<string, unknown>>(text: string, params?: readonly unknown[]) => {
       const result = await config.pool.query(text, params as never);
       return { rows: result.rows as R[] };
@@ -835,7 +835,7 @@ export function createProductionRouteSurface(
     credentialService,
     resolveImplementerId,
     implementerRegistry,
-    integrationRequestStore,
+    integrationRequestStore: adminIntegrationRequestStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -1105,7 +1105,7 @@ export function createProductionRouteSurface(
 
 
   // Route 2 public handshake store (ZTR-1239). Claim TX uses pool transaction runner.
-  const integrationRequestStore = new SqlIntegrationRequestStore(
+  const integrationRequestStore = new PublicSqlIntegrationRequestStore(
     createPoolSqlExecutor(config.pool),
     async (body) => {
       const runner = createPoolSqlTransactionRunner(config.pool);

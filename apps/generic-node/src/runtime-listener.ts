@@ -24,7 +24,7 @@ import {
   consumeOriginRelayAttempt,
   createDestinationsRouter,
   createIntegrationRequestRouter,
-  type IntegrationRequestStore,
+  type PublicIntegrationRequestStore,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
   enforceTransportGuards,
@@ -180,7 +180,7 @@ export interface NodeRuntimeListenerDeps {
   /** Required with destinationService — custody node uuid for destination rows. */
   readonly nodeId?: string;
   /** Route 2 public handshake store (ZTR-1239). Mounted when nodeId set. */
-  readonly integrationRequestStore?: IntegrationRequestStore;
+  readonly integrationRequestStore?: PublicIntegrationRequestStore;
   readonly adminRouter?: AdminRouter;
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;

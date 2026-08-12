@@ -1,12 +1,45 @@
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
+import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
 const CONFIG_DIR = fileURLToPath(new URL(".", import.meta.url)).replace(/\/$/, "");
 
+/**
+ * ZTR-1252: stamp public/sw.js SHELL_CACHE name with a per-build id so activate
+ * purges the previous shell cache after every deploy. Source keeps the
+ * `__SHELL_CACHE_BUILD_ID__` token; only dist/sw.js is rewritten.
+ */
+function stampShellServiceWorker(): Plugin {
+  const token = "__SHELL_CACHE_BUILD_ID__";
+  return {
+    name: "stamp-shell-service-worker",
+    apply: "build",
+    closeBundle() {
+      const swPath = join(CONFIG_DIR, "dist", "sw.js");
+      let body: string;
+      try {
+        body = readFileSync(swPath, "utf8");
+      } catch {
+        return;
+      }
+      if (!body.includes(token)) return;
+      const stamp = createHash("sha256")
+        .update(randomBytes(16))
+        .update(String(Date.now()))
+        .digest("hex")
+        .slice(0, 12);
+      writeFileSync(swPath, body.split(token).join(stamp), "utf8");
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stampShellServiceWorker()],
   server: {
     port: 5174,
     proxy: {

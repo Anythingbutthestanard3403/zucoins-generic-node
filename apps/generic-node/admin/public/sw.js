@@ -4,9 +4,18 @@
  * NEVER durable-caches authenticated JSON (balances, approvals, session).
  * Admin/public money APIs and health probes are network-only.
  * Does not touch cookies, CSP, or response bodies that embed secrets.
+ *
+ * ZTR-1252: cache name is build-stamped (__SHELL_CACHE_BUILD_ID__ replaced at
+ * vite build). Activate purges every other zu-node-* cache. Script/CSS assets
+ * are only cached when Content-Type is a real JS/CSS MIME — never HTML under a
+ * .js URL (the old trap when the static server returned index.html 200 for
+ * missing chunks).
  */
 /* eslint-disable no-restricted-globals */
-const SHELL_CACHE = "zu-node-shell-v1";
+// Build stamp: vite plugin replaces the token; fallback keeps a distinct name
+// from the pre-ZTR-1252 unversioned "zu-node-shell-v1" so activate still purges it.
+const SHELL_CACHE_BUILD_ID = "__SHELL_CACHE_BUILD_ID__";
+const SHELL_CACHE = "zu-node-shell-" + SHELL_CACHE_BUILD_ID;
 const PRECACHE = [
   "/",
   "/index.html",
@@ -42,6 +51,42 @@ function isShellAssetPath(pathname) {
 function isJsonLike(response) {
   const ct = (response.headers.get("content-type") || "").toLowerCase();
   return ct.includes("application/json") || ct.includes("+json");
+}
+
+/** True when the body is HTML — must never be stored under a script/style URL. */
+function isHtmlLike(response) {
+  const ct = (response.headers.get("content-type") || "").toLowerCase();
+  return ct.includes("text/html");
+}
+
+/**
+ * Whether this response is safe to durable-cache for the requested path.
+ * Scripts and styles require a matching MIME; HTML under .js/.css is refused.
+ */
+function isCacheableShellResponse(pathname, response) {
+  if (!response.ok || isJsonLike(response) || isHtmlLike(response)) return false;
+  if (/\.m?js$/i.test(pathname)) {
+    const ct = (response.headers.get("content-type") || "").toLowerCase();
+    return (
+      ct.includes("javascript") ||
+      ct.includes("ecmascript") ||
+      ct.includes("application/wasm")
+    );
+  }
+  if (/\.css$/i.test(pathname)) {
+    const ct = (response.headers.get("content-type") || "").toLowerCase();
+    return ct.includes("text/css");
+  }
+  return true;
+}
+
+/** Cached entry may be stale poison (HTML under a .js key from an older SW). */
+function isUsableCachedResponse(pathname, cached) {
+  if (!cached || isJsonLike(cached) || isHtmlLike(cached)) return false;
+  if (/\.m?js$/i.test(pathname) || /\.css$/i.test(pathname)) {
+    return isCacheableShellResponse(pathname, cached);
+  }
+  return true;
 }
 
 self.addEventListener("install", (event) => {
@@ -93,9 +138,9 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then(async (res) => {
-          if (res.ok && !isJsonLike(res)) {
+          if (res.ok && !isJsonLike(res) && isHtmlLike(res)) {
             const cache = await caches.open(SHELL_CACHE);
-            // Store a clone of the HTML shell only.
+            // Store a clone of the HTML shell only under shell keys.
             void cache.put("/index.html", res.clone());
           }
           return res;
@@ -122,20 +167,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Shell static assets: cache-first after a successful non-JSON network put.
+  // Shell static assets: cache-first after a successful typed non-JSON network put.
+  // Never serve a cached HTML body for a script/style URL (ZTR-1252).
   event.respondWith(
     caches.open(SHELL_CACHE).then(async (cache) => {
       const cached = await cache.match(req);
-      if (cached && !isJsonLike(cached)) return cached;
+      if (isUsableCachedResponse(url.pathname, cached)) return cached;
+      // Drop poison entries left by older SW versions.
+      if (cached) void cache.delete(req);
       try {
         const res = await fetch(req);
-        if (res.ok && !isJsonLike(res)) {
-          // Only cache opaque-safe shell bytes — never JSON bodies.
+        if (isCacheableShellResponse(url.pathname, res)) {
           void cache.put(req, res.clone());
         }
         return res;
       } catch (err) {
-        if (cached) return cached;
+        if (isUsableCachedResponse(url.pathname, cached)) return cached;
         throw err;
       }
     }),

@@ -4,7 +4,7 @@
 **Epic:** ZTR-1266  
 **Branch:** `ztr-1267-wallet-money-capability`  
 **Claim run:** `cff73ee1-b646-4ea7-8eca-319ba33fd3c3`  
-**Head SHA:** `10a266710952d58c04e26d12d6e7bb2d72e94bfb`
+**Head SHA:** `9d81d9c6fdd00c7c59f67f1e52b578e370aecc5f`
 
 ## Scope (this ticket only)
 
@@ -51,3 +51,6 @@ Schema + frozen pure contracts + defaults. No admission gates (ZTR-1268), no adm
 - ZTR-1268 admission gates using eligibility helpers
 - ZTR-1269 admin PATCH + CAS on row_version
 - Top-up hub composition
+
+**PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/125
+

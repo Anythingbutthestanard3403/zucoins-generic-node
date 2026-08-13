@@ -69,8 +69,8 @@
     "verification-access-windows.sql",
     "verification-acknowledgements.sql",
     "verification-proofs.sql",
-    "wallet-money-capability.sql",
     "wallet-money-capability-lease-guard.sql",
+    "wallet-money-capability.sql",
     "wallet-settled-ledger-indexes.sql",
     "wallet-settled-ledger.sql"
   ],

@@ -1115,6 +1115,8 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const alreadyReleasedOp = operationId(33);
       // ZTR-1249 ghost: walletless EXPIRED + terminal_at set must not re-enter the scan.
       const terminalizedExpiredOp = operationId(34);
+      // ZTR-1277: attention-parked assigned receive must not re-enter the automatic sweep.
+      const parkedAssignedOp = operationId(35);
 
       // The frozen operations CHECKs pin the shapes: a RECEIVE_EXTERNAL row with
       // expiry_unix_time_secs set must carry the READY receiver triple, and
@@ -1125,23 +1127,27 @@ describe("receive expiry/release PostgreSQL drills", () => {
         `INSERT INTO operations (
            id, node_id, implementer_id, kind, status, row_version, amount_zkz,
            receiver_wallet_id, after_landing, discriminator, anchor, idempotency_key,
-           request_sha256, expiry_unix_time_secs, t0_observation_id, created_at, terminal_at
+           request_sha256, expiry_unix_time_secs, t0_observation_id, created_at, terminal_at,
+           attention_required, attention_reason
          ) VALUES
            ('${expiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
             '${WALLET}', 'HOLD', '${expiredOp}', 'expiryscan-expired', 'expiryscan-idem-30', '${SHA}',
-            '1000000000', '${T0}', to_timestamp(0), NULL),
+            '1000000000', '${T0}', to_timestamp(0), NULL, false, NULL),
            ('${futureOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
             '${WALLET}', 'HOLD', '${futureOp}', 'expiryscan-future', 'expiryscan-idem-31', '${SHA}',
-            '9999999999', '${T0}', now(), NULL),
+            '9999999999', '${T0}', now(), NULL, false, NULL),
            ('${nullExpiryOldOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
             NULL, 'HOLD', '${nullExpiryOldOp}', 'expiryscan-null-expiry', 'expiryscan-idem-32', '${SHA}',
-            NULL, NULL, to_timestamp(0), NULL),
+            NULL, NULL, to_timestamp(0), NULL, false, NULL),
            ('${alreadyReleasedOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'EXPIRED', 1, '1',
             NULL, 'HOLD', '${alreadyReleasedOp}', 'expiryscan-released', 'expiryscan-idem-33', '${SHA}',
-            NULL, NULL, to_timestamp(0), NULL),
+            NULL, NULL, to_timestamp(0), NULL, false, NULL),
            ('${terminalizedExpiredOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'EXPIRED', 1, '1',
             NULL, 'HOLD', '${terminalizedExpiredOp}', 'expiryscan-terminalized', 'expiryscan-idem-34', '${SHA}',
-            NULL, NULL, to_timestamp(0), now());
+            NULL, NULL, to_timestamp(0), now(), false, NULL),
+           ('${parkedAssignedOp}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'READY', 1, '1',
+            '${WALLET}', 'HOLD', '${parkedAssignedOp}', 'expiryscan-parked', 'expiryscan-idem-35', '${SHA}',
+            '1000000000', '${T0}', to_timestamp(0), NULL, true, 'T0_RELEASE_MISMATCH');
          UPDATE operations SET receive_release_status = 'RELEASED_T0_UNCHANGED'
           WHERE id = '${alreadyReleasedOp}';`,
       );
@@ -1150,18 +1156,33 @@ describe("receive expiry/release PostgreSQL drills", () => {
       const ids = candidates.map((c) => c.operationId).sort();
 
       // Expired text expiry and NULL-expiry old created_at should appear;
-      // future expiry, already-released, and terminalized walletless EXPIRED must not.
+      // future expiry, already-released, terminalized walletless EXPIRED, and
+      // attention-parked assigned receives must not.
       expect(ids).toContain(expiredOp);
       expect(ids).toContain(nullExpiryOldOp);
       expect(ids).not.toContain(futureOp);
       expect(ids).not.toContain(alreadyReleasedOp);
       expect(ids).not.toContain(terminalizedExpiredOp);
+      expect(ids).not.toContain(parkedAssignedOp);
 
       // Verify the expired-op row carries the text expiry value through.
       const expiredCandidate = candidates.find((c) => c.operationId === expiredOp);
       expect(expiredCandidate).toBeDefined();
       expect(expiredCandidate!.expiryUnixTimeSecs).toBe("1000000000");
       expect(expiredCandidate!.status).toBe("READY");
+
+      // After operator attention retraction the parked row rejoins the sweep
+      // (status may still be NEEDS_ATTENTION-path READY; flag is the gate).
+      psqlMust(
+        dbUrl,
+        `UPDATE operations
+            SET attention_required = false,
+                attention_reason = NULL,
+                attention_detail = NULL
+          WHERE id = '${parkedAssignedOp}'`,
+      );
+      const afterRetract = await loadExpiredReceiveCandidates(db);
+      expect(afterRetract.map((c) => c.operationId)).toContain(parkedAssignedOp);
     },
   );
 });

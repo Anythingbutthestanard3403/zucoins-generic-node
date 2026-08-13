@@ -31,6 +31,7 @@ under pressure. Before you change anything at 3am, read this:
 | [`auto-approve-external-sends.md`](auto-approve-external-sends.md) | Auto-approved external sends: setup (both routes), omit-source default, spend vs cap, three stop levers, audit, wallet pool |
 | [`zukaz-source-omit-cutover.md`](zukaz-source-omit-cutover.md) | Zukaz / implementer cutover: stop supplying source wallet id (checklist + config keys) |
 | [`wallet-money-capabilities.md`](wallet-money-capabilities.md) | Designate hubs/workers, fund hubs, manual rebalance, capability failure map (ZTR-1273) |
+| [`incidents.md`](incidents.md) § forged `EXPIRED_T0_UNCHANGED` (staging 2026-08-12) | Four hand-SQL membership releases without proofs — timeline, verifier allowlist, audit annotation runbook (ZTR-1281) |
 
 ## What the node is
 

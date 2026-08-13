@@ -333,3 +333,147 @@ Fail closed for money decisions until gateway reads recover. Do not switch endpo
 **P1.** `gn_receive_queue_oldest_age_seconds` vs `RECEIVE_QUEUE_MAX_WAIT`. Suppressed while DB-truth unavailable.
 
 Stop affected admission path; keep other isolated lanes operating if invariants hold.
+
+---
+
+## Historical incident — forged `EXPIRED_T0_UNCHANGED` releases (staging, 2026-08-12)
+
+**ZTR-1281** (child of epic **ZTR-1274**). Severity at the time: operator-blocking
+custody capacity loss on staging, not a production double-spend. Recorded so the
+four forged memberships are never re-read as proof that auto-release worked.
+
+### Timeline (UTC, 2026-08-12)
+
+| When | What |
+| --- | --- |
+| ~13:23Z | ZTR-1247 fix wave deployed to staging. |
+| ~13:23Z–15:32Z | Four assigned receives past expiry stayed `attention_required` with reason `T0_RELEASE_MISMATCH`. Wallets remained `PINNED`. Worker re-evaluated on the sweep; every sanctioned path failed closed. |
+| Investigation window | Ops short ids `4bec5ae4`, `4fc07a73`, `5316a5f2`, `e123d38d` (full UUIDs below). Zero submits, zero candidates, zero anomalies. Failed predicates on every attention event: `FRESH_VERIFIED_T0_EXACT`, `NO_ANOMALY_LINEAGE_OR_SUBMIT`. |
+| 15:32–15:33Z | Operator, under duress after all catalogue actions failed, hand-wrote `wallet_lease_memberships` releases with `release_reason = 'EXPIRED_T0_UNCHANGED'`. **No** matching `receive_release_proofs` rows. **No** `audit_log` rows for the release. |
+| 2026-08-13 | Root cause proven live: observation exact-repeat dedup starves the fresh-head predicate. Full write-up: [`tasks/wallet-unpin-root-cause-2026-08-13.md`](../../tasks/wallet-unpin-root-cause-2026-08-13.md). |
+
+### Affected operations (full UUIDs)
+
+| Short | Operation id |
+| --- | --- |
+| `4bec5ae4` | `4bec5ae4-2b46-4542-b7e2-9d57105ab9fe` |
+| `4fc07a73` | `4fc07a73-9b84-474f-a1ca-1ff9f7e70820` |
+| `5316a5f2` | `5316a5f2-5d19-40f7-9324-fe0ad677646e` |
+| `e123d38d` | `e123d38d-3451-4bfe-9e00-7e587debd3e0` |
+
+These four ids are the **only** allowlisted forged-release exceptions. Do not
+extend the list without a new incident ticket.
+
+### What was forged
+
+Shipped code mints an `EXPIRED_T0_UNCHANGED` membership close **only** inside the
+same SERIALIZABLE transaction that inserts `receive_release_proofs` (and the
+lease release proof). The staging rows violate that biconditional:
+
+- `wallet_lease_memberships.released_at IS NOT NULL`
+- `wallet_lease_memberships.release_reason = 'EXPIRED_T0_UNCHANGED'`
+- **no** `receive_release_proofs` row for the operation
+- **no** contemporaneous `audit_log` release entry
+
+That shape is impossible from the catalogue. It is hand SQL. It must not be
+silently absorbed as a successful auto-release.
+
+### Root cause (one paragraph)
+
+`FRESH_VERIFIED_T0_EXACT` needs a post-expiry observation row whose relationship
+is a safe-unchanged kind. Exact-repeat dedup suppresses byte-identical heads as
+sightings and returns the pre-expiry T0 id, so the freshness window can never
+hold for the one case expiry-release exists to handle. Break-glass
+`RELEASE_EXPIRED_RECEIVE` shares the same reader. Detail:
+[`tasks/wallet-unpin-root-cause-2026-08-13.md`](../../tasks/wallet-unpin-root-cause-2026-08-13.md).
+Code fix track: ZTR-1275 and siblings under ZTR-1274.
+
+### Verifier / census decision (recorded)
+
+**Special-case these four operation ids on staging. Do not reset the environment
+solely for this incident. Do not delete or rewrite the forged membership rows.**
+
+Rationale:
+
+1. Append-only / never-delete-evidence discipline forbids scrubbing the
+   memberships to "make the biconditional true".
+2. Minting back-dated `receive_release_proofs` would forge a second class of
+   evidence and is **forbidden**.
+3. A full staging DB reset would erase unrelated lab state and is not required
+   once verifiers know the allowlist.
+4. Future auto-release drills (ZTR-1276 and successors) must use **new**
+   operations; success on a fresh op is the only admissible proof that the fix
+   works. These four must never be cited as pre-fix auto-release evidence.
+
+**How verifiers and census jobs must treat the allowlist:**
+
+- Any check of the form “membership `EXPIRED_T0_UNCHANGED` ⟺ row in
+  `receive_release_proofs`” **must** exclude the four operation ids above, **or**
+  accept the pair `(forged membership, audit annotation
+  action = incident.manual_release_annotated)` as the explained exception.
+- Boot-recovery / lease census that only cares about *active* leases is
+  unaffected (these memberships are already released; wallets were returned to
+  pool by the hand SQL).
+- Metrics that count `receive_release_proofs` by kind must not treat a missing
+  proof for these four as a live invariant breach after the annotation rows
+  exist; treat them as historical incident debt.
+
+If a future production (non-staging) database ever shows this shape, that is a
+**new P0 incident** — this allowlist is staging-only and must not be copied.
+
+### Staging audit annotation (append-only)
+
+Membership rows stay as-is. Reconciliation is four new `audit_log` rows, one per
+operation, action `incident.manual_release_annotated`, pointing at this section
+and ZTR-1281.
+
+**Runbook (preferred path — one-shot ops script):**
+
+```bash
+# From a clean checkout of this commit, with staging DATABASE_URL only.
+# Default is dry-run (BEGIN … plan … ROLLBACK). Nothing commits without --execute.
+
+export DATABASE_URL='postgres://…staging…'   # refuse if this is production
+export STAGING_CONFIRM=ZTR-1281            # required hard gate
+
+# Preview
+node docs/operations/annotate-forged-expired-t0-releases.mjs
+
+# Apply (idempotent: skips ops that already have the annotation action)
+node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
+```
+
+**What the script does:**
+
+- Connects with `DATABASE_URL`.
+- Refuses unless `STAGING_CONFIRM=ZTR-1281`.
+- Refuses if `PUBLIC_BASE_URL` / heuristic markers look like production (see script
+  header).
+- For each of the four ops: verifies the membership is released with
+  `EXPIRED_T0_UNCHANGED`, verifies **zero** `receive_release_proofs` rows (still
+  forged), and `INSERT`s exactly one `audit_log` annotation when absent.
+- **Never** `UPDATE`/`DELETE`s `wallet_lease_memberships`, `receive_release_proofs`,
+  or any other money table.
+
+**If staging credentials are unavailable in this environment:** leave the script
+unrun; the runbook above is the AC. Apply on the next supervised staging
+maintenance window and paste the script JSON summary onto ZTR-1281.
+
+### Forbidden responses (then and now)
+
+- Deleting or rewriting the four membership rows “to clean the census”.
+- Inserting fake `receive_release_proofs` to satisfy the biconditional.
+- Citing these four ops as evidence that expiry auto-release worked before
+  ZTR-1275.
+- Extending the allowlist casually; new forgeries need a new incident ticket.
+- Hand SQL on money tables when a catalogue path exists — the root fix is the
+  product; this note is the deterrent.
+
+### Safe posture if you rediscover these rows
+
+1. Read this section and the root-cause doc.
+2. Confirm `audit_log` has `incident.manual_release_annotated` for each op; if
+   not, run the annotation script (staging only).
+3. Continue ZTR-1274 fix work; prove release on a **new** lab receive.
+4. Do not page as a live invariant breach on staging solely for these four ids
+   once annotated.

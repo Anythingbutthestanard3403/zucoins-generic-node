@@ -8,7 +8,6 @@ import { RecoveryActions } from "../../components/RecoveryActions.js";
 import {
   canRetractAttention,
   formatMoneyError,
-  isOperationTerminal,
   operationLifecycleBucket,
   getRecovery,
   isCancelled,

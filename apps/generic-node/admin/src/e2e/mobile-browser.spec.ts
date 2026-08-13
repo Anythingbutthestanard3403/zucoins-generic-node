@@ -89,7 +89,8 @@ const workflows: Workflow[] = [
   { name: "Approve inbox", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("link", { name: "Transfers", exact: true }).last() },
   { name: "Approve inbox pending SEND", path: "/approve", heading: "Approve", authenticated: true, critical: (p) => p.getByRole("button", { name: "Review & decide" }) },
   { name: "Operations", path: "/operations", heading: "Operations", authenticated: true, critical: (p) => p.getByRole("link", { name: "Operations" }) },
-  { name: "Wallets", path: "/wallets", heading: "Wallets", authenticated: true, critical: (p) => p.getByRole("link", { name: new RegExp(E2E_WALLET_PUBKEY.slice(0, 12)) }) },
+  // Four fixture wallets share the same pubkey prefix; pin the AVAILABLE row's link (first).
+  { name: "Wallets", path: "/wallets", heading: "Wallets", authenticated: true, critical: (p) => p.getByRole("link", { name: new RegExp(E2E_WALLET_PUBKEY.slice(0, 12)) }).first() },
   { name: "Wallet detail", path: `/wallets/${E2E_WALLET_PUBKEY}`, heading: "Wallet", authenticated: true, critical: (p) => p.getByRole("button", { name: "Copy pubkey" }) },
   { name: "Transfers", path: "/transfers", heading: "Transfers", authenticated: true, critical: (p) => p.getByRole("link", { name: E2E_OPERATION_ID }) },
   { name: "Transfer detail", path: `/transfers/${E2E_OPERATION_ID}`, heading: new RegExp(`Transfer\\s+${E2E_OPERATION_ID}`), authenticated: true, critical: (p) => p.getByRole("link", { name: "← Transfers" }) },
@@ -197,11 +198,11 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     await expect(qTag).toBeVisible();
     await expect(qTag).toHaveAttribute("data-severity", "danger");
     await expect(page.getByText(/QUARANTINED: REGRESSION/)).toBeVisible();
-    // RETIRED — muted terminal
+    // RETIRED — muted terminal (label also appears in hold-cause copy; scope to the tag).
     const rTag = page.getByTestId("status-tag-retired");
     await expect(rTag).toBeVisible();
     await expect(rTag).toHaveAttribute("data-severity", "muted");
-    await expect(page.getByText(/^Retired$/i)).toBeVisible();
+    await expect(rTag.getByText(/^Retired$/i)).toBeVisible();
   });
 
   test("Wallets table scrolls horizontally and keyboard focus scrolls its link into view", async ({ page }) => {
@@ -210,7 +211,8 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     const wrap = page.locator(".table-wrap");
     const dimensions = await wrap.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
     expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
-    const walletLink = page.getByRole("link", { name: new RegExp(E2E_WALLET_PUBKEY.slice(0, 12)) });
+    // Same prefix on all four e2e wallets — use the AVAILABLE row link only.
+    const walletLink = page.getByRole("link", { name: new RegExp(E2E_WALLET_PUBKEY.slice(0, 12)) }).first();
     await tabTo(page, walletLink);
     const box = await walletLink.boundingBox();
     const wrapBox = await wrap.boundingBox();
@@ -269,13 +271,13 @@ test.describe("deeper real-browser mobile/keyboard checks", () => {
     await expect(page.getByRole("button", { name: "Revoke" })).toBeVisible();
   });
 
-  test("Backup disabled controls are honest and readable without document overflow", async ({ page }) => {
+  test("Backup page is host-CLI only and readable without document overflow", async ({ page }) => {
     await authenticated(page, "/backup");
-    const exportButton = page.getByRole("button", { name: /export backup/i });
-    const importButton = page.getByRole("button", { name: /import backup/i });
-    await expect(exportButton).toBeDisabled();
-    await expect(importButton).toBeDisabled();
+    // Dashboard export/import buttons are intentionally not mounted (host DR CLI only).
+    await expect(page.getByRole("button", { name: /export backup/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /import backup/i })).toHaveCount(0);
     await expect(page.getByText(/dist\/dr\/cli\.js/)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Open recovery ceremony/i })).toBeVisible();
     await expectReflowAt320(page);
   });
 

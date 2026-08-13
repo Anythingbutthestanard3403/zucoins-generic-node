@@ -7,7 +7,6 @@ import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import {
   IconArrow, IconHalt, IconMark, IconRefresh,
 } from "../../icons.js";
-import { apiSoftRead } from "../../lib/api.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "../../lib/health.js";
 import {
@@ -32,7 +31,6 @@ import {
   NEEDS_ATTENTION_KEY,
 } from "../../lib/needs-attention.js";
 import {
-  EMPTY_NEEDS_ATTENTION,
   type NeedsAttentionListItem,
 } from "../../lib/ops.js";
 import {

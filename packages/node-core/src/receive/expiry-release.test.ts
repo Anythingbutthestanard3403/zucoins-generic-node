@@ -105,4 +105,8 @@ describe("release predicate mutation matrix", () => {
     expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.terminal_at IS NOT NULL");
     expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.receiver_wallet_id IS NULL");
   });
+
+  it("excludes attention-parked receives from the expiry candidate scan (ZTR-1277)", () => {
+    expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.attention_required = false");
+  });
 });

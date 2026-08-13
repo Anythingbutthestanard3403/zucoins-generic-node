@@ -1301,8 +1301,13 @@ async function commitRelease(
 // already carry terminal_at are fully done (queue-age path stamps both in one
 // UPDATE) — re-selecting them only re-appends receive_expiry_events forever
 // (ZTR-1249). EXPIRED + receiver still assigned stays in the scan so lease
-// release can finish. The service itself re-derives every predicate under
-// SERIALIZABLE isolation; this scan is selection only.
+// release can finish. Attention-parked rows (`attention_required = true`) are
+// excluded (ZTR-1277): each candidate may cost a live gateway fresh-head read,
+// and parked rows cannot progress until operator RETRY_OBSERVATION /
+// RELEASE_EXPIRED_RECEIVE or attention retraction — re-scanning them only
+// hammers the gateway and bloats gateway_observations. After retraction the
+// flag clears and the row naturally rejoins. The service itself re-derives
+// every predicate under SERIALIZABLE isolation; this scan is selection only.
 
 export const LOAD_EXPIRED_RECEIVE_CANDIDATES = `
 SELECT o.id::text AS operation_id,
@@ -1315,6 +1320,7 @@ SELECT o.id::text AS operation_id,
  WHERE o.kind = 'RECEIVE_EXTERNAL'
    AND o.status IN ('CREATED','READY','EXPIRED')
    AND o.receive_release_status IS NULL
+   AND o.attention_required = false
    AND NOT (
          o.status = 'EXPIRED'
          AND o.terminal_at IS NOT NULL

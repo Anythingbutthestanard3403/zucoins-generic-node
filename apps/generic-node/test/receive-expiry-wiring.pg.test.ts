@@ -526,6 +526,47 @@ describe.skipIf(!PG_AVAILABLE)(
             logs.some((l) => l.includes("receive expiry") && l.includes("ATTENTION")),
           ).toBe(true);
 
+          // ZTR-1277: once parked, subsequent ticks must not re-select the row for the
+          // automatic expiry sweep — no per-tick ATTENTION re-park spam, attention_episode
+          // stays put, and no new receive_expiry_attention_events rows.
+          const episodeBefore = await pool.query<{
+            attention_episode: string;
+            event_count: string;
+          }>(
+            `SELECT o.attention_episode::text AS attention_episode,
+                    (SELECT count(*)::text FROM receive_expiry_attention_events e
+                      WHERE e.operation_id = o.id) AS event_count
+               FROM operations o
+              WHERE o.id = $1::uuid`,
+            [operationId],
+          );
+          const episodeAtPark = episodeBefore.rows[0]!;
+          logs.length = 0;
+          const TICKS = 5;
+          for (let i = 0; i < TICKS; i++) {
+            await handle.tickOnce();
+          }
+          const episodeAfter = await pool.query<{
+            attention_required: boolean;
+            attention_episode: string;
+            event_count: string;
+          }>(
+            `SELECT o.attention_required AS attention_required,
+                    o.attention_episode::text AS attention_episode,
+                    (SELECT count(*)::text FROM receive_expiry_attention_events e
+                      WHERE e.operation_id = o.id) AS event_count
+               FROM operations o
+              WHERE o.id = $1::uuid`,
+            [operationId],
+          );
+          const afterParkTicks = episodeAfter.rows[0]!;
+          expect(afterParkTicks.attention_required).toBe(true);
+          expect(afterParkTicks.attention_episode).toBe(episodeAtPark.attention_episode);
+          expect(afterParkTicks.event_count).toBe(episodeAtPark.event_count);
+          expect(
+            logs.filter((l) => l.includes("receive expiry") && l.includes("ATTENTION")).length,
+          ).toBe(0);
+
           // Step 7: the release path this worker step CAN prove on its own is
           // the proven-not-started one — a leased receive with zero formation
           // evidence (no T0, no code, no artifact, no signer use). Plant that

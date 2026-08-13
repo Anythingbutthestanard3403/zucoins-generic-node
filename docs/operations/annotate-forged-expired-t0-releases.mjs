@@ -16,9 +16,9 @@
 //
 // Usage:
 //   DATABASE_URL=postgres://… STAGING_CONFIRM=ZTR-1281 \
-//     node scripts/annotate-forged-expired-t0-releases.mjs
+//     node docs/operations/annotate-forged-expired-t0-releases.mjs
 //   DATABASE_URL=postgres://… STAGING_CONFIRM=ZTR-1281 \
-//     node scripts/annotate-forged-expired-t0-releases.mjs --execute
+//     node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
 //
 // Incident note: docs/operations/incidents.md
 //   § "Historical incident — forged EXPIRED_T0_UNCHANGED releases"
@@ -51,7 +51,7 @@ async function loadPg() {
     if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
   }
   const genericNodeManifest = fileURLToPath(
-    new URL("../apps/generic-node/package.json", import.meta.url),
+    new URL("../../apps/generic-node/package.json", import.meta.url),
   );
   return createRequire(genericNodeManifest)("pg");
 }

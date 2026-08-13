@@ -437,10 +437,10 @@ export DATABASE_URL='postgres://…staging…'   # refuse if this is production
 export STAGING_CONFIRM=ZTR-1281            # required hard gate
 
 # Preview
-node scripts/annotate-forged-expired-t0-releases.mjs
+node docs/operations/annotate-forged-expired-t0-releases.mjs
 
 # Apply (idempotent: skips ops that already have the annotation action)
-node scripts/annotate-forged-expired-t0-releases.mjs --execute
+node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
 ```
 
 **What the script does:**

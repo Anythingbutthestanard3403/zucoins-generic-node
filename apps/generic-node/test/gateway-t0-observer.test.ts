@@ -9,7 +9,7 @@
 //   D3: VERIFIED_HEAD pathway with node-core settle golden + cursor advance
 //   ARM 409: mismatch against durable T0 is documented as t0_mismatch (census on arm-route)
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -1069,6 +1069,30 @@ describe("real T0 OBSERVE (offline)", () => {
     // Boot readiness smoke in main.ts is allowed a documented no-op (no wallet to attribute).
     const main = readFileSync(join(here, "../src/main.ts"), "utf8");
     expect(main).toMatch(/readiness smoke: intentionally non-durable/);
+  });
+
+  // ZTR-1275 census: only createSqlFreshHeadReader may set appendExactRepeat: true.
+  it("gate: only sql-fresh-head-reader sets appendExactRepeat true", () => {
+    const moneyWorkersDir = join(here, "../src/money-workers");
+    const files = readdirSync(moneyWorkersDir).filter((f) => f.endsWith(".ts"));
+    const flagSites: string[] = [];
+    for (const file of files) {
+      const src = readFileSync(join(moneyWorkersDir, file), "utf8");
+      if (/appendExactRepeat\s*:\s*true/.test(src)) {
+        flagSites.push(file);
+      }
+    }
+    expect(flagSites).toEqual(["sql-fresh-head-reader.ts"]);
+    // Persistence only forwards the option; it must not hardcode true.
+    const persistence = readFileSync(
+      join(moneyWorkersDir, "sql-observation-persistence.ts"),
+      "utf8",
+    );
+    expect(persistence).toMatch(/appendExactRepeat\?/);
+    expect(persistence).not.toMatch(/appendExactRepeat\s*:\s*true/);
+    // Fresh-head verified path must pass the flag.
+    const freshHead = readFileSync(join(moneyWorkersDir, "sql-fresh-head-reader.ts"), "utf8");
+    expect(freshHead).toMatch(/appendExactRepeat:\s*true/);
   });
 
   it("parse-result MALFORMED_ENVELOPE applies retain/alert audit action", async () => {

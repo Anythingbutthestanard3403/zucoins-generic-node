@@ -125,10 +125,16 @@ export class ExactRepeatService {
    * result on this stream. On suppress: cursor counter only. On append: one
    * gateway_observations row plus, when anomalyKind is set, one observation_anomalies
    * row — even when the anomalous bytes are themselves a consecutive repeat.
+   *
+   * `options.appendExactRepeat` (ZTR-1275): when the comparator would suppress a
+   * verified byte-identical repeat, append a gateway_observations row with
+   * relationship DUPLICATE instead (no anomaly row; cursor advances like a new
+   * observation). Default off — suppress-as-sighting unchanged.
    */
   async classify(
     streamKey: string,
     candidate: ExactRepeatCandidate,
+    options?: { readonly appendExactRepeat?: boolean },
   ): Promise<ExactRepeatDecision> {
     const cursor = (await this.store.loadCursor(streamKey)) ?? EMPTY_CURSOR;
     const sha256 = rawResponseDigest(candidate.rawResponseBytes);
@@ -145,6 +151,34 @@ export class ExactRepeatService {
     const decision = decideAppend(cursor.lastRecorded, dedupCandidate);
 
     if (decision === "SUPPRESS_AS_SIGHTING") {
+      if (options?.appendExactRepeat === true) {
+        const walletSeq = cursor.nextWalletSeq;
+        const observationId = this.store.allocateObservationId();
+        await this.store.appendObservation(streamKey, {
+          observationId,
+          walletSeq,
+          rawResponseBytes: candidate.rawResponseBytes,
+          rawResponseSha256: sha256,
+          verified: candidate.verified,
+          semanticFingerprint: candidate.semanticFingerprint,
+          relationship: "DUPLICATE",
+        });
+        // No anomaly row for DUPLICATE confirm-read appends (anomaly.no_op_non_anomalous).
+        await this.store.recordSighting(streamKey, {
+          nextWalletSeq: walletSeq + 1,
+          consecutiveRepeatCount: 0,
+          lastRecorded: dedupCandidate,
+          lastSemanticFingerprint: candidate.semanticFingerprint,
+          lastObservationId: observationId,
+        });
+        return {
+          kind: "NEW_OBSERVATION",
+          walletSeq,
+          observationId,
+          rawResponseSha256: sha256,
+          anomalyAppended: false,
+        };
+      }
       const updated: ExactRepeatCursorState = {
         ...cursor,
         consecutiveRepeatCount: cursor.consecutiveRepeatCount + 1,

@@ -88,25 +88,100 @@ export interface CaptureWriteResult {
   readonly nextCursor: StreamCursor;
 }
 
+/**
+ * Per-capture planner options. `appendExactRepeat` is the expiry confirm-read seam
+ * (ZTR-1275): when the frozen reducer would SUPPRESS_AS_SIGHTING a verified
+ * byte-identical repeat, force an APPEND row with relationship DUPLICATE so
+ * FRESH_VERIFIED_T0_EXACT can name a post-expiry observation id. Default off —
+ * ordinary capture paths keep suppress-as-sighting behaviour unchanged.
+ */
+export interface PlanCaptureOptions {
+  readonly appendExactRepeat?: boolean;
+}
+
 // PURE core: fold this one capture through the frozen reducer against the prior stream cursor
 // (null = a fresh stream), then map the reducer's decision to a persistence plan. No lock, no
 // I/O — the serialization guarantee is the writer's, below.
 export const planCapture = (
   prior: StreamCursor | null,
   capture: SequenceCapture,
+  options?: PlanCaptureOptions,
 ): CaptureWriteResult => {
-  const { events, cursor: nextCursor } = runObservationSequence([capture], prior ?? EMPTY_CURSOR);
+  const base = prior ?? EMPTY_CURSOR;
+  const { events, cursor: reducedCursor } = runObservationSequence([capture], base);
   const event = events[0]!;
   const digest = capture.rawResponseSha256Override ?? rawResponseDigest(capture.rawResponseBytes);
 
   if (event.decision === "SUPPRESS_AS_SIGHTING") {
+    // ZTR-1275: confirm-read path needs a durable DUPLICATE row (not a sighting bump).
+    // previous_recorded is the cursor tip (base.lastRecordedSeq); no anomaly row.
+    if (options?.appendExactRepeat === true) {
+      const walletSeq = base.nextWalletSeq;
+      const verified = isVerifiedParseResult(capture.parseResult);
+      const nextCursor: StreamCursor = {
+        nextWalletSeq: walletSeq + 1,
+        consecutiveRepeatCount: 0,
+        rowCount: base.rowCount + 1,
+        anomalyCount: base.anomalyCount,
+        lastRecordedSeq: walletSeq,
+        lastRecorded: {
+          verified,
+          rawResponseSha256: digest,
+          rawResponseOctets: capture.rawResponseBytes.byteLength,
+          rawResponseBytes: capture.rawResponseBytes,
+        },
+        lastAcceptedState: verified
+          ? {
+              isGenesis: capture.isGenesis,
+              sSignature: capture.sSignature,
+              pSignature: capture.pSignature,
+              semanticFingerprint: capture.semanticFingerprint,
+            }
+          : base.lastAcceptedState,
+        acceptedStateSignatureHistory: verified
+          ? [...base.acceptedStateSignatureHistory, capture.sSignature]
+          : base.acceptedStateSignatureHistory,
+        priorHistoryHasNonGenesis:
+          base.priorHistoryHasNonGenesis || (verified && !capture.isGenesis),
+      };
+      const syntheticEvent: SequenceEvent = {
+        decision: "APPEND",
+        walletSeq,
+        relationship: "DUPLICATE",
+        stateChanged: false,
+        anomalyAppended: false,
+        previousRecordedSeq: base.lastRecordedSeq,
+      };
+      return {
+        plan: {
+          kind: "APPEND",
+          observation: {
+            walletSeq,
+            rawResponseSha256: digest,
+            verified,
+            relationship: "DUPLICATE",
+            stateChanged: false,
+            previousRecordedSeq: base.lastRecordedSeq,
+          },
+          cursor: {
+            nextWalletSeq: walletSeq + 1,
+            consecutiveRepeatCount: 0,
+            lastRawResponseSha256: digest,
+            lastSemanticFingerprint: verified ? capture.semanticFingerprint : null,
+          },
+          anomalyRequired: false,
+        },
+        event: syntheticEvent,
+        nextCursor,
+      };
+    }
     return {
       plan: {
         kind: "SUPPRESS_AS_SIGHTING",
-        cursor: { consecutiveRepeatCount: nextCursor.consecutiveRepeatCount },
+        cursor: { consecutiveRepeatCount: reducedCursor.consecutiveRepeatCount },
       },
       event,
-      nextCursor,
+      nextCursor: reducedCursor,
     };
   }
 
@@ -123,7 +198,7 @@ export const planCapture = (
         previousRecordedSeq: event.previousRecordedSeq,
       },
       cursor: {
-        nextWalletSeq: nextCursor.nextWalletSeq,
+        nextWalletSeq: reducedCursor.nextWalletSeq,
         consecutiveRepeatCount: 0,
         lastRawResponseSha256: digest,
         lastSemanticFingerprint: verified ? capture.semanticFingerprint : null,
@@ -131,7 +206,7 @@ export const planCapture = (
       anomalyRequired: event.anomalyAppended,
     },
     event,
-    nextCursor,
+    nextCursor: reducedCursor,
   };
 };
 
@@ -148,8 +223,15 @@ export interface StreamWriterEffects {
   ): Promise<void>;
 }
 
+/** Options threaded from capture callers into {@link planCapture}. */
+export type CaptureOptions = PlanCaptureOptions;
+
 export interface SerializedStreamWriter {
-  capture(key: ObservationStreamKey, capture: SequenceCapture): Promise<CaptureWriteResult>;
+  capture(
+    key: ObservationStreamKey,
+    capture: SequenceCapture,
+    options?: CaptureOptions,
+  ): Promise<CaptureWriteResult>;
 }
 
 // step 1: acquire a transaction-scoped serialization lock for (observer_id, wallet_public_key)
@@ -169,11 +251,12 @@ export const createSerializedStreamWriter = (
   const capture = (
     key: ObservationStreamKey,
     input: SequenceCapture,
+    options?: CaptureOptions,
   ): Promise<CaptureWriteResult> => {
     const id = streamKeyId(key);
     const run = async (): Promise<CaptureWriteResult> => {
       const prior = await effects.loadPrior(key);
-      const result = planCapture(prior, input);
+      const result = planCapture(prior, input, options);
       await effects.apply(key, result, input);
       return result;
     };

@@ -4,7 +4,7 @@
 **Epic:** ZTR-1266  
 **Depends on:** ZTR-1267 (schema/contracts) — PR #125  
 **Branch:** `ztr-1268-money-capability-gates` (stacks on `ztr-1267-wallet-money-capability`)  
-**Head SHA:** 
+**Head SHA:** `22d75dda0cb1de962deb079f541d7cb128ebd2e8`
 **Claim run:** `806c2963-fe8e-4a37-9ec3-4065e9aeba35`
 
 ## Scope

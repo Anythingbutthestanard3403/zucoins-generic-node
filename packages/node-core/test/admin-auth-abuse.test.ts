@@ -574,11 +574,12 @@ describe("login — per-(IP, username) lockout", () => {
   it("a concurrent burst cannot outrun the lock — the correct guess inside it is refused", async () => {
     const { users, service } = await seedClearedPassword();
 
-    // The attempts above are sequential, which a brute-force tool never is. Every
-    // request already in flight when the threshold trips must be decided against the
-    // lock as it stands at the decision, not as it stood at handler entry — otherwise
-    // the attacker's guess budget per window is their own concurrency, not the threshold.
-    // Correct guess fires last so it reaches the decision after the burst has tripped.
+    // Brute-force tools pipeline. handleAdminLogin serializes verify+decide+register
+    // per (IP, username) via withIpPairGate, so the failure counter and lock trip are
+    // visible to every subsequent attempt on the same pair — the attacker's guess
+    // budget per window is IP_LOCK_THRESHOLD, not their concurrency. Starting the
+    // correct guess last is the hostile schedule; serialization makes the outcome
+    // deterministic under Promise.all.
     const attempts = [
       ...Array.from({ length: 20 }, () => attempt(users, service, WRONG)),
       attempt(users, service, PASSWORD),

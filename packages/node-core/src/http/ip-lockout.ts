@@ -22,6 +22,9 @@ interface WindowEntry {
 
 const windows = new Map<string, WindowEntry>();
 
+/** Per-pair async mutex chain — see withIpPairGate. */
+const pairGates = new Map<string, Promise<void>>();
+
 function windowKey(ip: string | null, username: string): string {
   return `${ip ?? "unknown"}|${username.toLowerCase()}`;
 }
@@ -80,7 +83,40 @@ export function clearIpFailures(ip: string | null, username: string): void {
   windows.delete(windowKey(ip, username));
 }
 
+/**
+ * Serialize async work per (IP, username) so lock decisions and failure
+ * registration cannot race under concurrent login attempts.
+ *
+ * Without this, N parallel bcrypt compares can all observe an unlocked pair,
+ * then a correct guess in the same burst grants a session even after sibling
+ * failures have crossed IP_LOCK_THRESHOLD — the attacker's per-window guess
+ * budget becomes their concurrency, not the threshold. Other pairs are
+ * unaffected (independent chains).
+ */
+export async function withIpPairGate<T>(
+  ip: string | null,
+  username: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = windowKey(ip, username);
+  const prev = pairGates.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = prev.then(() => held);
+  pairGates.set(key, tail);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (pairGates.get(key) === tail) pairGates.delete(key);
+  }
+}
+
 /** Test helper — forget all per-IP window state. Not for production call sites. */
 export function _resetIpLockoutForTests(): void {
   windows.clear();
+  pairGates.clear();
 }

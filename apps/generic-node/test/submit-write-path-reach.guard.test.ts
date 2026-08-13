@@ -316,6 +316,7 @@ const APP_SUBMIT_WRITE_PATH_REACHERS: Readonly<Record<string, string>> = {
   "admin-inventory/types.ts":
     "@zucoins/node-core:WALLET_CUSTODY_VIEW_FIELDS (allowlist; no submit write call site)",
   "admin-router.ts": "@zucoins/node-core:1 (admin money mount; no submit write call site)",
+  "admin-spa.ts": "shell composition imports admin-router which reaches submit claim store via inventory/ops surfaces",
   "boot/boot-lane.ts": "@zucoins/node-core:57",
   "boot/index.ts": "-> boot/readiness.ts (./readiness.js:1)",
   "boot/readiness.ts": "@zucoins/node-core:11",

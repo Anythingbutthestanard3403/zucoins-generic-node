@@ -52,6 +52,7 @@ describe("first-boot vs mutable split", () => {
       "DB_POOL_KEEPALIVE_INITIAL_DELAY_MS",
       "MONEY_PATH_STATEMENT_TIMEOUT_MS",
       "SIGNER_LEADERSHIP_OWNERSHIP_ASSERT_INTERVAL_MS",
+      "OPERATOR_ALERT_WEBHOOK_URL",
     ]);
     expect(MUTABLE_CONFIG_FIELDS).toEqual([
       "POOL_CAP_TOTAL",

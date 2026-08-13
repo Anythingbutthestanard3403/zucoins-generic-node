@@ -528,8 +528,12 @@ const SUBMIT_LEDGER_NAMING_MODULES: Readonly<Record<string, string>> = {
     "squash false positive, and a deliberate one: the counter help text \"Gateway submit attempts by outcome.\" (metrics.ts:422) squashes to the same run the table name does. Over-inclusion costs one declared line; under-inclusion is a hole",
   "core/move-submit-claim.ts":
     "MOVE_INTERNAL's own claim-and-submit-once path (operation flows step 9); names both ledgers in its header",
+  "core/receive-settle.ts":
+    "RECEIVE settle step prose names submit ledger tables when describing claim/settle coordination; read-side documentation only",
   "core/receive-submit-once.ts":
     "RECEIVE's own claim-and-submit-once path. Prose only: its header names submit_decisions to say that RECEIVE arbitrates on the same (operationId, transactionAttemptNo) pair MOVE does. It takes no import edge to the write path — half 1 does not list it — and is not a SEND surface",
+  "gateway/identical-byte-redelivery.ts":
+    "identical-byte redelivery guard names gateway_submit_attempts when describing at-most-once re-drive; no new write path",
   "core/submit-decision-claim-store.ts": "the write path itself — the module that owns both ledgers",
   "data/privilege-readiness.ts":
     "The boot half. SUBMIT_LEDGER_TABLES names both ledgers so the gate can ask has_table_privilege() whether node_core_send holds INSERT/UPDATE on them. It issues no write of its own — it reads pg_class/pg_roles — and takes no edge to the write path",

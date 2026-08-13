@@ -258,7 +258,8 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
     renderPage();
     fireEvent.click(screen.getByText(/4\. Verify result/));
 
-    expect(await screen.findByText("Verified")).toBeInTheDocument();
+    // Status appears on the step summary and the result card (strict-mode multi-match).
+    expect((await screen.findAllByText("Verified")).length).toBeGreaterThan(0);
     expect(screen.getByText("Born-blocked")).toBeInTheDocument();
     expect(screen.getByText(/≥1 recovery_verified/i)).toBeInTheDocument();
   });

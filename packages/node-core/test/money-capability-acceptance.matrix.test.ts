@@ -398,10 +398,11 @@ class ScenarioWorld {
     return w;
   }
 
-  sql(): AssignSqlExecutor {
-    const world = this;
+  sql = (): AssignSqlExecutor => {
+    const wallets = this.wallets;
+    const moveStore = this.moveStore;
     return {
-      async query<R>(text: string, params: readonly unknown[] = []): Promise<{ rows: R[] }> {
+      query: async <R>(text: string, params: readonly unknown[] = []): Promise<{ rows: R[] }> => {
         const sql = text.replace(/\s+/g, " ");
 
         // Explicit source lock (composition plan path)
@@ -411,7 +412,7 @@ class ScenarioWorld {
           sql.includes("WHERE w.id = $1::uuid")
         ) {
           const walletId = String(params[0]);
-          const w = world.wallets.find((x) => x.id === walletId);
+          const w = wallets.find((x) => x.id === walletId);
           if (w === undefined) return { rows: [] };
           const flags = modeFlags(w.mode);
           return {
@@ -428,13 +429,13 @@ class ScenarioWorld {
         // Worker pool select
         if (sql.includes("allow_external_send IS TRUE") && sql.includes("CASE")) {
           const amount = String(params[1] ?? "0");
-          const candidates = world.wallets
+          const candidates = wallets
             .filter((w) => {
               const f = modeFlags(w.mode);
               return (
                 w.state === "AVAILABLE" &&
                 f.allow_external_send === true &&
-                !world.moveStore.activeLeases.has(w.id)
+                !moveStore.activeLeases.has(w.id)
               );
             })
             .sort((a, b) => {
@@ -460,7 +461,7 @@ class ScenarioWorld {
         // Hub select
         if (sql.includes("money_mode = 'INTERNAL_ONLY'") && sql.includes("FOR UPDATE OF w")) {
           const shortfall = Number(params[1] ?? "0");
-          const hubs = world.wallets
+          const hubs = wallets
             .filter((w) => {
               const f = modeFlags(w.mode);
               return (
@@ -470,7 +471,7 @@ class ScenarioWorld {
                 f.allow_internal_move === true &&
                 w.balance !== null &&
                 Number(w.balance) >= shortfall &&
-                !world.moveStore.activeLeases.has(w.id)
+                !moveStore.activeLeases.has(w.id)
               );
             })
             .sort((a, b) => a.id.localeCompare(b.id));
@@ -489,7 +490,7 @@ class ScenarioWorld {
         // Hub liquidity count (busy vs none)
         if (sql.includes("count(*)::text AS n") && sql.includes("money_mode = 'INTERNAL_ONLY'")) {
           const shortfall = Number(params[1] ?? "0");
-          const n = world.wallets.filter((w) => {
+          const n = wallets.filter((w) => {
             const f = modeFlags(w.mode);
             return (
               w.mode === "INTERNAL_ONLY" &&
@@ -505,7 +506,7 @@ class ScenarioWorld {
         // Blessed destination for worker
         if (sql.includes("d.state = 'BLESSED'") && sql.includes("d.wallet_id = $1::uuid")) {
           const walletId = String(params[0]);
-          const w = world.wallets.find((x) => x.id === walletId);
+          const w = wallets.find((x) => x.id === walletId);
           if (w === undefined || w.destinationId === null) return { rows: [] };
           return { rows: [{ destination_id: w.destinationId } as R] };
         }

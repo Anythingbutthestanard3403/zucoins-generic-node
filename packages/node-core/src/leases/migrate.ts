@@ -254,26 +254,50 @@ function loadCapabilityLeaseGuardStatements(): readonly string[] | null {
   }
 }
 
+/**
+ * Capability overlay references wallets.allow_external_* / allow_internal_move.
+ * Those columns land in wallet-money-capability.sql (money pack), which many
+ * PG harnesses never apply — they only run migrateLeaseFoundation on top of
+ * custody-eligibility wallets. Installing the overlay without the columns
+ * yields ERROR 42703 at lease claim time. Prefer overlay only when the column
+ * surface is present; otherwise keep the custody base body.
+ */
+async function walletsHaveMoneyCapabilityColumns(db: SqlExecutor): Promise<boolean> {
+  if (!(await tableExists(db, "wallets"))) return false;
+  const result = await db.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wallets'
+          AND column_name = 'allow_external_receive'
+     ) AS exists`,
+  );
+  return result.rows[0]?.exists === true;
+}
+
 async function ensureEligibilityGuard(
   db: SqlExecutor,
   _foundationStatements: readonly string[],
 ): Promise<void> {
   // Base function + trigger: custody-eligibility.sql. Capability overlay (ZTR-1268)
-  // replaces the function body when the pack slice is on disk.
+  // replaces the function body when the pack slice is on disk AND wallets already
+  // carry the allow_* columns the overlay body references.
   const custodyStatements = loadCustodyEligibilityStatements();
   const capabilityStatements = loadCapabilityLeaseGuardStatements();
-  const fnSource =
-    capabilityStatements !== null
-      ? pickStatement(
-          capabilityStatements,
-          /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
-          ELIGIBILITY_FUNCTION,
-        )
-      : pickStatement(
-          custodyStatements,
-          /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
-          ELIGIBILITY_FUNCTION,
-        );
+  const useCapabilityOverlay =
+    capabilityStatements !== null && (await walletsHaveMoneyCapabilityColumns(db));
+  const fnSource = useCapabilityOverlay
+    ? pickStatement(
+        capabilityStatements!,
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
+        ELIGIBILITY_FUNCTION,
+      )
+    : pickStatement(
+        custodyStatements,
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
+        ELIGIBILITY_FUNCTION,
+      );
   const trgStmt = pickStatement(
     custodyStatements,
     /CREATE TRIGGER wallet_active_leases_eligibility_guard/i,

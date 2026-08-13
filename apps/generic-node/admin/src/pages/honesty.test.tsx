@@ -82,9 +82,11 @@ describe("admin SPA honesty", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={["/wallets/wallet-live"]}>
-          <Routes><Route path="/wallets/:pubkey" element={<WalletDetailPage />} /></Routes>
-        </MemoryRouter>
+        <TotpPromptProvider>
+          <MemoryRouter initialEntries={["/wallets/wallet-live"]}>
+            <Routes><Route path="/wallets/:pubkey" element={<WalletDetailPage />} /></Routes>
+          </MemoryRouter>
+        </TotpPromptProvider>
       </QueryClientProvider>,
     );
     await waitFor(() => expect(screen.getByText(/Wallet inventory unavailable/)).toBeInTheDocument());

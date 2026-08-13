@@ -287,6 +287,14 @@ export const PACK_P_CHECKLIST: readonly Omit<PackChecklistRow, "status">[] = [
       "Single human (TOTP+device) vs two distinct operators. Policy enforcement is separate; teach the mode in-product first.",
     href: "/transfers",
   },
+  {
+    id: "pack_p_omit_source",
+    pack: "P",
+    title: "Omit source_wallet_id by default",
+    detail:
+      "Implementer create body: destination + amount (+ idempotency). Node assigns send-capable worker (may top up from internal-only hubs). Explicit source is legacy only. Node does not chain-submit SEND.",
+    href: "/transfers",
+  },
 ] as const;
 
 const PACK_CHECKLISTS: Record<TogglePackId, readonly Omit<PackChecklistRow, "status">[]> = {
@@ -353,7 +361,7 @@ export const KIT_GENERATOR_REGISTRY: readonly KitGeneratorSlot[] = [
     pack: "P",
     title: "External send dual-control guide",
     description:
-      "Request SEND server-side → Approve inbox (TOTP + device) → recipient finishes. Approve ≠ paid; node never chain-submits SEND.",
+      "Request SEND server-side (omit source_wallet_id by default) → Approve inbox (TOTP + device) or auto-approve → recipient finishes. Approve ≠ paid; node never chain-submits SEND.",
     usesConnectKit: false,
   },
   {
@@ -401,12 +409,29 @@ Three money ops only. This pack composes Outgoing (SEND_EXTERNAL / needs approva
 
 Normative semantics (also on Transfer detail + Approve inbox):
 1. Someone REQUESTS SEND via implementer API (server-side only).
-2. Approver uses Approve inbox with TOTP + device sign.
-3. The node does NOT submit SEND on-chain.
-4. After approve, state may be waiting for recipient to finish
+2. Default create body OMITS source_wallet_id — node assigns a free
+   send-capable worker (and may MOVE_INTERNAL top-up from internal-only
+   hubs). Do not pin “the send wallet” in integration config.
+3. Explicit source_wallet_id remains accepted as a legacy / break-glass
+   path; must be send-capable (internal-only sources are refused).
+4. Approver uses Approve inbox with TOTP + device sign (or auto-approve
+   under policy caps — see docs/operations/auto-approve-external-sends.md).
+5. The node does NOT submit SEND on-chain.
+6. After approve, state may be waiting for recipient to finish
    (AWAITING_REDEMPTION) — NOT paid.
-5. Observe-land / completion lander is separate.
-6. Dual-control modes: single human (TOTP+device) vs two distinct operators.
+7. Observe-land / completion lander is separate.
+8. Dual-control modes: single human (TOTP+device) vs two distinct operators.
+9. Support: “which wallet sent?” → GET operation source_wallet_id on the
+   node — not an env/config key in the implementer product.
+
+Happy-path create (preferred):
+  POST /v1/external-sends
+  { "destination_address": "…", "amount_zkz": "…" }
+  (+ Idempotency-Key). Response always includes resolved source_wallet_id.
+
+Operator setup: designate internal-only hubs + send-capable workers on the
+admin wallet money-mode controls; fund hubs; size the worker pool for peak
+concurrent unsettled sends. Hand integrations only base URL + ik_… key.
 
 Approver path: ${base}/transfers
 Approve alone ≠ paid. Never claim node chain-submits SEND.

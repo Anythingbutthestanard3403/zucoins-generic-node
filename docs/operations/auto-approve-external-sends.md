@@ -76,8 +76,11 @@ There is no "best effort" parse. Corrupt documents do not partially apply.
    First successful claim returns the implementer API key (`ik_…`) **once** and
    moves the row to CLAIMED. Subsequent polls return status only.
 6. Platform `POST /v1/external-sends` with that bearer key within the approved
-   caps. The worker auto-approves and forms; the platform reads the transfer
-   code when the operation reaches `AWAITING_REDEMPTION`.
+   caps. **Omit `source_wallet_id`** (default); the node assigns a send-capable
+   worker (and may top up from internal-only hubs). Explicit source remains a
+   legacy path. The worker auto-approves and forms; the platform reads the
+   transfer code when the operation reaches `AWAITING_REDEMPTION`. The node
+   never chain-submits SEND.
 
 ### Route 1 — operator creates everything
 
@@ -149,10 +152,12 @@ The schema enforces **at most one unsettled external send per source wallet**
 CREATED / APPROVED / AWAITING_REDEMPTION / NEEDS_ATTENTION is refused with
 `wallet_in_flight`.
 
-This is intentional, not a defect. High-cadence integrations must spread creates
-across a **wallet pool** large enough for their concurrency, and only reuse a
-wallet after the prior send has fully settled (or been terminal-rejected).
-Size the pool from peak concurrent unsettled sends, not from daily volume.
+This is intentional, not a defect. Under the **omit-source** happy path the node
+picks free send-capable workers for you; operators still size the **send-capable
+worker pool** (plus hub float) for peak concurrent unsettled sends. Legacy clients
+that pin an explicit `source_wallet_id` must only reuse that wallet after the prior
+send has fully settled (or been terminal-rejected). Size from peak concurrent
+unsettled sends, not from daily volume.
 
 ## Monitoring checklist
 
@@ -173,6 +178,72 @@ Size the pool from peak concurrent unsettled sends, not from daily volume.
 5. Triage any CREATED rows on the manual queue; reject or approve deliberately.
 6. Disengage halt only after policy and credentials are in the state you want.
 
+
+## Source wallet selection (default: omit)
+
+`POST /v1/external-sends` accepts an optional `source_wallet_id` (ZTR-1271).
+
+### Happy path — omit source
+
+Integrations should request **value movement**, not pin custody layout:
+
+```http
+POST /v1/external-sends
+Authorization: Bearer ik_…
+Idempotency-Key: <stable client key>
+Content-Type: application/json
+
+{
+  "destination_address": "<recipient public key>",
+  "amount_zkz": "10.00000000"
+}
+```
+
+When `source_wallet_id` is omitted the node:
+
+1. Assigns a free **send-capable** worker wallet
+2. May compose one or more internal top-ups from **internal-only hub(s)** when the worker needs float
+3. Binds the expected artifact to the resolved worker
+4. Returns the operation with the **resolved** `source_wallet_id` always present on the response
+
+Operators configure this topology on the admin dashboard (wallet money modes + float on hubs). Implementers do **not** need a configured “the send wallet id”.
+
+### Operator setup recipe (hub / worker)
+
+1. Designate one or more wallets as **internal-only** hubs (float; never external send sources).
+2. Designate one or more wallets as **send-capable** workers (send-only or full).
+3. Fund hubs; keep worker float sized for concurrent unsettled sends (see wallet-pool guidance below).
+4. Configure auto-approve caps for the implementer as today (this document’s setup sections).
+5. Hand the implementer only: node base URL + `ik_…` key with `send:create` / `send:read`.
+
+Do not hand integrations a single hot-wallet UUID as a required config key.
+
+### Legacy — explicit source (still accepted)
+
+Passing `source_wallet_id` remains valid during migration:
+
+- Must identify a **send-capable** wallet (`allow_external_send=true`)
+- Still subject to one-unsettled-send-per-source, capability gates, halt, and busy checks
+- Explicit **internal-only** source is refused
+- Response still echoes the bound `source_wallet_id`
+
+Treat explicit source as a break-glass / legacy client path. New deployments should omit it. Support questions of the form “which wallet sent?” are answered from the operation record (`GET /v1/external-sends/:id` → `source_wallet_id`), not from integration config.
+
+### What the node still never does
+
+After create (and after auto-approve or manual approve), formation parks the operation at `AWAITING_REDEMPTION` with a deliverable transfer code. **The node never chain-submits SEND.** Recipient redemption is off-node; completion monitoring only observes.
+
+## End-to-end path (create → auto-approve → transfer code)
+
+1. Implementer `POST /v1/external-sends` **without** `source_wallet_id` (preferred) or with a legacy explicit send-capable source.
+2. Operation enters CREATED / approval-pending; response includes resolved `source_wallet_id`.
+3. Auto-approve worker matches the implementer rule under caps → `AUTO_POLICY` approval → APPROVED (or falls through to manual Approve inbox).
+4. Formation signs transfer material; status → `AWAITING_REDEMPTION`; transfer code becomes readable.
+5. Recipient redeems off-node. Product outcome for the integration is unchanged: create → wait for transfer code → hand code to recipient.
+6. Support: source wallet identity lives on the operation, not in Zukaz (or other) env config.
+
+Idempotency: same `Idempotency-Key` + same body replays the same operation. Omitting source vs passing source are **different** request bodies (different fingerprints).
+
 ## Related
 
 - [`README.md`](README.md) — operating model and document index
@@ -180,3 +251,4 @@ Size the pool from peak concurrent unsettled sends, not from daily volume.
 - [`attention-triage.md`](attention-triage.md) — `needs_attention` reasons
 - Full-suite / CI expectations: [`full-suite-test-runs.md`](full-suite-test-runs.md)
 - E2E drill (developers): `apps/generic-node/test/auto-approve-e2e-drill.pg.test.ts`
+- Zukaz / implementer cutover: [`zukaz-source-omit-cutover.md`](zukaz-source-omit-cutover.md)

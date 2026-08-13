@@ -165,6 +165,10 @@ describe("kit generator extension point", () => {
     expect(p).toMatch(/does NOT submit SEND on-chain/i);
     expect(p).toMatch(/NOT paid/);
     expect(p).toMatch(/Approve inbox/i);
+    expect(p).toMatch(/OMITS source_wallet_id/i);
+    expect(p).toMatch(/legacy \/ break-glass/i);
+    expect(p).toMatch(/Never claim node chain-submits SEND/);
+    expect(p).toMatch(/does NOT submit SEND on-chain/i);
 
     const x = buildPackGuideText("headless_openapi", "https://node.example");
     expect(x).toMatch(/\.well-known\/zupay-node/);

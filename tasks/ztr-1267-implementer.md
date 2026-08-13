@@ -4,7 +4,7 @@
 **Epic:** ZTR-1266  
 **Branch:** `ztr-1267-wallet-money-capability`  
 **Claim run:** `578f03ec-3ff9-44cf-b976-0d47c87a46ff`  
-**Head SHA:** `(pending push — r2 fixture fix)`
+**Head SHA:** `61c56c3650af51dc4b55f430104a129d4167977f`
 
 ## Scope (this ticket only)
 

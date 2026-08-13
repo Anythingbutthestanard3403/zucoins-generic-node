@@ -66,7 +66,8 @@ export const CreateInternalMoveBody = z.object({
 // --- SEND_EXTERNAL --
 
 export const CreateExternalSendBody = z.object({
-  source_wallet_id: UuidSchema,
+  // Optional — omit to assign a free send-capable worker (+ optional hub top-up). ZTR-1271.
+  source_wallet_id: UuidSchema.optional(),
   destination_address: WalletPublicKeySchema,
   amount_zkz: PositiveZkzAmountSchema,
   references_operation_id: UuidSchema.optional(),

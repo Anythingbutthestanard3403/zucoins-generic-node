@@ -387,6 +387,73 @@ describe("handleCreateExternalSend", () => {
     expect(JSON.parse(result.error.body).error.code).toBe("idempotency_in_progress");
     expect(result.error.headers["Retry-After"]).toBe("1");
   });
+
+  it("maps assign/top-up failures to documented HTTP codes (ZTR-1271)", async () => {
+    const cases: Array<{ code: string; detail?: string; status: number; wire: string }> = [
+      { code: "no_free_send_worker", status: 503, wire: "service_unavailable" },
+      { code: "no_hub_liquidity", status: 503, wire: "service_unavailable" },
+      { code: "hub_busy", status: 409, wire: "wallet_busy" },
+      { code: "halted", status: 503, wire: "service_unavailable" },
+      { code: "worker_destination_missing", status: 503, wire: "service_unavailable" },
+      {
+        code: "send_rejected",
+        detail: "allow_external_send=false",
+        status: 422,
+        wire: "protocol_predicate_failed",
+      },
+      {
+        code: "send_rejected",
+        detail: "source_wallet_not_found",
+        status: 404,
+        wire: "not_found",
+      },
+    ];
+    for (const c of cases) {
+      const store = makeStore({
+        createExternalSend: async () => {
+          throw new SendAdmissionError(c.code, c.detail);
+        },
+      });
+      const result = await handleCreateExternalSend(sendCtx, store);
+      expect(result.ok, c.code).toBe(false);
+      if (result.ok) return;
+      expect(result.error.status, c.code).toBe(c.status);
+      expect(JSON.parse(result.error.body).error.code, c.code).toBe(c.wire);
+    }
+  });
+
+  it("forwards omitted source_wallet_id to the store (ZTR-1271)", async () => {
+    let seen: unknown;
+    const store = makeStore({
+      createExternalSend: async (input) => {
+        seen = input;
+        return {
+          status: 201 as const,
+          body: {
+            ...SEND_RESPONSE,
+            source_wallet_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          },
+        };
+      },
+    });
+    const ctx = {
+      ...sendCtx,
+      parsedBody: {
+        destination_address: "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=",
+        amount_zkz: "5.5",
+      },
+    };
+    const result = await handleCreateExternalSend(ctx, store);
+    expect(result.ok).toBe(true);
+    expect(seen).toMatchObject({
+      destination_address: "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=",
+      amount_zkz: "5.5",
+    });
+    expect(seen).not.toHaveProperty("source_wallet_id");
+    if (!result.ok) return;
+    const body = JSON.parse(result.body);
+    expect(body.source_wallet_id).toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  });
 });
 
 describe("handleGetExternalSend", () => {

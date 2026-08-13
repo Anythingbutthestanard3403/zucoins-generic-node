@@ -693,7 +693,6 @@ paths:
               type: object
               additionalProperties: false
               required:
-                - source_wallet_id
                 - destination_address
                 - amount_zkz
               properties:

@@ -25,6 +25,13 @@ import {
   type MoveCreateStore,
 } from "./move/create.js";
 import {
+  assignAndTopUpExternalSend,
+  type AssignAndTopUpDeps,
+  type AssignSqlExecutor,
+  type AssignSqlTxFn,
+  type SendAssignRejectionCode,
+} from "./assign-and-topup.js";
+import {
   buildExternalSendResponse,
   createExternalSend,
   readExternalSend,
@@ -81,6 +88,16 @@ export interface SqlOperationRouteStoreConfig {
    * Composition root must thread the live config value (ZTR-1170).
    */
   readonly receiveTtlDefaultSecs?: number;
+  /**
+   * SQL ports for ZTR-1270/1271 assign + multi-hub top-up when `source_wallet_id`
+   * is omitted (or for explicit source top-up composition). Required for optional-source
+   * admits; when omitted, create without source_wallet_id fails closed with
+   * `service_unavailable` / assign-not-wired.
+   */
+  readonly assignSql?: AssignSqlExecutor;
+  readonly assignSelectionTx?: AssignSqlTxFn;
+  /** Kind-scoped operator halt (MOVE + SEND) before durable assign rows. */
+  readonly assertHaltAdmitsKind?: (kind: string) => void;
 }
 
 function wireAfterLanding(
@@ -204,6 +221,24 @@ function throwSendRejection(code: SendRejectionCode, detail?: string, retry?: nu
   if (code === "idempotency_key_reused") throw new IdempotencyKeyReusedError();
   if (code === "idempotency_in_progress") throw new IdempotencyInProgressError(retry ?? 1);
   throw new SendAdmissionError(code, detail, retry);
+}
+
+function throwAssignRejection(
+  code: SendAssignRejectionCode,
+  detail?: string,
+  causeCode?: string,
+  retry?: number,
+): never {
+  // Nested send/move causes that already have wire mappings.
+  if (causeCode === "wallet_in_flight" || causeCode === "wallet_busy") {
+    throw new WalletBusyError();
+  }
+  if (causeCode === "idempotency_key_reused") throw new IdempotencyKeyReusedError();
+  if (causeCode === "idempotency_in_progress") {
+    throw new IdempotencyInProgressError(retry ?? 1);
+  }
+  // Surface assign codes through SendAdmissionError for mapStoreError (ZTR-1271).
+  throw new SendAdmissionError(code, detail ?? causeCode, retry);
 }
 
 function sendOutcomeToRouteResult(outcome: SendCreateOutcome): {
@@ -348,28 +383,83 @@ export function createSqlOperationRouteStore(
     },
 
     async createExternalSend(input: CreateExternalSendInput) {
-      const outcome = await createExternalSend(
-        config.send,
-        config.sendSigner,
-        {
-          implementerId: input.implementerId,
-          nodeId: config.nodeId,
-          sourceWalletId: input.source_wallet_id,
-          destinationAddress: input.destination_address,
-          amountZkz: input.amount_zkz,
-          referencesOperationId: input.references_operation_id ?? null,
-          clientReference: input.client_reference ?? null,
-          description: input.description ?? null,
-          idempotencyKey: input.idempotencyKey,
-        },
-        { generateId, now, requireActiveSubscription: config.requireActiveSubscription },
-      );
-      const routed = sendOutcomeToRouteResult(outcome);
-      if (outcome.outcome === "CREATED") {
-        // Persist the exact create response for idempotent replay (same as receive path).
-        const bodyText = JSON.stringify(routed.body);
-        await config.send.completeOperation(outcome.operation.operationId, 201, bodyText);
+      // ZTR-1271: always run assign composition so omitted source assigns a worker and
+      // explicit source still gets optional hub top-up + capability checks before artifact bind.
+      if (config.assignSql === undefined) {
+        // Legacy / unit fixtures without SQL assign ports — explicit source only.
+        if (input.source_wallet_id === undefined) {
+          throw new SendAdmissionError(
+            "assign_not_wired",
+            "optional source_wallet_id requires assign SQL ports",
+          );
+        }
+        const outcome = await createExternalSend(
+          config.send,
+          config.sendSigner,
+          {
+            implementerId: input.implementerId,
+            nodeId: config.nodeId,
+            sourceWalletId: input.source_wallet_id,
+            destinationAddress: input.destination_address,
+            amountZkz: input.amount_zkz,
+            referencesOperationId: input.references_operation_id ?? null,
+            clientReference: input.client_reference ?? null,
+            description: input.description ?? null,
+            idempotencyKey: input.idempotencyKey,
+          },
+          { generateId, now, requireActiveSubscription: config.requireActiveSubscription },
+        );
+        const routed = sendOutcomeToRouteResult(outcome);
+        if (outcome.outcome === "CREATED") {
+          const bodyText = JSON.stringify(routed.body);
+          await config.send.completeOperation(outcome.operation.operationId, 201, bodyText);
+        }
+        return routed;
       }
+
+      const assignDeps: AssignAndTopUpDeps = {
+        sql: config.assignSql,
+        withSelectionTx: config.assignSelectionTx,
+        moveStore: config.move,
+        sendStore: config.send,
+        sendSigner: config.sendSigner,
+        sendCreateConfig: {
+          generateId,
+          now,
+          requireActiveSubscription: config.requireActiveSubscription,
+        },
+        assertHaltAdmitsKind: config.assertHaltAdmitsKind,
+        generateId,
+        now,
+      };
+      const composed = await assignAndTopUpExternalSend(assignDeps, {
+        implementerId: input.implementerId,
+        nodeId: config.nodeId,
+        sourceWalletId: input.source_wallet_id ?? null,
+        destinationAddress: input.destination_address,
+        amountZkz: input.amount_zkz,
+        clientReference: input.client_reference ?? null,
+        description: input.description ?? null,
+        idempotencyKey: input.idempotencyKey,
+        referencesOperationId: input.references_operation_id ?? null,
+      });
+
+      if (composed.outcome === "REJECTED") {
+        throwAssignRejection(
+          composed.code,
+          composed.detail,
+          composed.causeCode,
+          composed.retryAfterSeconds,
+        );
+      }
+      if (composed.outcome === "IDEMPOTENT_REPLAY") {
+        return sendOutcomeToRouteResult(composed.sendCreate);
+      }
+
+      // CREATED — response always includes the resolved source_wallet_id (bound worker).
+      const routed = sendOutcomeToRouteResult(composed.sendCreate);
+      const bodyText = JSON.stringify(routed.body);
+      await config.send.completeOperation(composed.send.operationId, 201, bodyText);
       return routed;
     },
 

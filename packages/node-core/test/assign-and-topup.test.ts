@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalAssignRequestSha256,
   decideWorkerFunding,
   evaluateTopUpReadiness,
   isTopUpHubEligible,
@@ -10,6 +11,7 @@ import {
   SELECT_SEND_TOPUP_READY_SQL,
   SEND_ASSIGN_SQL,
 } from "../src/assign-and-topup.js";
+import { canonicalRequestSha256 } from "../src/send/create.js";
 import { WALLET_MONEY_MODE_FLAGS } from "@zucoins/generic-node-contracts/wallet-state";
 
 describe("decideWorkerFunding", () => {
@@ -122,5 +124,50 @@ describe("frozen selection SQL", () => {
         "SELECT_TOPUP_HUB",
       ].sort(),
     );
+  });
+});
+
+describe("canonicalAssignRequestSha256 (ZTR-1271 idempotency)", () => {
+  const DEST = "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=";
+  const base = {
+    implementerId: "b0000000-0000-4000-8000-0000000000bb",
+    nodeId: "a0000000-0000-4000-8000-0000000000aa",
+    destinationAddress: DEST,
+    amountZkz: "2",
+    clientReference: null as string | null,
+    description: null as string | null,
+    idempotencyKey: "idem-key-sixteen!!",
+    referencesOperationId: null as string | null,
+  };
+
+  it("omitted source fingerprints as null (not a resolved worker id)", () => {
+    const omit = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
+    const explicit = canonicalAssignRequestSha256({
+      ...base,
+      sourceWalletId: "c0000000-0000-4000-8000-000000000001",
+    });
+    expect(omit).not.toBe(explicit);
+    // Matches create fingerprint with idempotencySourceWalletId=null
+    expect(omit).toBe(
+      canonicalRequestSha256({
+        implementerId: base.implementerId,
+        nodeId: base.nodeId,
+        sourceWalletId: "c0000000-0000-4000-8000-000000000099",
+        destinationAddress: DEST,
+        amountZkz: "2",
+        referencesOperationId: null,
+        clientReference: null,
+        description: null,
+        idempotencyKey: base.idempotencyKey,
+        idempotencySourceWalletId: null,
+        idempotencyReferencesOperationId: null,
+      }),
+    );
+  });
+
+  it("is stable across client-identical bodies (top-up MOVE id must not enter hash)", () => {
+    const a = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
+    const b = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
+    expect(a).toBe(b);
   });
 });

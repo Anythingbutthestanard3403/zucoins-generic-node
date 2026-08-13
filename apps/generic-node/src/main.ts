@@ -692,6 +692,10 @@ async function main(): Promise<void> {
     requireActiveSubscription: async (walletId: string) => {
       await requireActivePushSubscriptionOrRefuse(push, walletId);
     },
+    // ZTR-1271: optional source_wallet_id → assign + multi-hub top-up (ZTR-1270).
+    assignSql: poolSql,
+    assignSelectionTx: withPgTransaction,
+    assertHaltAdmitsKind: (kind) => moneyPathPorts.assertHaltAdmitsKind(kind),
   });
   const operationAuth = createImplementerBearerAuthFromService(
     new CredentialService(credentialStore),

@@ -115,7 +115,11 @@ export interface CreateInternalMoveInput {
 }
 
 export interface CreateExternalSendInput {
-  readonly source_wallet_id: string;
+  /**
+   * Optional send-capable source. When omitted/undefined, the route store runs
+   * assign-and-top-up composition (ZTR-1271 / ZTR-1270) before artifact bind.
+   */
+  readonly source_wallet_id?: string;
   readonly destination_address: string;
   readonly amount_zkz: string;
   readonly references_operation_id?: string;
@@ -448,6 +452,48 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
         return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
       case "signing_key_unavailable":
         return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
+      // ZTR-1271 assign / top-up composition codes (SendAssignRejectionCode).
+      // Documented HTTP map: busy → 409; liquidity/worker absence → 503; predicates → 422;
+      // halt / wiring → 503; nested validation → 400 / 422 via cause when present.
+      case "hub_busy":
+        return { ok: false, error: apiErrorResponse("wallet_busy", requestId) };
+      case "no_free_send_worker":
+      case "no_hub_liquidity":
+      case "worker_destination_missing":
+      case "halted":
+      case "assign_not_wired":
+      case "move_rejected":
+        return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
+      case "send_rejected": {
+        // Nested create codes may appear in detail / as code suffix.
+        const nested = err.detail ?? "";
+        if (nested === "source_wallet_not_found") {
+          return { ok: false, error: apiErrorResponse("not_found", requestId) };
+        }
+        if (
+          nested === "allow_external_send=false" ||
+          nested === "source_wallet_not_eligible" ||
+          nested.includes("allow_external_send")
+        ) {
+          return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
+        }
+        if (nested === "invalid_source_wallet_id" || nested === "invalid_amount") {
+          return { ok: false, error: apiErrorResponse("invalid_scalar", requestId) };
+        }
+        if (nested === "idempotency_key_reused") {
+          return { ok: false, error: apiErrorResponse("idempotency_key_reused", requestId) };
+        }
+        if (nested === "idempotency_in_progress") {
+          return mapIdempotencyInProgress(requestId, err.retryAfterSeconds);
+        }
+        if (nested === "wallet_in_flight") {
+          return { ok: false, error: apiErrorResponse("wallet_busy", requestId) };
+        }
+        if (nested === "destination_is_internal") {
+          return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
+        }
+        return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
+      }
       default:
         return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
     }

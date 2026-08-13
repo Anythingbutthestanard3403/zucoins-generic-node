@@ -282,6 +282,18 @@ describe("the named concern SEND_EXTERNAL strict schemas", () => {
     expect(SendExternalResponseSchema.safeParse(SEND_RESPONSE).success).toBe(true);
   });
 
+  it("accepts request without source_wallet_id (ZTR-1271 assign path)", () => {
+    const { source_wallet_id: _omit, ...withoutSource } = SEND_REQUEST;
+    expect(SendExternalRequestSchema.safeParse(withoutSource).success).toBe(true);
+    // Response still requires resolved source_wallet_id once bound.
+    expect(
+      SendExternalResponseSchema.safeParse({
+        ...SEND_RESPONSE,
+        source_wallet_id: UUID_A,
+      }).success,
+    ).toBe(true);
+  });
+
   it("rejects unknown request and response fields", () => {
     expect(
       SendExternalRequestSchema.safeParse({

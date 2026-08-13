@@ -14,7 +14,12 @@ import {
 
 export const SendExternalRequestSchema = z
   .object({
-    source_wallet_id: UuidSchema,
+    /**
+     * Optional send-capable source. When omitted, the node assigns a free worker
+     * (and may MOVE_INTERNAL top-up from an INTERNAL_ONLY hub) before binding the
+     * expected artifact — ZTR-1271 / ZTR-1270. Response always echoes the resolved id.
+     */
+    source_wallet_id: UuidSchema.optional(),
     destination_address: WalletPublicKeySchema,
     amount_zkz: PositiveZkzAmountSchema,
     references_operation_id: UuidSchema.optional(),

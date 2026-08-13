@@ -56,6 +56,7 @@ export {
   clearIpFailures,
   isIpPairLocked,
   registerIpFailure,
+  withIpPairGate,
   type IpFailureResult,
 } from "../../src/http/ip-lockout.js";
 

@@ -128,6 +128,7 @@ export {
   clearIpFailures,
   isIpPairLocked,
   registerIpFailure,
+  withIpPairGate,
 } from "./ip-lockout.js";
 export type { IpFailureResult } from "./ip-lockout.js";
 

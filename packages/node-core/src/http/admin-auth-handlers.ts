@@ -45,6 +45,7 @@ import {
   clearIpFailures,
   isIpPairLocked,
   registerIpFailure,
+  withIpPairGate,
 } from "./ip-lockout.js";
 import { DUMMY_PASSWORD_HASH, hashPassword, needsPasswordRehash, verifyPassword } from "./password.js";
 import {
@@ -135,64 +136,65 @@ export async function handleAdminLogin(
   }
 
   // Password brute force: same admin lockout model primary pair lock as
-  // confirm-TOTP (5/15 min). The lock is read at the decision below, never cached
-  // here — two awaits separate this point from that branch, and a snapshot taken
-  // before them lets every request already in flight when the threshold trips be
-  // judged as unlocked. That hands a pipelining attacker a per-window guess budget
-  // equal to their own concurrency instead of the threshold.
+  // confirm-TOTP (5/15 min). The entire verify + decide + register/clear path
+  // runs under withIpPairGate so concurrent attempts on one pair cannot observe
+  // an unlocked window, finish bcrypt in parallel, and let a correct guess in
+  // the same burst mint a session after siblings have crossed the threshold.
   // Ceiling: ip-lockout state is in-memory per process, so an N-replica
-  // deployment gives an attacker N× the threshold before any pair locks.
-  let user = await deps.userStore.findByUsername(username);
+  // deployment still gives an attacker N× the threshold before any pair locks.
+  return withIpPairGate(ip, username, async () => {
+    let user = await deps.userStore.findByUsername(username);
 
-  // Constant work: exactly one bcrypt compare regardless of whether the user exists.
-  const passwordMatches = await verifyPassword(
-    password,
-    user?.passwordHash ?? DUMMY_PASSWORD_HASH,
-  );
+    // Constant work: exactly one bcrypt compare regardless of whether the user exists.
+    const passwordMatches = await verifyPassword(
+      password,
+      user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    );
 
-  // The compare above already ran, so short-circuiting on the lock here costs a
-  // locked pair exactly one bcrypt — no timing oracle DUMMY_PASSWORD_HASH exists to close.
-  if (
-    isIpPairLocked(ip, username) ||
-    user === null ||
-    !passwordMatches ||
-    user.disabledAt !== null
-  ) {
-    // Silent lockout: a locked pair answers with the wrong-password envelope,
-    // byte for byte (ip-lockout.ts:6-7). Registering while already locked only
-    // touches lastFailureMs — it never extends the lock.
-    registerIpFailure(ip, username);
-    return errorJson(401, "invalid_credentials", "invalid credentials");
-  }
+    // The compare above already ran, so short-circuiting on the lock here costs a
+    // locked pair exactly one bcrypt — no timing oracle DUMMY_PASSWORD_HASH exists to close.
+    if (
+      isIpPairLocked(ip, username) ||
+      user === null ||
+      !passwordMatches ||
+      user.disabledAt !== null
+    ) {
+      // Silent lockout: a locked pair answers with the wrong-password envelope,
+      // byte for byte (ip-lockout.ts:6-7). Registering while already locked only
+      // touches lastFailureMs — it never extends the lock.
+      registerIpFailure(ip, username);
+      return errorJson(401, "invalid_credentials", "invalid credentials");
+    }
 
-  clearIpFailures(ip, username);
+    clearIpFailures(ip, username);
 
-  // Rehash-on-next-login when stored cost is below current policy (ZTR-1168 cost 13).
-  // Only after a successful verify so attackers cannot force expensive rehashes.
-  if (needsPasswordRehash(user.passwordHash)) {
-    const upgraded = await hashPassword(password);
-    await deps.userStore.updatePassword(user.id, upgraded, user.mustChangePassword);
-    user = { ...user, passwordHash: upgraded };
-  }
+    // Rehash-on-next-login when stored cost is below current policy (ZTR-1168 cost 13).
+    // Only after a successful verify so attackers cannot force expensive rehashes.
+    if (needsPasswordRehash(user.passwordHash)) {
+      const upgraded = await hashPassword(password);
+      await deps.userStore.updatePassword(user.id, upgraded, user.mustChangePassword);
+      user = { ...user, passwordHash: upgraded };
+    }
 
-  const { session, setCookie } = await deps.sessions.createSession({
-    userId: user.id,
-    ip,
-    userAgent: deps.userAgent ?? null,
+    const { session, setCookie } = await deps.sessions.createSession({
+      userId: user.id,
+      ip,
+      userAgent: deps.userAgent ?? null,
+    });
+
+    // Body carries operator posture + CSRF only. Grep-guard: session id / cookie
+    // name must never appear here.
+    const responseBody = {
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+      mustEnrolTotp: user.mustEnrolTotp,
+      csrfToken: session.csrfToken,
+    };
+
+    return json(200, responseBody, { "set-cookie": setCookie });
   });
-
-  // Body carries operator posture + CSRF only. Grep-guard: session id / cookie
-  // name must never appear here.
-  const responseBody = {
-    userId: user.id,
-    username: user.username,
-    role: user.role,
-    mustChangePassword: user.mustChangePassword,
-    mustEnrolTotp: user.mustEnrolTotp,
-    csrfToken: session.csrfToken,
-  };
-
-  return json(200, responseBody, { "set-cookie": setCookie });
 }
 
 // --- Logout ---

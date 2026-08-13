@@ -28,7 +28,8 @@ under pressure. Before you change anything at 3am, read this:
 | [`alerts/generic-node.rules.yml`](alerts/generic-node.rules.yml) | You are wiring Prometheus |
 | [`push-action-suffix-rotation.md`](push-action-suffix-rotation.md) | Boot fails with `PushActionVocabularyRejectedError` / wallet push action-name drift |
 | [`full-suite-test-runs.md`](full-suite-test-runs.md) | You need full-suite vs targeted test expectations (ZTR-1209) |
-| [`auto-approve-external-sends.md`](auto-approve-external-sends.md) | Auto-approved external sends: setup (both routes), spend vs cap, three stop levers, audit, wallet pool |
+| [`auto-approve-external-sends.md`](auto-approve-external-sends.md) | Auto-approved external sends: setup (both routes), omit-source default, spend vs cap, three stop levers, audit, wallet pool |
+| [`zukaz-source-omit-cutover.md`](zukaz-source-omit-cutover.md) | Zukaz / implementer cutover: stop supplying source wallet id (checklist + config keys) |
 
 ## What the node is
 

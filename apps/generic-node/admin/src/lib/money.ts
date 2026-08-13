@@ -608,6 +608,48 @@ export async function getWalletInventory(idOrPubkey: string): Promise<WalletInve
   }
 }
 
+/** Closed money-capability presets (ZTR-1269). */
+export type WalletMoneyMode = "RECEIVE_ONLY" | "SEND_ONLY" | "INTERNAL_ONLY" | "FULL";
+
+export interface WalletMoneyCapabilityResult {
+  readonly wallet_id: string;
+  readonly money_mode: WalletMoneyMode | string;
+  readonly allow_external_receive: boolean;
+  readonly allow_external_send: boolean;
+  readonly allow_internal_move: boolean;
+  readonly row_version: number;
+  readonly previous_mode: WalletMoneyMode | string;
+  readonly previous_flags: {
+    readonly allow_external_receive: boolean;
+    readonly allow_external_send: boolean;
+    readonly allow_internal_move: boolean;
+  };
+  readonly warnings: {
+    readonly zero_send_capable: boolean;
+    readonly zero_receive_capable: boolean;
+  };
+}
+
+/**
+ * PATCH wallet money capability (fresh TOTP + row_version CAS + audit).
+ * Mode wins; flags are derived server-side via flagsFromMode.
+ */
+export async function patchWalletMoneyCapability(
+  walletId: string,
+  body: { readonly mode: WalletMoneyMode; readonly expected_row_version: number },
+  totp: string,
+): Promise<WalletMoneyCapabilityResult> {
+  return api<WalletMoneyCapabilityResult>(
+    `/wallets/${encodeURIComponent(walletId)}/money-capability`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+      totp,
+      idempotencyKey: newIdempotencyKey(),
+    },
+  );
+}
+
 export interface AuditInventoryFilters {
   readonly actor_kind?: string;
   readonly action?: string;

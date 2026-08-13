@@ -105,12 +105,14 @@ import {
   createSqlDeviceSignaturePolicy,
   createSqlDualControlPolicy,
   createSqlAutoApprovePolicy,
+  createSqlWalletMoneyCapabilityStore,
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
   type DualControlMode,
   type DualControlPolicyPort,
   type AutoApprovePolicyPort,
   type DeviceSignaturePolicyPort,
+  type WalletMoneyCapabilityStore,
 } from "@zucoins/node-core";
 
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
@@ -940,6 +942,8 @@ export function createProductionRouteSurface(
       const txDualControlPolicy: DualControlPolicyPort = createSqlDualControlPolicy(client, {
         defaultMode: config.dualControlMode,
       });
+      const txWalletMoneyCapability: WalletMoneyCapabilityStore =
+        createSqlWalletMoneyCapabilityStore(client);
       return {
         challengeStore: createSqlApprovalChallengeStore(client),
         sendDecisionStore: new SqlSendDecisionStore(client),
@@ -968,6 +972,7 @@ export function createProductionRouteSurface(
         deviceSignaturePolicy: txDeviceSignaturePolicy,
         dualControlPolicy: txDualControlPolicy,
         autoApprovePolicy: createSqlAutoApprovePolicy(client),
+        walletMoneyCapabilityStore: txWalletMoneyCapability,
       };
     },
   });

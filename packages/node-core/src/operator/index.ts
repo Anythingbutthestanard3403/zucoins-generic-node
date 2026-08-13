@@ -74,3 +74,19 @@ export {
   type OperatorParkOutcome,
   type OperatorParkStore,
 } from "./operator-park.js";
+
+// Per-wallet money capability preset mutation (ZTR-1269).
+export {
+  WALLET_MONEY_CAPABILITY_AUDIT_ACTION,
+  InMemoryWalletMoneyCapabilityStore,
+  createSqlWalletMoneyCapabilityStore,
+  type MemoryWalletMoneyCapabilityRow,
+  type WalletMoneyCapabilityFleetWarnings,
+  type WalletMoneyCapabilitySetInput,
+  type WalletMoneyCapabilitySetOutcome,
+  type WalletMoneyCapabilitySetRejectReason,
+  type WalletMoneyCapabilitySetResult,
+  type WalletMoneyCapabilitySnapshot,
+  type WalletMoneyCapabilitySqlExecutor,
+  type WalletMoneyCapabilityStore,
+} from "./wallet-money-capability.js";

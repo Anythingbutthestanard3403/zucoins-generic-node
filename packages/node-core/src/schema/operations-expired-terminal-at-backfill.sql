@@ -13,7 +13,7 @@
 
 DO $operations_expired_terminal_at_backfill$
 BEGIN
-  IF to_regclass('public.operations') IS NULL THEN
+  IF to_regclass('operations') IS NULL THEN
     RAISE EXCEPTION
       'operations-expired-terminal-at-backfill requires operations';
   END IF;

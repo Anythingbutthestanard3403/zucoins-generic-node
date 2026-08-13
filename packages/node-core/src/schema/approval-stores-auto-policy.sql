@@ -10,7 +10,7 @@
 
 DO $approval_auto_policy$
 BEGIN
-  IF to_regclass('public.operation_approvals') IS NULL THEN
+  IF to_regclass('operation_approvals') IS NULL THEN
     RAISE EXCEPTION 'approval-stores-auto-policy requires operation_approvals';
   END IF;
 

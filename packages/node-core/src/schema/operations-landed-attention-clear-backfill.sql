@@ -12,7 +12,7 @@
 
 DO $operations_landed_attention_clear_backfill$
 BEGIN
-  IF to_regclass('public.operations') IS NULL THEN
+  IF to_regclass('operations') IS NULL THEN
     RAISE EXCEPTION
       'operations-landed-attention-clear-backfill requires operations';
   END IF;

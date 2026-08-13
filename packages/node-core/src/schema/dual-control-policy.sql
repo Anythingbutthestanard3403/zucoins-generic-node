@@ -15,10 +15,10 @@
 
 DO $dual_control_policy$
 BEGIN
-  IF to_regclass('public.node_settings') IS NULL THEN
+  IF to_regclass('node_settings') IS NULL THEN
     RAISE EXCEPTION 'dual-control-policy requires node_settings (operational-stores)';
   END IF;
-  IF to_regclass('public.audit_log') IS NULL THEN
+  IF to_regclass('audit_log') IS NULL THEN
     RAISE EXCEPTION 'dual-control-policy requires audit_log';
   END IF;
 END

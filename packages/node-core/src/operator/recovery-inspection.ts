@@ -128,6 +128,11 @@ export interface RecoveryFacts {
   readonly status: string;
   readonly attentionRequired: boolean;
   readonly attentionReason: string | null;
+  /**
+   * Free-text / structured JSON from operations.attention_detail (ZTR-1279).
+   * Null when attention is clear or the column was never written.
+   */
+  readonly attentionDetail: string | null;
   readonly rowVersion: number;
   /** Max held lease epoch across active leases; null when none held. */
   readonly leaseEpoch: number | null;

@@ -8,6 +8,8 @@ import {
   operationKindDisplay,
   operationKindLabel,
   operationKindWire,
+  parseAttentionDetail,
+  predicateLabel,
   severityLabel,
   severityShort,
   statusLabel,
@@ -86,5 +88,36 @@ describe("severity and implementer display", () => {
     expect(statusLabel("EXPIRED")).toBe("Expired");
     expect(statusLabel("APPROVAL_PENDING")).toMatch(/Approval pending/i);
     expect(statusLabel("UNEXPECTED_HEAD_CHANGE")).toMatch(/Unexpected head/i);
+  });
+});
+
+describe("parseAttentionDetail (ZTR-1279)", () => {
+  it("renders per-predicate causes and fresh-read summary from structured JSON", () => {
+    const detail = JSON.stringify({
+      failed_predicates: ["FRESH_VERIFIED_T0_EXACT"],
+      predicate_causes: [
+        {
+          predicate: "FRESH_VERIFIED_T0_EXACT",
+          cause:
+            "fresh verified head does not match T0 exactly; post-expiry confirm-read was skipped: wallet_row_undefined",
+        },
+      ],
+      fresh_read: {
+        kind: "skipped",
+        reason: "wallet_row_undefined",
+        summary: "skipped:wallet_row_undefined",
+      },
+    });
+    const parsed = parseAttentionDetail(detail);
+    expect(parsed?.failedPredicates).toEqual(["FRESH_VERIFIED_T0_EXACT"]);
+    expect(parsed?.predicateCauses[0]?.cause).toMatch(/wallet_row_undefined/);
+    expect(parsed?.freshReadSummary).toBe("skipped:wallet_row_undefined");
+    expect(predicateLabel("FRESH_VERIFIED_T0_EXACT")).toMatch(/Fresh head matches T0/i);
+  });
+
+  it("falls back to raw text for free-form attention notes", () => {
+    const parsed = parseAttentionDetail("operator note: holding for review");
+    expect(parsed?.rawText).toBe("operator note: holding for review");
+    expect(parsed?.failedPredicates).toEqual([]);
   });
 });

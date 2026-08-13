@@ -92,10 +92,65 @@ export type ReceiveExpiryDualChainEmitter = (
   },
 ) => Promise<void>;
 
+/**
+ * Outcome of the pre-transaction confirm-read that produced (or failed to produce)
+ * `freshObservationId`. Threaded into attention_detail so operators can tell
+ * "gateway unreadable" / "exact repeat" / "read never attempted" apart (ZTR-1279).
+ */
+export type FreshReadOutcome =
+  | {
+      readonly kind: "appended";
+      readonly observationId: string;
+      readonly relationship?: string;
+    }
+  | {
+      readonly kind: "exact_repeat";
+      readonly observationId: string;
+    }
+  | {
+      readonly kind: "failed";
+      readonly reason: string;
+    }
+  | {
+      readonly kind: "skipped";
+      readonly reason: string;
+    }
+  | {
+      readonly kind: "not_attempted";
+      readonly reason: string;
+    };
+
+/** Compact wire form for logs and attention_detail JSON. */
+export function serializeFreshReadOutcome(
+  outcome: FreshReadOutcome | null | undefined,
+): string {
+  if (outcome === undefined || outcome === null) return "unknown";
+  switch (outcome.kind) {
+    case "appended":
+      return outcome.relationship !== undefined
+        ? `appended:${outcome.relationship}:${outcome.observationId}`
+        : `appended:${outcome.observationId}`;
+    case "exact_repeat":
+      return `exact-repeat:${outcome.observationId}`;
+    case "failed":
+      return `failed:${outcome.reason}`;
+    case "skipped":
+      return `skipped:${outcome.reason}`;
+    case "not_attempted":
+      return `not_attempted:${outcome.reason}`;
+  }
+}
+
 export interface ExpireReceiveInput {
   readonly operationId: string;
   /** Fresh, already-persisted gateway observation produced for this expiry pass. */
   readonly freshObservationId: string | null;
+  /**
+   * How the confirm-read that produced `freshObservationId` resolved. Optional for
+   * callers that only have an id (e.g. recovery action reusing a prior read); when
+   * omitted, attention_detail still names failed predicates without a fresh-read clause.
+   */
+  readonly freshReadOutcome?: FreshReadOutcome | null;
   readonly nowMs?: number;
   readonly queueMaxWaitMs?: number;
   readonly safetyMarginSecs?: number;
@@ -128,6 +183,8 @@ export type ExpireReceiveOutcome =
       readonly attentionEpisode: number;
       readonly eventAppended: boolean;
       readonly failedPredicates: readonly ReceiveReleasePredicateName[];
+      /** JSON written to operations.attention_detail (predicates + causes + fresh-read). */
+      readonly attentionDetail: string;
       readonly walletStillPinned: true;
     }
   | {
@@ -137,6 +194,7 @@ export type ExpireReceiveOutcome =
       readonly attentionEpisode: number;
       readonly eventAppended: boolean;
       readonly failedPredicates: readonly ReceiveReleasePredicateName[];
+      readonly attentionDetail: string;
       readonly walletId: string;
       readonly walletState: "QUARANTINED";
       readonly activeLeasePreserved: true;
@@ -196,6 +254,131 @@ export function allReceiveReleasePredicatesHold(
   predicates: ReceiveReleasePredicates,
 ): boolean {
   return failedReceiveReleasePredicates(predicates).length === 0;
+}
+
+/**
+ * Base operator-language cause for each release predicate. Frozen safe vocabulary
+ * (no drift-gate terms). Enriched further when a fresh-read outcome is known.
+ */
+export const RECEIVE_RELEASE_PREDICATE_CAUSES: Readonly<
+  Record<ReceiveReleasePredicateName, string>
+> = {
+  EXPIRY_PLUS_SAFETY_MARGIN:
+    "expiry plus safety margin not yet satisfied, or expiry bytes on the operation and code do not match",
+  NO_LANDED_PROOF: "a landed proof row already exists for this receive",
+  FRESH_VERIFIED_T0_EXACT:
+    "fresh verified head does not match T0 exactly within the post-expiry window",
+  NO_ANOMALY_LINEAGE_OR_SUBMIT:
+    "anomaly, lineage gap, candidate, or submit evidence blocks terminal release",
+  CHILD_ABSENT_OR_SAFE_TERMINAL:
+    "a child operation is present and not in a safe terminal state",
+  PRE_CODE_FORMATION_PROVEN_SAFE:
+    "pre-code formation evidence is incomplete or inconsistent with a safe release",
+};
+
+function humanFreshReadClause(outcome: FreshReadOutcome | null | undefined): string | null {
+  if (outcome === undefined || outcome === null) return null;
+  switch (outcome.kind) {
+    case "exact_repeat":
+      return (
+        "post-expiry confirm-read recorded as an exact repeat of the prior head " +
+        `(observation ${outcome.observationId}); no distinct post-expiry head change was observed`
+      );
+    case "appended":
+      return (
+        `post-expiry confirm-read appended observation ${outcome.observationId}` +
+        (outcome.relationship !== undefined ? ` (${outcome.relationship})` : "")
+      );
+    case "failed":
+      return `post-expiry confirm-read failed: ${outcome.reason}`;
+    case "skipped":
+      return `post-expiry confirm-read was skipped: ${outcome.reason}`;
+    case "not_attempted":
+      return `post-expiry confirm-read was not attempted: ${outcome.reason}`;
+  }
+}
+
+/**
+ * Build the durable attention_detail JSON for a parked expiry release.
+ * Includes bare predicate ids (backward compatible) plus per-predicate human causes
+ * and the fresh-read outcome (ZTR-1279).
+ */
+export function buildReceiveExpiryAttentionDetail(
+  failed: readonly ReceiveReleasePredicateName[],
+  freshReadOutcome?: FreshReadOutcome | null,
+  freshObservationId?: string | null,
+): string {
+  const freshClause = humanFreshReadClause(freshReadOutcome);
+  const predicate_causes = failed.map((predicate) => {
+    let cause = RECEIVE_RELEASE_PREDICATE_CAUSES[predicate];
+    if (predicate === "FRESH_VERIFIED_T0_EXACT") {
+      if (freshClause !== null) {
+        cause = `${cause}; ${freshClause}`;
+      } else if (freshObservationId === null || freshObservationId === undefined) {
+        cause =
+          `${cause}; no fresh observation id was supplied (confirm-read missing or null)`;
+      }
+    }
+    return { predicate, cause };
+  });
+  const body: {
+    failed_predicates: readonly ReceiveReleasePredicateName[];
+    predicate_causes: readonly { predicate: string; cause: string }[];
+    fresh_read?: {
+      kind: string;
+      observation_id?: string;
+      relationship?: string;
+      reason?: string;
+      summary: string;
+    };
+  } = {
+    failed_predicates: failed,
+    predicate_causes,
+  };
+  if (freshReadOutcome !== undefined && freshReadOutcome !== null) {
+    const summary = serializeFreshReadOutcome(freshReadOutcome);
+    switch (freshReadOutcome.kind) {
+      case "appended":
+        body.fresh_read = {
+          kind: "appended",
+          observation_id: freshReadOutcome.observationId,
+          ...(freshReadOutcome.relationship !== undefined
+            ? { relationship: freshReadOutcome.relationship }
+            : {}),
+          summary,
+        };
+        break;
+      case "exact_repeat":
+        body.fresh_read = {
+          kind: "exact-repeat",
+          observation_id: freshReadOutcome.observationId,
+          summary,
+        };
+        break;
+      case "failed":
+        body.fresh_read = {
+          kind: "failed",
+          reason: freshReadOutcome.reason,
+          summary,
+        };
+        break;
+      case "skipped":
+        body.fresh_read = {
+          kind: "skipped",
+          reason: freshReadOutcome.reason,
+          summary,
+        };
+        break;
+      case "not_attempted":
+        body.fresh_read = {
+          kind: "not_attempted",
+          reason: freshReadOutcome.reason,
+          summary,
+        };
+        break;
+    }
+  }
+  return JSON.stringify(body);
 }
 
 export const RECEIVE_EXPIRY_RELEASE_STATEMENTS = {
@@ -380,7 +563,8 @@ SELECT opened.status::text AS status,
 
   LOAD_ATTENTION: `
 SELECT status::text AS status, attention_required,
-       attention_reason, attention_episode::text AS attention_episode
+       attention_reason, attention_episode::text AS attention_episode,
+       attention_detail
   FROM operations
  WHERE id = $1::uuid`.replace(/\s+/g, " ").trim(),
 
@@ -627,9 +811,15 @@ async function openAttention(
   operationId: string,
   reason: ReceiveExpiryAttentionReason,
   failed: readonly ReceiveReleasePredicateName[],
-  dualChain?: ReceiveExpiryDualChainEmitter,
+  dualChain: ReceiveExpiryDualChainEmitter | undefined,
+  freshReadOutcome: FreshReadOutcome | null | undefined,
+  freshObservationId: string | null | undefined,
 ): Promise<Extract<ExpireReceiveOutcome, { kind: "NEEDS_ATTENTION" }>> {
-  const detail = JSON.stringify({ failed_predicates: failed });
+  const detail = buildReceiveExpiryAttentionDetail(
+    failed,
+    freshReadOutcome,
+    freshObservationId,
+  );
   const opened = await tx.query<{
     status: "CREATED" | "READY" | "EXPIRED";
     attention_episode: string;
@@ -657,6 +847,7 @@ async function openAttention(
       attentionEpisode: Number(row.attention_episode),
       eventAppended: true,
       failedPredicates: failed,
+      attentionDetail: detail,
       walletStillPinned: true,
     };
   }
@@ -666,6 +857,7 @@ async function openAttention(
       attention_required: boolean;
       attention_reason: string | null;
       attention_episode: string;
+      attention_detail: string | null;
     }>(RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_ATTENTION, [operationId]),
   );
   if (existing === undefined || !asBool(existing.attention_required)) {
@@ -694,6 +886,7 @@ async function openAttention(
         attentionEpisode: Number(escalated.attention_episode),
         eventAppended: false,
         failedPredicates: failed,
+        attentionDetail: detail,
         walletStillPinned: true,
       };
     }
@@ -711,6 +904,9 @@ async function openAttention(
     attentionEpisode: Number(existing.attention_episode),
     eventAppended: false,
     failedPredicates: failed,
+    // Prefer the just-built detail when this tick re-evaluated predicates; fall back
+    // to whatever is already durable when the episode was held without rewrite.
+    attentionDetail: detail,
     walletStillPinned: true,
   };
 }
@@ -890,6 +1086,8 @@ export class SqlReceiveExpiryReleaseService {
           POST_EXPIRY_RECONCILING,
           failed,
           dualChain,
+          input.freshReadOutcome,
+          input.freshObservationId,
         );
       }
 
@@ -915,6 +1113,8 @@ export class SqlReceiveExpiryReleaseService {
             "LEASE_INVARIANT_VIOLATION",
             ["PRE_CODE_FORMATION_PROVEN_SAFE"],
             dualChain,
+            input.freshReadOutcome,
+            input.freshObservationId,
           );
         }
         const updated = await tx.query<{ status: "EXPIRED" }>(
@@ -964,6 +1164,8 @@ export class SqlReceiveExpiryReleaseService {
           "LEASE_INVARIANT_VIOLATION",
           ["PRE_CODE_FORMATION_PROVEN_SAFE"],
           dualChain,
+          input.freshReadOutcome,
+          input.freshObservationId,
         );
       }
 
@@ -989,6 +1191,8 @@ export class SqlReceiveExpiryReleaseService {
           "EXACT_BYTES_UNAVAILABLE",
           ["PRE_CODE_FORMATION_PROVEN_SAFE"],
           dualChain,
+          input.freshReadOutcome,
+          input.freshObservationId,
         );
         return {
           kind: "INVARIANT_BREACH",
@@ -997,6 +1201,7 @@ export class SqlReceiveExpiryReleaseService {
           attentionEpisode: attention.attentionEpisode,
           eventAppended: attention.eventAppended,
           failedPredicates: attention.failedPredicates,
+          attentionDetail: attention.attentionDetail,
           walletId: lease.wallet_id,
           walletState: "QUARANTINED",
           activeLeasePreserved: true,
@@ -1010,6 +1215,8 @@ export class SqlReceiveExpiryReleaseService {
           "T0_RELEASE_MISMATCH",
           ["EXPIRY_PLUS_SAFETY_MARGIN"],
           dualChain,
+          input.freshReadOutcome,
+          input.freshObservationId,
         );
       }
 
@@ -1172,6 +1379,8 @@ export class SqlReceiveExpiryReleaseService {
           attentionReasonFor(failed, material, lease, binding),
           failed,
           dualChain,
+          input.freshReadOutcome,
+          input.freshObservationId,
         );
       }
 

@@ -132,7 +132,8 @@ const SQL_STORE_IDEMPOTENCY = `
 // stay out via the attention_required / NEEDS_ATTENTION predicate above.
 const SQL_LIST_NEEDS_ATTENTION = `
   SELECT id::text AS operation_id, kind::text AS kind, status::text AS status,
-         attention_required, attention_reason, row_version::int AS row_version,
+         attention_required, attention_reason, attention_detail,
+         row_version::int AS row_version,
          t0_observation_id::text AS t0_observation_id,
          terminal_observation_id::text AS terminal_observation_id,
          expiry_unix_time_secs, formation_state::text AS formation_state
@@ -150,7 +151,8 @@ const SQL_LIST_NEEDS_ATTENTION = `
 
 const SQL_LOAD_RECOVERY_FACTS = `
   SELECT o.id::text AS operation_id, o.kind::text AS kind, o.status::text AS status,
-         o.attention_required, o.attention_reason, o.row_version::int AS row_version,
+         o.attention_required, o.attention_reason, o.attention_detail,
+         o.row_version::int AS row_version,
          o.t0_observation_id::text AS t0_observation_id,
          o.terminal_observation_id::text AS terminal_observation_id,
          o.verification_material_available_until,
@@ -531,14 +533,15 @@ export function createSqlRecoveryInspectionStore(
       const limit = query.limit ?? 50;
       const result = await pool.query<{
         operation_id: string; kind: string; status: string;
-        attention_required: boolean; attention_reason: string | null; row_version: number;
+        attention_required: boolean; attention_reason: string | null;
+        attention_detail: string | null; row_version: number;
         t0_observation_id: string | null; terminal_observation_id: string | null;
         expiry_unix_time_secs: string | null; formation_state: string | null;
       }>(SQL_LIST_NEEDS_ATTENTION, [limit, query.kind ?? null]);
       const facts: RecoveryFacts[] = [];
       for (const r of result.rows) {
         const f = await loadRecoveryFactsFromRow(pool, r.operation_id, r.kind, r.status,
-          r.attention_required, r.attention_reason, r.row_version, {
+          r.attention_required, r.attention_reason, r.attention_detail, r.row_version, {
             t0ObservationId: r.t0_observation_id,
             terminalObservationId: r.terminal_observation_id,
             expiryUnixTimeSecs: r.expiry_unix_time_secs,
@@ -996,7 +999,8 @@ async function loadRecoveryFactsById(
 ): Promise<RecoveryFacts | null> {
   const result = await pool.query<{
     operation_id: string; kind: string; status: string;
-    attention_required: boolean; attention_reason: string | null; row_version: number;
+    attention_required: boolean; attention_reason: string | null;
+    attention_detail: string | null; row_version: number;
     t0_observation_id: string | null; terminal_observation_id: string | null;
     verification_material_available_until: string | null;
     expiry_unix_time_secs: string | null; formation_state: string | null;
@@ -1004,7 +1008,7 @@ async function loadRecoveryFactsById(
   const r = result.rows[0];
   if (r === undefined) return null;
   return loadRecoveryFactsFromRow(pool, r.operation_id, r.kind, r.status,
-    r.attention_required, r.attention_reason, r.row_version, {
+    r.attention_required, r.attention_reason, r.attention_detail, r.row_version, {
       t0ObservationId: r.t0_observation_id,
       terminalObservationId: r.terminal_observation_id,
       expiryUnixTimeSecs: r.expiry_unix_time_secs,
@@ -1021,7 +1025,8 @@ interface RecoveryFactsRowExtra {
 
 async function loadRecoveryFactsFromRow(
   pool: Pool, operationId: string, kind: string, status: string,
-  attentionRequired: boolean, attentionReason: string | null, rowVersion: number,
+  attentionRequired: boolean, attentionReason: string | null,
+  attentionDetail: string | null, rowVersion: number,
   extra: RecoveryFactsRowExtra,
   readFreshHead?: ReadFreshHead,
 ): Promise<RecoveryFacts | null> {
@@ -1327,6 +1332,7 @@ async function loadRecoveryFactsFromRow(
     status,
     attentionRequired,
     attentionReason,
+    attentionDetail,
     rowVersion,
     leaseEpoch: maxEpoch,
     heldLeases,

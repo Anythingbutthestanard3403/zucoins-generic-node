@@ -151,6 +151,104 @@ export function humanizeWire(code: string): string {
 }
 
 /**
+ * Receive-expiry release predicates → short operator labels (frozen vocabulary; ZTR-1279).
+ * Keep in lock-step with node-core RECEIVE_RELEASE_PREDICATE_CAUSES base text.
+ */
+export const RECEIVE_RELEASE_PREDICATE_LABELS: Readonly<Record<string, string>> = {
+  EXPIRY_PLUS_SAFETY_MARGIN: "Expiry plus safety margin",
+  NO_LANDED_PROOF: "No landed proof",
+  FRESH_VERIFIED_T0_EXACT: "Fresh head matches T0",
+  NO_ANOMALY_LINEAGE_OR_SUBMIT: "No anomaly, lineage gap, or submit debt",
+  CHILD_ABSENT_OR_SAFE_TERMINAL: "Child absent or safe terminal",
+  PRE_CODE_FORMATION_PROVEN_SAFE: "Pre-code formation proven safe",
+};
+
+export interface AttentionPredicateCause {
+  readonly predicate: string;
+  readonly cause: string;
+}
+
+export interface ParsedAttentionDetail {
+  readonly failedPredicates: readonly string[];
+  readonly predicateCauses: readonly AttentionPredicateCause[];
+  readonly freshReadSummary: string | null;
+  /** Raw text when the column is free-form (operator park note, move parking, etc.). */
+  readonly rawText: string | null;
+}
+
+/**
+ * Parse operations.attention_detail for the SPA. Understands the ZTR-1279 JSON
+ * shape `{ failed_predicates, predicate_causes, fresh_read }` and falls back to
+ * plain text for older free-form rows.
+ */
+export function parseAttentionDetail(
+  detail: string | null | undefined,
+): ParsedAttentionDetail | null {
+  if (detail == null || detail === "") return null;
+  const trimmed = detail.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        failed_predicates?: unknown;
+        predicate_causes?: unknown;
+        fresh_read?: { summary?: unknown; kind?: unknown; reason?: unknown };
+      };
+      const failedPredicates = Array.isArray(parsed.failed_predicates)
+        ? parsed.failed_predicates.filter((p): p is string => typeof p === "string")
+        : [];
+      const predicateCauses: AttentionPredicateCause[] = [];
+      if (Array.isArray(parsed.predicate_causes)) {
+        for (const row of parsed.predicate_causes) {
+          if (
+            row !== null &&
+            typeof row === "object" &&
+            typeof (row as { predicate?: unknown }).predicate === "string" &&
+            typeof (row as { cause?: unknown }).cause === "string"
+          ) {
+            predicateCauses.push({
+              predicate: (row as { predicate: string }).predicate,
+              cause: (row as { cause: string }).cause,
+            });
+          }
+        }
+      }
+      let freshReadSummary: string | null = null;
+      if (parsed.fresh_read && typeof parsed.fresh_read === "object") {
+        if (typeof parsed.fresh_read.summary === "string") {
+          freshReadSummary = parsed.fresh_read.summary;
+        } else if (typeof parsed.fresh_read.kind === "string") {
+          const reason =
+            typeof parsed.fresh_read.reason === "string"
+              ? `:${parsed.fresh_read.reason}`
+              : "";
+          freshReadSummary = `${parsed.fresh_read.kind}${reason}`;
+        }
+      }
+      if (failedPredicates.length > 0 || predicateCauses.length > 0 || freshReadSummary) {
+        return {
+          failedPredicates,
+          predicateCauses,
+          freshReadSummary,
+          rawText: null,
+        };
+      }
+    } catch {
+      // fall through to raw text
+    }
+  }
+  return {
+    failedPredicates: [],
+    predicateCauses: [],
+    freshReadSummary: null,
+    rawText: trimmed,
+  };
+}
+
+export function predicateLabel(predicate: string): string {
+  return RECEIVE_RELEASE_PREDICATE_LABELS[predicate] ?? humanizeWire(predicate);
+}
+
+/**
  * Primary label for an operation kind. Unknown kinds fall back to a
  * humanized form of the raw enum (never invents a fourth money verb).
  */

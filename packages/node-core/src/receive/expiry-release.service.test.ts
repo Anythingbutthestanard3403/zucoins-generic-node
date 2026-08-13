@@ -39,6 +39,7 @@ interface Operation {
   t0_observation_id: string | null;
   attention_required: boolean;
   attention_reason: string | null;
+  attention_detail: string | null;
   attention_episode: string;
   receive_release_status: string | null;
   created_at: string;
@@ -105,6 +106,7 @@ class ExpiryHarness implements SqlExecutor {
     t0_observation_id: null,
     attention_required: false,
     attention_reason: null,
+    attention_detail: null,
     attention_episode: "0",
     receive_release_status: null,
     created_at: "1970-01-01T00:00:00.000Z",
@@ -262,6 +264,7 @@ class ExpiryHarness implements SqlExecutor {
       const params = _params;
       this.operation.attention_required = true;
       this.operation.attention_reason = String(params[1]);
+      this.operation.attention_detail = String(params[2]);
       this.operation.attention_episode = String(
         Number(this.operation.attention_episode) + 1,
       );
@@ -271,6 +274,8 @@ class ExpiryHarness implements SqlExecutor {
         attention_episode: Number(this.operation.attention_episode),
         operator_action_required: true,
         failed_predicates: JSON.parse(String(params[4])),
+        // ZTR-1279: durable detail JSON (params[2]) is also mirrored here for asserts.
+        attention_detail: JSON.parse(String(params[2])),
       });
       this.operation.row_version = String(Number(this.operation.row_version) + 1);
       this.attentionEvents += 1;
@@ -288,6 +293,7 @@ class ExpiryHarness implements SqlExecutor {
     if (text === S.ESCALATE_ATTENTION_TO_RECONCILING) {
       if (!this.operation.attention_required) return this.result<R>([]);
       this.operation.attention_reason = String(_params[1]);
+      this.operation.attention_detail = String(_params[2]);
       this.operation.row_version = String(Number(this.operation.row_version) + 1);
       return this.result<R>([
         {
@@ -625,8 +631,47 @@ describe("assigned expired-unpaid release", () => {
       expect(h.expiredEvents).toBe(0);
       expect(h.releaseCalls).toEqual([]);
       expect(h.walletState).toBe("PINNED");
+      // ZTR-1279: attention_detail must name the failed predicate, not bare reason alone.
+      if (result.kind === "NEEDS_ATTENTION") {
+        const detail = JSON.parse(result.attentionDetail) as {
+          failed_predicates: string[];
+          predicate_causes: { predicate: string; cause: string }[];
+        };
+        expect(detail.failed_predicates).toContain("EXPIRY_PLUS_SAFETY_MARGIN");
+        expect(detail.predicate_causes[0]?.cause.length).toBeGreaterThan(10);
+      }
     },
   );
+
+  it("stamps fresh-read outcome into attention_detail when supplied (ZTR-1279)", async () => {
+    const h = new ExpiryHarness();
+    h.observation = undefined; // force FRESH_VERIFIED_T0_EXACT failure path via missing observations
+
+    const result = await run(h, {
+      freshObservationId: null,
+      freshReadOutcome: { kind: "skipped", reason: "wallet_row_undefined" },
+    });
+
+    expect(result.kind).toBe("NEEDS_ATTENTION");
+    if (result.kind === "NEEDS_ATTENTION") {
+      const detail = JSON.parse(result.attentionDetail) as {
+        failed_predicates: string[];
+        predicate_causes: { predicate: string; cause: string }[];
+        fresh_read: { kind: string; reason: string; summary: string };
+      };
+      expect(detail.failed_predicates).toContain("FRESH_VERIFIED_T0_EXACT");
+      const freshCause = detail.predicate_causes.find(
+        (c) => c.predicate === "FRESH_VERIFIED_T0_EXACT",
+      );
+      expect(freshCause?.cause).toMatch(/skipped/i);
+      expect(freshCause?.cause).toMatch(/wallet_row_undefined/);
+      expect(detail.fresh_read).toMatchObject({
+        kind: "skipped",
+        reason: "wallet_row_undefined",
+        summary: "skipped:wallet_row_undefined",
+      });
+    }
+  });
 
   it.each([
     ["foreign T0 wallet", (h: ExpiryHarness) => {

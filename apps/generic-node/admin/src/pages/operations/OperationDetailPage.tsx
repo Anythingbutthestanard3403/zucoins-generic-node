@@ -22,7 +22,13 @@ import {
   type OperationInventoryDetail,
   type RecoveryDetail,
 } from "../../lib/money.js";
-import { implementerDisplayName, operationKindLabel, statusLabel } from "../../lib/labels.js";
+import {
+  implementerDisplayName,
+  operationKindLabel,
+  parseAttentionDetail,
+  predicateLabel,
+  statusLabel,
+} from "../../lib/labels.js";
 import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 
@@ -342,6 +348,62 @@ export function OperationDetailPage() {
           {classification ? ` · ${statusLabel(classification)}` : ""}
         </div>
       ) : null}
+
+      {(() => {
+        const parsed = parseAttentionDetail(recovery?.attention_detail);
+        if (!parsed) return null;
+        const hasStructured =
+          parsed.predicateCauses.length > 0 ||
+          parsed.failedPredicates.length > 0 ||
+          parsed.freshReadSummary !== null;
+        if (!hasStructured && parsed.rawText === null) return null;
+        return (
+          <div
+            className="card form-card"
+            style={{ maxWidth: "none", marginBottom: 12 }}
+            data-testid="attention-detail-evidence"
+          >
+            <div className="k" style={{ marginBottom: 8 }}>
+              Evidence gap
+            </div>
+            {parsed.predicateCauses.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {parsed.predicateCauses.map((row) => (
+                  <li key={row.predicate} style={{ marginBottom: 6 }}>
+                    <strong>{predicateLabel(row.predicate)}</strong>
+                    <span className="quiet mono" style={{ fontSize: 11, marginLeft: 6 }}>
+                      {row.predicate}
+                    </span>
+                    <div style={{ fontSize: 13, marginTop: 2 }}>{row.cause}</div>
+                  </li>
+                ))}
+              </ul>
+            ) : parsed.failedPredicates.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {parsed.failedPredicates.map((p) => (
+                  <li key={p}>
+                    <strong>{predicateLabel(p)}</strong>
+                    <span className="quiet mono" style={{ fontSize: 11, marginLeft: 6 }}>
+                      {p}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {parsed.freshReadSummary ? (
+              <p style={{ margin: "8px 0 0", fontSize: 13 }} data-testid="fresh-read-outcome">
+                Confirm-read outcome:{" "}
+                <span className="mono">{parsed.freshReadSummary}</span>
+              </p>
+            ) : null}
+            {parsed.rawText ? (
+              <p style={{ margin: "8px 0 0", fontSize: 13, whiteSpace: "pre-wrap" }}>
+                {parsed.rawText}
+              </p>
+            ) : null}
+          </div>
+        );
+      })()}
 
       <div className="card form-card detail-grid" style={{ maxWidth: "none" }}>
         <DetailItem label="Type">{operationKindLabel(opType)} <span className="quiet mono" style={{ fontSize: 11 }}>{opType}</span></DetailItem>

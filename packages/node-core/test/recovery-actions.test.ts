@@ -43,6 +43,7 @@ function baseSend(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
     status: "NEEDS_ATTENTION",
     attentionRequired: true,
     attentionReason: "UNEXPECTED_HEAD_CHANGE",
+    attentionDetail: null,
     rowVersion: 7,
     leaseEpoch: 3,
     heldLeases: [{ walletId: WALLET, leaseEpoch: 3, role: "SOURCE" }],

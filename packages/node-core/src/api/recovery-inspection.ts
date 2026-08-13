@@ -85,6 +85,8 @@ export interface RecoveryDetailResponse {
   readonly status: string;
   readonly attention_required: boolean;
   readonly attention_reason: string | null;
+  /** operations.attention_detail — structured evidence gap text (ZTR-1279). */
+  readonly attention_detail: string | null;
   readonly classification: RecoveryClassification;
   readonly classification_rationale: string;
   readonly permitted_actions: readonly OperatorRecoveryAction[];
@@ -231,6 +233,7 @@ export async function handleGetRecovery(
       status: facts.status,
       attention_required: facts.attentionRequired,
       attention_reason: facts.attentionReason,
+      attention_detail: facts.attentionDetail,
       classification: inspected.classification,
       classification_rationale: inspected.classificationRationale,
       permitted_actions: inspected.permittedActions,

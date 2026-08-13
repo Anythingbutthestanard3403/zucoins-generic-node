@@ -43,9 +43,15 @@ export const DEFAULT_MAX_PATH_DEPTH = 64;
 // One live read of the authoritative head for a wallet. Production wires this to the
 // bounded jittered gateway read (gateway/read.ts, `get_transaction__v1`) plus the
 // envelope parse; `observationId` is the observation-ledger row that read landed.
+//
+// `relationship` is the observation-ledger relationship of that row when known
+// (e.g. DUPLICATE for ZTR-1275 exact-repeat confirm-reads). Optional so test
+// stubs and older callers stay valid.
 export interface FreshHeadRead {
   readonly observationId: string;
   readonly envelope: GatewayEnvelopeVerdict;
+  /** Observation-ledger relationship of the persisted row, when the writer reported one. */
+  readonly relationship?: string;
 }
 
 export type ReadFreshHead = (walletPubkeyBase64Urlsafe: string) => Promise<FreshHeadRead>;

@@ -263,3 +263,63 @@ indefinitely** — there is no post-boundary release branch at any proof level.
 head-unchanged read is a snapshot, not proof that a signed, durable transaction will never
 land. That belief is the exact defect this contract forbids. `RELEASE_EXPIRED_RECEIVE`
 applies to the pre-boundary safe-terminal case, not to this one.
+
+---
+
+## Composition failure modes (wallet money capabilities / auto-funded send)
+
+These are **operator diagnosis paths**, not new `ATTENTION_REASONS` enum values.
+They surface as rejected creates (HTTP), parked formation (send waiting on top-up
+MOVE), or ordinary attention reasons on the MOVE/SEND rows. Use
+`GET /admin/v1/operations/needs-attention` plus inventory.
+
+Cross-links: [`wallet-money-capabilities.md`](wallet-money-capabilities.md) ·
+[`auto-approve-external-sends.md`](auto-approve-external-sends.md).
+
+### Top-up MOVE stuck (SEND references MOVE, move not landed)
+
+**Looks like.** `SEND_EXTERNAL` stays approval-pending / formation-parked;
+`references_operation_id` points at a `MOVE_INTERNAL` that is not
+`INTERNAL_MOVE_LANDED`. Auto-approve and formation deliberately wait (top-up
+readiness probe).
+
+**Check.**
+
+1. Open the referenced MOVE. Is it `NEEDS_ATTENTION`, in-flight, or halted?
+2. Triage the MOVE with the reason section above (gateway, lease, proof, …).
+3. Confirm hub and worker still hold expected leases / standing.
+
+**Resolved by.** Landing or terminal resolution of the MOVE first. Only then
+does the SEND become formation-eligible. Do not create a second SEND from the
+hub.
+
+**Never.** External-send from the internal-only hub to “unstick” float. Never
+clear SEND attention while the referenced MOVE is still open without
+understanding dual-path proof on the MOVE.
+
+### SEND waiting on MOVE (healthy park)
+
+**Looks like.** No attention flag yet; SEND simply does not auto-approve or form.
+This is the **funded-after-top-up** design: readiness requires
+`INTERNAL_MOVE_LANDED` (or no reference on the funded path).
+
+**Resolved by.** Waiting for the MOVE money worker to land, or fixing the MOVE
+if it parked. Not an incident by itself.
+
+### Capability misconfiguration
+
+**Looks like.**
+
+| API / symptom | Misconfiguration |
+| --- | --- |
+| `no_free_send_worker` | No wallet with `allow_external_send` free (all receive-only / internal-only / busy) |
+| `no_hub_liquidity` | Workers underfunded; hubs empty, unobserved, or non-internal-only |
+| `allow_external_send=false` on explicit source | Client pinned an internal-only or receive-only wallet |
+| Receive pool dry while wallets exist | Only send-only / internal-only in the fleet |
+| Fleet warnings on mode PATCH | Last send-capable or receive-capable wallet re-moded away |
+
+**Resolved by.** Correct modes on the admin money-capability control; fund hubs;
+omit `source_wallet_id` so assign can pick a worker. See
+[`wallet-money-capabilities.md`](wallet-money-capabilities.md).
+
+**Never.** “Fix” by forcing an internal-only wallet through external send.

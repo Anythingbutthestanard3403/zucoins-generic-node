@@ -246,6 +246,7 @@ Idempotency: same `Idempotency-Key` + same body replays the same operation. Omit
 
 ## Related
 
+- [`wallet-money-capabilities.md`](wallet-money-capabilities.md) — hubs/workers, fund, rebalance (ZTR-1273)
 - [`README.md`](README.md) — operating model and document index
 - [`incidents.md`](incidents.md) — alert-driven response
 - [`attention-triage.md`](attention-triage.md) — `needs_attention` reasons

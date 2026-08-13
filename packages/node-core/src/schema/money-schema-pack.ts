@@ -217,6 +217,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   "operations-expired-terminal-at-backfill",
   // ZTR-1250: clear sticky attention on already-landed ops. Appended only.
   "operations-landed-attention-clear-backfill",
+  // ZTR-1267: per-wallet money capability columns on wallets (allow flags + money_mode +
+  // row_version). Pure ALTER on custody-eligibility wallets; defaults FULL. Appended only.
+  "wallet-money-capability",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

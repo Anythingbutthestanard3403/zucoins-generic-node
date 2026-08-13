@@ -651,6 +651,11 @@ describe("admin inventory HTTP (contract)", () => {
       "holding_operation_terminal_at",
       "holding_lease_role",
       "holding_operation_type",
+      "money_mode",
+      "allow_external_receive",
+      "allow_external_send",
+      "allow_internal_move",
+      "row_version",
     ]);
   });
 
@@ -673,6 +678,11 @@ describe("admin inventory HTTP (contract)", () => {
                 quarantine_reason: null,
                 recovery_verified_at: "2026-07-02T00:00:00.000Z",
                 recovery_verification_id: null,
+                money_mode: "FULL",
+                allow_external_receive: true,
+                allow_external_send: true,
+                allow_internal_move: true,
+                row_version: 1,
               },
             ],
           };

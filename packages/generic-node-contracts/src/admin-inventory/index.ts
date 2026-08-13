@@ -144,6 +144,16 @@ export interface WalletInventoryItem {
   readonly holding_lease_role: string | null;
   /** operations.kind of the holding operation when present (ZTR-1255). */
   readonly holding_operation_type: string | null;
+  /**
+   * Per-wallet money capability preset (ZTR-1267). One of RECEIVE_ONLY | SEND_ONLY |
+   * INTERNAL_ONLY | FULL. Kept consistent with the three allow_* flags by schema CHECK.
+   */
+  readonly money_mode: string;
+  readonly allow_external_receive: boolean;
+  readonly allow_external_send: boolean;
+  readonly allow_internal_move: boolean;
+  /** House CAS counter for admin capability mutations (ZTR-1269). */
+  readonly row_version: number;
 }
 
 /** Response field allowlist for wallet inventory — never private keys or secret-class tokens. */
@@ -167,6 +177,11 @@ export const WALLET_INVENTORY_FIELDS = [
   "holding_operation_terminal_at",
   "holding_lease_role",
   "holding_operation_type",
+  "money_mode",
+  "allow_external_receive",
+  "allow_external_send",
+  "allow_internal_move",
+  "row_version",
 ] as const;
 
 /**

@@ -412,8 +412,13 @@ function createPoolMint(deps: {
       // Commit wallet on the pool (not the scale-up txn client) so vault.seal's
       // separate connection can see wallet_id for FK (vault insert is not on txn).
       await deps.pool.query(
-        `INSERT INTO wallets (id, node_id, public_key, key_origin, state)
-         VALUES ($1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE')`,
+        `INSERT INTO wallets (
+           id, node_id, public_key, key_origin, state,
+           allow_external_receive, allow_external_send, allow_internal_move, money_mode
+         ) VALUES (
+           $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
+           true, true, true, 'FULL'
+         )`,
         [walletId, deps.nodeId, publicKey],
       );
       // recovery_verified_at intentionally NULL — workers never stamp recovery verification.

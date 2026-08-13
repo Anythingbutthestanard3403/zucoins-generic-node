@@ -60,6 +60,11 @@ function walletFixture(
     holding_operation_terminal_at: null,
     holding_lease_role: null,
     holding_operation_type: null,
+    money_mode: "FULL",
+    allow_external_receive: true,
+    allow_external_send: true,
+    allow_internal_move: true,
+    row_version: 1,
     ...partial,
   };
 }

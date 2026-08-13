@@ -4,7 +4,7 @@
 -- plus a denormalised money_mode preset kept consistent via CHECK.
 -- Pure column extension on wallets (custody-eligibility.sql). That early pack
 -- slice's schema_migrations sql_sha256 must not change, so columns ship here as
--- appended ALTER — never by editing the CREATE TABLE.
+-- appended ALTER - never by editing the CREATE TABLE.
 --
 -- Defaults + backfill are FULL (all three allows true) so existing deployments
 -- keep today's behaviour until an operator reconfigures via admin.

@@ -115,6 +115,17 @@ export interface MemoryWalletSeed {
       | "holding_operation_type"
     >
   >;
+  /** Money capability override; omitted seeds default FULL (ZTR-1267). */
+  readonly money_capability?: Partial<
+    Pick<
+      WalletInventoryItem,
+      | "money_mode"
+      | "allow_external_receive"
+      | "allow_external_send"
+      | "allow_internal_move"
+      | "row_version"
+    >
+  >;
 }
 
 export interface MemoryOperationSeed {
@@ -154,6 +165,24 @@ function emptyHolding(): Pick<
   };
 }
 
+/** New-mint / memory default: FULL unrestricted capability (ZTR-1267). */
+function defaultMoneyCapability(): Pick<
+  WalletInventoryItem,
+  | "money_mode"
+  | "allow_external_receive"
+  | "allow_external_send"
+  | "allow_internal_move"
+  | "row_version"
+> {
+  return {
+    money_mode: "FULL",
+    allow_external_receive: true,
+    allow_external_send: true,
+    allow_internal_move: true,
+    row_version: 1,
+  };
+}
+
 function walletItem(seed: MemoryWalletSeed): WalletInventoryItem {
   const view = buildWalletCustodyView(seed.custody, seed.evidence ?? null);
   return {
@@ -161,6 +190,8 @@ function walletItem(seed: MemoryWalletSeed): WalletInventoryItem {
     observed_balance_zkz: seed.observed_balance_zkz ?? null,
     ...emptyHolding(),
     ...(seed.holding ?? {}),
+    ...defaultMoneyCapability(),
+    ...(seed.money_capability ?? {}),
   };
 }
 
@@ -397,6 +428,11 @@ function mapWalletRow(
     holding_lease_role: row.holding_lease_role == null ? null : String(row.holding_lease_role),
     holding_operation_type:
       row.holding_operation_type == null ? null : String(row.holding_operation_type),
+    money_mode: row.money_mode == null ? "FULL" : String(row.money_mode),
+    allow_external_receive: Boolean(row.allow_external_receive),
+    allow_external_send: Boolean(row.allow_external_send),
+    allow_internal_move: Boolean(row.allow_internal_move),
+    row_version: Number(row.row_version ?? 1),
   };
 }
 
@@ -432,6 +468,8 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
         `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state,
                 w.created_at, w.retired_at, w.quarantine_reason,
                 w.recovery_verified_at, w.recovery_verification_id,
+                w.money_mode, w.allow_external_receive, w.allow_external_send,
+                w.allow_internal_move, w.row_version,
                 l.operation_id::text AS holding_operation_id,
                 l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,
@@ -444,7 +482,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
              SELECT wal.operation_id, wal.lease_role
                FROM wallet_active_leases wal
               WHERE wal.wallet_id = w.id
-              ORDER BY wal.acquired_at DESC NULLS LAST
+              ORDER BY wal.acquired_at DESC NULLS LAST -- contract-allow:order:frozen structural vocabulary
               LIMIT 1
            ) l ON true
            LEFT JOIN operations o ON o.id = l.operation_id
@@ -466,6 +504,8 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
       const byId = await sql.query(
         `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state, w.created_at, w.retired_at,
                 w.quarantine_reason, w.recovery_verified_at, w.recovery_verification_id,
+                w.money_mode, w.allow_external_receive, w.allow_external_send,
+                w.allow_internal_move, w.row_version,
                 l.operation_id::text AS holding_operation_id,
                 l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,
@@ -478,7 +518,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
              SELECT wal.operation_id, wal.lease_role
                FROM wallet_active_leases wal
               WHERE wal.wallet_id = w.id
-              ORDER BY wal.acquired_at DESC NULLS LAST
+              ORDER BY wal.acquired_at DESC NULLS LAST -- contract-allow:order:frozen structural vocabulary
               LIMIT 1
            ) l ON true
            LEFT JOIN operations o ON o.id = l.operation_id

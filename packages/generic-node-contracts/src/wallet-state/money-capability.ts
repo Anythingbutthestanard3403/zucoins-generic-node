@@ -1,7 +1,7 @@
 /**
  * Per-wallet money capability presets and flag triples (ZTR-1267).
  *
- * Pure model only — no I/O. Schema CHECKs mirror this matrix; admission gates
+ * Pure model only - no I/O. Schema CHECKs mirror this matrix; admission gates
  * (ZTR-1268) consume the eligibility helpers.
  */
 

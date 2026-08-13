@@ -269,8 +269,13 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
       try {
         // Commit wallet on the pool so vault.seal (separate connection) can see FK target.
         await deps.pool.query(
-          `INSERT INTO wallets (id, node_id, public_key, key_origin, state)
-           VALUES ($1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE')`,
+          `INSERT INTO wallets (
+             id, node_id, public_key, key_origin, state,
+             allow_external_receive, allow_external_send, allow_internal_move, money_mode
+           ) VALUES (
+             $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
+             true, true, true, 'FULL'
+           )`,
           [walletId, nodeId, publicKey],
         );
         await deps.vault.seal(

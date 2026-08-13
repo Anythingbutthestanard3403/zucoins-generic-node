@@ -43,7 +43,7 @@ export const WALLET_MONEY_CAPABILITY_INVARIANTS: readonly WalletMoneyCapabilityI
   {
     id: "MONEY_MODE_DEFAULT_FULL",
     sqlAnchor: "ADD COLUMN IF NOT EXISTS money_mode text NOT NULL DEFAULT 'FULL'",
-    rule: "money_mode defaults FULL — the only preset that matches all-three-true.",
+    rule: "money_mode defaults FULL - the only preset that matches all-three-true.",
   },
   {
     id: "ROW_VERSION_DEFAULT_ONE",

@@ -71,7 +71,7 @@ describe("wallet money capability matrix (ZTR-1267)", () => {
 
   it("isWalletMoneyMode is closed", () => {
     expect(isWalletMoneyMode("FULL")).toBe(true);
-    expect(isWalletMoneyMode("treasury")).toBe(false);
+    expect(isWalletMoneyMode("NOT_A_MODE")).toBe(false);
     expect(isWalletMoneyMode(null)).toBe(false);
   });
 });

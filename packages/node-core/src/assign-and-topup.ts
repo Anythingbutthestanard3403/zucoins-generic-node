@@ -281,7 +281,7 @@ export function evaluateTopUpReadiness(input: {
 
 // ─── orchestration ports ────────────────────────────────────────────────────
 
-export interface SqlExecutor {
+export interface AssignSqlExecutor {
   query<R>(
     text: string,
     params?: readonly unknown[],
@@ -289,7 +289,7 @@ export interface SqlExecutor {
 }
 
 /** One BEGIN/COMMIT scope for selection locks + optional multi-step planning reads. */
-export type AssignSqlTxFn = <T>(body: (tx: SqlExecutor) => Promise<T>) => Promise<T>;
+export type AssignSqlTxFn = <T>(body: (tx: AssignSqlExecutor) => Promise<T>) => Promise<T>;
 
 export interface AssignAndTopUpRequest {
   readonly implementerId: string;
@@ -309,7 +309,7 @@ export interface AssignAndTopUpRequest {
 }
 
 export interface AssignAndTopUpDeps {
-  readonly sql: SqlExecutor;
+  readonly sql: AssignSqlExecutor;
   /**
    * Optional TX wrapper for selection FOR UPDATE locks. When omitted, selection
    * runs on `sql` without an explicit transaction (tests / single-connection).
@@ -378,7 +378,7 @@ interface HubPick {
 }
 
 async function pickWorker(
-  tx: SqlExecutor,
+  tx: AssignSqlExecutor,
   nodeId: string,
   amountZkz: string,
 ): Promise<WorkerPick | null> {
@@ -395,7 +395,7 @@ async function pickWorker(
 }
 
 async function pickHub(
-  tx: SqlExecutor,
+  tx: AssignSqlExecutor,
   nodeId: string,
   shortfallZkz: string,
 ): Promise<HubPick | null> {
@@ -412,7 +412,7 @@ async function pickHub(
 }
 
 async function blessedDestinationId(
-  tx: SqlExecutor,
+  tx: AssignSqlExecutor,
   workerWalletId: string,
 ): Promise<string | null> {
   const result = await tx.query<{ destination_id: string }>(
@@ -427,7 +427,7 @@ async function blessedDestinationId(
  * Returns true when the send may advance.
  */
 export async function isSendTopUpReady(
-  sql: SqlExecutor,
+  sql: AssignSqlExecutor,
   sendOperationId: string,
 ): Promise<boolean> {
   const result = await sql.query<{ operation_id: string }>(

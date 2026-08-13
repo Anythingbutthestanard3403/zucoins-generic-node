@@ -94,7 +94,7 @@ export interface ReceiveCandidateIntakeStepDeps {
   readonly inbox: CandidateIntakeInbox;
   readonly observeSender: SenderPreflightObserver;
   readonly logger: MoneyWorkerLogger;
-  /** Optional: publish gn_candidate_intake_backlog after the drain. */
+  /** Optional: publish gn_candidate_intake_backlog after the batch. */
   readonly metricsHooks?: MetricsHooks;
   readonly nowMs?: () => number;
   readonly nowIso?: () => string;
@@ -119,7 +119,7 @@ export async function runReceiveCandidateIntakeStep(
 ): Promise<number> {
   const batch = deps.inbox.take(INTAKE_BATCH_LIMIT);
   // Depth after take is the truth the gauge should show — publish even on an empty
-  // batch so a scrape after a full drain does not keep a stale non-zero.
+  // batch so a scrape after a full empty does not keep a stale non-zero.
   deps.metricsHooks?.setCandidateIntakeBacklog("push", deps.inbox.sizeBySource("push"));
   deps.metricsHooks?.setCandidateIntakeBacklog("relay", deps.inbox.sizeBySource("relay"));
   if (batch.length === 0) return 0;

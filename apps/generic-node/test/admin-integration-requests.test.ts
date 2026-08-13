@@ -440,7 +440,7 @@ describe("admin integration-requests", () => {
       "POST",
       `/admin/v1/integration-requests/${REQ_ID}/approve`,
       payload,
-      { ...headers, "x-zp-totp": totpNow(Date.now() + 35_000) },
+      { ...headers, "x-zp-totp": totpNow(Date.now() + 30_000) },
     );
     expect(second.status).toBe(200);
     expect(second.body).toBe(first.body);
@@ -474,7 +474,7 @@ describe("admin integration-requests", () => {
         origin: ORIGIN,
         cookie,
         "x-csrf-token": csrf,
-        "x-zp-totp": totpNow(Date.now() + 35_000),
+        "x-zp-totp": totpNow(Date.now() + 30_000),
         "idempotency-key": randomUUID(),
         "content-type": "application/json",
       },

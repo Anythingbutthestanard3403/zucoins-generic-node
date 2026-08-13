@@ -60,6 +60,11 @@ function walletFixture(
     holding_operation_terminal_at: null,
     holding_lease_role: null,
     holding_operation_type: null,
+    money_mode: "FULL",
+    allow_external_receive: true,
+    allow_external_send: true,
+    allow_internal_move: true,
+    row_version: 1,
     ...partial,
   };
 }
@@ -275,6 +280,19 @@ const IMPLEMENTERS_LIST = {
 
 const HALT_STATE = { engaged: false, reason: null, updated_at: null, updated_by: null };
 
+/** Empty list — App shell badge (`useApproveInboxBadgeCount`) soft-reads PENDING IRs on every route. */
+const INTEGRATION_REQUESTS_LIST = {
+  object: "list",
+  data: [] as const,
+  has_more: false,
+  next_cursor: null,
+};
+
+/** Empty keys — Approve/Destinations device-sign paths and listDeviceKeys consumers. */
+const DEVICE_KEYS_LIST = {
+  keys: [] as const,
+};
+
 const READINESS = {
   object: "readiness_checklist",
   generated_at: "2026-07-30T00:00:00.000Z",
@@ -406,6 +424,9 @@ export async function registerAdminApiRoutes(
     if (key === "GET /admin/v1/dual-control-policy") return json(DUAL_CONTROL_POLICY);
     if (key === "GET /admin/v1/vault-master") return json(VAULT_MASTER);
     if (key === "GET /admin/v1/destinations") return json(DESTINATIONS_LIST);
+    // Shell badge always soft-reads PENDING integration requests; query string is not part of `key`.
+    if (key === "GET /admin/v1/integration-requests") return json(INTEGRATION_REQUESTS_LIST);
+    if (key === "GET /admin/v1/device-keys") return json(DEVICE_KEYS_LIST);
     if (key === "GET /admin/v1/audit") return json(AUDIT_LIST);
     if (key === "GET /admin/v1/api-keys") return json(API_KEYS_LIST);
     if (key === "GET /admin/v1/implementers") return json(IMPLEMENTERS_LIST);

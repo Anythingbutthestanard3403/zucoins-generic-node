@@ -25,6 +25,11 @@ function base(over: Partial<WalletInventoryItem> = {}): WalletInventoryItem {
     holding_operation_terminal_at: null,
     holding_lease_role: null,
     holding_operation_type: null,
+    money_mode: "FULL",
+    allow_external_receive: true,
+    allow_external_send: true,
+    allow_internal_move: true,
+    row_version: 1,
     ...over,
   } as WalletInventoryItem;
 }
@@ -41,6 +46,11 @@ describe("walletHoldCauseText", () => {
         state: "PINNED",
         holding_operation_id: "4fc07a73-aaaa-bbbb-cccc-dddddddddddd",
         holding_operation_type: "RECEIVE_EXTERNAL",
+        money_mode: "FULL",
+        allow_external_receive: true,
+        allow_external_send: true,
+        allow_internal_move: true,
+        row_version: 1,
         holding_operation_status: "AWAITING_REDEMPTION",
       }),
     );
@@ -61,6 +71,11 @@ describe("WalletHoldCause", () => {
             state: "PINNED",
             holding_operation_id: "op-1",
             holding_operation_type: "SEND_EXTERNAL",
+            money_mode: "FULL",
+            allow_external_receive: true,
+            allow_external_send: true,
+            allow_internal_move: true,
+            row_version: 1,
           })}
         />
       </MemoryRouter>,

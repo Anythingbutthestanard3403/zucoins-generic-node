@@ -269,8 +269,13 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
       try {
         // Commit wallet on the pool so vault.seal (separate connection) can see FK target.
         await deps.pool.query(
-          `INSERT INTO wallets (id, node_id, public_key, key_origin, state)
-           VALUES ($1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE')`,
+          `INSERT INTO wallets (
+             id, node_id, public_key, key_origin, state,
+             allow_external_receive, allow_external_send, allow_internal_move, money_mode
+           ) VALUES (
+             $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
+             true, true, true, 'FULL'
+           )`,
           [walletId, nodeId, publicKey],
         );
         await deps.vault.seal(
@@ -1057,7 +1062,7 @@ async function main(): Promise<void> {
   }
 
   const shutdownRegistry = createShutdownRegistry();
-  // Signing-only: general drain (boot token, runUnderLeadership, backup) must not
+  // Signing-only: general shutdown work (boot token, runUnderLeadership, backup) must not
   // latch P0 signer_loss (ZTR-1144 dual-FAIL D2).
   signerInFlightAmbiguousReading = () =>
     !readiness.core.snapshot().leadershipLockHeld &&
@@ -1502,7 +1507,7 @@ async function main(): Promise<void> {
           const message =
             `APPROVED external sends cannot form: signer deps unavailable ` +
             `(count=${info.approvedCount}). Arm NODE_IDENTITY sealed-store signer and hold ` +
-            `leadership; until then payouts stay APPROVED without forming.`;
+            `leadership; until then APPROVED sends stay queued without forming.`;
           logger.error(`node: operator-alert signal=approved_send_signer_unavailable severity=P1 ${message}`);
           const wh = custodyAlertChannels.webhook;
           if (wh !== undefined) {
@@ -1552,7 +1557,7 @@ async function main(): Promise<void> {
         // ZTR-1162: stamp readiness on every money-path gateway read outcome.
         readGatewayAction: observedGatewayRead,
         runUnderLeadership: (work) => stamped.runUnderLeadership(work),
-        // Drain-track only. Real signUnderLease bodies auto-enter signingInflightCount
+        // Inflight-track only. Real signUnderLease bodies auto-enter signingInflightCount
         // via the registry's freeze-on-first setSigningInflightTracker (ZTR-1144 D2).
         // Binding money ticks to authority.trackSigningInflight falsely P0'd signer_loss.
         trackSigningInflight: (work) => shutdownRegistry.trackInflight(work),

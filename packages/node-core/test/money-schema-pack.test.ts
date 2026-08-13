@@ -320,7 +320,8 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
       "operations-landed-attention-clear-backfill",
     );
     expect(clearIdx).toBeGreaterThan(opsIdx);
-    expect(clearIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    // Append-only pack: later slices (e.g. wallet-money-capability) may follow.
+    expect(clearIdx).toBeLessThan(MONEY_SCHEMA_PACK_ORDER.length);
     const files = loadMoneySchemaMigrations();
     expect(files[clearIdx]!.sql).toContain("attention_required = false");
     expect(files[clearIdx]!.sql).toContain("'RECEIVE_LANDED'");
@@ -374,6 +375,22 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[reqIdx]!.sql).toMatch(/CREATE TABLE integration_requests\b/);
     expect(files[reqIdx]!.sql).toContain("claim_token_hash");
     expect(files[reqIdx]!.sql).toContain("integration_requests_status_consistency");
+  });
+
+  it("pack lands wallet-money-capability after custody-eligibility (ZTR-1267)", () => {
+    const custodyIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("custody-eligibility");
+    const capIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("wallet-money-capability");
+    expect(custodyIdx).toBeGreaterThanOrEqual(0);
+    expect(capIdx).toBeGreaterThan(custodyIdx);
+    // Appended at end — after the last backfill slice.
+    expect(capIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[capIdx]!.sql).toContain("allow_external_receive");
+    expect(files[capIdx]!.sql).toContain("allow_external_send");
+    expect(files[capIdx]!.sql).toContain("allow_internal_move");
+    expect(files[capIdx]!.sql).toContain("money_mode");
+    expect(files[capIdx]!.sql).toContain("wallets_money_mode_flags_consistent");
+    expect(files[capIdx]!.sql).toContain("DEFAULT 'FULL'");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

@@ -70,8 +70,8 @@ const GET_ACTIVE_SQL = `SELECT id::text AS id, name, created_at, retired_at
 const GENESIS_SQL = `SELECT id::text AS id
   FROM implementers
   WHERE retired_at IS NULL
-  ORDER BY created_at ASC, id ASC
-  LIMIT 1`; // contract-allow:order:frozen-sql-text
+  ORDER BY created_at ASC, id ASC /* contract-allow:order:frozen-sql-text */
+  LIMIT 1`;
 
 // Insert implementer + audit in one statement (both-or-neither).
 const CREATE_SQL = `WITH inserted AS (

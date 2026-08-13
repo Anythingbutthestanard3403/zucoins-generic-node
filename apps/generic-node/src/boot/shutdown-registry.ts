@@ -130,7 +130,7 @@ export interface ShutdownRegistry {
   readonly inflightCount: number;
   /**
    * Test/inspection + metrics: unsettled promises that entered via the signing
-   * chokepoint (signUnderLease → authority.trackSigningInflight). General drain
+   * chokepoint (signUnderLease → authority.trackSigningInflight). General shutdown
    * work (runUnderLeadership, backup, boot token) is NOT counted here — ZTR-1144 D2.
    */
   readonly signingInflightCount: number;
@@ -470,7 +470,7 @@ export function createShutdownRegistry(): ShutdownRegistry {
   // that uses this registry's authority latch is observed in the inflight set
   // without caller runUnderLeadership / trackInflight memory. Also stamps the
   // signing-only set used by gn_signer_in_flight_ambiguous (ZTR-1144 D2) — general
-  // drain work must not enter this set.
+  // non-signing work must not enter this set.
   authority.setSigningInflightTracker((work) => {
     const waitable = trackWaitable(work);
     signingInflight.add(waitable);

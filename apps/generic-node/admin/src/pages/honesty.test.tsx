@@ -70,7 +70,8 @@ describe("admin SPA honesty", () => {
       next_cursor: null,
     }), { status: 200 })));
     renderPage(<AuditPage />);
-    expect(await screen.findByText("wallet.inspected")).toBeInTheDocument();
+    // Action is humanized in the cell; wire code remains on title for operators.
+    expect(await screen.findByTitle("wallet.inspected")).toBeInTheDocument();
     expect(screen.getByText("wallet-1")).toBeInTheDocument();
   });
 

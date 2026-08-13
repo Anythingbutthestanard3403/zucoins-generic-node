@@ -218,6 +218,11 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
                 holding_operation_terminal_at: null,
                 holding_lease_role: null,
                 holding_operation_type: null,
+                money_mode: "FULL",
+                allow_external_receive: true,
+                allow_external_send: true,
+                allow_internal_move: true,
+                row_version: 1,
               },
               {
                 wallet_id: "w2",
@@ -233,6 +238,11 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
                 holding_operation_terminal_at: null,
                 holding_lease_role: null,
                 holding_operation_type: null,
+                money_mode: "FULL",
+                allow_external_receive: true,
+                allow_external_send: true,
+                allow_internal_move: true,
+                row_version: 1,
               },
             ],
             has_more: false,
@@ -248,7 +258,8 @@ describe("RecoveryCeremonyPage (Mode A)", () => {
     renderPage();
     fireEvent.click(screen.getByText(/4\. Verify result/));
 
-    expect(await screen.findByText("Verified")).toBeInTheDocument();
+    // Status appears on the step summary and the result card (strict-mode multi-match).
+    expect((await screen.findAllByText("Verified")).length).toBeGreaterThan(0);
     expect(screen.getByText("Born-blocked")).toBeInTheDocument();
     expect(screen.getByText(/≥1 recovery_verified/i)).toBeInTheDocument();
   });

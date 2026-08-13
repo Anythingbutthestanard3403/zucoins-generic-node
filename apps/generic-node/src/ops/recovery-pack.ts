@@ -460,7 +460,7 @@ function buildKeyboardWalks(): readonly string[] {
   }
 
   // Multi-column stitches: operators type whole columns left-to-right
-  // (1QAZ2WSX3EDC…) or reverse-column (ZAQ1XSW2…) or reverse column-order.
+  // (1QAZ2WSX3EDC…) or reverse-column (ZAQ1XSW2…) or reverse column sequence.
   const colVariants: readonly (readonly string[])[] = [
     columns,
     columns.map((col) => [...col].reverse().join("")),
@@ -472,7 +472,7 @@ function buildKeyboardWalks(): readonly string[] {
         acc += cols[end]!;
         add(acc);
       }
-      // Reverse column-order stitch from this start.
+      // Reverse column-sequence stitch from this start.
       let racc = "";
       for (let end = start; end >= 0; end--) {
         racc += cols[end]!;

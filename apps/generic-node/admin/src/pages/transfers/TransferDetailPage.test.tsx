@@ -161,7 +161,7 @@ describe("TransferDetailPage approve happy path", () => {
         ([u, i]) => String(u).includes("/approve") && (i as RequestInit | undefined)?.method === "POST",
       ),
     ).toBe(true);
-    // Polled status surface (may appear more than once via StatusTag)
-    expect(screen.getAllByText("APPROVED").length).toBeGreaterThan(0);
+    // Polled status surface uses humanized labels (ZTR-1262); wire remains on data-testid.
+    expect(screen.getAllByTestId("status-tag-approved").length).toBeGreaterThan(0);
   });
 });

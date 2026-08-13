@@ -291,12 +291,12 @@ describe("the submit/sign call-site class is enumerated from source", () => {
     ]);
   });
 
-  it("exactly one submit egress exists, and the read path is classified apart from it", () => {
+  it("submit egresses are the single-shot path plus identical-byte redelivery; read is classified apart", () => {
     expect(
       SUBMIT_CALL_SITE_CATALOGUE.filter((site) => site.role === "SUBMIT_EGRESS").map(
         (site) => site.file,
       ),
-    ).toEqual(["gateway/submit.ts"]);
+    ).toEqual(["gateway/identical-byte-redelivery.ts", "gateway/submit.ts"]);
     expect(
       SUBMIT_CALL_SITE_CATALOGUE.filter((site) => site.role === "READ_NOT_SUBMIT").map(
         (site) => site.file,

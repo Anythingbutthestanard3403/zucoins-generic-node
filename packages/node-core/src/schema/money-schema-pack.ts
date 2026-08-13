@@ -199,7 +199,7 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // operations.attention_reason (+ send_operations) text → attention_reason enum (ZTR-1147).
   // Value-preserving USING cast after free-text purge for already-applied DBs. Appended.
   "attention-reason-enum",
-  // Dual-control policy durable home (ZTR-1214). Pins pack order after node_settings +
+  // Dual-control policy durable home (ZTR-1214). Pins pack sequence after node_settings +
   // audit_log; does not seed a default (boot env remains pre-mutation truth). Appended.
   "dual-control-policy",
   // approval_method += AUTO_POLICY (ZTR-1233). Own slice so ADD VALUE commits before
@@ -217,6 +217,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   "operations-expired-terminal-at-backfill",
   // ZTR-1250: clear sticky attention on already-landed ops. Appended only.
   "operations-landed-attention-clear-backfill",
+  // ZTR-1267: per-wallet money capability columns on wallets (allow flags + money_mode +
+  // row_version). Pure ALTER on custody-eligibility wallets; defaults FULL. Appended only.
+  "wallet-money-capability",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

@@ -356,11 +356,16 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     const spendBefore = await queryWindowSpend(sql, IMPLEMENTER_ID, RULE.window_hours);
     expect(spendBefore).toBe("2");
 
+    // Wall-clock nowMs: WINDOW_SPEND_SQL filters consumed_at against SQL now(), and
+    // commitAutoApproval stamps consumed_at from nowMs. A frozen epoch (e.g. 2026-08-01)
+    // lands outside the rolling window so prior AUTO_POLICY rows vanish from spend.
+    const nowMs = () => Date.now();
+
     // Candidate amount 1 → projected 3 == cap → approve
     const { operationId: okOp } = await seedCreated("1");
     const ok = await commitAutoApproval(
       { operationId: okOp, rule: RULE },
-      { sql, withTx, nowMs: () => Date.parse("2026-08-01T00:00:00.000Z") },
+      { sql, withTx, nowMs },
     );
     expect(ok.decision).toBe("approve");
     if (ok.decision !== "approve") return;
@@ -376,7 +381,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     const { operationId: overOp } = await seedCreated("1");
     const over = await commitAutoApproval(
       { operationId: overOp, rule: RULE },
-      { sql, withTx, nowMs: () => Date.parse("2026-08-01T00:00:00.000Z") },
+      { sql, withTx, nowMs },
     );
     expect(over).toEqual({ decision: "fall_through", reason: "window_cap" });
     const statusOver = psqlMust(
@@ -529,7 +534,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       {
         sql,
         withTx: sabotagedWithTx,
-        nowMs: () => Date.parse("2026-08-01T00:00:00.000Z"),
+        nowMs: () => Date.now(),
       },
     );
     expect(result).toEqual({ decision: "fall_through", reason: "cas_miss" });
@@ -574,7 +579,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       {
         sql,
         withTx,
-        nowMs: () => Date.parse("2026-08-01T00:00:00.000Z"),
+        nowMs: () => Date.now(),
       },
     );
 
@@ -760,7 +765,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
 
     const result = await commitAutoApproval(
       { operationId: op, rule },
-      { sql, withTx, nowMs: () => Date.parse("2026-08-01T00:00:00.000Z") },
+      { sql, withTx, nowMs: () => Date.now() },
     );
     expect(result.decision).toBe("approve");
 
@@ -845,7 +850,8 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     // Two independent TX factories — not one shared client / queue.
     const sessionA = sessionWithTx(dbUrl);
     const sessionB = sessionWithTx(dbUrl);
-    const nowMs = () => Date.parse("2026-08-01T00:00:00.000Z");
+    // Must match SQL now() used by WINDOW_SPEND_SQL (see cap-boundary comment).
+    const nowMs = () => Date.now();
 
     const [resultA, resultB] = await Promise.all([
       commitAutoApproval(

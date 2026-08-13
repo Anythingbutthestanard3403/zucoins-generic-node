@@ -206,7 +206,7 @@ export const SAFETY_ALERT_RULES: readonly SafetyAlertRuleDefinition[] = [
     citation:
       "Doc 09 §9.1 — operations with attention_required accumulating past bound. P1 (operator backlog before wallet-cap exhaustion)",
     posture:
-      "Page operator. Drain attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.",
+      "Page operator. Clear attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.",
     diagnosticOnly: false,
   },
   {

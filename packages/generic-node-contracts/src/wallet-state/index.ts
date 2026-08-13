@@ -56,3 +56,21 @@ export {
   MATRIX_INVARIANTS,
   walletStateMatrixContract,
 } from "./matrix.js";
+
+// Per-wallet money capability presets (ZTR-1267) — pure flag matrix; no I/O.
+export {
+  WALLET_MONEY_MODES,
+  WALLET_MONEY_CAPABILITY_DEFAULT_MODE,
+  WALLET_MONEY_MODE_FLAGS,
+  isWalletMoneyMode,
+  flagsFromMode,
+  modeFromFlags,
+  isLegalMoneyCapabilityTriple,
+  isEligibleForReceiveAssign,
+  isEligibleForSendSource,
+  isEligibleForMoveParty,
+  isInternalOnlyHub,
+  type WalletMoneyMode,
+  type WalletMoneyCapabilityFlags,
+} from "./money-capability.js";
+

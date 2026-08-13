@@ -292,6 +292,13 @@ export const SUBMIT_CALL_SITE_CATALOGUE: readonly CallSiteRecord[] = [
     countedBy: "gateway client dispatches the injected transport exactly once",
   },
   {
+    file: "gateway/identical-byte-redelivery.ts",
+    token: ".exchange(",
+    occurrences: 1,
+    role: "SUBMIT_EGRESS",
+    countedBy: "ZTR-1243/1244 identical-byte redelivery of already-authorized request bytes",
+  },
+  {
     file: "gateway/read.ts",
     token: ".exchange(",
     occurrences: 1,

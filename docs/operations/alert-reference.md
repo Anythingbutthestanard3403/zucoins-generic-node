@@ -214,7 +214,7 @@ metrics directly are in [`alerts/generic-node.rules.yml`](alerts/generic-node.ru
 
 **Required posture.**
 
-> Page operator. Drain attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.
+> Page operator. Clear attention via admin recovery actions; do not release leases or rebuild. Suppress when DB-truth gauges are unavailable.
 
 ## gateway_read_failure
 

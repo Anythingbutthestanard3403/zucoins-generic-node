@@ -108,7 +108,10 @@ export async function createSqlRestoredInstance(
         );
         for (const section of archive.wallet_sections) {
           await client.query(
-            `INSERT INTO wallets (id, node_id, public_key, key_origin, state) VALUES ($1, $2, $3, $4, 'AVAILABLE') ON CONFLICT DO NOTHING`,
+            `INSERT INTO wallets (
+               id, node_id, public_key, key_origin, state,
+               allow_external_receive, allow_external_send, allow_internal_move, money_mode
+             ) VALUES ($1, $2, $3, $4, 'AVAILABLE', true, true, true, 'FULL') ON CONFLICT DO NOTHING`,
             [section.wallet_id, section.node_id, section.public_key, section.key_origin],
           );
           const v = section.vault;

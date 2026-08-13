@@ -51,6 +51,7 @@ const ELIGIBILITY_FUNCTION = "custody_reject_ineligible_lease";
 const ELIGIBILITY_TRIGGER = "wallet_active_leases_eligibility_guard";
 const CUSTODY_SCHEMA_FILE = "custody-eligibility.sql";
 const CAPABILITY_LEASE_GUARD_SCHEMA_FILE = "wallet-money-capability-lease-guard.sql";
+const MONEY_CAPABILITY_SCHEMA_FILE = "wallet-money-capability.sql";
 
 /** Foundation tables only — never drop shared domains (sha256_hex) or wallets. */
 const FOUNDATION_TABLES_DROP_ORDER = [
@@ -276,6 +277,29 @@ async function walletsHaveMoneyCapabilityColumns(db: SqlExecutor): Promise<boole
   return result.rows[0]?.exists === true;
 }
 
+
+/**
+ * Product RECEIVE/MOVE/SEND SQL (ZTR-1268) SELECTs allow_* columns. Money pack
+ * installs them via wallet-money-capability.sql; PG harnesses that only load
+ * custody + migrateLeaseFoundation otherwise hit ERROR 42703. Apply the pure
+ * column extension (IF NOT EXISTS) whenever wallets exist and columns are
+ * absent — safe on production re-migrate and on custody-only scratch DBs.
+ */
+async function ensureWalletMoneyCapabilityColumns(db: SqlExecutor): Promise<void> {
+  if (!(await tableExists(db, "wallets"))) return;
+  if (await walletsHaveMoneyCapabilityColumns(db)) return;
+  let sql: string;
+  try {
+    sql = readFileSync(resolve(here, "../schema", MONEY_CAPABILITY_SCHEMA_FILE), "utf8");
+  } catch {
+    // Pack slice absent from this tree — leave columns missing; overlay stays gated.
+    return;
+  }
+  for (const stmt of splitSqlStatements(sql)) {
+    await db.query(stmt);
+  }
+}
+
 async function ensureEligibilityGuard(
   db: SqlExecutor,
   _foundationStatements: readonly string[],
@@ -283,6 +307,7 @@ async function ensureEligibilityGuard(
   // Base function + trigger: custody-eligibility.sql. Capability overlay (ZTR-1268)
   // replaces the function body when the pack slice is on disk AND wallets already
   // carry the allow_* columns the overlay body references.
+  await ensureWalletMoneyCapabilityColumns(db);
   const custodyStatements = loadCustodyEligibilityStatements();
   const capabilityStatements = loadCapabilityLeaseGuardStatements();
   const useCapabilityOverlay =

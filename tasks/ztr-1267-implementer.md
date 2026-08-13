@@ -4,7 +4,7 @@
 **Epic:** ZTR-1266  
 **Branch:** `ztr-1267-wallet-money-capability`  
 **Claim run:** `cff73ee1-b646-4ea7-8eca-319ba33fd3c3`  
-**Head SHA (pin after commit):** see git log / PR
+**Head SHA:** `10a266710952d58c04e26d12d6e7bb2d72e94bfb`
 
 ## Scope (this ticket only)
 

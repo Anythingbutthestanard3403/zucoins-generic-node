@@ -48,6 +48,8 @@ export interface SendSourceWalletRecord {
   readonly publicKey: string;
   readonly keyOrigin: "node_generated" | "imported";
   readonly state: SendWalletState;
+  /** Money capability (ZTR-1268). Default true when a fixture omits the column era. */
+  readonly allowExternalSend: boolean;
 }
 
 export interface SendCreateRequest {
@@ -186,9 +188,13 @@ const IDEMPOTENCY_KEY_RE = /^[\x20-\x7E]{16,255}$/;
 // origin conjunct: an imported-origin wallet never sources a node operation.
 // Step 2 requires node-generated AND controlled by this node; a
 // non-AVAILABLE wallet is already committed elsewhere.
+// Money capability (ZTR-1268): allow_external_send must be true.
 export function isSendSourceEligible(wallet: SendSourceWalletRecord, nodeId: string): boolean {
   return (
-    wallet.keyOrigin === "node_generated" && wallet.state === "AVAILABLE" && wallet.nodeId === nodeId
+    wallet.keyOrigin === "node_generated" &&
+    wallet.state === "AVAILABLE" &&
+    wallet.nodeId === nodeId &&
+    wallet.allowExternalSend === true
   );
 }
 
@@ -294,7 +300,11 @@ export async function createExternalSend(
     return { outcome: "REJECTED", code: "source_wallet_not_found" };
   }
   if (!isSendSourceEligible(wallet, request.nodeId)) {
-    return { outcome: "REJECTED", code: "source_wallet_not_eligible" };
+    const detail =
+      wallet.allowExternalSend !== true
+        ? "allow_external_send=false"
+        : undefined;
+    return { outcome: "REJECTED", code: "source_wallet_not_eligible", detail };
   }
 
   // hard gate — source wallet must hold an ACTIVE push subscription.

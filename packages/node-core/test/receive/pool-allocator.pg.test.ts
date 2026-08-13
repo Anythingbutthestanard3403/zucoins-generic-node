@@ -132,7 +132,7 @@ CREATE TABLE receive_release_proofs (
 const applySchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });
@@ -361,6 +361,7 @@ describe("bounded receive-pool allocator (real PG / separate processes)", () => 
     expect(sql).toContain("w.key_origin = 'node_generated'");
     expect(sql).toContain("w.recovery_verified_at IS NOT NULL");
     expect(sql).toContain("w.state = 'AVAILABLE'");
+    expect(sql).toContain("w.allow_external_receive IS TRUE");
     expect(sql).toContain("FROM destinations d");
     expect(sql).toContain("d.state IS DISTINCT FROM 'RETIRED'");
     expect(sql).toContain("FROM receive_release_proofs rrp");

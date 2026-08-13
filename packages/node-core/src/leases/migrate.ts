@@ -44,10 +44,14 @@ const FULL_REQUIRED_COLUMNS = [
 
 const LEGACY_ONLY_COLUMNS = new Set(["wallet_id", "lease_role", "acquired_at"]);
 
-// Single owner: custody-eligibility.sql (ZTR-1169 removed the lease-foundation shadow).
+// Function name lives in custody-eligibility.sql; ZTR-1268 overlays the body with
+// money-capability conjuncts (wallet-money-capability-lease-guard.sql). Prefer the
+// overlay when present so re-migrate never reverts capability gates.
 const ELIGIBILITY_FUNCTION = "custody_reject_ineligible_lease";
 const ELIGIBILITY_TRIGGER = "wallet_active_leases_eligibility_guard";
 const CUSTODY_SCHEMA_FILE = "custody-eligibility.sql";
+const CAPABILITY_LEASE_GUARD_SCHEMA_FILE = "wallet-money-capability-lease-guard.sql";
+const MONEY_CAPABILITY_SCHEMA_FILE = "wallet-money-capability.sql";
 
 /** Foundation tables only — never drop shared domains (sha256_hex) or wallets. */
 const FOUNDATION_TABLES_DROP_ORDER = [
@@ -239,18 +243,86 @@ function loadCustodyEligibilityStatements(): readonly string[] {
   return splitSqlStatements(sql);
 }
 
+function loadCapabilityLeaseGuardStatements(): readonly string[] | null {
+  try {
+    const sql = readFileSync(
+      resolve(here, "../schema", CAPABILITY_LEASE_GUARD_SCHEMA_FILE),
+      "utf8",
+    );
+    return splitSqlStatements(sql);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Capability overlay references wallets.allow_external_* / allow_internal_move.
+ * Those columns land in wallet-money-capability.sql (money pack), which many
+ * PG harnesses never apply — they only run migrateLeaseFoundation on top of
+ * custody-eligibility wallets. Installing the overlay without the columns
+ * yields ERROR 42703 at lease claim time. Prefer overlay only when the column
+ * surface is present; otherwise keep the custody base body.
+ */
+async function walletsHaveMoneyCapabilityColumns(db: SqlExecutor): Promise<boolean> {
+  if (!(await tableExists(db, "wallets"))) return false;
+  const result = await db.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'wallets'
+          AND column_name = 'allow_external_receive'
+     ) AS exists`,
+  );
+  return result.rows[0]?.exists === true;
+}
+
+
+/**
+ * Product RECEIVE/MOVE/SEND SQL (ZTR-1268) SELECTs allow_* columns. Money pack
+ * installs them via wallet-money-capability.sql; PG harnesses that only load
+ * custody + migrateLeaseFoundation otherwise hit ERROR 42703. Apply the pure
+ * column extension (IF NOT EXISTS) whenever wallets exist and columns are
+ * absent — safe on production re-migrate and on custody-only scratch DBs.
+ */
+async function ensureWalletMoneyCapabilityColumns(db: SqlExecutor): Promise<void> {
+  if (!(await tableExists(db, "wallets"))) return;
+  if (await walletsHaveMoneyCapabilityColumns(db)) return;
+  let sql: string;
+  try {
+    sql = readFileSync(resolve(here, "../schema", MONEY_CAPABILITY_SCHEMA_FILE), "utf8");
+  } catch {
+    // Pack slice absent from this tree — leave columns missing; overlay stays gated.
+    return;
+  }
+  for (const stmt of splitSqlStatements(sql)) {
+    await db.query(stmt);
+  }
+}
+
 async function ensureEligibilityGuard(
   db: SqlExecutor,
   _foundationStatements: readonly string[],
 ): Promise<void> {
-  // Eligibility lives in custody-eligibility.sql only (ZTR-1169). Foundation SQL no
-  // longer carries a second copy — load the custody statements explicitly.
+  // Base function + trigger: custody-eligibility.sql. Capability overlay (ZTR-1268)
+  // replaces the function body when the pack slice is on disk AND wallets already
+  // carry the allow_* columns the overlay body references.
+  await ensureWalletMoneyCapabilityColumns(db);
   const custodyStatements = loadCustodyEligibilityStatements();
-  const fnStmt = pickStatement(
-    custodyStatements,
-    /CREATE FUNCTION custody_reject_ineligible_lease/i,
-    ELIGIBILITY_FUNCTION,
-  );
+  const capabilityStatements = loadCapabilityLeaseGuardStatements();
+  const useCapabilityOverlay =
+    capabilityStatements !== null && (await walletsHaveMoneyCapabilityColumns(db));
+  const fnSource = useCapabilityOverlay
+    ? pickStatement(
+        capabilityStatements!,
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
+        ELIGIBILITY_FUNCTION,
+      )
+    : pickStatement(
+        custodyStatements,
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+custody_reject_ineligible_lease/i,
+        ELIGIBILITY_FUNCTION,
+      );
   const trgStmt = pickStatement(
     custodyStatements,
     /CREATE TRIGGER wallet_active_leases_eligibility_guard/i,
@@ -260,7 +332,10 @@ async function ensureEligibilityGuard(
   // Always CREATE OR REPLACE the function body so receive-gate repairs land on
   // re-migrate even when the trigger name already exists. Trigger is recreated
   // only when missing to avoid DROP races on a live claim path.
-  const replaceFn = fnStmt.replace(/^CREATE\s+FUNCTION/i, "CREATE OR REPLACE FUNCTION");
+  const replaceFn = fnSource.replace(
+    /^CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i,
+    "CREATE OR REPLACE FUNCTION",
+  );
 
   try {
     await db.query(replaceFn);

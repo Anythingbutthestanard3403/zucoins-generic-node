@@ -21,6 +21,7 @@ describe("createPoolArmTxFactory / createPoolArmWalletGate", () => {
                 wallet_id: "w1",
                 state: "PINNED",
                 recovery_verified_at: "2026-01-15T10:00:00.000Z",
+                allow_external_receive: true,
               },
             ],
           };
@@ -81,6 +82,7 @@ describe("createPoolArmTxFactory / createPoolArmWalletGate", () => {
                 wallet_id: "w1",
                 state: "PINNED",
                 recovery_verified_at: "2026-01-15T10:00:00.000Z",
+                allow_external_receive: true,
               },
             ],
           };
@@ -124,6 +126,7 @@ describe("createPoolArmWalletGate requireCommitSession binds sql tx", () => {
                 wallet_id: "w1",
                 state: "PINNED",
                 recovery_verified_at: "2026-01-15T10:00:00.000Z",
+                allow_external_receive: true,
               },
             ],
           };

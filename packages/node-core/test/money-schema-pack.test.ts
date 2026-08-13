@@ -382,8 +382,6 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     const capIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("wallet-money-capability");
     expect(custodyIdx).toBeGreaterThanOrEqual(0);
     expect(capIdx).toBeGreaterThan(custodyIdx);
-    // Appended at end — after the last backfill slice.
-    expect(capIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[capIdx]!.sql).toContain("allow_external_receive");
     expect(files[capIdx]!.sql).toContain("allow_external_send");
@@ -391,6 +389,19 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[capIdx]!.sql).toContain("money_mode");
     expect(files[capIdx]!.sql).toContain("wallets_money_mode_flags_consistent");
     expect(files[capIdx]!.sql).toContain("DEFAULT 'FULL'");
+  });
+
+  it("pack lands wallet-money-capability-lease-guard after capability columns (ZTR-1268)", () => {
+    const capIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("wallet-money-capability");
+    const guardIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("wallet-money-capability-lease-guard");
+    expect(capIdx).toBeGreaterThanOrEqual(0);
+    expect(guardIdx).toBeGreaterThan(capIdx);
+    expect(guardIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[guardIdx]!.sql).toContain("CREATE OR REPLACE FUNCTION custody_reject_ineligible_lease");
+    expect(files[guardIdx]!.sql).toContain("CUSTODY_LEASE_RECEIVE_CAPABILITY_REJECTED");
+    expect(files[guardIdx]!.sql).toContain("CUSTODY_LEASE_SEND_CAPABILITY_REJECTED");
+    expect(files[guardIdx]!.sql).toContain("CUSTODY_LEASE_MOVE_CAPABILITY_REJECTED");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

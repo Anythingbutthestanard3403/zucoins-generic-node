@@ -66,7 +66,8 @@ export const SQLSTATE_UNIQUE_VIOLATION = "23505";
 
 export const STATEMENTS = {
   SELECT_SOURCE_WALLET:
-    `SELECT id AS wallet_id, node_id, public_key, key_origin, state ` +
+    `SELECT id AS wallet_id, node_id, public_key, key_origin, state, ` +
+    `allow_internal_move ` +
     `FROM wallets WHERE id = $1`,
 
   // destinations ⨝ wallets — destination_id is the public handle; wallet facts come from
@@ -74,7 +75,8 @@ export const STATEMENTS = {
   SELECT_DESTINATION:
     `SELECT d.id AS destination_id, d.node_id, d.wallet_id, d.state AS destination_state, ` +
     `w.public_key, w.key_origin, w.state AS wallet_state, ` +
-    `w.recovery_verified_at::text AS recovery_verified_at ` +
+    `w.recovery_verified_at::text AS recovery_verified_at, ` +
+    `w.allow_internal_move ` +
     `FROM destinations d JOIN wallets w ON w.id = d.wallet_id WHERE d.id = $1`,
 
   SELECT_ACTIVE_LEASE: `SELECT 1 FROM wallet_active_leases WHERE wallet_id = $1`,
@@ -189,6 +191,7 @@ interface WalletRow {
   readonly public_key: string;
   readonly key_origin: string;
   readonly state: string;
+  readonly allow_internal_move: boolean | string;
 }
 
 interface DestinationRow {
@@ -200,6 +203,7 @@ interface DestinationRow {
   readonly key_origin: string;
   readonly wallet_state: string;
   readonly recovery_verified_at: string | null;
+  readonly allow_internal_move: boolean | string;
 }
 
 interface OperationRow {
@@ -242,6 +246,10 @@ interface ReadProjectionRow {
 const isoOrNull = (value: string | number | null): string | null =>
   value === null ? null : new Date(Number(value)).toISOString();
 
+function pgBool(value: unknown): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
 function toSource(row: WalletRow): MoveSourceWalletRecord {
   return {
     walletId: row.wallet_id,
@@ -249,6 +257,7 @@ function toSource(row: WalletRow): MoveSourceWalletRecord {
     publicKey: row.public_key,
     keyOrigin: row.key_origin as MoveSourceWalletRecord["keyOrigin"],
     state: row.state as MoveWalletState,
+    allowInternalMove: pgBool(row.allow_internal_move),
   };
 }
 
@@ -262,11 +271,8 @@ function toDestination(row: DestinationRow): MoveDestinationRecord {
     walletState: row.wallet_state as MoveWalletState,
     destinationState: row.destination_state as MoveDestinationState,
     recoveryVerifiedAt: row.recovery_verified_at,
+    allowInternalMove: pgBool(row.allow_internal_move),
   };
-}
-
-function pgBool(value: unknown): boolean {
-  return value === true || value === "t" || value === "true" || value === "1";
 }
 
 function toStored(row: OperationRow): StoredMoveOperation {

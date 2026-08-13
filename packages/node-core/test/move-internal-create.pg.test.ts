@@ -115,6 +115,7 @@ const prerequisiteDdl = ((): string => {
 })();
 
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
+const MONEY_CAPABILITY_DDL = readSchema("wallet-money-capability.sql");
 
 // operations.sql redeclares domains/enums already present — strip CREATE DOMAIN / TYPE that
 // collide when applied after base-enums-domains + custody.
@@ -382,6 +383,7 @@ describeIfPg("MOVE_INTERNAL admission — real frozen DDL against real PostgreSQ
     psqlMust(MAINTENANCE_DB, `CREATE DATABASE ${scratchDb}`);
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
+    applyDdl(scratchDb, MONEY_CAPABILITY_DDL);
     psqlMust(scratchDb, seedNode());
     psqlMust(scratchDb, seedImplementer());
     applyDdl(scratchDb, operationsDdl);

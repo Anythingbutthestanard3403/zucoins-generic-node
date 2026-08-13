@@ -125,6 +125,7 @@ function toMoveRecord(d: DestinationRecord, facts: DestinationWalletFacts) {
     walletState: facts.walletState,
     destinationState: d.state,
     recoveryVerifiedAt: facts.recoveryVerifiedAt,
+    allowInternalMove: true,
   };
 }
 

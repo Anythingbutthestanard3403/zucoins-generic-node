@@ -49,6 +49,7 @@ const AVAILABLE_SOURCE: MoveSourceWalletRecord = {
   publicKey: SOURCE_PUBKEY,
   keyOrigin: "node_generated",
   state: "AVAILABLE",
+  allowInternalMove: true,
 };
 
 const ELIGIBLE_DESTINATION: MoveDestinationRecord = {
@@ -60,6 +61,7 @@ const ELIGIBLE_DESTINATION: MoveDestinationRecord = {
   walletState: "AVAILABLE",
   destinationState: "BLESSED",
   recoveryVerifiedAt: "2026-07-01T00:00:00.000Z",
+  allowInternalMove: true,
 };
 
 const request = (overrides: Partial<MoveCreateRequest> = {}): MoveCreateRequest => ({
@@ -421,6 +423,34 @@ describe("createInternalMove — admission", () => {
       outcome: "REJECTED",
       code: "source_wallet_not_eligible",
     });
+  });
+
+  it("rejects source when allow_internal_move is false (ZTR-1268)", async () => {
+    const store = seededStore();
+    store.sources.set(SOURCE_WALLET_ID, {
+      ...AVAILABLE_SOURCE,
+      allowInternalMove: false,
+    });
+    expect(await admit(store)).toMatchObject({
+      outcome: "REJECTED",
+      code: "source_wallet_not_eligible",
+      detail: "allow_internal_move=false",
+    });
+    expect(store.insertCalls).toBe(0);
+  });
+
+  it("rejects destination when allow_internal_move is false (ZTR-1268)", async () => {
+    const store = seededStore();
+    store.destinations.set(DESTINATION_ID, {
+      ...ELIGIBLE_DESTINATION,
+      allowInternalMove: false,
+    });
+    expect(await admit(store)).toMatchObject({
+      outcome: "REJECTED",
+      code: "destination_not_eligible",
+      detail: "allow_internal_move=false",
+    });
+    expect(store.insertCalls).toBe(0);
   });
 
   it("returns 409 wallet_busy when source or destination already has an active lease", async () => {

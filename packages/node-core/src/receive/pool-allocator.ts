@@ -110,6 +110,7 @@ SELECT w.id
  WHERE w.key_origin = 'node_generated'
    AND w.recovery_verified_at IS NOT NULL
    AND w.state = 'AVAILABLE'
+   AND w.allow_external_receive IS TRUE
    AND NOT EXISTS (
          SELECT 1
            FROM destinations d

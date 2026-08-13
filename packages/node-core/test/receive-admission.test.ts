@@ -255,6 +255,8 @@ const blessedDestinationRow = (overrides: Record<string, unknown> = {}): Record<
   public_key: "pk-dest",
   key_origin: "node_generated",
   wallet_state: "AVAILABLE",
+  allow_external_receive: true,
+  allow_internal_move: true,
   recovery_verified_at: "2023-11-14T22:13:20.000Z",
   ...overrides,
 });
@@ -266,6 +268,8 @@ function eligibleWallet(overrides: Partial<ReceiveWalletRecord> = {}): ReceiveWa
     keyOrigin: "node_generated",
     state: "AVAILABLE",
     recoveryVerifiedAt: 1700000000000,
+    allowExternalReceive: true,
+    allowInternalMove: true,
     ...overrides,
   };
 }
@@ -388,6 +392,7 @@ describe("isReceiveEligible — receive-pool predicate (blessing-free)", () => {
     ["QUARANTINED wallet", { state: "QUARANTINED" as const }],
     ["RETIRED wallet", { state: "RETIRED" as const }],
     ["wallet without recovery verification", { recoveryVerifiedAt: null }],
+    ["wallet with allow_external_receive false", { allowExternalReceive: false }],
   ])("rejects %s", (_label, overrides) => {
     expect(isReceiveEligible(eligibleWallet(overrides))).toBe(false);
   });
@@ -409,6 +414,19 @@ describe("isMoveDestinationEligible — step 3 four-conjunct predicate", () => {
     expect(
       isMoveDestinationEligible(
         destination({ wallet: eligibleWallet({ recoveryVerifiedAt: null }) }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects when allow_internal_move is false even if external receive is allowed (ZTR-1268)", () => {
+    expect(
+      isMoveDestinationEligible(
+        destination({
+          wallet: eligibleWallet({
+            allowExternalReceive: true,
+            allowInternalMove: false,
+          }),
+        }),
       ),
     ).toBe(false);
   });

@@ -104,6 +104,7 @@ interface WalletRow {
   readonly public_key: string;
   readonly key_origin: string;
   readonly state: string;
+  readonly allow_internal_move: boolean | string;
 }
 
 interface DestinationRow {
@@ -115,6 +116,7 @@ interface DestinationRow {
   readonly key_origin: string;
   readonly wallet_state: string;
   readonly recovery_verified_at: string | null;
+  readonly allow_internal_move: boolean | string;
 }
 
 interface ChildRow {
@@ -133,6 +135,10 @@ interface ChildRow {
   readonly created_at_ms: string | number;
 }
 
+function pgBool(value: unknown): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
 function toSource(row: WalletRow): MoveSourceWalletRecord {
   return {
     walletId: row.wallet_id,
@@ -140,6 +146,7 @@ function toSource(row: WalletRow): MoveSourceWalletRecord {
     publicKey: row.public_key,
     keyOrigin: row.key_origin as MoveSourceWalletRecord["keyOrigin"],
     state: row.state as MoveWalletState,
+    allowInternalMove: pgBool(row.allow_internal_move),
   };
 }
 
@@ -153,6 +160,7 @@ function toDestination(row: DestinationRow): MoveDestinationRecord {
     walletState: row.wallet_state as MoveWalletState,
     destinationState: row.destination_state as MoveDestinationState,
     recoveryVerifiedAt: row.recovery_verified_at,
+    allowInternalMove: pgBool(row.allow_internal_move),
   };
 }
 

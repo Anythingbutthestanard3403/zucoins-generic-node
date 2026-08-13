@@ -145,6 +145,7 @@ class MemGate implements ArmWalletGate {
       walletId: WALLET,
       state: "PINNED",
       recoveryVerifiedAt: FIXED,
+      allowExternalReceive: true,
     };
     return body({
       readStanding: async () => standing,

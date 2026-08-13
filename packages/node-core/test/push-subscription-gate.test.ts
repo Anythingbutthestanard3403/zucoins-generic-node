@@ -55,6 +55,7 @@ const AVAILABLE_SOURCE: SendSourceWalletRecord = {
   publicKey: SOURCE_PUBKEY,
   keyOrigin: "node_generated",
   state: "AVAILABLE",
+  allowExternalSend: true,
 };
 
 const baseRequest = (overrides: Partial<SendCreateRequest> = {}): SendCreateRequest => ({

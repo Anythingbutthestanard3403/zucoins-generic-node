@@ -73,6 +73,7 @@ const AVAILABLE_SOURCE: SendSourceWalletRecord = {
   publicKey: SOURCE_PUBKEY,
   keyOrigin: "node_generated",
   state: "AVAILABLE",
+  allowExternalSend: true,
 };
 
 const request = (overrides: Partial<SendCreateRequest> = {}): SendCreateRequest => ({
@@ -419,6 +420,21 @@ describe("source and destination gates (operation flows step 2)", () => {
         code: "source_wallet_not_eligible",
       });
     }
+  });
+
+  it("rejects source when allow_external_send is false (ZTR-1268)", async () => {
+    const store = readyStore();
+    store.wallets.set(SOURCE_WALLET_ID, {
+      ...AVAILABLE_SOURCE,
+      allowExternalSend: false,
+    });
+    const outcome = await create(store);
+    expect(outcome).toMatchObject({
+      outcome: "REJECTED",
+      code: "source_wallet_not_eligible",
+      detail: "allow_external_send=false",
+    });
+    expect(store.operations.size).toBe(0);
   });
 
   it("rejects a wallet whose stored public key cannot be bound into the signed tuple", async () => {

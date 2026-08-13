@@ -144,7 +144,7 @@ export const STATEMENTS = {
   SELECT_BY_OPERATION_ID: `SELECT o.${OPERATION_COLUMNS.join(
     ", o.",
   )}, o.completed_at, o.response_status, o.response_body, ${SELECT_ARTIFACT_COLUMNS} FROM send_operations o JOIN send_operation_expected_artifacts a ON a.operation_id = o.operation_id WHERE o.operation_id = $1`,
-  SELECT_SOURCE_WALLET: `SELECT id AS wallet_id, node_id, public_key, key_origin, state FROM wallets WHERE id = $1`,
+  SELECT_SOURCE_WALLET: `SELECT id AS wallet_id, node_id, public_key, key_origin, state, allow_external_send FROM wallets WHERE id = $1`,
   // Step 2: the CURRENT blessed internal set, re-read per request —
   // never a cached or precomputed list.
   // wallets PK is `id`; destinations.wallet_id FKs wallets(id).
@@ -193,6 +193,7 @@ interface WalletRow {
   readonly public_key: string;
   readonly key_origin: string;
   readonly state: string;
+  readonly allow_external_send: boolean | string;
 }
 
 const epochMs = (value: string | Date): number =>
@@ -240,6 +241,10 @@ function toArtifact(operationId: string, row: ArtifactRow): SendExpectedArtifact
   };
 }
 
+function pgBool(value: unknown): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
 function toWallet(row: WalletRow): SendSourceWalletRecord {
   return {
     walletId: row.wallet_id,
@@ -247,6 +252,7 @@ function toWallet(row: WalletRow): SendSourceWalletRecord {
     publicKey: row.public_key,
     keyOrigin: row.key_origin === "imported" ? "imported" : "node_generated",
     state: row.state as SendWalletState,
+    allowExternalSend: pgBool(row.allow_external_send),
   };
 }
 

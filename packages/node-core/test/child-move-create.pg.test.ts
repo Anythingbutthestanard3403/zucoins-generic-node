@@ -209,6 +209,7 @@ const prerequisiteDdl = ((): string => {
 })();
 
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
+const MONEY_CAPABILITY_DDL = readSchema("wallet-money-capability.sql");
 const operationsDdl = ((): string => {
   const raw = readSchema("operations.sql");
   const start = raw.indexOf("CREATE TABLE operations");
@@ -298,6 +299,7 @@ describeIfPg("createChildMoveAtomically — real PostgreSQL", () => {
     psqlMust(MAINTENANCE_DB, `CREATE DATABASE ${scratchDb}`);
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
+    applyDdl(scratchDb, MONEY_CAPABILITY_DDL);
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);

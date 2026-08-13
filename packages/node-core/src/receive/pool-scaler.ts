@@ -108,9 +108,11 @@ export const POOL_SCALER_STATEMENTS = {
 
   /**
    * `available_wallet_count` (B-04): only recovery-verified AVAILABLE node-generated
-   * wallets. The three conjuncts are the allocator's SELECT_ELIGIBLE_WALLET predicate
-   * verbatim, so what the scaler calls "available" is exactly what the allocator can take —
-   * the pg suite asserts that equivalence against a live pool rather than by text match.
+   * wallets with allow_external_receive. Conjuncts match the allocator's
+   * SELECT_ELIGIBLE_WALLET predicate (minus destination/release exclusions that the
+   * scaler historically shared), so what the scaler calls "available" tracks what the
+   * allocator can take — the pg suite asserts that equivalence against a live pool
+   * rather than by text match.
    * This count is a METRIC only: RECEIVE_QUEUE_CAP equals POOL_CAP_TOTAL mints against the cap count, never against this one,
    * because a keypair is minted recovery-UNVERIFIED and only the ceremony makes it
    * available. Minting can never close an AVAILABLE deficit.
@@ -121,6 +123,7 @@ SELECT count(*)::int AS available_count
  WHERE w.key_origin = 'node_generated'
    AND w.recovery_verified_at IS NOT NULL
    AND w.state = 'AVAILABLE'
+   AND w.allow_external_receive IS TRUE
    AND NOT EXISTS (
          SELECT 1
            FROM receive_release_proofs rrp

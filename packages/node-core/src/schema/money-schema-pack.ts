@@ -220,6 +220,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1267: per-wallet money capability columns on wallets (allow flags + money_mode +
   // row_version). Pure ALTER on custody-eligibility wallets; defaults FULL. Appended only.
   "wallet-money-capability",
+  // ZTR-1268: replace custody_reject_ineligible_lease body so lease claim re-checks
+  // allow_* flags in-TX. Requires wallet-money-capability columns. Appended only.
+  "wallet-money-capability-lease-guard",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];
@@ -591,9 +594,14 @@ export function stripAlreadySeenCatalogObjects(
   out = out.replace(domainRe(), (stmt, name: string) =>
     seen.domains.has(name.toLowerCase()) ? "" : stmt,
   );
-  out = out.replace(functionRe(), (stmt, name: string) =>
-    seen.functions.has(name.toLowerCase()) ? "" : stmt,
-  );
+  out = out.replace(functionRe(), (stmt, name: string) => {
+    if (!seen.functions.has(name.toLowerCase())) return stmt;
+    // Body overlays (CREATE OR REPLACE) must survive pack strip so later slices can
+    // upgrade a first-owner function (ZTR-1268 custody_reject_ineligible_lease).
+    // Bare re-CREATE FUNCTION remains stripped.
+    if (/^CREATE\s+OR\s+REPLACE\s+FUNCTION\b/i.test(stmt.trimStart())) return stmt;
+    return "";
+  });
   out = out.replace(triggerRe(), (stmt, name: string) =>
     seen.triggers.has(name.toLowerCase()) ? "" : stmt,
   );

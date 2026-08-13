@@ -375,6 +375,7 @@ function buildService(opts?: {
     recoveryVerifiedAt:
       opts?.recoveryVerifiedAt === undefined ? FIXED_TIME : opts.recoveryVerifiedAt,
     state: opts?.walletState ?? "PINNED",
+    allowExternalReceive: true,
   });
   const publicKeys = new Map([[WALLET_ID, WALLET_PUB]]);
   const signatureVerifier = new Ed25519ArmVerifier(publicKeys);
@@ -420,7 +421,7 @@ interface TxLogEntry {
  * lock the same wallet serialize; maxConcurrent for one wallet stays 1.
  */
 function createLockSerializingTxFactory(opts: {
-  rows: Map<string, { state: string; recovery_verified_at: string | null }>;
+  rows: Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>;
   /** Optional: arm ack + code/ops tables for createSqlArmStore path. */
   armAcks?: Map<string, ArmRecord>;
   opStates?: Map<string, string>;
@@ -510,6 +511,7 @@ function createLockSerializingTxFactory(opts: {
                   wallet_id: id,
                   state: row.state,
                   recovery_verified_at: row.recovery_verified_at,
+                  allow_external_receive: row.allow_external_receive !== false,
                 },
               ] as R[],
             };
@@ -900,6 +902,7 @@ describe("arm standing gate — intervening quarantine (receive arm barrier; rec
         walletId: "w",
         state: "AVAILABLE",
         recoveryVerifiedAt: FIXED_TIME,
+        allowExternalReceive: true,
       }).ok,
     ).toBe(true);
     expect(
@@ -907,6 +910,7 @@ describe("arm standing gate — intervening quarantine (receive arm barrier; rec
         walletId: "w",
         state: "PINNED",
         recoveryVerifiedAt: FIXED_TIME,
+        allowExternalReceive: true,
       }).ok,
     ).toBe(true);
     expect(
@@ -914,6 +918,7 @@ describe("arm standing gate — intervening quarantine (receive arm barrier; rec
         walletId: "w",
         state: "QUARANTINED",
         recoveryVerifiedAt: FIXED_TIME,
+        allowExternalReceive: true,
       }).ok,
     ).toBe(false);
     expect(
@@ -921,6 +926,18 @@ describe("arm standing gate — intervening quarantine (receive arm barrier; rec
         walletId: "w",
         state: "PINNED",
         recoveryVerifiedAt: null,
+        allowExternalReceive: true,
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("rejects when allow_external_receive is false (ZTR-1268)", () => {
+    expect(
+      isArmableWalletStanding({
+        walletId: "w",
+        state: "PINNED",
+        recoveryVerifiedAt: FIXED_TIME,
+        allowExternalReceive: false,
       }).ok,
     ).toBe(false);
   });
@@ -1117,8 +1134,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("same-client executor log: FOR UPDATE + receive_arms INSERT + code release share one txId", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const armAcks = new Map<string, ArmRecord>();
     const opStates = new Map<string, string>([["op-sametx", "READY"]]);
     const codeStatuses = new Map<string, string>([["op-sametx", "AWAITING_ARM"]]);
@@ -1219,8 +1236,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("SQL gate serializes concurrent withWalletLocked — maxConcurrent stays 1", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const { txFactory, maxConcurrentByWallet } = createLockSerializingTxFactory({ rows });
     const gate = createSqlArmWalletGate(txFactory);
 
@@ -1261,8 +1278,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("concurrent quarantine UPDATE blocks until arm COMMIT; arm stays armed", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const armAcks = new Map<string, ArmRecord>();
     const opStates = new Map<string, string>([["op-qser", "READY"]]);
     const codeStatuses = new Map<string, string>([["op-qser", "AWAITING_ARM"]]);
@@ -1321,8 +1338,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("quarantine first: arm gets operation_not_armable and zero arm rows", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const armAcks = new Map<string, ArmRecord>();
     const opStates = new Map<string, string>([["op-qfirst", "READY"]]);
     const { txFactory, quarantineUnderLock } = createLockSerializingTxFactory({
@@ -1356,8 +1373,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("commitArmUnderWalletLock rejects QUARANTINED and never invokes commit", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "QUARANTINED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "QUARANTINED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const { txFactory } = createLockSerializingTxFactory({ rows });
     let commitCalls = 0;
     const result = await commitArmUnderWalletLock(txFactory, WALLET_ID, async () => {
@@ -1369,8 +1386,8 @@ describe("SQL same-TX arm DML (composition proof)", () => {
   });
 
   it("commitArmUnderWalletLock admits PINNED and runs commit under activeArmTx", async () => {
-    const rows = new Map<string, { state: string; recovery_verified_at: string | null }>();
-    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME });
+    const rows = new Map<string, { state: string; recovery_verified_at: string | null; allow_external_receive?: boolean }>();
+    rows.set(WALLET_ID, { state: "PINNED", recovery_verified_at: FIXED_TIME, allow_external_receive: true });
     const { txFactory } = createLockSerializingTxFactory({ rows });
     const result = await commitArmUnderWalletLock(txFactory, WALLET_ID, async (tx, standing) => {
       expect(standing.state).toBe("PINNED");

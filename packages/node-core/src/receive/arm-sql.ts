@@ -56,7 +56,8 @@ export interface SqlTxFactory {
 export const ARM_SQL_STATEMENTS = {
   LOCK_WALLET_STANDING:
     "SELECT id::text AS wallet_id, state::text AS state, " +
-    "recovery_verified_at::text AS recovery_verified_at " +
+    "recovery_verified_at::text AS recovery_verified_at, " +
+    "allow_external_receive " +
     "FROM wallets WHERE id = $1::uuid FOR UPDATE",
   /**
    * Operation + withheld code under the wallet-lock TX.
@@ -147,6 +148,7 @@ interface WalletStandingRow {
   readonly wallet_id: string;
   readonly state: string;
   readonly recovery_verified_at: string | null;
+  readonly allow_external_receive: boolean | string;
 }
 
 interface OperationGateRow {
@@ -167,6 +169,10 @@ const KNOWN_WALLET_STATES: ReadonlySet<string> = new Set([
   "RETIRED",
 ]);
 
+function pgBool(value: unknown): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
 function mapStanding(row: WalletStandingRow): ArmWalletStanding {
   const state = KNOWN_WALLET_STATES.has(row.state)
     ? (row.state as ArmWalletState)
@@ -176,6 +182,7 @@ function mapStanding(row: WalletStandingRow): ArmWalletStanding {
     walletId: row.wallet_id,
     state,
     recoveryVerifiedAt: row.recovery_verified_at,
+    allowExternalReceive: pgBool(row.allow_external_receive),
   };
 }
 

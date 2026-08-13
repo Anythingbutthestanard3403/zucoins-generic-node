@@ -39,6 +39,7 @@ const PINNED_SOURCE: MoveSourceWalletRecord = {
   publicKey: SOURCE_PUBKEY,
   keyOrigin: "node_generated",
   state: "PINNED",
+  allowInternalMove: true,
 };
 
 const ELIGIBLE_DESTINATION: MoveDestinationRecord = {
@@ -50,6 +51,7 @@ const ELIGIBLE_DESTINATION: MoveDestinationRecord = {
   walletState: "AVAILABLE",
   destinationState: "BLESSED",
   recoveryVerifiedAt: "2026-07-01T00:00:00.000Z",
+  allowInternalMove: true,
 };
 
 const LANDED_PARENT: LandedParentReceive = {

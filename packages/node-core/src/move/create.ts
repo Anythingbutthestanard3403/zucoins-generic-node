@@ -45,6 +45,8 @@ export interface MoveSourceWalletRecord {
   readonly publicKey: string;
   readonly keyOrigin: "node_generated" | "imported";
   readonly state: MoveWalletState;
+  /** Money capability (ZTR-1268). */
+  readonly allowInternalMove: boolean;
 }
 
 /** Destination resolved through destinations ⨝ wallets (predicates 2–4; generic core neutrality; recovery_verified_at gate). */
@@ -58,6 +60,8 @@ export interface MoveDestinationRecord {
   readonly destinationState: MoveDestinationState;
   /** ISO-8601 timestamptz; null when recovery has never been verified. */
   readonly recoveryVerifiedAt: string | null;
+  /** Money capability (ZTR-1268). */
+  readonly allowInternalMove: boolean;
 }
 
 export interface MoveCreateRequest {
@@ -214,6 +218,7 @@ const IDEMPOTENCY_KEY_RE = /^[\x20-\x7E]{16,255}$/;
  * Public path: state must be AVAILABLE.
  * Receive-child path: parent holds the source lease continuously, so
  * wallets.state is PINNED — allow AVAILABLE|PINNED. Still refuse QUARANTINED/RETIRED.
+ * Money capability (ZTR-1268): allow_internal_move must be true.
  */
 export function isMoveSourceEligible(
   wallet: MoveSourceWalletRecord,
@@ -226,7 +231,8 @@ export function isMoveSourceEligible(
   return (
     wallet.keyOrigin === "node_generated" &&
     wallet.nodeId === nodeId &&
-    stateOk
+    stateOk &&
+    wallet.allowInternalMove === true
   );
 }
 
@@ -234,6 +240,7 @@ export function isMoveSourceEligible(
  * Step 3 — automatic-sink destination: it resolves to a different
  * node-generated wallet that is BLESSED, recovery-verified, and wallet_state AVAILABLE.
  * Recovery verification never makes an imported or unblessed wallet internal.
+ * Money capability (ZTR-1268): allow_internal_move must be true on the sink wallet.
  */
 export function isMoveDestinationEligible(
   destination: MoveDestinationRecord,
@@ -272,6 +279,13 @@ export function isMoveDestinationEligible(
       ok: false,
       code: "destination_not_eligible",
       detail: `wallet_state=${destination.walletState}`,
+    };
+  }
+  if (destination.allowInternalMove !== true) {
+    return {
+      ok: false,
+      code: "destination_not_eligible",
+      detail: "allow_internal_move=false",
     };
   }
   return { ok: true };
@@ -435,7 +449,11 @@ export async function createInternalMove(
   }
   const receiveChild = request.spawnedFromOperationId != null;
   if (!isMoveSourceEligible(source, request.nodeId, { allowPinned: receiveChild })) {
-    return { outcome: "REJECTED", code: "source_wallet_not_eligible" };
+    const detail =
+      source.allowInternalMove !== true
+        ? "allow_internal_move=false"
+        : undefined;
+    return { outcome: "REJECTED", code: "source_wallet_not_eligible", detail };
   }
 
   // Step 3 — destination_id → different node-generated BLESSED recovery-verified AVAILABLE.

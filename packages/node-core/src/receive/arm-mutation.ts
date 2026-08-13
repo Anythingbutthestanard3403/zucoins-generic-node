@@ -196,6 +196,8 @@ export interface ArmWalletStanding {
   readonly walletId: string;
   readonly recoveryVerifiedAt: string | null;
   readonly state: ArmWalletState;
+  /** Money capability (ZTR-1268) — arm requires allow_external_receive. */
+  readonly allowExternalReceive: boolean;
 }
 
 /**
@@ -244,6 +246,9 @@ export function isArmableWalletStanding(
   }
   if (!ARMABLE_WALLET_STATES.has(standing.state)) {
     return { ok: false, reason: `receiver wallet state ${standing.state} is not armable` };
+  }
+  if (standing.allowExternalReceive !== true) {
+    return { ok: false, reason: "receiver allow_external_receive is false" };
   }
   return { ok: true };
 }

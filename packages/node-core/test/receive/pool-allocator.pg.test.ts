@@ -361,6 +361,7 @@ describe("bounded receive-pool allocator (real PG / separate processes)", () => 
     expect(sql).toContain("w.key_origin = 'node_generated'");
     expect(sql).toContain("w.recovery_verified_at IS NOT NULL");
     expect(sql).toContain("w.state = 'AVAILABLE'");
+    expect(sql).toContain("w.allow_external_receive IS TRUE");
     expect(sql).toContain("FROM destinations d");
     expect(sql).toContain("d.state IS DISTINCT FROM 'RETIRED'");
     expect(sql).toContain("FROM receive_release_proofs rrp");

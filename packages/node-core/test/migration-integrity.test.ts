@@ -215,6 +215,8 @@ const SCHEMA_FILES = [
   "operations-landed-attention-clear-backfill.sql",
   // ZTR-1267: per-wallet money capability columns. ALTER-only on wallets.
   "wallet-money-capability.sql",
+  // ZTR-1268: CREATE OR REPLACE custody_reject_ineligible_lease (capability conjuncts).
+  "wallet-money-capability-lease-guard.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -242,6 +244,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "approval-method-auto-policy-enum.sql",
   "approval-stores-auto-policy.sql",
   "wallet-money-capability.sql",
+  "wallet-money-capability-lease-guard.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -553,6 +556,11 @@ const GREENFIELD: Record<
   },
   // ALTER TABLE wallets — fails greenfield-alone on missing relation.
   "wallet-money-capability.sql": {
+    applies: false,
+    missingRelation: "wallets",
+  },
+  // CREATE OR REPLACE FUNCTION on wallets%ROWTYPE — fails greenfield-alone (no wallets).
+  "wallet-money-capability-lease-guard.sql": {
     applies: false,
     missingRelation: "wallets",
   },

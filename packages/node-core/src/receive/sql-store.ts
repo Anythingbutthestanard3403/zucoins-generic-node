@@ -132,7 +132,7 @@ export const STATEMENTS = {
   FROM receive_operations r
   JOIN operations o ON o.id = r.operation_id
   WHERE r.operation_id = $1 AND r.implementer_id = $2`,
-  SELECT_DESTINATION: `SELECT d.id AS destination_id, d.state AS destination_state, w.id AS wallet_id, w.node_id, w.public_key, w.key_origin, w.state AS wallet_state, w.recovery_verified_at FROM destinations d JOIN wallets w ON w.id = d.wallet_id WHERE d.id = $1`,
+  SELECT_DESTINATION: `SELECT d.id AS destination_id, d.state AS destination_state, w.id AS wallet_id, w.node_id, w.public_key, w.key_origin, w.state AS wallet_state, w.recovery_verified_at, w.allow_external_receive, w.allow_internal_move FROM destinations d JOIN wallets w ON w.id = d.wallet_id WHERE d.id = $1`,
   COMPLETE_OPERATION: `UPDATE receive_operations SET completed_at = now(), response_status = $2, response_body = $3 WHERE operation_id = $1 AND completed_at IS NULL RETURNING operation_id`,
   // "maximum unassigned CREATED receives", per node. `wallet_id IS NULL`
   // is stated rather than inferred from the no-receiver-while-CREATED CHECK, so the depth
@@ -183,6 +183,8 @@ interface DestinationRow {
   readonly key_origin: string;
   readonly wallet_state: string;
   readonly recovery_verified_at: string | Date | null;
+  readonly allow_external_receive: boolean | string;
+  readonly allow_internal_move: boolean | string;
 }
 
 const epochMs = (value: string | Date): number =>
@@ -253,6 +255,10 @@ function toStoredOperation(row: OperationRow): StoredReceiveOperation {
   };
 }
 
+function pgBool(value: unknown): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
 function toDestination(row: DestinationRow): ReceiveDestinationRecord {
   return {
     destinationId: row.destination_id,
@@ -263,6 +269,8 @@ function toDestination(row: DestinationRow): ReceiveDestinationRecord {
       keyOrigin: row.key_origin === "imported" ? "imported" : "node_generated",
       state: row.wallet_state as ReceiveWalletState,
       recoveryVerifiedAt: row.recovery_verified_at === null ? null : epochMs(row.recovery_verified_at),
+      allowExternalReceive: pgBool(row.allow_external_receive),
+      allowInternalMove: pgBool(row.allow_internal_move),
     },
   };
 }

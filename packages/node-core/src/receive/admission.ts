@@ -54,6 +54,12 @@ export interface ReceiveWalletRecord {
   readonly keyOrigin: "node_generated" | "imported";
   readonly state: ReceiveWalletState;
   readonly recoveryVerifiedAt: number | null;
+  /**
+   * Money capability (ZTR-1268). Required for receive-pool eligibility and for
+   * after_landing INTERNAL_MOVE destination parties (allow_internal_move).
+   */
+  readonly allowExternalReceive: boolean;
+  readonly allowInternalMove: boolean;
 }
 
 // A destination as the store resolves it: the opaque destination_id joined to the wallet it
@@ -295,23 +301,32 @@ export function canonicalRequestSha256(request: ReceiveRequest): string {
 }
 
 // Receive-eligibility predicate: a wallet is receive-eligible iff
-// key_origin='node_generated' AND recovery_verified_at IS NOT NULL AND state='AVAILABLE'.
+// key_origin='node_generated' AND recovery_verified_at IS NOT NULL AND state='AVAILABLE'
+// AND allow_external_receive (ZTR-1268 money capability).
 // This is the generic core neutrality recovery conjunct MINUS blessing — receivers are never blessed — and it
 // gates receive-pool selection, NOT move destinations.
 export function isReceiveEligible(wallet: ReceiveWalletRecord): boolean {
   return (
     wallet.keyOrigin === "node_generated" &&
     wallet.state === "AVAILABLE" &&
-    wallet.recoveryVerifiedAt !== null
+    wallet.recoveryVerifiedAt !== null &&
+    wallet.allowExternalReceive === true
   );
 }
 
-// An INTERNAL_MOVE destination requires FOUR conjuncts
-// the receive predicate PLUS a blessed destination (generic core neutrality; B-08). Applying
-// isReceiveEligible here would admit an unblessed move destination, which is the exact gate
-// this admission step exists to anchor.
+// An INTERNAL_MOVE destination requires the receive-standing conjuncts PLUS blessed
+// destination (generic core neutrality; B-08) PLUS allow_internal_move (ZTR-1268).
+// Applying isReceiveEligible alone would wrongly require allow_external_receive on a
+// move sink and miss allow_internal_move.
 export function isMoveDestinationEligible(destination: ReceiveDestinationRecord): boolean {
-  return isReceiveEligible(destination.wallet) && destination.destinationState === "BLESSED";
+  const wallet = destination.wallet;
+  return (
+    wallet.keyOrigin === "node_generated" &&
+    wallet.state === "AVAILABLE" &&
+    wallet.recoveryVerifiedAt !== null &&
+    wallet.allowInternalMove === true &&
+    destination.destinationState === "BLESSED"
+  );
 }
 
 export interface ReceiveAdmissionConfig {

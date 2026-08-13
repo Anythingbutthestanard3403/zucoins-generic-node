@@ -97,7 +97,7 @@ async function psqlOk(sql: string, values: readonly unknown[] = []): Promise<str
   return result.stdout;
 }
 
-const inSchema = (sql: string): string => `SET search_path TO ${SCHEMA};\n${sql}`;
+const inSchema = (sql: string): string => `SET search_path TO ${SCHEMA}, public;\n${sql}`;
 
 const query: SqlQueryFn = async (text, values) => {
   // Anything with a result set (SELECT / WITH / … RETURNING) is JSON-aggregated so the

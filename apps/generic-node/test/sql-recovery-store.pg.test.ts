@@ -1570,6 +1570,79 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(ids).not.toContain(stickyId);
   });
 
+  // ZTR-1278: attention-parked EXPIRED/REJECTED must remain operator-visible so recovery
+  // catalogue actions (RETRY_OBSERVATION / RELEASE_EXPIRED_RECEIVE / …) can fire. Landed
+  // terminals stay excluded (ZTR-1250); EXPIRED/REJECTED with attention cleared stay out.
+  it("listNeedsAttention includes EXPIRED and REJECTED when attention_required is set (ZTR-1278)", async () => {
+    const expiredId = randomUUID();
+    await pool.query(
+      `INSERT INTO operations
+         (id, node_id, implementer_id, kind, status, attention_required, attention_reason,
+          after_landing, discriminator, anchor, amount_zkz, idempotency_key, request_sha256, created_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'EXPIRED', true, 'LINEAGE_GAP',
+               'HOLD', $1::uuid, 'recovery-store-anchor', '0.01', $4, $5, now())`,
+      [expiredId, NODE_ID, IMPLEMENTER_ID, randomUUID(), sha256(randomUUID())],
+    );
+
+    const rejectedId = await seedSendOperation({
+      status: "REJECTED",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "UNEXPECTED_HEAD_CHANGE",
+      sourceWalletId: await insertWallet(),
+    });
+
+    const clearedExpiredId = randomUUID();
+    await pool.query(
+      `INSERT INTO operations
+         (id, node_id, implementer_id, kind, status, attention_required, attention_reason,
+          after_landing, discriminator, anchor, amount_zkz, idempotency_key, request_sha256, created_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'RECEIVE_EXTERNAL', 'EXPIRED', false, NULL,
+               'HOLD', $1::uuid, 'recovery-store-anchor', '0.01', $4, $5, now())`,
+      [clearedExpiredId, NODE_ID, IMPLEMENTER_ID, randomUUID(), sha256(randomUUID())],
+    );
+
+    const clearedRejectedId = await seedSendOperation({
+      status: "REJECTED",
+      formationState: "PARTIAL_DELIVERED",
+      sourceWalletId: await insertWallet(),
+    });
+
+    const stickyLandedId = await seedMoveOperation({
+      status: "INTERNAL_MOVE_LANDED",
+      attentionReason: "LINEAGE_GAP",
+      sourceWalletId: await insertWallet(),
+      destinationId: await insertDestination(await insertWallet()),
+    });
+    await pool.query(
+      `UPDATE operations
+          SET attention_required = true,
+              attention_reason = 'LINEAGE_GAP'
+        WHERE id = $1::uuid`,
+      [stickyLandedId],
+    );
+
+    const facts = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const ids = facts.map((f) => f.operationId);
+    expect(ids).toContain(expiredId);
+    expect(ids).toContain(rejectedId);
+    expect(ids).not.toContain(clearedExpiredId);
+    expect(ids).not.toContain(clearedRejectedId);
+    expect(ids).not.toContain(stickyLandedId);
+
+    const expiredRow = facts.find((f) => f.operationId === expiredId)!;
+    const rejectedRow = facts.find((f) => f.operationId === rejectedId)!;
+    expect(expiredRow.status).toBe("EXPIRED");
+    expect(expiredRow.attentionRequired).toBe(true);
+    expect(rejectedRow.status).toBe("REJECTED");
+    expect(rejectedRow.attentionRequired).toBe(true);
+
+    // Catalogue still derives recovery actions for attention-parked terminals.
+    const expiredActions = derivePermittedActions(expiredRow).permittedActions;
+    const rejectedActions = derivePermittedActions(rejectedRow).permittedActions;
+    expect(expiredActions).toContain("RETRY_OBSERVATION");
+    expect(rejectedActions).toContain("RETRY_OBSERVATION");
+  });
+
   it("RELEASE_EXPIRED_RECEIVE releases via SqlReceiveExpiryReleaseService, unpins the wallet, and records dual proof rows", async () => {
     const fx = await seedReleaseableExpiredReceive();
 

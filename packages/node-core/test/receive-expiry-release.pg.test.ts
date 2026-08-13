@@ -740,24 +740,70 @@ describe("receive expiry/release PostgreSQL drills", () => {
   it.skipIf(!live)(
     "pre-code with T0 still releases via EXPIRED_T0_UNCHANGED",
     async () => {
-      const { op, wallet, fresh } = await seedServiceReady(20);
+      // Seed CREATED + T0 + lease with zero formation evidence. Do not DELETE
+      // operation_expected_artifacts: the insert-only trigger raises
+      // EXPECTED_ARTIFACT_INSERT_ONLY (same regime move-baseline freezes).
+      const op = operationId(20);
+      const wallet = operationId(220);
+      const t0 = operationId(320);
+      const fresh = operationId(420);
+      const recovery = operationId(520);
+      const pubkey = `${"Q".repeat(41)}p0=`;
+      const nowMs = Date.now();
       psqlMust(
         dbUrl,
-        `DELETE FROM receive_codes WHERE operation_id='${op}';
-         DELETE FROM operation_expected_artifacts WHERE operation_id='${op}';
-         UPDATE operations
-            SET status='CREATED', expiry_unix_time_secs=NULL, row_version=1,
-                receiver_wallet_id=NULL, t0_observation_id=NULL,
-                created_at=to_timestamp(0)
-          WHERE id='${op}';`,
+        `INSERT INTO wallets (id, node_id, public_key, key_origin, state)
+           VALUES ('${wallet}', '${NODE}', '${pubkey}', 'node_generated', 'AVAILABLE');
+         INSERT INTO wallet_recovery_verifications (
+           id, wallet_id, method, export_sha256, public_key, audit_event_id,
+           verified_at, verifier_identity
+         ) VALUES (
+           '${recovery}', '${wallet}', 'AUDITED_EXPORT', '${SHA}', '${pubkey}',
+           '${recovery}', now(), 'release-precode'
+         );
+         UPDATE wallets SET recovery_verified_at=now(), recovery_verification_id='${recovery}'
+           WHERE id='${wallet}';
+         INSERT INTO operations (
+           id, node_id, implementer_id, kind, status, row_version, amount_zkz,
+           after_landing, discriminator, anchor, idempotency_key, request_sha256,
+           created_at
+         ) VALUES (
+           '${op}', '${NODE}', '${IMPLEMENTER}', 'RECEIVE_EXTERNAL', 'CREATED', 1, '1',
+           'HOLD', '${op}', 'release-precode', 'release-precode-idem-${op}', '${SHA}',
+           to_timestamp(0)
+         );
+         -- CREATED forbids operations.t0/expiry/receiver_wallet_id (operations_check1).
+         -- T0 binding lives on operation_wallets only for this pre-code path.
+         INSERT INTO operation_wallets (
+           operation_id, wallet_id, operation_role, t0_observation_id
+         ) VALUES ('${op}', '${wallet}', 'RECEIVER', '${t0}');
+         INSERT INTO gateway_observations (
+           id, observer_id, wallet_id, wallet_public_key, s_signature, p_signature,
+           b_amount, parse_result, relationship, observed_at
+         ) VALUES
+           ('${t0}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
+            'VERIFIED_HEAD', 'FIRST', to_timestamp(0)),
+           ('${fresh}', '${OBSERVER}', '${wallet}', '${pubkey}', 'S0', 'P0', '10',
+            'VERIFIED_HEAD', 'DUPLICATE', to_timestamp(${nowMs - 1_000} / 1000.0));`,
       );
+      await withTx(dbUrl, async (tx) => {
+        const leaseGroupId = await createLeaseGroup(tx, op);
+        await acquireLeases(tx, {
+          wallets: [{ walletId: wallet, leaseRole: "RECEIVE_WINDOW" }],
+          leaseGroupId,
+          rootOperationId: op,
+          operationId: op,
+          ownerInstanceId: OWNER,
+        });
+      });
+
       let nextId = 680;
       const result = await new SqlReceiveExpiryReleaseService({
         withTransaction: (fn) => withTx(dbUrl, fn),
       }).expire({
         operationId: op,
         freshObservationId: fresh,
-        nowMs: Date.now(),
+        nowMs,
         queueMaxWaitMs: 30_000,
         newId: () => operationId(nextId++),
       });

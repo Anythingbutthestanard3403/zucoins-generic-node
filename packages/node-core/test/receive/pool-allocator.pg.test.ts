@@ -132,7 +132,7 @@ CREATE TABLE receive_release_proofs (
 const applySchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });

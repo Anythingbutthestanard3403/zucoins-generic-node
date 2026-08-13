@@ -93,6 +93,7 @@ const prerequisiteDdl = ((): string => {
 })();
 
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
+const MONEY_CAPABILITY_DDL = readSchema("wallet-money-capability.sql");
 const RECEIVE_DDL = readSchema("receive-admission.sql");
 const SEND_DDL = readSchema("send-external-create.sql");
 const MOVE_OBSERVATION_EVIDENCE_DDL = `
@@ -375,6 +376,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     psqlMust(MAINTENANCE_DB, `CREATE DATABASE ${scratchDb}`);
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
+    applyDdl(scratchDb, MONEY_CAPABILITY_DDL);
     applyDdl(scratchDb, RECEIVE_DDL);
     applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     applyDdl(scratchDb, operationsDdl);

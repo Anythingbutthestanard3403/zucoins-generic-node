@@ -4,7 +4,7 @@
 **Epic:** ZTR-1266  
 **Depends on:** ZTR-1267 (schema/contracts) — PR #125  
 **Branch:** `ztr-1268-money-capability-gates` (stacks on `ztr-1267-wallet-money-capability`)  
-**Head SHA:** `22d75dda0cb1de962deb079f541d7cb128ebd2e8`
+**Head SHA:** `26378b426a6deae443338579c863de0cb55258e8`
 **Claim run:** `806c2963-fe8e-4a37-9ec3-4065e9aeba35`
 
 ## Scope
@@ -60,3 +60,5 @@ Fail-closed admission using flags from ZTR-1267:
 - ZTR-1269 admin PATCH UI
 - ZTR-1270 auto top-up composition
 - ZTR-1271 optional source_wallet_id
+
+**PR:** https://github.com/Anythingbutthestanard3403/zucoins-generic-node/pull/127

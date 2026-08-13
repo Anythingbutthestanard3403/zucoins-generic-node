@@ -3,8 +3,8 @@
 **Linear:** https://linear.app/zutopia/issue/ZTR-1267  
 **Epic:** ZTR-1266  
 **Branch:** `ztr-1267-wallet-money-capability`  
-**Claim run:** `cff73ee1-b646-4ea7-8eca-319ba33fd3c3`  
-**Head SHA:** `9d81d9c6fdd00c7c59f67f1e52b578e370aecc5f`
+**Claim run:** `578f03ec-3ff9-44cf-b976-0d47c87a46ff`  
+**Head SHA:** `(pending push — r2 fixture fix)`
 
 ## Scope (this ticket only)
 

@@ -314,14 +314,7 @@ describe("GET /admin/v1/readiness", () => {
             recoveryVerificationId: null,
           },
           observed_balance_zkz: null,
-          holding: {
-            holding_operation_id: null,
-            holding_operation_status: null,
-            holding_operation_expiry_unix_time_secs: null,
-            holding_operation_attention_required: false,
-            holding_operation_terminal_at: null,
-            holding_lease_role: null,
-            holding_operation_type: null,
+          money_capability: {
             money_mode: "FULL",
             allow_external_receive: true,
             allow_external_send: true,

@@ -23,7 +23,7 @@ export const ORIGIN_RELAY_RATE_WINDOW_MS = 60_000;
 
 // 120 deposits/minute/IP. A legitimate origin (one payer hop, occasional retry) sits
 // far inside this. A spray that would otherwise thrash decode+inbox at the cap is
-// cut ~order-of-magnitude before the cap is even the binding constraint.
+// cut ~10× before the cap is even the binding constraint.
 export const ORIGIN_RELAY_RATE_MAX_REQUESTS = 120;
 
 // The limiter's first key dimension namespaces buckets across nodes; this instance

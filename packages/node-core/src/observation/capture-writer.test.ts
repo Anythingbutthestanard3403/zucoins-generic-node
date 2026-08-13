@@ -111,6 +111,39 @@ describe("capture write-path: dedup / append / classification", () => {
       expect(second!.plan.anomalyRequired).toBe(false);
     }
   });
+
+  // ZTR-1275: confirm-read path forces DUPLICATE append on exact byte-identical repeat.
+  it("appendExactRepeat: flag off keeps SUPPRESS_AS_SIGHTING on A,A", () => {
+    const first = planCapture(null, A);
+    expect(first.plan.kind).toBe("APPEND");
+    const second = planCapture(first.nextCursor, A);
+    expect(second.plan.kind).toBe("SUPPRESS_AS_SIGHTING");
+    const secondForcedOff = planCapture(first.nextCursor, A, { appendExactRepeat: false });
+    expect(secondForcedOff.plan.kind).toBe("SUPPRESS_AS_SIGHTING");
+  });
+
+  it("appendExactRepeat: flag on APPENDS DUPLICATE row, no anomaly, advances wallet_seq", () => {
+    const first = planCapture(null, A);
+    expect(first.plan.kind).toBe("APPEND");
+    if (first.plan.kind !== "APPEND") throw new Error("expected APPEND");
+    expect(first.plan.observation.walletSeq).toBe(1);
+
+    const second = planCapture(first.nextCursor, A, { appendExactRepeat: true });
+    expect(second.plan.kind).toBe("APPEND");
+    if (second.plan.kind !== "APPEND") throw new Error("expected APPEND");
+    expect(second.plan.observation.relationship).toBe("DUPLICATE");
+    expect(second.plan.observation.walletSeq).toBe(2);
+    expect(second.plan.observation.stateChanged).toBe(false);
+    expect(second.plan.observation.previousRecordedSeq).toBe(1);
+    expect(second.plan.anomalyRequired).toBe(false);
+    expect(second.event.decision).toBe("APPEND");
+    expect(second.event.relationship).toBe("DUPLICATE");
+    expect(second.event.anomalyAppended).toBe(false);
+    expect(second.nextCursor.rowCount).toBe(2);
+    expect(second.nextCursor.nextWalletSeq).toBe(3);
+    expect(second.nextCursor.consecutiveRepeatCount).toBe(0);
+    expect(second.nextCursor.anomalyCount).toBe(0);
+  });
 });
 
 // In-memory persistence fake modelling wallet_observation_cursors: loadPrior returns the last

@@ -238,6 +238,10 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
     }
 
     try {
+      // ZTR-1275: confirm-reads must APPEND a DUPLICATE row on exact byte-identical
+      // repeats so FRESH_VERIFIED_T0_EXACT can name a post-expiry observation id.
+      // Only this reader sets appendExactRepeat; other persistSqlObservation callers
+      // keep SUPPRESS_AS_SIGHTING default.
       const persisted = await persistSqlObservation({
         pool: deps.pool,
         nodeId: deps.nodeId,
@@ -254,6 +258,7 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
           semanticFingerprint,
         },
         projection: rowProjectionBase,
+        appendExactRepeat: true,
       });
       // Landing oracle must not mint proofs from anomalous heads. Evidence is durable;
       // the read fails closed so terminal_observation_id cannot pin a REGRESSION/JUMP.

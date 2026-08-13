@@ -245,6 +245,13 @@ export interface PersistSqlObservationInput {
   readonly bootPriorRawByStreamKey?: ReadonlyMap<string, Uint8Array | null>;
   /** ZTR-1144 — endpoint disagreement / anomaly metric seam. */
   readonly metricsHooks?: MetricsHooks;
+  /**
+   * ZTR-1275 — when true, a verified byte-identical consecutive repeat APPENDS a
+   * gateway_observations row with relationship DUPLICATE (cursor tip as
+   * previous_recorded; no anomaly row) instead of SUPPRESS_AS_SIGHTING. Only the
+   * fresh-head confirm-read path sets this; other callers keep default suppress.
+   */
+  readonly appendExactRepeat?: boolean;
 }
 
 export interface PersistSqlObservationResult {
@@ -331,6 +338,10 @@ export async function persistSqlObservation(
     const written = await createSerializedStreamWriter(effects).capture(
       { observerId, walletPublicKey: input.walletPublicKey },
       input.capture,
+      // Forward caller flag only (do not hardcode true — census: sole setter is fresh-head).
+      input.appendExactRepeat === true
+        ? { appendExactRepeat: input.appendExactRepeat }
+        : undefined,
     );
     let observationId: string | null = allocatedObservationId as string | null;
     if (written.plan.kind === "SUPPRESS_AS_SIGHTING") {

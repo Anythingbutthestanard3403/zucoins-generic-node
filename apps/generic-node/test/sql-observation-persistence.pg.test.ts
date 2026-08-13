@@ -391,6 +391,86 @@ describeIfPg("persistSqlObservation real-PG pairing + quarantine", () => {
     expect(bodies[1]).toContain("not-json{");
     assertionsRun += 1;
   });
+
+  // ZTR-1275: appendExactRepeat appends DUPLICATE on exact byte-identical verified repeat.
+  it("appendExactRepeat true → second identical verified head is DUPLICATE row, no anomaly", async () => {
+    const pk = `${"K".repeat(43)}=`;
+    const cap = headCapture("exact-repeat-body", sig("A"), "");
+    const first = await persistSqlObservation({
+      pool,
+      nodeId: NODE_ID,
+      walletPublicKey: pk,
+      endpointFingerprint: HEX,
+      httpStatus: 200,
+      capture: cap,
+      projection: emptyProjection,
+    });
+    expect(first.relationship).toBe("FIRST");
+
+    // Default (flag off): suppress returns tip id, no new row.
+    const suppressed = await persistSqlObservation({
+      pool,
+      nodeId: NODE_ID,
+      walletPublicKey: pk,
+      endpointFingerprint: HEX,
+      httpStatus: 200,
+      capture: cap,
+      projection: emptyProjection,
+    });
+    expect(suppressed.observationId).toBe(first.observationId);
+    expect(suppressed.relationship).toBe("NOT_APPLICABLE");
+    expect(
+      psqlMust(
+        scratchDb,
+        `SELECT count(*) FROM gateway_observations WHERE wallet_public_key='${pk}';`,
+      ).trim(),
+    ).toBe("1");
+
+    // Flag on: append DUPLICATE with previous_recorded = tip, no anomaly.
+    const dup = await persistSqlObservation({
+      pool,
+      nodeId: NODE_ID,
+      walletPublicKey: pk,
+      endpointFingerprint: HEX,
+      httpStatus: 200,
+      capture: cap,
+      projection: emptyProjection,
+      appendExactRepeat: true,
+    });
+    expect(dup.relationship).toBe("DUPLICATE");
+    expect(dup.observationId).not.toBe(first.observationId);
+
+    const rows = psqlMust(
+      scratchDb,
+      `SELECT wallet_seq::text || '|' || relationship::text || '|' ||
+              coalesce(previous_recorded_observation_id::text,'')
+         FROM gateway_observations
+        WHERE wallet_public_key='${pk}'
+        ORDER BY wallet_seq`,
+    )
+      .trim()
+      .split("\n");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toBe(`1|FIRST|`);
+    expect(rows[1]).toBe(`2|DUPLICATE|${first.observationId}`);
+
+    const nAnom = psqlMust(
+      scratchDb,
+      `SELECT count(*) FROM observation_anomalies a
+         JOIN gateway_observations o ON o.id = a.observation_id
+        WHERE o.wallet_public_key='${pk}'`,
+    ).trim();
+    expect(nAnom).toBe("0");
+
+    const cursor = psqlMust(
+      scratchDb,
+      `SELECT next_wallet_seq::text || '|' || consecutive_repeat_count::text || '|' ||
+              last_recorded_observation_id::text
+         FROM wallet_observation_cursors WHERE wallet_public_key='${pk}'`,
+    ).trim();
+    expect(cursor).toBe(`3|0|${dup.observationId}`);
+    assertionsRun += 1;
+  });
 });
 
 it("obligation guard: real-PG persistSqlObservation drills must execute", () => {
@@ -400,5 +480,5 @@ it("obligation guard: real-PG persistSqlObservation drills must execute", () => 
     }
     return;
   }
-  expect(assertionsRun).toBeGreaterThanOrEqual(4);
+  expect(assertionsRun).toBeGreaterThanOrEqual(5);
 });

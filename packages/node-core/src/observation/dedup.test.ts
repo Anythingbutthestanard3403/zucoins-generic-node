@@ -69,6 +69,44 @@ describe("ExactRepeatService — consecutive verified suppress (step 7; changed-
     expect(store.getCursor(STREAM)?.consecutiveRepeatCount).toBe(1);
   });
 
+  // ZTR-1275: appendExactRepeat forces a DUPLICATE observation instead of sighting suppress.
+  it("appendExactRepeat true on A,A → 2 rows, second relationship DUPLICATE, no anomaly", async () => {
+    const store = new InMemoryExactRepeatStore();
+    const svc = new ExactRepeatService(store);
+
+    await svc.classify(STREAM, candidate(BODY_A, { fingerprint: FP_1 }));
+    const second = await svc.classify(
+      STREAM,
+      candidate(BODY_A, { fingerprint: FP_1 }),
+      { appendExactRepeat: true },
+    );
+    expect(second.kind).toBe("NEW_OBSERVATION");
+    if (second.kind !== "NEW_OBSERVATION") throw new Error("expected NEW_OBSERVATION");
+    expect(second.walletSeq).toBe(2);
+    expect(second.anomalyAppended).toBe(false);
+
+    const rows = store.getObservations();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.relationship).toBe("DUPLICATE");
+    expect(store.getAnomalies()).toHaveLength(0);
+    expect(store.getCursor(STREAM)?.consecutiveRepeatCount).toBe(0);
+    expect(store.getCursor(STREAM)?.nextWalletSeq).toBe(3);
+    expect(store.getCursor(STREAM)?.lastObservationId).toBe(second.observationId);
+  });
+
+  it("appendExactRepeat false / omitted still suppresses A,A as EXACT_REPEAT", async () => {
+    const store = new InMemoryExactRepeatStore();
+    const svc = new ExactRepeatService(store);
+    await svc.classify(STREAM, candidate(BODY_A, { fingerprint: FP_1 }));
+    const off = await svc.classify(
+      STREAM,
+      candidate(BODY_A, { fingerprint: FP_1 }),
+      { appendExactRepeat: false },
+    );
+    expect(off.kind).toBe("EXACT_REPEAT");
+    expect(store.getObservations()).toHaveLength(1);
+  });
+
   it("three consecutive identical verified responses increment the counter to 2", async () => {
     const store = new InMemoryExactRepeatStore();
     const svc = new ExactRepeatService(store);

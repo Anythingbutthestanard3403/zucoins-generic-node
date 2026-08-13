@@ -86,11 +86,13 @@ export {
 export {
   createSerializedStreamWriter,
   planCapture,
+  type CaptureOptions,
   type CaptureWritePlan,
   type CaptureWriteResult,
   type CursorAppendUpdate,
   type CursorSightingUpdate,
   type ObservationStreamKey,
+  type PlanCaptureOptions,
   type PlannedObservationRow,
   type SerializedStreamWriter,
   type StreamWriterEffects,

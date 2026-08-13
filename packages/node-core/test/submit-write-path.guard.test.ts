@@ -77,13 +77,41 @@ const ALLOWED_TEST_CALL_SITES: readonly string[] = [
 const SELF_FILE = "submit-write-path.guard.test.ts";
 
 function listTsFiles(dir: string): string[] {
-  return (readdirSync(dir, { recursive: true }) as string[])
-    .map((entry) => join(dir, entry))
-    .filter((file) => extname(file) === ".ts" && statSync(file).isFile());
+  // Tolerate ENOENT: sibling suites write short-lived mutation probes under src/
+  // (e.g. _sign_census_mutation_probe.ts) that can vanish between readdir and stat
+  // when vitest workers run in parallel.
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { recursive: true }) as string[]) {
+    const file = join(dir, entry);
+    if (extname(file) !== ".ts") continue;
+    try {
+      if (statSync(file).isFile()) out.push(file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
+  }
+  return out;
+}
+
+/** Read utf8 or null if the path disappeared mid-scan (parallel mutation probes). */
+function tryReadUtf8(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 function readEntries(files: readonly string[]): SourceEntry[] {
-  return files.map((file) => ({ file, text: readFileSync(file, "utf8") }));
+  const out: SourceEntry[] = [];
+  for (const file of files) {
+    const text = tryReadUtf8(file);
+    if (text === null) continue;
+    out.push({ file, text });
+  }
+  return out;
 }
 
 // The scan predicate under test. Kept pure (no fs) so the mutation-negative test below proves
@@ -133,7 +161,8 @@ describe("submit write-path structural guard (SEND_EXTERNAL cannot reach either 
     // Names are only a proxy; the substantive bound is that no SEND-named core module reaches a
     // submit write path or its ledgers, whatever it is called.
     for (const entry of coreFiles.filter((f) => f.toLowerCase().includes("send"))) {
-      const text = readFileSync(resolve(srcRoot, "core", entry), "utf8");
+      const text = tryReadUtf8(resolve(srcRoot, "core", entry));
+      if (text === null) continue;
       for (const marker of SUBMIT_WRITE_PATH_MARKERS) {
         expect(text, `core/${entry} must not contain ${marker}`).not.toContain(marker);
       }
@@ -144,7 +173,8 @@ describe("submit write-path structural guard (SEND_EXTERNAL cannot reach either 
     const sendRoot = resolve(srcRoot, "send");
     const files = listTsFiles(sendRoot);
     for (const file of files) {
-      const text = readFileSync(file, "utf8");
+      const text = tryReadUtf8(file);
+      if (text === null) continue;
       for (const marker of SUBMIT_WRITE_PATH_MARKERS) {
         expect(text, `${relative(srcRoot, file)} must not contain ${marker}`).not.toContain(marker);
       }
@@ -401,7 +431,12 @@ function resolveModule(fromFile: string, specifier: string): string | null {
   if (!specifier.startsWith(".")) return null; // node: builtins and other packages
   const target = resolve(dirname(fromFile), specifier);
   for (const candidate of [target.replace(/\.js$/, ".ts"), `${target}.ts`, join(target, "index.ts")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
   }
   throw new Error(`unresolvable import "${specifier}" in ${relative(srcRoot, fromFile)}`);
 }
@@ -413,7 +448,9 @@ function importClosure(entry: string): string[] {
     const file = queue.pop() as string;
     if (seen.has(file)) continue;
     seen.add(file);
-    for (const specifier of valueImportEdges(readFileSync(file, "utf8"))) {
+    const fileText = tryReadUtf8(file);
+    if (fileText === null) continue;
+    for (const specifier of valueImportEdges(fileText)) {
       const resolved = resolveModule(file, specifier);
       if (resolved !== null) queue.push(resolved);
     }
@@ -430,7 +467,9 @@ function productionImportGraph(): Map<string, string[]> {
   const graph = new Map<string, string[]>();
   for (const file of productionSourceFiles()) {
     const rel = relative(srcRoot, file);
-    const edges = valueImportEdges(readFileSync(file, "utf8"), rel)
+    const fileText = tryReadUtf8(file);
+    if (fileText === null) continue;
+    const edges = valueImportEdges(fileText, rel)
       .map((specifier) => resolveModule(file, specifier))
       .filter((resolved): resolved is string => resolved !== null)
       .map((resolved) => relative(srcRoot, resolved));
@@ -476,7 +515,9 @@ function submitReachers(graph: ReadonlyMap<string, readonly string[]>, sink: str
 function submitLedgerNamingModules(): string[] {
   return productionSourceFiles()
     .filter((file) => {
-      const squashed = squash(readFileSync(file, "utf8"));
+      const raw = tryReadUtf8(file);
+      if (raw === null) return false;
+      const squashed = squash(raw);
       return SUBMIT_LEDGER_TABLES.some((table) => squashed.includes(squash(table)));
     })
     .map((file) => relative(srcRoot, file))
@@ -582,7 +623,7 @@ describe("submit write-path reach guard (import graph, not literal text)", () =>
 
   it("the SEND_EXTERNAL surfaces among the declared reachers are exactly the named exemptions", () => {
     const flagged = Object.keys(SUBMIT_WRITE_PATH_REACHERS)
-      .filter((rel) => isSendExternalSurface(rel, readFileSync(resolve(srcRoot, rel), "utf8")))
+      .filter((rel) => isSendExternalSurface(rel, tryReadUtf8(resolve(srcRoot, rel)) ?? ""))
       .sort();
     expect(flagged, `a SEND_EXTERNAL surface reaches ${WRITE_PATH_MODULE}`).toEqual(
       Object.keys(SEND_NAMING_REACHERS).sort(),
@@ -597,7 +638,7 @@ describe("submit write-path reach guard (import graph, not literal text)", () =>
 
   it("the SEND_EXTERNAL surfaces naming a submit ledger are exactly the named exemptions", () => {
     const flagged = Object.keys(SUBMIT_LEDGER_NAMING_MODULES)
-      .filter((rel) => isSendExternalSurface(rel, readFileSync(resolve(srcRoot, rel), "utf8")))
+      .filter((rel) => isSendExternalSurface(rel, tryReadUtf8(resolve(srcRoot, rel)) ?? ""))
       .sort();
     expect(flagged, "a SEND_EXTERNAL surface names a submit ledger").toEqual(
       Object.keys(SEND_NAMING_LEDGER_MODULES).sort(),

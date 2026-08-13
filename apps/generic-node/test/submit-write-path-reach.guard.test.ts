@@ -92,9 +92,31 @@ const WRITE_PATH_MARKERS = [
 ] as const;
 
 function listTsFiles(dir: string): string[] {
-  return (readdirSync(dir, { recursive: true }) as string[])
-    .map((entry) => join(dir, entry))
-    .filter((file) => extname(file) === ".ts" && statSync(file).isFile());
+  // Tolerate ENOENT: sibling suites write short-lived mutation probes under src/
+  // (e.g. _sign_census_mutation_probe.ts) that can vanish between readdir and stat
+  // when vitest workers run in parallel.
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { recursive: true }) as string[]) {
+    const file = join(dir, entry);
+    if (extname(file) !== ".ts") continue;
+    try {
+      if (statSync(file).isFile()) out.push(file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
+  }
+  return out;
+}
+
+/** Read utf8 or null if the path disappeared mid-scan (parallel mutation probes). */
+function tryReadUtf8(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
 }
 
 // Import/export specifiers that survive compilation, i.e. real runtime edges. PARSED, not
@@ -240,7 +262,12 @@ function resolveModule(fromFile: string, specifier: string): string | null {
   if (!specifier.startsWith(".")) return null; // node: builtins and other packages
   const target = resolve(dirname(fromFile), specifier);
   for (const candidate of [target.replace(/\.js$/, ".ts"), `${target}.ts`, join(target, "index.ts")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
   }
   throw new Error(`unresolvable import "${specifier}" in ${relative(repoRoot, fromFile)}`);
 }
@@ -257,7 +284,9 @@ function crossPackageImportGraph(): Map<string, string[]> {
   const graph = new Map<string, string[]>();
   for (const rel of productionSourceFiles()) {
     const file = resolve(repoRoot, rel);
-    const edges = valueImportEdges(readFileSync(file, "utf8"), rel)
+    const text = tryReadUtf8(file);
+    if (text === null) continue;
+    const edges = valueImportEdges(text, rel)
       .map((specifier) => resolveModule(file, specifier))
       .filter((resolved): resolved is string => resolved !== null)
       .map((resolved) => relative(repoRoot, resolved));
@@ -527,7 +556,7 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
       .filter((f) => f.startsWith(APP_PREFIX))
       .filter((rel) =>
         WRITE_PATH_MARKERS.some((marker) =>
-          readFileSync(resolve(repoRoot, rel), "utf8").includes(marker),
+          (tryReadUtf8(resolve(repoRoot, rel)) ?? "").includes(marker),
         ),
       )
       .map((rel) => rel.slice(APP_PREFIX.length));
@@ -554,7 +583,7 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
     const settleText = readFileSync(resolve(repoRoot, RECEIVE_SETTLE_MODULE), "utf8");
     expect(settleText.match(/receiveSubmitOnce\(/g)).toHaveLength(1);
     const callers = productionSourceFiles().filter(
-      (rel) => rel !== RECEIVE_SUBMIT_ONCE_MODULE && /\breceiveSubmitOnce\(/.test(readFileSync(resolve(repoRoot, rel), "utf8")),
+      (rel) => rel !== RECEIVE_SUBMIT_ONCE_MODULE && /\breceiveSubmitOnce\(/.test(tryReadUtf8(resolve(repoRoot, rel)) ?? ""),
     );
     expect(callers, "receiveSubmitOnce has more than one production call site").toEqual([
       RECEIVE_SETTLE_MODULE,
@@ -566,9 +595,10 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
     expect(intakeReachers).toContain(CANDIDATE_INTAKE_APP_MODULE);
     expect(intakeReachers).toContain(`${APP_PREFIX}money-workers/start-money-workers.ts`);
     expect(intakeReachers).toContain(`${APP_PREFIX}main.ts`);
-    const namers = productionSourceFiles().filter((rel) =>
-      /\bcreateCandidateIntakeService\b/.test(readFileSync(resolve(repoRoot, rel), "utf8")),
-    );
+    const namers = productionSourceFiles().filter((rel) => {
+      const text = tryReadUtf8(resolve(repoRoot, rel));
+      return text !== null && /\bcreateCandidateIntakeService\b/.test(text);
+    });
     expect(namers, "createCandidateIntakeService missing from production graph").toContain(
       CANDIDATE_INTAKE_APP_MODULE,
     );
@@ -577,7 +607,8 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
     const enqueueProducers = productionSourceFiles()
       .filter((rel) => rel.startsWith(APP_PREFIX))
       .filter((rel) => {
-        const text = readFileSync(resolve(repoRoot, rel), "utf8");
+        const text = tryReadUtf8(resolve(repoRoot, rel));
+        if (text === null) return false;
         return (
           text.includes("inbox.enqueue(") ||
           text.includes("candidateIntake.enqueue(") ||
@@ -614,7 +645,7 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
       .filter((f) => f.startsWith(APP_PREFIX))
       .filter((rel) => !writePathCallerSet.has(rel))
       .filter((rel) => {
-        const text = readFileSync(resolve(repoRoot, rel), "utf8");
+        const text = tryReadUtf8(resolve(repoRoot, rel)) ?? "";
         return WRITE_PATH_MARKERS.some((m) => text.includes(m)) || text.includes("submit_transaction");
       });
     expect(flaggedSubmit, "submit markers in apps/generic-node/src (non-RECEIVE)").toEqual([]);
@@ -624,13 +655,13 @@ describe("app-tree submit write-path reach census (apps/generic-node/src)", () =
       .filter(
         (rel) =>
           /send/i.test(rel) ||
-          readFileSync(resolve(repoRoot, rel), "utf8").includes("SEND_EXTERNAL") ||
-          readFileSync(resolve(repoRoot, rel), "utf8").includes("runSendPostApproveFormation"),
+          (tryReadUtf8(resolve(repoRoot, rel)) ?? "").includes("SEND_EXTERNAL") ||
+          (tryReadUtf8(resolve(repoRoot, rel)) ?? "").includes("runSendPostApproveFormation"),
       )
       .sort();
     expect(sendSurfaces.length).toBeGreaterThan(0);
     for (const rel of sendSurfaces) {
-      const text = readFileSync(resolve(repoRoot, rel), "utf8");
+      const text = tryReadUtf8(resolve(repoRoot, rel)) ?? "";
       expect(text, rel).not.toContain("submit_transaction");
       expect(text, rel).not.toContain("makeSubmitDecisionClaimStore");
     }

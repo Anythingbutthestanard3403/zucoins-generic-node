@@ -15,9 +15,12 @@ import {
   POST_EXPIRY_RECONCILING,
   RECEIVE_EXPIRY_RELEASE_STATEMENTS,
   RECEIVE_QUEUE_MAX_WAIT_MS,
+  RECEIVE_RELEASE_PREDICATE_CAUSES,
   SAFE_TERMINAL_RELEASE_STATUS,
   allReceiveReleasePredicatesHold,
+  buildReceiveExpiryAttentionDetail,
   failedReceiveReleasePredicates,
+  serializeFreshReadOutcome,
   type ReceiveReleasePredicateName,
   type ReceiveReleasePredicates,
 } from "./expiry-release.js";
@@ -47,6 +50,55 @@ describe("receive expiry/release frozen constants", () => {
     expect(SAFE_TERMINAL_RELEASE_STATUS).toBe(
       CONTRACT_SAFE_TERMINAL_RELEASE_STATUS,
     );
+  });
+});
+
+describe("buildReceiveExpiryAttentionDetail (ZTR-1279)", () => {
+  it("names each failed predicate with a human cause and the fresh-read outcome", () => {
+    const detail = buildReceiveExpiryAttentionDetail(
+      ["FRESH_VERIFIED_T0_EXACT", "NO_LANDED_PROOF"],
+      { kind: "exact_repeat", observationId: "obs-1" },
+      "obs-1",
+    );
+    const parsed = JSON.parse(detail) as {
+      failed_predicates: string[];
+      predicate_causes: { predicate: string; cause: string }[];
+      fresh_read: { kind: string; summary: string };
+    };
+    expect(parsed.failed_predicates).toEqual([
+      "FRESH_VERIFIED_T0_EXACT",
+      "NO_LANDED_PROOF",
+    ]);
+    expect(parsed.predicate_causes).toHaveLength(2);
+    const freshCause = parsed.predicate_causes.find(
+      (c) => c.predicate === "FRESH_VERIFIED_T0_EXACT",
+    );
+    expect(freshCause?.cause).toMatch(/exact repeat/i);
+    expect(freshCause?.cause).toContain("obs-1");
+    expect(parsed.fresh_read.kind).toBe("exact-repeat");
+    expect(parsed.fresh_read.summary).toBe("exact-repeat:obs-1");
+  });
+
+  it("covers every release predicate with a frozen cause string", () => {
+    for (const [, name] of PREDICATES) {
+      expect(RECEIVE_RELEASE_PREDICATE_CAUSES[name].length).toBeGreaterThan(10);
+    }
+  });
+
+  it("serializeFreshReadOutcome is stable for worker log lines", () => {
+    expect(serializeFreshReadOutcome({ kind: "skipped", reason: "wallet_row_undefined" })).toBe(
+      "skipped:wallet_row_undefined",
+    );
+    expect(serializeFreshReadOutcome({ kind: "failed", reason: "gateway down" })).toBe(
+      "failed:gateway down",
+    );
+    expect(
+      serializeFreshReadOutcome({
+        kind: "appended",
+        observationId: "o1",
+        relationship: "SUCCESSOR",
+      }),
+    ).toBe("appended:SUCCESSOR:o1");
   });
 });
 

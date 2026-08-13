@@ -46,12 +46,14 @@ import {
   runPoolScaleUp,
   runSendPostApproveFormation,
   SqlReceiveExpiryReleaseService,
+  serializeFreshReadOutcome,
   toBase64UrlPadded,
   withSerializationRetry,
   type AutoApprovePolicyPort,
   type DeviceKeyStore,
   type DualChainEventQuota,
   type EncryptedWalletKeyStore,
+  type FreshReadOutcome,
   type GatewayLimits,
   type MintWallet,
   type MoneyPathSignerGates,
@@ -1116,32 +1118,69 @@ async function runReceiveExpiryReleaseStep(deps: {
       // Fresh head OUTSIDE the SERIALIZABLE expire body. Only needed when T0 exists —
       // PROVEN_NOT_STARTED (null T0 + no formation) still uses freshObservationId: null.
       let freshObservationId: string | null = null;
-      if (
-        candidate.t0ObservationId !== null &&
-        deps.readFreshHead !== undefined &&
-        candidate.receiverWalletId !== null
-      ) {
+      // ZTR-1279: every candidate logs a fresh-read outcome (never silent skip).
+      let freshReadOutcome: FreshReadOutcome;
+      if (candidate.t0ObservationId === null) {
+        freshReadOutcome = {
+          kind: "not_attempted",
+          reason: "no_t0_observation",
+        };
+      } else if (deps.readFreshHead === undefined) {
+        freshReadOutcome = {
+          kind: "not_attempted",
+          reason: "no_fresh_head_reader",
+        };
+      } else if (candidate.receiverWalletId === null) {
+        freshReadOutcome = {
+          kind: "skipped",
+          reason: "receiver_wallet_id_null",
+        };
+      } else {
         try {
           const walletRow = (
             await deps.pool.query<{ public_key: string }>(SQL_EXPIRY_RECEIVER_WALLET_PUBLIC_KEY, [
               candidate.operationId,
             ])
           ).rows[0];
-          if (walletRow !== undefined) {
+          if (walletRow === undefined) {
+            // Silent skip was the incident cost — always log with operation id (ZTR-1279).
+            freshReadOutcome = {
+              kind: "skipped",
+              reason: "wallet_row_undefined",
+            };
+          } else {
             const fresh = await deps.readFreshHead(walletRow.public_key);
             freshObservationId = fresh.observationId;
+            if (fresh.relationship === "DUPLICATE") {
+              freshReadOutcome = {
+                kind: "exact_repeat",
+                observationId: fresh.observationId,
+              };
+            } else {
+              freshReadOutcome = {
+                kind: "appended",
+                observationId: fresh.observationId,
+                ...(fresh.relationship !== undefined
+                  ? { relationship: fresh.relationship }
+                  : {}),
+              };
+            }
           }
         } catch (err) {
-          deps.logger.info(
-            `money-workers: receive expiry fresh-head read failed op=${candidate.operationId} ` +
-              `(${err instanceof Error ? err.message : String(err)}) — expire with null fresh id`,
-          );
+          const reason = err instanceof Error ? err.message : String(err);
+          freshReadOutcome = { kind: "failed", reason };
           freshObservationId = null;
         }
       }
+      const freshReadSummary = serializeFreshReadOutcome(freshReadOutcome);
+      deps.logger.info(
+        `money-workers: receive expiry candidate op=${candidate.operationId} ` +
+          `fresh_read=${freshReadSummary}`,
+      );
       const outcome = await service.expire({
         operationId: candidate.operationId,
         freshObservationId,
+        freshReadOutcome,
         nowMs: Date.now(),
       });
       switch (outcome.kind) {
@@ -1150,7 +1189,7 @@ async function runReceiveExpiryReleaseStep(deps: {
           deps.logger.info(
             `money-workers: receive expiry RELEASED op=${candidate.operationId} ` +
               `wallet=${outcome.walletId} status=${outcome.releaseStatus} ` +
-              `proof=${outcome.receiveReleaseProofId}`,
+              `proof=${outcome.receiveReleaseProofId} fresh_read=${freshReadSummary}`,
           );
           break;
         case "NEEDS_ATTENTION":
@@ -1158,7 +1197,7 @@ async function runReceiveExpiryReleaseStep(deps: {
           deps.logger.info(
             `money-workers: receive expiry ATTENTION op=${candidate.operationId} ` +
               `reason=${outcome.attentionReason} episode=${outcome.attentionEpisode} ` +
-              `failed=${outcome.failedPredicates.join(",")}`,
+              `failed=${outcome.failedPredicates.join(",")} fresh_read=${freshReadSummary}`,
           );
           break;
         case "NOT_EXPIRED":
@@ -1169,13 +1208,14 @@ async function runReceiveExpiryReleaseStep(deps: {
           break;
         case "EXPIRED_UNASSIGNED":
           deps.logger.info(
-            `money-workers: receive expiry UNASSIGNED op=${candidate.operationId}`,
+            `money-workers: receive expiry UNASSIGNED op=${candidate.operationId} ` +
+              `fresh_read=${freshReadSummary}`,
           );
           break;
         case "INVARIANT_BREACH":
           deps.logger.info(
             `money-workers: receive expiry INVARIANT_BREACH op=${candidate.operationId} ` +
-              `wallet=${outcome.walletId}`,
+              `wallet=${outcome.walletId} fresh_read=${freshReadSummary}`,
           );
           deps.metricsHooks?.onInvariantBreach();
           break;

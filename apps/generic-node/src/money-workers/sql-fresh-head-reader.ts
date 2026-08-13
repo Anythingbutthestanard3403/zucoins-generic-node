@@ -272,7 +272,11 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
           `head anomalous relationship ${persisted.relationship} (observation ${persisted.observationId})`,
         );
       }
-      return { observationId: persisted.observationId, envelope };
+      return {
+        observationId: persisted.observationId,
+        envelope,
+        relationship: persisted.relationship,
+      };
     } catch (err) {
       throw err instanceof FreshHeadReadError
         ? err

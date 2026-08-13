@@ -253,6 +253,7 @@ function b0Facts(
     status,
     attentionRequired: status === "NEEDS_ATTENTION",
     attentionReason: status === "NEEDS_ATTENTION" ? "UNEXPECTED_HEAD_CHANGE" : null,
+    attentionDetail: null,
     rowVersion: 1,
     leaseEpoch: 1,
     heldLeases: [{ walletId: WALLET, leaseEpoch: 1, role: "SOURCE" }],

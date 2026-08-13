@@ -71,6 +71,8 @@ export interface RecoveryDetail {
   status: string;
   attention_required: boolean;
   attention_reason: string | null;
+  /** Structured evidence-gap JSON from operations.attention_detail (ZTR-1279). */
+  attention_detail?: string | null;
   classification: string;
   classification_rationale: string;
   permitted_actions: readonly string[];

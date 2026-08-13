@@ -62,6 +62,19 @@ export interface SendCreateRequest {
   readonly clientReference: string | null;
   readonly description: string | null;
   readonly idempotencyKey: string;
+  /**
+   * Client-visible source for the idempotency fingerprint (ZTR-1271).
+   * When set (including `null` = omitted on the public body), hashed instead of the
+   * resolved `sourceWalletId` so assign-path replay stays stable across worker picks.
+   * When undefined, fingerprint uses `sourceWalletId` (explicit create path).
+   */
+  readonly idempotencySourceWalletId?: string | null;
+  /**
+   * Client-visible references_operation_id for the fingerprint. Composition may bind a
+   * top-up MOVE id into the durable row while the public body omitted the field — the
+   * hash must stay client-stable (ZTR-1271).
+   */
+  readonly idempotencyReferencesOperationId?: string | null;
 }
 
 export interface SendOperation {
@@ -247,13 +260,21 @@ export function validateSendCreateRequest(
 // field sequence below IS the preimage byte sequence — it is written out literally and is
 // never sorted, rearranged, or normalized.
 export function canonicalRequestSha256(request: SendCreateRequest): string {
+  const sourceForFingerprint =
+    request.idempotencySourceWalletId !== undefined
+      ? request.idempotencySourceWalletId
+      : request.sourceWalletId;
+  const referencesForFingerprint =
+    request.idempotencyReferencesOperationId !== undefined
+      ? request.idempotencyReferencesOperationId
+      : request.referencesOperationId;
   const canonical = JSON.stringify({
     implementer_id: request.implementerId,
     node_id: request.nodeId,
-    source_wallet_id: request.sourceWalletId,
+    source_wallet_id: sourceForFingerprint,
     destination_address: request.destinationAddress,
     amount_zkz: request.amountZkz,
-    references_operation_id: request.referencesOperationId,
+    references_operation_id: referencesForFingerprint,
     client_reference: request.clientReference,
     description: request.description,
   });

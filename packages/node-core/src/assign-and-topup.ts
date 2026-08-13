@@ -35,13 +35,18 @@ import {
   type MoveOperation,
 } from "./move/create.js";
 import {
+  canonicalRequestSha256,
   createExternalSend,
+  SEND_CANONICAL_ROUTE,
+  SEND_HTTP_METHOD,
   type SendArtifactSigner,
   type SendCreateConfig,
   type SendCreateOutcome,
+  type SendCreateRequest,
   type SendCreateStore,
   type SendExpectedArtifact,
   type SendOperation,
+  IDEMPOTENCY_IN_PROGRESS_RETRY_AFTER_SECONDS,
 } from "./send/create.js";
 
 // ─── frozen SQL (exported for PG text + concurrency drills) ─────────────────
@@ -443,6 +448,27 @@ export async function isSendTopUpReady(
  * Does NOT chain-submit SEND_EXTERNAL. Does NOT acquire SEND_SOURCE / MOVE leases —
  * existing money workers own formation after admission.
  */
+/** Client-visible idempotency fingerprint for assign composition (source may be null). */
+export function canonicalAssignRequestSha256(request: AssignAndTopUpRequest): string {
+  const fingerprint: SendCreateRequest = {
+    implementerId: request.implementerId,
+    nodeId: request.nodeId,
+    // Placeholder — overridden by idempotencySourceWalletId for the hash.
+    sourceWalletId: request.sourceWalletId ?? "00000000-0000-4000-8000-000000000000",
+    destinationAddress: request.destinationAddress,
+    amountZkz: request.amountZkz,
+    // Client-supplied reference only; top-up MOVE id is composition-internal and must
+    // not enter the fingerprint (replay would otherwise diverge after first create).
+    referencesOperationId: request.referencesOperationId,
+    clientReference: request.clientReference,
+    description: request.description,
+    idempotencyKey: request.idempotencyKey,
+    idempotencySourceWalletId: request.sourceWalletId,
+    idempotencyReferencesOperationId: request.referencesOperationId,
+  };
+  return canonicalRequestSha256(fingerprint);
+}
+
 export async function assignAndTopUpExternalSend(
   deps: AssignAndTopUpDeps,
   request: AssignAndTopUpRequest,
@@ -470,6 +496,44 @@ export async function assignAndTopUpExternalSend(
     } catch {
       return { outcome: "REJECTED", code: "send_rejected", detail: "invalid_source_wallet_id" };
     }
+  }
+
+  // ZTR-1271: resolve idempotent replay BEFORE worker/hub selection. Re-assign on
+  // replay can fail with no_free_send_worker even when the first create succeeded.
+  const requestSha256 = canonicalAssignRequestSha256(request);
+  const existing = await deps.sendStore.findByIdempotency(
+    request.implementerId,
+    SEND_HTTP_METHOD,
+    SEND_CANONICAL_ROUTE,
+    request.idempotencyKey,
+  );
+  if (existing !== null) {
+    if (existing.requestSha256 !== requestSha256) {
+      return {
+        outcome: "REJECTED",
+        code: "send_rejected",
+        detail: "idempotency_key_reused",
+        causeCode: "idempotency_key_reused",
+      };
+    }
+    if (existing.responseBody === null || existing.responseStatus === null) {
+      return {
+        outcome: "REJECTED",
+        code: "send_rejected",
+        detail: "idempotency_in_progress",
+        causeCode: "idempotency_in_progress",
+        retryAfterSeconds: IDEMPOTENCY_IN_PROGRESS_RETRY_AFTER_SECONDS,
+      };
+    }
+    return {
+      outcome: "IDEMPOTENT_REPLAY",
+      sendCreate: {
+        outcome: "IDEMPOTENT_REPLAY",
+        operation: existing,
+        responseStatus: existing.responseStatus,
+        responseBody: existing.responseBody,
+      },
+    };
   }
 
   // Halt blocks first formation of both verbs before any durable row is written.
@@ -686,10 +750,14 @@ export async function assignAndTopUpExternalSend(
       sourceWalletId: plan.workerWalletId,
       destinationAddress: request.destinationAddress,
       amountZkz: request.amountZkz,
+      // Durable linkage may be the top-up MOVE; fingerprint stays client-stable.
       referencesOperationId,
       clientReference: request.clientReference,
       description: request.description,
       idempotencyKey: request.idempotencyKey,
+      // Client-visible source (null when omitted) — not the resolved worker. ZTR-1271.
+      idempotencySourceWalletId: request.sourceWalletId,
+      idempotencyReferencesOperationId: request.referencesOperationId,
     },
     deps.sendCreateConfig ?? { generateId: deps.generateId, now: deps.now },
   );

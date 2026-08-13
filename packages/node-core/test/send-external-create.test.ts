@@ -382,6 +382,48 @@ describe("idempotency", () => {
       expect(canonicalRequestSha256(request(overrides)), JSON.stringify(overrides)).not.toBe(base);
     }
   });
+
+  it("client-visible idempotency overrides keep fingerprint stable when resolved fields differ (ZTR-1271)", () => {
+    const clientOmit = request({
+      sourceWalletId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      referencesOperationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      idempotencySourceWalletId: null,
+      idempotencyReferencesOperationId: null,
+    });
+    const otherResolved = request({
+      sourceWalletId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      referencesOperationId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      idempotencySourceWalletId: null,
+      idempotencyReferencesOperationId: null,
+    });
+    expect(canonicalRequestSha256(clientOmit)).toBe(canonicalRequestSha256(otherResolved));
+    // Explicit client source still differs from omit.
+    expect(
+      canonicalRequestSha256(
+        request({
+          sourceWalletId: SOURCE_WALLET_ID,
+          idempotencySourceWalletId: SOURCE_WALLET_ID,
+          idempotencyReferencesOperationId: null,
+        }),
+      ),
+    ).not.toBe(canonicalRequestSha256(clientOmit));
+  });
+
+  it("binds expected artifact to the resolved source wallet, not the client fingerprint override", async () => {
+    const store = readyStore();
+    const outcome = await create(store, {
+      sourceWalletId: SOURCE_WALLET_ID,
+      idempotencySourceWalletId: null,
+      idempotencyReferencesOperationId: null,
+    });
+    expect(outcome.outcome).toBe("CREATED");
+    if (outcome.outcome !== "CREATED") return;
+    // Artifact preimage must name the resolved wallet id (suite builder source_selector).
+    expect(outcome.artifact.preimageText).toContain(SOURCE_WALLET_ID);
+    expect(outcome.operation.sourceWalletId).toBe(SOURCE_WALLET_ID);
+    const body = buildExternalSendResponse(outcome.operation, outcome.artifact);
+    expect(body.source_wallet_id).toBe(SOURCE_WALLET_ID);
+  });
 });
 
 /* ─── step 2 gates ────────────────────────────────────────────── */

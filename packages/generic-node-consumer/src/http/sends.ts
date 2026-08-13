@@ -10,7 +10,11 @@ import { resolveFetch, resolveUrl, type NodeClientConfig } from "./client-types.
 import type { CommonOperationView } from "./receives.js";
 
 export interface CreateExternalSendRequest {
-  readonly source_wallet_id: string;
+  /**
+   * Optional send-capable source wallet. When omitted, the node assigns a free
+   * worker (ZTR-1271). Response always includes the resolved `source_wallet_id`.
+   */
+  readonly source_wallet_id?: string;
   readonly destination_address: string;
   readonly amount_zkz: string;
   readonly references_operation_id?: string;

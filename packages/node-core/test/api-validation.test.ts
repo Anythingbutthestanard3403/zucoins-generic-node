@@ -227,6 +227,14 @@ describe("unknown field rejection (400 unknown_field)", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts POST /v1/external-sends without source_wallet_id (ZTR-1271)", () => {
+    const result = CreateExternalSendBody.safeParse({
+      destination_address: "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=",
+      amount_zkz: "5.5",
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 // --- Unsupported state/event rejection ---

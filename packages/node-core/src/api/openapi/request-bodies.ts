@@ -191,7 +191,8 @@ export const CREATE_INTERNAL_MOVE_BODY: JsonSchema = {
 export const CREATE_EXTERNAL_SEND_BODY: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["source_wallet_id", "destination_address", "amount_zkz"],
+  // source_wallet_id optional (ZTR-1271): omit → node assigns send-capable worker (+ top-up).
+  required: ["destination_address", "amount_zkz"],
   properties: {
     source_wallet_id: uuid,
     destination_address: walletPubkey,

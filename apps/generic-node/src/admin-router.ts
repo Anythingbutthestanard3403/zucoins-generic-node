@@ -119,7 +119,12 @@ import {
   type OperatorPushSubscriptionStore,
   type OperatorPushSubscription,
   type OperatorPushSender,
+  type WalletMoneyCapabilityStore,
 } from "@zucoins/node-core";
+import {
+  isWalletMoneyMode,
+  type WalletMoneyMode,
+} from "@zucoins/generic-node-contracts/wallet-state";
 
 import {
   createEmptyAdminInventoryStore,
@@ -559,6 +564,48 @@ function parseDualControlPolicyBody(
     }
   }
   return { ok: true, body: { mode: raw.mode } };
+}
+
+/**
+ * PATCH /admin/v1/wallets/:wallet_id/money-capability body (ZTR-1269).
+ * Mode is the primary control; expected_row_version is required for CAS.
+ */
+function parseWalletMoneyCapabilityBody(
+  raw: unknown,
+): ParseOk<{ mode: WalletMoneyMode; expected_row_version: number }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (!isWalletMoneyMode(raw.mode)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "mode must be RECEIVE_ONLY, SEND_ONLY, INTERNAL_ONLY, or FULL",
+    };
+  }
+  if (
+    typeof raw.expected_row_version !== "number" ||
+    !Number.isInteger(raw.expected_row_version) ||
+    raw.expected_row_version < 1
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "expected_row_version must be a positive integer",
+    };
+  }
+  const known = new Set(["mode", "expected_row_version"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return {
+    ok: true,
+    body: { mode: raw.mode, expected_row_version: raw.expected_row_version },
+  };
 }
 
 /**
@@ -1584,6 +1631,11 @@ export interface AdminMutationTxPorts {
    * so node_settings + audit_log commit/roll back with the admin mutation TX.
    */
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  /**
+   * TX-scoped wallet money-capability store (ZTR-1269). Mutation writes MUST use
+   * this port so wallets CAS + audit_log commit/roll back with the admin TX.
+   */
+  readonly walletMoneyCapabilityStore?: WalletMoneyCapabilityStore;
 }
 
 export interface AdminRouterResponse {
@@ -2290,6 +2342,118 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         } catch {
           return fail(503, "service_unavailable", "wallet detail unavailable", requestId);
         }
+      }
+    }
+
+    // PATCH /admin/v1/wallets/:wallet_id/money-capability — TOTP + row_version CAS + audit (ZTR-1269).
+    // Lives above the POST-only mutation zone (peer of setup-state PATCH) and decodes its own body.
+    {
+      const m = pathname.match(/^\/admin\/v1\/wallets\/([^/]+)\/money-capability$/);
+      if (verb === "PATCH" && m) {
+        let moneyCapBody: unknown;
+        try {
+          moneyCapBody = decodeBody(rawBody);
+        } catch {
+          return fail(400, "validation_error", "invalid JSON body", requestId);
+        }
+        const routeId = "admin_wallet_money_capability";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const capabilityStore = ports.walletMoneyCapabilityStore;
+            if (capabilityStore === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(
+                  503,
+                  "service_unavailable",
+                  "wallet money-capability store not wired",
+                  requestId,
+                ),
+              };
+            }
+            const walletId = decodeURIComponent(m[1]!);
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: moneyCapBody,
+              validateBody: parseWalletMoneyCapabilityBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user }) => {
+                const outcome = await capabilityStore.setMode({
+                  walletId,
+                  mode: body.mode,
+                  expectedRowVersion: body.expected_row_version,
+                  actorId: user.id,
+                  nodeId,
+                });
+                if (!outcome.ok) {
+                  const status =
+                    outcome.reason === "wallet_not_found"
+                      ? 404
+                      : outcome.reason === "conflict"
+                        ? 409
+                        : 400;
+                  throw Object.assign(new Error(outcome.reason), {
+                    code: outcome.reason,
+                    status,
+                  });
+                }
+                return outcome.result;
+              },
+            });
+            if (!guarded.ok) {
+              const nestedStatus =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "status" in guarded.error &&
+                typeof (guarded.error as { status: unknown }).status === "number"
+                  ? (guarded.error as { status: number }).status
+                  : guarded.status;
+              const nestedCode =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "code" in guarded.error &&
+                typeof (guarded.error as { code: unknown }).code === "string"
+                  ? (guarded.error as { code: string }).code
+                  : guarded.code;
+              return {
+                outcome: "abort" as const,
+                response: fail(nestedStatus, nestedCode, guarded.message, requestId),
+              };
+            }
+            return {
+              outcome: "commit" as const,
+              status: 200,
+              responseBody: guarded.result,
+            };
+          },
+        });
       }
     }
 

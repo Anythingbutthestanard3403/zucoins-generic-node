@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { CopyButton } from "../../components/CopyButton.js";
+import { MoneyModeBadge } from "../../components/MoneyModeBadge.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import { truncatePubkey } from "../../lib/format.js";
@@ -19,6 +20,8 @@ export function WalletsPage() {
   const verifiedCount = rows.filter((w) => w.recovery_verified).length;
   const blockedCount = rows.filter((w) => !w.recovery_verified).length;
   const zeroEligible = live && !loading && (rows.length === 0 || verifiedCount === 0);
+  const sendCapable = rows.filter((w) => w.allow_external_send).length;
+  const receiveCapable = rows.filter((w) => w.allow_external_receive).length;
 
   return (
     <div className="page">
@@ -67,6 +70,27 @@ export function WalletsPage() {
           </div>
         </div>
       ) : null}
+      {live && rows.length > 0 && (sendCapable === 0 || receiveCapable === 0) ? (
+        <div
+          className="banner banner-warn"
+          role="status"
+          data-testid="wallets-capability-fleet-warning"
+          style={{ marginBottom: 16 }}
+        >
+          {sendCapable === 0 ? (
+            <p style={{ margin: 0 }}>
+              No send-capable wallet remains (none allow external send). Outgoing may stall until a
+              FULL or SEND_ONLY wallet is restored.
+            </p>
+          ) : null}
+          {receiveCapable === 0 ? (
+            <p style={{ margin: sendCapable === 0 ? "8px 0 0" : 0 }}>
+              No receive-capable wallet remains (none allow external receive). Incoming assign may
+              stall until a FULL or RECEIVE_ONLY wallet is restored.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {live && rows.length === 0 ? (
         <p className="muted">
           No wallets in custody DB yet. After signer leadership, the receive-pool mint creates
@@ -81,6 +105,7 @@ export function WalletsPage() {
               <th>Pubkey</th>
               <th>Origin</th>
               <th>State</th>
+              <th>Money mode</th>
               <th>Hold cause</th>
               <th>Recovery</th>
               <th>Observed ZKZ</th>
@@ -90,7 +115,7 @@ export function WalletsPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   {loading
                       ? "Loading…"
                       : live
@@ -109,6 +134,9 @@ export function WalletsPage() {
                   <td>{w.key_origin}</td>
                   <td>
                     <StatusTag status={w.state} />
+                  </td>
+                  <td>
+                    <MoneyModeBadge mode={w.money_mode} />
                   </td>
                   <td>
                     <WalletHoldCause wallet={w} compact />

@@ -106,6 +106,53 @@ describe("WalletsPage honesty", () => {
     renderPage();
     expect(await screen.findByText("1.5000")).toBeInTheDocument();
     expect(screen.queryByText("No wallets")).not.toBeInTheDocument();
+    expect(screen.getByTestId("money-mode-badge-full")).toHaveTextContent("Full");
+  });
+
+  it("soft-warns when the live fleet has zero send-capable wallets", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                wallet_id: "w1",
+                public_key: "zkz1qhub",
+                state: "AVAILABLE",
+                key_origin: "node_generated",
+                recovery_verified: true,
+                observed_balance_zkz: "2.0000",
+                holding_operation_id: null,
+                holding_operation_status: null,
+                holding_operation_expiry_unix_time_secs: null,
+                holding_operation_attention_required: false,
+                holding_operation_terminal_at: null,
+                holding_lease_role: null,
+                holding_operation_type: null,
+                money_mode: "INTERNAL_ONLY",
+                allow_external_receive: false,
+                allow_external_send: false,
+                allow_internal_move: true,
+                row_version: 2,
+              },
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByTestId("money-mode-badge-internal_only")).toBeInTheDocument();
+    expect(screen.getByTestId("wallets-capability-fleet-warning")).toHaveTextContent(
+      /No send-capable/,
+    );
+    expect(screen.getByTestId("wallets-capability-fleet-warning")).toHaveTextContent(
+      /No receive-capable/,
+    );
   });
 
   it("shows Continue recovery verification CTA when live inventory has zero verified wallets", async () => {

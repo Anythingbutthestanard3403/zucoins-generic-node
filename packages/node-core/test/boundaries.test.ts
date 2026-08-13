@@ -527,6 +527,8 @@ describe("node-core dependency boundaries", () => {
         "@zucoins/generic-node-contracts/operations",
         "@zucoins/generic-node-contracts/operations/events",
         "@zucoins/generic-node-contracts/operator-halt",
+        // Wallet money-capability preset validation (ZTR-1269 admin PATCH).
+        "@zucoins/generic-node-contracts/wallet-state",
         "@zucoins/node-core",
         "@zucoins/node-core/data",
         // scrubErrorDetails for the process-level fatal net, and the redacting

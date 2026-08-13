@@ -11,6 +11,43 @@ export const OPERATION_KIND_LABELS = {
   SEND_EXTERNAL: "Outgoing (needs approval)",
 } as const;
 
+/**
+ * Per-wallet money capability presets (ZTR-1269) — short chip + help copy.
+ * Drift-safe wording: hub / internal-only / float — not forbidden stems.
+ */
+export const MONEY_MODE_LABELS = {
+  RECEIVE_ONLY: {
+    short: "Receive only",
+    help: "Accepts external incoming funds and internal transfers. Cannot be a source for external outgoing.",
+  },
+  SEND_ONLY: {
+    short: "Send only",
+    help: "Can source external outgoing and internal transfers. Does not accept external incoming assign.",
+  },
+  INTERNAL_ONLY: {
+    short: "Internal only",
+    help: "Hub float: internal transfers only. Never external send or receive. Multiple internal-only wallets are allowed.",
+  },
+  FULL: {
+    short: "Full",
+    help: "Unrestricted: external receive, external send, and internal transfers (default).",
+  },
+} as const;
+
+export type MoneyModeKey = keyof typeof MONEY_MODE_LABELS;
+
+export function moneyModeLabel(mode: string | null | undefined): string {
+  if (mode == null || mode === "") return "Unknown";
+  const key = mode.trim().toUpperCase() as MoneyModeKey;
+  return MONEY_MODE_LABELS[key]?.short ?? mode;
+}
+
+export function moneyModeHelp(mode: string | null | undefined): string {
+  if (mode == null || mode === "") return "Mode unknown.";
+  const key = mode.trim().toUpperCase() as MoneyModeKey;
+  return MONEY_MODE_LABELS[key]?.help ?? "Unrecognised money mode.";
+}
+
 export type OperationKindKey = keyof typeof OPERATION_KIND_LABELS;
 
 /** Status / formation / attention / inventory codes → operator text. */

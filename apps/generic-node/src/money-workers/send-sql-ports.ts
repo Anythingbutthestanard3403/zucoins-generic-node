@@ -149,12 +149,23 @@ export async function syncOperationsMirrorFromSend(
 }
 
 export async function loadApprovedUnsignedSendIds(pool: Pool): Promise<readonly string[]> {
+  // ZTR-1270: park formation until referenced top-up MOVE is INTERNAL_MOVE_LANDED.
   const result = await pool.query<{ operation_id: string }>(
-    `SELECT operation_id::text AS operation_id
-       FROM send_operations
-      WHERE status = 'APPROVED'
-        AND formation_state = 'APPROVED_UNSIGNED'
-      ORDER BY created_at ASC, operation_id ASC -- contract-allow:order:frozen structural vocabulary
+    `SELECT s.operation_id::text AS operation_id
+       FROM send_operations s
+      WHERE s.status = 'APPROVED'
+        AND s.formation_state = 'APPROVED_UNSIGNED'
+        AND (
+              s.references_operation_id IS NULL
+           OR EXISTS (
+                SELECT 1
+                  FROM operations m
+                 WHERE m.id = s.references_operation_id
+                   AND m.kind = 'MOVE_INTERNAL'
+                   AND m.status = 'INTERNAL_MOVE_LANDED'
+              )
+            )
+      ORDER BY s.created_at ASC, s.operation_id ASC -- contract-allow:order:frozen structural vocabulary
       LIMIT 10`,
   );
   return result.rows.map((r) => r.operation_id);
@@ -172,18 +183,29 @@ const AUTO_APPROVE_PENDING_BATCH = 100;
 export async function loadApprovalPendingSendCandidates(
   pool: Pool,
 ): Promise<readonly ApprovalPendingSendCandidate[]> {
+  // ZTR-1270: auto-approve only after source is known AND top-up MOVE (if any) has landed.
   const result = await pool.query<{
     operation_id: string;
     implementer_id: string;
     amount_zkz: string;
   }>(
-    `SELECT operation_id::text AS operation_id,
-            implementer_id::text AS implementer_id,
-            amount_zkz::text AS amount_zkz
-       FROM send_operations
-      WHERE status = 'CREATED'
-        AND formation_state = 'APPROVAL_PENDING'
-      ORDER BY created_at ASC, operation_id ASC -- contract-allow:order:frozen structural vocabulary
+    `SELECT s.operation_id::text AS operation_id,
+            s.implementer_id::text AS implementer_id,
+            s.amount_zkz::text AS amount_zkz
+       FROM send_operations s
+      WHERE s.status = 'CREATED'
+        AND s.formation_state = 'APPROVAL_PENDING'
+        AND (
+              s.references_operation_id IS NULL
+           OR EXISTS (
+                SELECT 1
+                  FROM operations m
+                 WHERE m.id = s.references_operation_id
+                   AND m.kind = 'MOVE_INTERNAL'
+                   AND m.status = 'INTERNAL_MOVE_LANDED'
+              )
+            )
+      ORDER BY s.created_at ASC, s.operation_id ASC -- contract-allow:order:frozen structural vocabulary
       LIMIT ${AUTO_APPROVE_PENDING_BATCH}`,
   );
   return result.rows.map((r) => ({

@@ -118,9 +118,20 @@ describe("withTotpRetry ceiling", () => {
     );
     renderHarness(attempt);
 
-    // One initial attempt + MAX_TOTP_RETRIES re-prompts. An unbounded loop would
-    // keep handing out a fifth prompt and never settle the mutation.
-    for (let i = 0; i < 4; i += 1) await enterCode("123456");
+    // One initial attempt + MAX_TOTP_RETRIES re-prompts. Wait for the prompt to
+    // clear slots / surface the wrong-code banner between entries so fireEvent
+    // does not type into a still-busy or mid-reset dialog (CI race under load).
+    await enterCode("123456");
+    expect(await screen.findByText(/^Code invalid — try again\.$/)).toBeInTheDocument();
+    await enterCode("123456");
+    expect(
+      await screen.findByText(/wait for the next authenticator code/),
+    ).toBeInTheDocument();
+    await enterCode("123456");
+    expect(
+      await screen.findByText(/wait for the next authenticator code/),
+    ).toBeInTheDocument();
+    await enterCode("123456");
 
     expect(await screen.findByText(/^terminated:/)).toHaveTextContent(
       "terminated: authentication required",

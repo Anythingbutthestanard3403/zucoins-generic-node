@@ -5,6 +5,7 @@
 export * from "./api/index.js";
 export * from "./core/index.js";
 export * from "./money-path-admission.js";
+export * from "./assign-and-topup.js";
 export * from "./operation-route-store.js";
 export * from "./credential/index.js";
 export * from "./implementer/index.js";

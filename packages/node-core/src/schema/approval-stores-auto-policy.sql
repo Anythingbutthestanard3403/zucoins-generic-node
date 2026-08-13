@@ -17,8 +17,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1
       FROM pg_enum e
-      JOIN pg_type t ON t.oid = e.enumtypid
-     WHERE t.typname = 'approval_method'
+     WHERE e.enumtypid = to_regtype('approval_method')
        AND e.enumlabel = 'AUTO_POLICY'
   ) THEN
     RAISE EXCEPTION 'approval-stores-auto-policy requires approval_method.AUTO_POLICY (apply approval-method-auto-policy-enum first)';

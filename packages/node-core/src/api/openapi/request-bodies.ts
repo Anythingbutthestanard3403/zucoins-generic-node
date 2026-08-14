@@ -327,6 +327,8 @@ export const NEEDS_ATTENTION_QUERY: Readonly<Record<string, JsonSchema>> = {
     enum: [...OPERATION_KINDS],
   },
   limit: { type: "integer", minimum: 1, maximum: 200 },
+  /** Id keyset — last operation_id from prior page (`next_cursor`). */
+  after: uuid,
 };
 
 const ed25519Sig: JsonSchema = {

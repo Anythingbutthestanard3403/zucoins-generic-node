@@ -47,10 +47,10 @@ function stubUnrelatedInventory() {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
     let body: unknown = { object: "list", data: [], has_more: false, next_cursor: null };
-    if (path.endsWith("/operations/needs-attention")) {
+    if (path.includes("/operations/needs-attention")) {
       body = {
         operations: [],
-        summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+        summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
       };
     } else if (path.includes("/readiness")) {
       body = {
@@ -393,10 +393,10 @@ describe("OverviewPage activity toolbar honesty", () => {
     vi.spyOn(money, "fetchHaltState").mockResolvedValue(CLEAR);
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path.endsWith("/operations/needs-attention")) {
+      if (path.includes("/operations/needs-attention")) {
         return new Response(JSON.stringify({
           operations: attention,
-          summary: { total: attention.length, by_classification: {}, p0_invariant_breach: 0 },
+          summary: { total: attention.length, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
         }), { status: 200 });
       }
       if (path.endsWith("/operations")) {
@@ -526,7 +526,7 @@ describe("OverviewPage activity toolbar honesty", () => {
       if (path.includes("/operations/needs-attention")) {
         return new Response(JSON.stringify({
           operations: [],
-          summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+          summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
         }), { status: 200 });
       }
       if (path.includes("/operations")) {
@@ -582,10 +582,10 @@ describe("OverviewPage health honesty", () => {
           checks: [],
         }), { status: healthStatus === "ready" ? 200 : 503 });
       }
-      if (path.endsWith("/operations/needs-attention")) {
+      if (path.includes("/operations/needs-attention")) {
         return new Response(JSON.stringify({
           operations: [],
-          summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+          summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
         }), { status: 200 });
       }
       return new Response(
@@ -692,10 +692,10 @@ describe("OverviewPage readiness checklist", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const path = String(input);
         let body: unknown = { object: "list", data: [], has_more: false, next_cursor: null };
-        if (path.endsWith("/operations/needs-attention")) {
+        if (path.includes("/operations/needs-attention")) {
           body = {
             operations: [],
-            summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+            summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
           };
         } else if (path.includes("/readiness")) {
           body = {

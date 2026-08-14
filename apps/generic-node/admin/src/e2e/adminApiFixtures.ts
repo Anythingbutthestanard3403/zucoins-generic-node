@@ -35,6 +35,8 @@ const SETUP_SESSION = {
 const NEEDS_ATTENTION = {
   operations: [],
   summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+  has_more: false,
+  next_cursor: null,
 };
 
 const KEY_ORIGIN_NODE: WalletKeyOrigin = "node_generated";

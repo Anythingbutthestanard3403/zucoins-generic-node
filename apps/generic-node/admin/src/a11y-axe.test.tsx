@@ -85,6 +85,8 @@ function emptyLiveFetch() {
           JSON.stringify({
             operations: [],
             summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+            has_more: false,
+            next_cursor: null,
           }),
           { status: 200 },
         );
@@ -321,7 +323,7 @@ describe("axe smoke — Approve inbox", () => {
           return new Response(
             JSON.stringify({
               operations: [],
-              summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+              summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
             }),
             { status: 200 },
           );

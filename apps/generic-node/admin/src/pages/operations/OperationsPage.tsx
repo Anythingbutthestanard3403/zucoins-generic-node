@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
@@ -20,10 +20,14 @@ import {
 } from "../../lib/money.js";
 import { relativeTime } from "../../lib/format.js";
 import {
+  fetchNeedsAttentionPage,
   invalidateNeedsAttention,
   useNeedsAttention,
 } from "../../lib/needs-attention.js";
-import { EMPTY_NEEDS_ATTENTION } from "../../lib/ops.js";
+import {
+  EMPTY_NEEDS_ATTENTION,
+  type NeedsAttentionListItem,
+} from "../../lib/ops.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
 import { operationKindLabel, severityShort, statusLabel } from "../../lib/labels.js";
 
@@ -40,6 +44,12 @@ export function OperationsPage() {
   const [retractReason, setRetractReason] = useState(
     "False-positive attention after LANDED_VERIFIED — classifier residue",
   );
+  // Accumulated pages beyond the shared first-page cache (ZTR-1284 load-more).
+  const [extraOps, setExtraOps] = useState<NeedsAttentionListItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreErr, setLoadMoreErr] = useState<string | null>(null);
 
   const attentionQ = useNeedsAttention({ refetchIntervalMs: 15_000 });
 
@@ -53,8 +63,44 @@ export function OperationsPage() {
   const live = attentionQ.data?.live ?? false;
   const loading = attentionQ.isLoading;
   const payload = attentionQ.data?.data ?? EMPTY_NEEDS_ATTENTION;
-  const ops = payload.operations;
   const summary = payload.summary;
+
+  // Reset accumulated pages whenever the shared first page refreshes.
+  useEffect(() => {
+    if (!live) return;
+    setExtraOps([]);
+    setNextCursor(payload.next_cursor);
+    setHasMore(payload.has_more);
+    setLoadMoreErr(null);
+  }, [live, payload.operations, payload.next_cursor, payload.has_more, summary.total]);
+
+  const ops = useMemo(() => {
+    if (extraOps.length === 0) return payload.operations;
+    const seen = new Set(payload.operations.map((o) => o.operation_id));
+    const merged = [...payload.operations];
+    for (const row of extraOps) {
+      if (seen.has(row.operation_id)) continue;
+      seen.add(row.operation_id);
+      merged.push(row);
+    }
+    return merged;
+  }, [payload.operations, extraOps]);
+
+  async function loadMoreAttention() {
+    if (!hasMore || nextCursor === null || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreErr(null);
+    try {
+      const page = await fetchNeedsAttentionPage({ after: nextCursor });
+      setExtraOps((prev) => [...prev, ...page.operations]);
+      setNextCursor(page.next_cursor);
+      setHasMore(page.has_more);
+    } catch (e) {
+      setLoadMoreErr(formatMoneyError(e, "Could not load more attention rows"));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const historyLive = historyQ.data?.live === true;
   const historyRows: readonly OperationListItem[] = historyLive ? (historyQ.data?.data ?? []) : [];
@@ -241,101 +287,122 @@ export function OperationsPage() {
                 ) : null}
               </>
             ) : (
-              ops.map((a) => (
-                <div key={a.operation_id}>
-                  <div className="attn">
-                    <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
-                    <div className="body-t">
-                      <div className="t">
-                        {operationKindLabel(a.operation_type)} · {statusLabel(a.status)} <StatusTag status={a.classification} />
-                      </div>
-                      <div className="d">
-                        <code>{a.operation_id}</code>
-                        {a.attention_reason ? ` · ${statusLabel(a.attention_reason)}` : ""}
-                        {a.attention_since ? ` · ${relativeTime(a.attention_since)}` : ""}
-                      </div>
-                      {a.classification_rationale ? (
-                        <div className="d" style={{ marginTop: 4 }}>
-                          {a.classification_rationale}
+              <>
+                {ops.map((a) => (
+                  <div key={a.operation_id}>
+                    <div className="attn">
+                      <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
+                      <div className="body-t">
+                        <div className="t">
+                          {operationKindLabel(a.operation_type)} · {statusLabel(a.status)} <StatusTag status={a.classification} />
                         </div>
-                      ) : null}
-                      <div className="form-actions" style={{ marginTop: 8 }}>
-                        <Link
-                          className="mini-btn primary"
-                          to={operationDetailPath(a.operation_id, a.operation_type)}
-                        >
-                          Open detail
-                        </Link>
-                        <button
-                          type="button"
-                          className="mini-btn"
-                          onClick={() => void openRecovery(a.operation_id)}
-                        >
-                          Quick recovery
-                        </button>
+                        <div className="d">
+                          <code>{a.operation_id}</code>
+                          {a.attention_reason ? ` · ${statusLabel(a.attention_reason)}` : ""}
+                          {a.attention_since ? ` · ${relativeTime(a.attention_since)}` : ""}
+                        </div>
+                        {a.classification_rationale ? (
+                          <div className="d" style={{ marginTop: 4 }}>
+                            {a.classification_rationale}
+                          </div>
+                        ) : null}
+                        <div className="form-actions" style={{ marginTop: 8 }}>
+                          <Link
+                            className="mini-btn primary"
+                            to={operationDetailPath(a.operation_id, a.operation_type)}
+                          >
+                            Open detail
+                          </Link>
+                          <button
+                            type="button"
+                            className="mini-btn"
+                            onClick={() => void openRecovery(a.operation_id)}
+                          >
+                            Quick recovery
+                          </button>
+                        </div>
                       </div>
                     </div>
+                    {expanded === a.operation_id ? (
+                      <div className="card form-card" style={{ margin: "0 12px 12px" }}>
+                        {detailErr ? <p className="err">{detailErr}</p> : null}
+                        {detail ? (
+                          <>
+                            <p className="muted" style={{ fontSize: 12.5 }}>
+                              Nonce issued {detail.recovery_nonce_issued_at} · expires{" "}
+                              {detail.recovery_nonce_expires_at} · row {detail.row_version}
+                            </p>
+                            <p style={{ marginTop: 8, fontSize: 13 }}>
+                              {statusLabel(detail.classification)}: {detail.classification_rationale}
+                            </p>
+                            {canRetractAttention(detail) ? (
+                              <div style={{ marginTop: 10 }} data-testid="attention-retraction-quick">
+                                <label className="field" style={{ display: "block", marginBottom: 8 }}>
+                                  <span className="k" style={{ display: "block", marginBottom: 4 }}>
+                                    Retraction reason
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={retractReason}
+                                    onChange={(e) => setRetractReason(e.target.value)}
+                                    maxLength={2000}
+                                    style={{ width: "100%" }}
+                                    aria-label="Retraction reason"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  className="mini-btn primary"
+                                  disabled={retract.isPending || retractReason.trim().length === 0}
+                                  onClick={() => {
+                                    setErr(null);
+                                    setMsg(null);
+                                    retract.mutate();
+                                  }}
+                                >
+                                  Retract attention flag
+                                </button>
+                              </div>
+                            ) : null}
+                            <RecoveryActions
+                              permittedActions={detail.permitted_actions}
+                              disabled={act.isPending}
+                              liveClassName="mini-btn primary"
+                              emptyMessage="No live recovery actions available on this row."
+                              onAction={(action) => {
+                                setErr(null);
+                                setMsg(null);
+                                act.mutate(action);
+                              }}
+                            />
+                          </>
+                        ) : !detailErr ? (
+                          <p className="muted">Loading recovery…</p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                  {expanded === a.operation_id ? (
-                    <div className="card form-card" style={{ margin: "0 12px 12px" }}>
-                      {detailErr ? <p className="err">{detailErr}</p> : null}
-                      {detail ? (
-                        <>
-                          <p className="muted" style={{ fontSize: 12.5 }}>
-                            Nonce issued {detail.recovery_nonce_issued_at} · expires{" "}
-                            {detail.recovery_nonce_expires_at} · row {detail.row_version}
-                          </p>
-                          <p style={{ marginTop: 8, fontSize: 13 }}>
-                            {statusLabel(detail.classification)}: {detail.classification_rationale}
-                          </p>
-                          {canRetractAttention(detail) ? (
-                            <div style={{ marginTop: 10 }} data-testid="attention-retraction-quick">
-                              <label className="field" style={{ display: "block", marginBottom: 8 }}>
-                                <span className="k" style={{ display: "block", marginBottom: 4 }}>
-                                  Retraction reason
-                                </span>
-                                <input
-                                  type="text"
-                                  value={retractReason}
-                                  onChange={(e) => setRetractReason(e.target.value)}
-                                  maxLength={2000}
-                                  style={{ width: "100%" }}
-                                  aria-label="Retraction reason"
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                className="mini-btn primary"
-                                disabled={retract.isPending || retractReason.trim().length === 0}
-                                onClick={() => {
-                                  setErr(null);
-                                  setMsg(null);
-                                  retract.mutate();
-                                }}
-                              >
-                                Retract attention flag
-                              </button>
-                            </div>
-                          ) : null}
-                          <RecoveryActions
-                            permittedActions={detail.permitted_actions}
-                            disabled={act.isPending}
-                            liveClassName="mini-btn primary"
-                            emptyMessage="No live recovery actions available on this row."
-                            onAction={(action) => {
-                              setErr(null);
-                              setMsg(null);
-                              act.mutate(action);
-                            }}
-                          />
-                        </>
-                      ) : !detailErr ? (
-                        <p className="muted">Loading recovery…</p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ))
+                ))}
+                {live && (hasMore || ops.length < summary.total) ? (
+                  <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+                      Showing {ops.length} of {summary.total}
+                    </p>
+                    {loadMoreErr ? <p className="err" style={{ margin: 0 }}>{loadMoreErr}</p> : null}
+                    {hasMore ? (
+                      <button
+                        type="button"
+                        className="mini-btn"
+                        disabled={loadingMore || nextCursor === null}
+                        onClick={() => void loadMoreAttention()}
+                        data-testid="needs-attention-load-more"
+                      >
+                        {loadingMore ? "Loading…" : "Load more"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
         </>

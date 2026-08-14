@@ -94,7 +94,7 @@ export class InMemoryDefaultFundingWallet implements DefaultFundingWalletPort {
     if (this.rowVersion !== input.expectedRowVersion) {
       return { ok: false, reason: "conflict" };
     }
-    let nextId: string | null = input.walletId;
+    const nextId: string | null = input.walletId;
     let nextKey: string | null = null;
     if (nextId !== null) {
       if (!UUID_RE.test(nextId)) {
@@ -195,7 +195,7 @@ export function createSqlDefaultFundingWallet(
         return { ok: false, reason: "conflict" };
       }
 
-      let nextValue: string | null = input.walletId;
+      const nextValue: string | null = input.walletId;
       let nextPublicKey: string | null = null;
       if (nextValue !== null) {
         if (!UUID_RE.test(nextValue)) {

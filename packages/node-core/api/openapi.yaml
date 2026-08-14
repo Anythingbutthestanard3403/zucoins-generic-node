@@ -343,6 +343,13 @@ paths:
             type: integer
             minimum: 1
             maximum: 200
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            description: Lowercase canonical UUID (RFC 4122 hex form).
       responses:
         "200":
           description: Success

@@ -3,6 +3,8 @@
 // apps/generic-node mount bullet of the ticket without inventing parallel logic.
 
 export {
+  NEEDS_ATTENTION_DEFAULT_LIMIT,
+  NEEDS_ATTENTION_MAX_LIMIT,
   NEEDS_ATTENTION_PATH,
   NeedsAttentionQuerySchema,
   RECOVERY_DETAIL_PATH,
@@ -13,6 +15,7 @@ export {
   type NeedsAttentionListItem,
   type NeedsAttentionQuery,
   type NeedsAttentionResponse,
+  type NeedsAttentionStorePage,
   type RecoveryDetailResponse,
   type RecoveryInspectionStore,
   // Pure classification / permitted-actions (operator surface)

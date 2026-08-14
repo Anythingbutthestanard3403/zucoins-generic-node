@@ -141,7 +141,7 @@ function makeRouter(opts?: {
           queryAutoApproveWindowSpend: async () => spend,
         }),
     recoveryStore: {
-      listNeedsAttention: async () => [],
+      listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
       issueRecoveryNonce: async () => {
         throw new Error("unused");

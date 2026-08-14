@@ -38,7 +38,23 @@ function cookieFrom(setCookie: string | undefined): string {
   return setCookie.split(";")[0] ?? "";
 }
 
-async function authedRouter(listNeedsAttention = vi.fn(async () => [])) {
+type NeedsAttentionPage = {
+  readonly items: readonly unknown[];
+  readonly total: number;
+  readonly has_more: boolean;
+  readonly next_cursor: string | null;
+};
+
+const EMPTY_PAGE: NeedsAttentionPage = {
+  items: [],
+  total: 0,
+  has_more: false,
+  next_cursor: null,
+};
+
+async function authedRouter(
+  listNeedsAttention: ReturnType<typeof vi.fn> = vi.fn(async (): Promise<NeedsAttentionPage> => EMPTY_PAGE),
+) {
   const userStore = new InMemoryAdminUserStore();
   await seedAdmin(userStore, "needs-attention-secret");
   const sessions = createAdminSessionService(
@@ -88,7 +104,12 @@ describe("GET /admin/v1/operations/needs-attention query validation (ZTR-1198)",
     const { get, listNeedsAttention } = await authedRouter();
     const empty = await get("/admin/v1/operations/needs-attention");
     expect(empty.status).toBe(200);
-    expect(JSON.parse(empty.body)).toMatchObject({ operations: [], summary: { total: 0 } });
+    expect(JSON.parse(empty.body)).toMatchObject({
+      operations: [],
+      summary: { total: 0 },
+      has_more: false,
+      next_cursor: null,
+    });
 
     const ceiling = await get("/admin/v1/operations/needs-attention?limit=200");
     expect(ceiling.status).toBe(200);
@@ -134,10 +155,19 @@ describe("GET /admin/v1/operations/needs-attention query validation (ZTR-1198)",
     expect(listNeedsAttention).not.toHaveBeenCalled();
   });
 
-  it("forwards validated filters to the store (no as-never bypass)", async () => {
+  it("rejects non-uuid after cursor with 400 invalid_scalar (ZTR-1284)", async () => {
     const { get, listNeedsAttention } = await authedRouter();
+    const res = await get("/admin/v1/operations/needs-attention?after=not-a-uuid");
+    expect(res.status).toBe(400);
+    expect(errorOf(res.body).code).toBe("invalid_scalar");
+    expect(listNeedsAttention).not.toHaveBeenCalled();
+  });
+
+  it("forwards validated filters and after cursor to the store (no as-never bypass)", async () => {
+    const { get, listNeedsAttention } = await authedRouter();
+    const cursor = "00000000-0000-4000-8000-0000000000aa";
     const res = await get(
-      "/admin/v1/operations/needs-attention?kind=MOVE_INTERNAL&classification=WAITING&limit=10",
+      `/admin/v1/operations/needs-attention?kind=MOVE_INTERNAL&classification=WAITING&limit=10&after=${cursor}`,
     );
     expect(res.status).toBe(200);
     expect(listNeedsAttention).toHaveBeenCalledTimes(1);
@@ -145,6 +175,29 @@ describe("GET /admin/v1/operations/needs-attention query validation (ZTR-1198)",
       kind: "MOVE_INTERNAL",
       classification: "WAITING",
       limit: 10,
+      after: cursor,
     });
+  });
+
+  it("exposes honest total + has_more from the store page (ZTR-1284)", async () => {
+    const listNeedsAttention = vi.fn(async (): Promise<NeedsAttentionPage> => ({
+      items: [],
+      total: 87,
+      has_more: true,
+      next_cursor: "00000000-0000-4000-8000-0000000000bb",
+    }));
+    const { get } = await authedRouter(listNeedsAttention);
+    const res = await get("/admin/v1/operations/needs-attention?limit=50");
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body) as {
+      summary: { total: number };
+      has_more: boolean;
+      next_cursor: string | null;
+      operations: unknown[];
+    };
+    expect(body.operations).toEqual([]);
+    expect(body.summary.total).toBe(87);
+    expect(body.has_more).toBe(true);
+    expect(body.next_cursor).toBe("00000000-0000-4000-8000-0000000000bb");
   });
 });

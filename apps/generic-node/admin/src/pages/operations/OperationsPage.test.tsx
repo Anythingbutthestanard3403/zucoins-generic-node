@@ -58,6 +58,8 @@ describe("OperationsPage honesty", () => {
       vi.fn(async () => new Response(JSON.stringify({
         operations: [],
         summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+        has_more: false,
+        next_cursor: null,
       }), { status: 200 })),
     );
     renderPage();
@@ -84,6 +86,8 @@ describe("OperationsPage honesty", () => {
           wallet_ids: [],
         }],
         summary: { total: 1, by_classification: { WAITING: 1 }, p0_invariant_breach: 0 },
+        has_more: false,
+        next_cursor: null,
       }), { status: 200 })),
     );
     renderPage();
@@ -95,6 +99,68 @@ describe("OperationsPage honesty", () => {
     );
   });
 
+  it("badge total is server summary.total and load-more walks the cursor (ZTR-1284)", async () => {
+    const row = (id: string) => ({
+      operation_id: id,
+      operation_type: "SEND_EXTERNAL",
+      status: "PARKED",
+      attention_required: true,
+      attention_reason: "stuck",
+      classification: "WAITING",
+      classification_rationale: "awaiting formation",
+      severity: "P1" as const,
+      permitted_actions: [] as string[],
+      row_version: 1,
+      lease_epoch: null,
+      attention_since: "2026-07-30T00:00:00.000Z",
+      wallet_ids: [] as string[],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("needs-attention")) {
+        return new Response(JSON.stringify({ error: { code: "not_found", message: url } }), {
+          status: 404,
+        });
+      }
+      if (url.includes("after=")) {
+        return new Response(
+          JSON.stringify({
+            operations: [row("op-2")],
+            summary: { total: 87, by_classification: { WAITING: 87 }, p0_invariant_breach: 0 },
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          operations: [row("op-1")],
+          summary: { total: 87, by_classification: { WAITING: 87 }, p0_invariant_breach: 0 },
+          has_more: true,
+          next_cursor: "00000000-0000-4000-8000-000000000001",
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = renderPage();
+    expect(await screen.findByText(/op-1/)).toBeInTheDocument();
+    // Tab badge and Parked stat use summary.total (87), not page length (1).
+    const warnBadges = Array.from(container.querySelectorAll(".n.warn")).map((el) => el.textContent);
+    expect(warnBadges).toContain("87");
+    const parked = Array.from(container.querySelectorAll(".stat")).find((el) =>
+      el.textContent?.includes("Parked"),
+    );
+    expect(parked?.querySelector(".v")?.textContent).toBe("87");
+    expect(screen.getByText(/Showing 1 of 87/)).toBeInTheDocument();
+
+    screen.getByTestId("needs-attention-load-more").click();
+    expect(await screen.findByText(/op-2/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 2 of 87/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("after="))).toBe(true);
+  });
+
   it("history tab lists inventory ops with receive detail links", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -103,6 +169,8 @@ describe("OperationsPage honesty", () => {
           JSON.stringify({
             operations: [],
             summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+            has_more: false,
+            next_cursor: null,
           }),
           { status: 200 },
         );

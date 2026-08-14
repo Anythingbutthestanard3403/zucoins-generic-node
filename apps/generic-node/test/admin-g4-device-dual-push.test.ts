@@ -139,7 +139,7 @@ function makeRouter(opts?: {
       ...(opts?.operatorPushSender !== undefined ? { sender: opts.operatorPushSender } : {}),
     },
     recoveryStore: {
-      listNeedsAttention: async () => [],
+      listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
       issueRecoveryNonce: async () => {
         throw new Error("unused");
@@ -1230,7 +1230,7 @@ describe("G4 device-signature policy (ZTR-1143)", () => {
       },
       deviceStore: new InMemoryDeviceKeyStore(),
       recoveryStore: {
-        listNeedsAttention: async () => [],
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
         loadRecoveryFacts: async () => null,
         issueRecoveryNonce: async () => {
           throw new Error("unused");

@@ -21,6 +21,7 @@ import {
   type RecoveryClassification,
   type RecoveryFacts,
 } from "../operator/recovery-inspection.js";
+import { UuidSchema } from "./scalars.js";
 
 export {
   FORBIDDEN_RECOVERY_ACTIONS,
@@ -38,11 +39,20 @@ export {
 export const NEEDS_ATTENTION_PATH = "/admin/v1/operations/needs-attention" as const;
 export const RECOVERY_DETAIL_PATH = "/admin/v1/operations/:operation_id/recovery" as const;
 
+/** Default page size — never the authority for summary.total (ZTR-1284). */
+export const NEEDS_ATTENTION_DEFAULT_LIMIT = 50;
+export const NEEDS_ATTENTION_MAX_LIMIT = 200;
+
 export const NeedsAttentionQuerySchema = z
   .object({
     classification: z.enum(RECOVERY_CLASSIFICATIONS).optional(),
     kind: z.enum(OPERATION_KINDS).optional(),
-    limit: z.coerce.number().int().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(NEEDS_ATTENTION_MAX_LIMIT).optional(),
+    /**
+     * Id keyset cursor — last `operation_id` from the prior page (`next_cursor`).
+     * Same shape as inventory `after` / wallets-ops.
+     */
+    after: UuidSchema.optional(),
   })
   .strict();
 
@@ -67,10 +77,25 @@ export interface NeedsAttentionListItem {
 export interface NeedsAttentionResponse {
   readonly operations: readonly NeedsAttentionListItem[];
   readonly summary: {
+    /**
+     * Full filtered-set size (SQL attention match ± kind), not the page length.
+     * Badge/total must use this — never `operations.length` (ZTR-1284).
+     */
     readonly total: number;
     readonly by_classification: Readonly<Record<RecoveryClassification, number>>;
     readonly p0_invariant_breach: number;
   };
+  readonly has_more: boolean;
+  readonly next_cursor: string | null;
+}
+
+/** Store page for needs-attention listing (keyset + honest total). */
+export interface NeedsAttentionStorePage {
+  readonly items: readonly RecoveryFacts[];
+  /** COUNT(*) of the SQL attention set (± kind filter), independent of limit/cursor. */
+  readonly total: number;
+  readonly has_more: boolean;
+  readonly next_cursor: string | null;
 }
 
 export interface IssuedRecoveryNonce {
@@ -115,10 +140,15 @@ export interface RecoveryDetailResponse {
  */
 export interface RecoveryInspectionStore {
   /**
-   * Tenant-neutral list of parked operations: attention_required=true OR public
-   * status NEEDS_ATTENTION.
+   * Tenant-neutral parked listing: attention_required=true OR public status
+   * NEEDS_ATTENTION (landed terminals excluded). Newest-first keyset page plus
+   * an honest `total` for the full SQL filter set (ZTR-1284).
+   *
+   * `classification` is derived at read time — stores ignore it; the handler
+   * filters the projected page. `total` / `has_more` remain SQL-set scoped
+   * (kind ± cursor), never capped at page length.
    */
-  listNeedsAttention(query: NeedsAttentionQuery): Promise<readonly RecoveryFacts[]>;
+  listNeedsAttention(query: NeedsAttentionQuery): Promise<NeedsAttentionStorePage>;
 
   /** Full durable snapshot for one operation, or null if absent. */
   loadRecoveryFacts(operationId: string): Promise<RecoveryFacts | null>;
@@ -168,6 +198,7 @@ function projectListItem(facts: RecoveryFacts): NeedsAttentionListItem {
 
 function buildSummary(
   items: readonly NeedsAttentionListItem[],
+  total: number,
 ): NeedsAttentionResponse["summary"] {
   const by_classification: Record<RecoveryClassification, number> = {
     ...EMPTY_BY_CLASSIFICATION,
@@ -178,7 +209,8 @@ function buildSummary(
     if (item.severity === "P0") p0 += 1;
   }
   return {
-    total: items.length,
+    // Honest backlog size from the store COUNT — never page length (ZTR-1284).
+    total,
     by_classification,
     p0_invariant_breach: p0,
   };
@@ -186,24 +218,29 @@ function buildSummary(
 
 /**
  * GET /admin/v1/operations/needs-attention — tenant-neutral parked listing.
- * Re-derives permitted actions per row at read time.
+ * Re-derives permitted actions per row at read time. Pagination is keyset
+ * (`after` / `next_cursor`); `summary.total` is the full SQL match count.
  */
 export async function handleNeedsAttention(
   store: RecoveryInspectionStore,
   query: NeedsAttentionQuery = {},
 ): Promise<NeedsAttentionResponse> {
-  const snapshots = await store.listNeedsAttention(query);
-  let items = snapshots.map(projectListItem);
+  const page = await store.listNeedsAttention(query);
+  let items = page.items.map(projectListItem);
+  // classification is not a durable column — filter the projected page only.
+  // kind is applied in SQL; keep a defensive in-memory pass for non-SQL stores.
   if (query.classification !== undefined) {
     items = items.filter((i) => i.classification === query.classification);
   }
   if (query.kind !== undefined) {
     items = items.filter((i) => i.operation_type === query.kind);
   }
-  if (query.limit !== undefined) {
-    items = items.slice(0, query.limit);
-  }
-  return { operations: items, summary: buildSummary(items) };
+  return {
+    operations: items,
+    summary: buildSummary(items, page.total),
+    has_more: page.has_more,
+    next_cursor: page.next_cursor,
+  };
 }
 
 export type GetRecoveryOutcome =

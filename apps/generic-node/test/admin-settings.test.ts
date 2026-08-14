@@ -74,7 +74,7 @@ async function loginRouter() {
     },
     deviceStore: null,
     recoveryStore: {
-      listNeedsAttention: async () => [],
+      listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
       issueRecoveryNonce: async () => {
         throw new Error("unused");
@@ -146,7 +146,7 @@ describe("GET /admin/v1/settings", () => {
       },
       deviceStore: null,
       recoveryStore: {
-        listNeedsAttention: async () => [],
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
         loadRecoveryFacts: async () => null,
         issueRecoveryNonce: async () => {
           throw new Error("unused");
@@ -240,7 +240,7 @@ describe("GET /admin/v1/settings", () => {
       },
       deviceStore: null,
       recoveryStore: {
-        listNeedsAttention: async () => [],
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
         loadRecoveryFacts: async () => null,
         issueRecoveryNonce: async () => {
           throw new Error("unused");

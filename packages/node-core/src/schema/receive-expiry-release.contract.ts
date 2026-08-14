@@ -9,9 +9,9 @@ export const RECEIVE_EXPIRY_RELEASE_INVARIANTS = [
   {
     id: "DURABLE_RELEASE_STATUS",
     sqlAnchor:
-      "receive_release_status IN (\n        'RELEASED_T0_UNCHANGED',\n        'RELEASED_PROVEN_NOT_STARTED',\n        'RELEASED_OPERATOR_ACCEPTED_RISK'\n      )",
+      "receive_release_status IN (\n        'RELEASED_T0_UNCHANGED',\n        'RELEASED_PROVEN_NOT_STARTED',\n        'RELEASED_OPERATOR_ACCEPTED_RISK',\n        'RELEASED_NODE_VERIFIED'\n      )",
     rule:
-      "successful expiry-release statuses are RELEASED_T0_UNCHANGED, RELEASED_PROVEN_NOT_STARTED, and RELEASED_OPERATOR_ACCEPTED_RISK (ZTR-1280).",
+      "successful release statuses are RELEASED_T0_UNCHANGED, RELEASED_PROVEN_NOT_STARTED, RELEASED_OPERATOR_ACCEPTED_RISK (ZTR-1280), and RELEASED_NODE_VERIFIED (ZTR-1300).",
   },
   {
     id: "PRE_CODE_RELEASE_PROOF",

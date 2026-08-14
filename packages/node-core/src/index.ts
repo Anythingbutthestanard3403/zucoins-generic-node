@@ -620,6 +620,21 @@ export {
   type ReceiveExpiryReleaseInvariant,
 } from "./schema/receive-expiry-release.contract.js";
 
+// verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
+export {
+  ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,
+  ALLOW_NODE_VERIFIED_SETTING_KEY,
+  DEFAULT_VERIFICATION_MODE,
+  RELEASED_NODE_VERIFIED,
+  VERIFICATION_MODES,
+  VERIFICATION_MODE_SCHEMA_EXECUTION_OBLIGATIONS,
+  VERIFICATION_MODE_SCHEMA_FILE,
+  VERIFICATION_MODE_SCHEMA_INVARIANTS,
+  VERIFICATION_MODE_SCHEMA_SOURCE,
+  VERIFICATION_MODE_EXTENDS,
+  type VerificationModeSchemaInvariant,
+} from "./schema/verification-mode.contract.js";
+
 // receive expiry, attention hold attention hold, and exact-T0 release.
 export {
   LOAD_EXPIRED_RECEIVE_CANDIDATES,

@@ -223,6 +223,9 @@ const SCHEMA_FILES = [
   // ZTR-1280: OPERATOR_ACCEPTED_RISK release kind/status + lease proof kind.
   // CHECK-constraint ALTERs only (no CREATE TABLE).
   "operator-accepted-risk-release.sql",
+  // ZTR-1300: verification_mode columns + RELEASED_NODE_VERIFIED + policy home.
+  // ALTER/DO/trigger only (no CREATE TABLE).
+  "verification-mode.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -253,6 +256,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "wallet-money-capability-lease-guard.sql",
   "implementer-funding-wallet.sql",
   "operator-accepted-risk-release.sql",
+  "verification-mode.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -582,6 +586,11 @@ const GREENFIELD: Record<
   "operator-accepted-risk-release.sql": {
     applies: false,
     missingFragment: "operator-accepted-risk-release requires operations",
+  },
+  // DO RAISE when operations / receive_operations / send_operations / node_settings / audit_log absent.
+  "verification-mode.sql": {
+    applies: false,
+    missingFragment: "verification-mode requires operations",
   },
 };
 

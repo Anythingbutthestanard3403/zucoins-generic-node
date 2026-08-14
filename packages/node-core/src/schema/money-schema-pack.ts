@@ -230,6 +230,11 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // CHECK-constraint ALTERs on receive_release_proofs / operations / lease_release_proofs.
   // Requires receive-expiry-release + lease-foundation. Appended only.
   "operator-accepted-risk-release",
+  // ZTR-1300: verification_mode column on operations/receive_operations/send_operations,
+  // RELEASED_NODE_VERIFIED on receive_release_status, ops.allow_node_verified policy home.
+  // Requires ops tables + node_settings + audit_log; follows operator-accepted-risk-release
+  // so the release-status CHECK rewrite includes the prior risk token. Appended only.
+  "verification-mode",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

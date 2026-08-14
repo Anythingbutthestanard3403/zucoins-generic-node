@@ -19,12 +19,12 @@ INSERT INTO wallets (
   allow_external_receive, allow_external_send, allow_internal_move, money_mode
 ) VALUES (
   $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
-  true, true, true, 'FULL'
+  $4, $5, $6, $7
 )` as const;
 
 export const INSERT_PENDING_DESTINATION_FOR_WALLET_SQL = `
 INSERT INTO destinations (id, node_id, wallet_id, label, state)
-VALUES (gen_random_uuid(), $2::uuid, $1::uuid, $3, 'PENDING')
+VALUES (gen_random_uuid(), $2::uuid, $1::uuid, $3, $4)
 ON CONFLICT (wallet_id) DO NOTHING` as const;
 
 export const DELETE_PENDING_DESTINATION_FOR_WALLET_SQL = `
@@ -33,32 +33,69 @@ DELETE FROM destinations WHERE wallet_id = $1::uuid` as const;
 export const DELETE_NODE_GENERATED_WALLET_SQL = `
 DELETE FROM wallets WHERE id = $1::uuid` as const;
 
+export type NodeGeneratedMintRole = "FULL" | "SEND_ONLY" | "RECEIVE_ONLY";
+
 export interface InsertNodeGeneratedWalletInput {
   readonly walletId: string;
   readonly nodeId: string;
   readonly publicKey: string;
   /** Operator-facing destinations.label. Empty is valid; register overwrites. */
   readonly label?: string;
+  /**
+   * Default FULL (register / funding). Pool scaler passes SEND_ONLY (WORKER
+   * dest, no blessing) or RECEIVE_ONLY (PENDING dest, blessable).
+   */
+  readonly role?: NodeGeneratedMintRole;
 }
 
+const ROLE_INSERT = {
+  FULL: {
+    allowReceive: true,
+    allowSend: true,
+    allowMove: true,
+    moneyMode: "FULL",
+    destState: "PENDING",
+  },
+  SEND_ONLY: {
+    allowReceive: false,
+    allowSend: true,
+    allowMove: true,
+    moneyMode: "SEND_ONLY",
+    destState: "WORKER",
+  },
+  RECEIVE_ONLY: {
+    allowReceive: true,
+    allowSend: false,
+    allowMove: true,
+    moneyMode: "RECEIVE_ONLY",
+    destState: "PENDING",
+  },
+} as const;
+
 /**
- * Insert a node_generated wallet and a matching PENDING destinations row.
- * Idempotent on destinations.wallet_id (UNIQUE) so a later register insert
- * cannot create a second row.
+ * Insert a node_generated wallet and a matching destinations row.
+ * Default FULL+PENDING (blessable). SEND_ONLY writes WORKER (composition sink,
+ * no ceremony). Idempotent on destinations.wallet_id (UNIQUE).
  */
 export async function insertNodeGeneratedWalletWithPendingDestination(
   sql: NodeGeneratedWalletSqlExecutor,
   input: InsertNodeGeneratedWalletInput,
 ): Promise<void> {
+  const spec = ROLE_INSERT[input.role ?? "FULL"];
   await sql.query(INSERT_NODE_GENERATED_WALLET_SQL, [
     input.walletId,
     input.nodeId,
     input.publicKey,
+    spec.allowReceive,
+    spec.allowSend,
+    spec.allowMove,
+    spec.moneyMode,
   ]);
   await sql.query(INSERT_PENDING_DESTINATION_FOR_WALLET_SQL, [
     input.walletId,
     input.nodeId,
     input.label ?? "",
+    spec.destState,
   ]);
 }
 

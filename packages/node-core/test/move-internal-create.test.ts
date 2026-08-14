@@ -191,7 +191,11 @@ function seededStore(): ConstraintStore {
 
 const FIXED_NOW = 1_700_000_000_000;
 
-function admit(store: ConstraintStore, overrides: Partial<MoveCreateRequest> = {}) {
+function admit(
+  store: ConstraintStore,
+  overrides: Partial<MoveCreateRequest> = {},
+  config: { readonly skipNodeVerifiedPolicyGate?: boolean } = {},
+) {
   let n = 0;
   return createInternalMove(store, request(overrides), {
     generateId: () => {
@@ -201,6 +205,9 @@ function admit(store: ConstraintStore, overrides: Partial<MoveCreateRequest> = {
       return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
     },
     now: () => FIXED_NOW,
+    ...(config.skipNodeVerifiedPolicyGate === true
+      ? { skipNodeVerifiedPolicyGate: true }
+      : {}),
   });
 }
 
@@ -361,10 +368,34 @@ describe("createInternalMove — admission", () => {
     expect(outcome.operation.kind).toBe("MOVE_INTERNAL");
     expect(outcome.operation.leaseGroupId).toBe(LEASE_GROUP_ID);
     expect(outcome.operation.spawnedFromOperationId).toBeNull();
+    expect(outcome.operation.verificationMode).toBe("INDEPENDENT");
     expect(store.insertCalls).toBe(1);
     expect(store.events).toEqual([OPERATION_ID]);
     expect(store.leaseGroups.get(LEASE_GROUP_ID)?.root).toBe(OPERATION_ID);
     expect(store.groupOps.get(OPERATION_ID)).toBe(LEASE_GROUP_ID);
+  });
+
+  it("refuses NODE_VERIFIED without operator policy (public / implementer path)", async () => {
+    const store = seededStore();
+    const outcome = await admit(store, { verificationMode: "NODE_VERIFIED" });
+    expect(outcome).toMatchObject({
+      outcome: "REJECTED",
+      code: "verification_mode_not_allowed",
+    });
+    expect(store.insertCalls).toBe(0);
+  });
+
+  it("admits NODE_VERIFIED when skipNodeVerifiedPolicyGate (node-owned top-up hop)", async () => {
+    const store = seededStore();
+    const outcome = await admit(
+      store,
+      { verificationMode: "NODE_VERIFIED" },
+      { skipNodeVerifiedPolicyGate: true },
+    );
+    expect(outcome.outcome).toBe("CREATED");
+    if (outcome.outcome !== "CREATED") return;
+    expect(outcome.operation.verificationMode).toBe("NODE_VERIFIED");
+    expect(store.insertCalls).toBe(1);
   });
 
   it("rejects same-wallet source=destination before any insert (review indicator 1)", async () => {

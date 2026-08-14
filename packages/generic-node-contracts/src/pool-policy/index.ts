@@ -3,6 +3,7 @@
 // concern into the package registry.
 export {
   POOL_FLOOR,
+  SEND_POOL_FLOOR,
   POOL_CAP_DEFAULT,
   POOL_CAP_CEILING,
   MINT_BATCH_LIMIT,
@@ -11,7 +12,12 @@ export {
   RECEIVE_QUEUE_MAX_WAIT_MS,
   RECEIVE_QUEUE_RETRY_AFTER_SECONDS,
 } from "./constants.js";
-export { computeProvisioningTarget, computeMintBatch } from "./sizing.js";
+export {
+  computeProvisioningTarget,
+  computeMintBatch,
+  planSharedCapMint,
+  type PoolMintRole,
+} from "./sizing.js";
 export {
   POOL_WALLET_STATES,
   POOL_WALLET_TRANSITIONS,
@@ -78,6 +84,8 @@ export {
   OPEN_SESSIONS_EXCLUDED_COMPONENTS,
   OPEN_SESSIONS_COUNT_SQL,
   OPEN_SESSIONS_DEFINITION,
+  SEND_OPEN_SESSIONS_COMPONENTS,
+  SEND_OPEN_SESSIONS_COUNT_SQL,
 } from "./open-sessions.js";
 export { poolTransactionsContract } from "./transactions-manifest.js";
 

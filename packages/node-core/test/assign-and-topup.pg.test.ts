@@ -179,7 +179,13 @@ const MODE_FLAGS: Record<Mode, { recv: boolean; send: boolean; move: boolean }> 
 
 const seedWallet = async (
   mode: Mode,
-  opts: { blessed?: boolean; balance?: string | null; nodeId?: string } = {},
+  opts: {
+    blessed?: boolean;
+    workerSink?: boolean;
+    recoveryVerified?: boolean;
+    balance?: string | null;
+    nodeId?: string;
+  } = {},
 ): Promise<{ walletId: string; destinationId: string | null }> => {
   seq += 1;
   const walletId = uuid(seq);
@@ -195,19 +201,21 @@ const seedWallet = async (
        ${f.recv}, ${f.send}, ${f.move}, '${mode}'
      )`,
   );
-  seq += 1;
-  const verificationId = uuid(seq);
-  const exportSha = `${"ab".repeat(30)}${String(seq).padStart(4, "0")}`;
-  await must(
-    `INSERT INTO wallet_recovery_verifications ` +
-      `(id, wallet_id, method, export_sha256, public_key, audit_event_id, verified_at, verifier_identity) ` +
-      `VALUES ('${verificationId}', '${walletId}', 'AUDITED_EXPORT', ` +
-      `'${exportSha}', '${publicKey}', '${verificationId}', now(), 'assign-topup');`,
-  );
-  await must(
-    `UPDATE wallets SET recovery_verified_at = now(), recovery_verification_id = '${verificationId}' ` +
-      `WHERE id = '${walletId}'`,
-  );
+  if (opts.recoveryVerified !== false) {
+    seq += 1;
+    const verificationId = uuid(seq);
+    const exportSha = `${"ab".repeat(30)}${String(seq).padStart(4, "0")}`;
+    await must(
+      `INSERT INTO wallet_recovery_verifications ` +
+        `(id, wallet_id, method, export_sha256, public_key, audit_event_id, verified_at, verifier_identity) ` +
+        `VALUES ('${verificationId}', '${walletId}', 'AUDITED_EXPORT', ` +
+        `'${exportSha}', '${publicKey}', '${verificationId}', now(), 'assign-topup');`,
+    );
+    await must(
+      `UPDATE wallets SET recovery_verified_at = now(), recovery_verification_id = '${verificationId}' ` +
+        `WHERE id = '${walletId}'`,
+    );
+  }
 
   if (opts.balance !== undefined && opts.balance !== null) {
     seq += 1;
@@ -219,7 +227,15 @@ const seedWallet = async (
   }
 
   let destinationId: string | null = null;
-  if (opts.blessed === true) {
+  if (opts.workerSink === true) {
+    seq += 1;
+    destinationId = uuid(seq);
+    await must(
+      `INSERT INTO destinations (id, node_id, wallet_id, label, state, created_at) ` +
+        `VALUES ('${destinationId}', '${nodeId}', '${walletId}', ` +
+        `'send-worker-${walletId.slice(0, 8)}', 'WORKER', now())`,
+    );
+  } else if (opts.blessed === true) {
     seq += 1;
     destinationId = uuid(seq);
     seq += 1;
@@ -256,6 +272,17 @@ beforeAll(() => {
     encoding: "utf-8",
     timeout: 90_000,
   });
+  // Own committed TXs: ADD VALUE cannot be used until the adding transaction commits.
+  execFileSync("psql", [scratchDbUrl, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
+    input: readSchema("destination-state-worker.sql"),
+    encoding: "utf-8",
+    timeout: 15_000,
+  });
+  execFileSync("psql", [scratchDbUrl, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
+    input: readSchema("destination-worker-sink.sql"),
+    encoding: "utf-8",
+    timeout: 15_000,
+  });
   execFileSync(
     "psql",
     [
@@ -288,6 +315,34 @@ describe.skipIf(!TEST_DATABASE_URL)("send assign + multi-hub top-up (real PG)", 
   it("frozen worker SQL carries SKIP LOCKED + allow_external_send", () => {
     expect(SELECT_SEND_WORKER_SQL).toContain("FOR UPDATE OF w SKIP LOCKED");
     expect(SELECT_SEND_WORKER_SQL).toContain("allow_external_send IS TRUE");
+    expect(SELECT_SEND_WORKER_SQL).not.toContain("recovery_verified_at");
+  });
+
+  it("recovery-unverified SEND_ONLY + WORKER sink is still selected", async () => {
+    const nodeC = "a0000000-0000-4000-8000-0000000000c1";
+    await must(
+      `INSERT INTO nodes (id, display_name, identity_public_key) VALUES
+         ('${nodeC}', 'worker-sink', '${pub(91)}') ON CONFLICT (id) DO NOTHING`,
+    );
+    const unverified = await seedWallet("SEND_ONLY", {
+      workerSink: true,
+      recoveryVerified: false,
+      balance: "10",
+      nodeId: nodeC,
+    });
+    const dest = await must(
+      SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL.replace(
+        /\$1::uuid/g,
+        `'${unverified.walletId}'::uuid`,
+      ),
+    );
+    expect(dest).toContain(unverified.destinationId);
+    const picked = await must(
+      `BEGIN;
+       ${SELECT_SEND_WORKER_SQL.replace(/\$1::uuid/g, `'${nodeC}'::uuid`).replace(/\$2::numeric/g, `2::numeric`).replace(/\$2/g, `'2'`)};
+       ROLLBACK;`,
+    );
+    expect(picked).toContain(unverified.walletId);
   });
 
   it("funded send-capable worker preferred; skips MOVE need", async () => {

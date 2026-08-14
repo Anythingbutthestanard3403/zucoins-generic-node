@@ -12,11 +12,15 @@ imports no other concern.
 
 ## Frozen facts
 
-- Sizing (backpressure rule 1): `POOL_FLOOR = 5`; `POOL_CAP_DEFAULT = 50`,
-  implementer-configurable to `POOL_CAP_CEILING = 500`. Provisioning target as a TOTAL:
+- Sizing (backpressure rule 1): `POOL_FLOOR = 5`; `SEND_POOL_FLOOR = 5`; `POOL_CAP_DEFAULT = 50`,
+  implementer-configurable to `POOL_CAP_CEILING = 500`. Receive target as a TOTAL:
   `ceil(open_sessions * 11 / 10)` clamped to `[POOL_FLOOR, pool_cap]` — the **exact integer**
-  form (11/10), never the float `open_sessions * 1.10` (a permanent over-mint). The idle-spare
-  `POOL_TARGET_AVAILABLE` knob does not exist.
+  form (11/10), never the float `open_sessions * 1.10` (a permanent over-mint). Send target
+  uses the same integer form over unsettled `SEND_EXTERNAL` count, clamped to
+  `[SEND_POOL_FLOOR, pool_cap]`. Combined mint target is `min(recv_target + send_target, cap)`.
+  One lifetime key cap; send deficit is minted first. The idle-spare
+  `POOL_TARGET_AVAILABLE` knob does not exist. Scaler mint modes are `SEND_ONLY` and
+  `RECEIVE_ONLY` — never `FULL`.
 - Growth (rule 3): `computeMintBatch` mints `min(deficit, cap_headroom, MINT_BATCH_LIMIT=5)`,
   never negative; minting STOPS at cap (fail-closed, rule 4).
 - Cap counting (rule 2): `pool_cap` counts ALL non-deleted wallets incl. PINNED / QUARANTINED /

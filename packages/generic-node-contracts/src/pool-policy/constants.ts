@@ -4,6 +4,8 @@
 // policy is exact integer arithmetic over small counts.
 
 export const POOL_FLOOR = 5;
+/** Send-worker floor. Same integer as receive; independent demand signal, shared cap. */
+export const SEND_POOL_FLOOR = 5;
 export const POOL_CAP_DEFAULT = 50;
 export const POOL_CAP_CEILING = 500;
 export const MINT_BATCH_LIMIT = 5;

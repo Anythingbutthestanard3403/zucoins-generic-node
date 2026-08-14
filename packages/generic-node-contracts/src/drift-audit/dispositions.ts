@@ -64,7 +64,7 @@ export const AXIS_DISPOSITIONS: readonly AxisDisposition[] = [
     governingConcerns: ["custody", "api-schema"],
     docCitations: ["data-model destinations DDL", "api-contract destination endpoints"],
     closure:
-      "DESTINATION_STATES (PENDING/BLESSED/RETIRED) agree across the data model's destination_state DDL and the api contract's state filter. The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes.",
+      "DESTINATION_STATES (PENDING/BLESSED/RETIRED/WORKER) agree across the data model's destination_state DDL and the api contract's state filter. WORKER is the node-owned send-worker sink (no blessing ceremony). The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes.",
   },
   {
     axis: "terminal-timestamps",

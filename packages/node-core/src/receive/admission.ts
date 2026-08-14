@@ -55,7 +55,7 @@ export const RECEIVE_QUEUE_FULL_RETRY_AFTER_SECONDS = 30;
 export const DEFAULT_EXPIRES_IN_SECONDS = 300;
 
 export type ReceiveWalletState = "AVAILABLE" | "PINNED" | "QUARANTINED" | "RETIRED";
-export type ReceiveDestinationState = "PENDING" | "BLESSED" | "RETIRED";
+export type ReceiveDestinationState = "PENDING" | "BLESSED" | "RETIRED" | "WORKER";
 
 export interface ReceiveWalletRecord {
   readonly walletId: string;

@@ -145,6 +145,25 @@ export const STATEMENTS = {
     `ON CONFLICT ON CONSTRAINT ${IDEMPOTENCY_SCOPE_CONSTRAINT} DO NOTHING RETURNING operation_id` +
     `) INSERT INTO send_operation_expected_artifacts (${ARTIFACT_COLUMNS.join(", ")}) ` +
     `SELECT ${ARTIFACT_VALUES} FROM created_operation RETURNING operation_id`,
+  // Co-insert the inventory `operations` row in the same TX as create + dual-chain
+  // `external_send.created`. node_events.operation_id FKs operations(id); MOVE already
+  // inserts operations before its event. Worker mirror remains for status lockstep and
+  // recovery of pre-fix rows (ON CONFLICT DO NOTHING).
+  INSERT_OPERATIONS_MIRROR:
+    `INSERT INTO operations (` +
+    `id, node_id, implementer_id, kind, status, amount_zkz, ` +
+    `source_wallet_id, destination_address, ` +
+    `references_operation_id, client_reference, description, ` +
+    `idempotency_key, request_sha256, formation_state, ` +
+    `verification_mode` +
+    `) VALUES (` +
+    `$1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL'::operation_kind, ` +
+    `$4::operation_status, $5, ` +
+    `$6::uuid, $7, ` +
+    `$8::uuid, $9, $10, ` +
+    `$11, $12, $13::external_formation_state, ` +
+    `$14` +
+    `) ON CONFLICT (id) DO NOTHING`,
   SELECT_BY_IDEMPOTENCY: `SELECT ${SELECT_OPERATION_COLUMNS} FROM send_operations WHERE implementer_id = $1 AND http_method = $2 AND route = $3 AND idempotency_key = $4`,
   SELECT_BY_OPERATION_ID: `SELECT o.${OPERATION_COLUMNS.join(
     ", o.",
@@ -368,6 +387,23 @@ export class SqlSendCreateStore implements SendCreateStore {
         // created_operation CTE means another caller already holds this key — and the artifact
         // insert selecting FROM that CTE writes nothing either.
         if (result.rows.length === 0) return { kind: "IDEMPOTENCY_CONFLICT" };
+        // Inventory row before dual-chain append — node_events.operation_id FK.
+        await tx.query(STATEMENTS.INSERT_OPERATIONS_MIRROR, [
+          operation.operationId,
+          operation.nodeId,
+          operation.implementerId,
+          operation.status,
+          operation.amountZkz,
+          operation.sourceWalletId,
+          operation.destinationAddress,
+          operation.referencesOperationId,
+          operation.clientReference,
+          operation.description,
+          operation.idempotencyKey,
+          operation.requestSha256,
+          operation.formationState,
+          operation.verificationMode,
+        ]);
         if (this.appendCreatedEvent !== undefined) {
           await this.appendCreatedEvent(tx, {
             operationId: operation.operationId,

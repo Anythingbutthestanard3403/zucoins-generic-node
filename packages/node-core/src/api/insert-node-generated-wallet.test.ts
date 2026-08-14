@@ -32,11 +32,11 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
     });
     expect(calls).toHaveLength(2);
     expect(calls[0]!.text).toBe(INSERT_NODE_GENERATED_WALLET_SQL);
-    expect(calls[0]!.params).toEqual([WALLET, NODE, PUB]);
+    expect(calls[0]!.params).toEqual([WALLET, NODE, PUB, true, true, true, "FULL"]);
     expect(calls[1]!.text).toBe(INSERT_PENDING_DESTINATION_FOR_WALLET_SQL);
-    expect(calls[1]!.params).toEqual([WALLET, NODE, "pool"]);
+    expect(calls[1]!.params).toEqual([WALLET, NODE, "pool", "PENDING"]);
     expect(calls[0]!.text).toContain("'node_generated'");
-    expect(calls[1]!.text).toContain("'PENDING'");
+    expect(calls[1]!.text).toContain("$4");
     expect(calls[1]!.text).toMatch(/ON CONFLICT \(wallet_id\) DO NOTHING/);
     expect(calls[0]!.text).not.toContain(WALLET);
     expect(calls[1]!.text).not.toContain(WALLET);
@@ -55,7 +55,44 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
       nodeId: NODE,
       publicKey: PUB,
     });
-    expect(params[1]).toEqual([WALLET, NODE, ""]);
+    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING"]);
+  });
+
+  it("SEND_ONLY writes SEND_ONLY wallet + WORKER dest", async () => {
+    const calls: { text: string; params: readonly unknown[] | undefined }[] = [];
+    const sql = {
+      query: vi.fn(async (text: string, params?: readonly unknown[]) => {
+        calls.push({ text, params });
+        return { rows: [] };
+      }),
+    };
+    await insertNodeGeneratedWalletWithPendingDestination(sql, {
+      walletId: WALLET,
+      nodeId: NODE,
+      publicKey: PUB,
+      label: "send-worker",
+      role: "SEND_ONLY",
+    });
+    expect(calls[0]!.params).toEqual([WALLET, NODE, PUB, false, true, true, "SEND_ONLY"]);
+    expect(calls[1]!.params).toEqual([WALLET, NODE, "send-worker", "WORKER"]);
+  });
+
+  it("RECEIVE_ONLY writes RECEIVE_ONLY wallet + PENDING dest", async () => {
+    const params: (readonly unknown[] | undefined)[] = [];
+    const sql = {
+      query: vi.fn(async (_text: string, p?: readonly unknown[]) => {
+        params.push(p);
+        return { rows: [] };
+      }),
+    };
+    await insertNodeGeneratedWalletWithPendingDestination(sql, {
+      walletId: WALLET,
+      nodeId: NODE,
+      publicKey: PUB,
+      role: "RECEIVE_ONLY",
+    });
+    expect(params[0]).toEqual([WALLET, NODE, PUB, true, false, true, "RECEIVE_ONLY"]);
+    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING"]);
   });
 });
 

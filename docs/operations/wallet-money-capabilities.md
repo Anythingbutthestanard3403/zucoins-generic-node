@@ -37,10 +37,10 @@ observed balance ≥ shortfall, wallet id ascending, `FOR UPDATE SKIP LOCKED`.
 2. Confirm each wallet is recovery-verified and in a healthy standing state
    before funding it for live work.
 3. Set mode via the money-mode control:
-   - Hubs → **Internal-only**
-   - Send workers → **Send-only** (or Full only if you intentionally want
-     the same wallet in both pools)
-   - Inbound workers → **Receive-only**
+   - Hubs → **Internal-only** (still operator-sized; the scaler does not mint hubs)
+   - Send workers → the scaler mints **Send-only** with a `WORKER` destination
+     (no bless / recovery tap). Leave existing Full wallets alone.
+   - Inbound workers → the scaler mints **Receive-only** (no destination row)
 4. Save with a fresh TOTP. The response echoes flags + bumped `row_version`.
 5. Re-read the wallet row and confirm `money_mode` and the three allow flags
    match the table above.
@@ -111,7 +111,7 @@ When auto-approve is off, halt is engaged, or you have paused money workers:
 
 | Symptom | Likely cause | First check |
 | --- | --- | --- |
-| External send 503 / `no_free_send_worker` | No free send-capable wallet | Mode mix; leases; unsettled sends |
+| External send 503 / `no_free_send_worker` | No free send-capable wallet yet | Scaler mint in flight; leases; unsettled sends |
 | External send 503 / `no_hub_liquidity` | Worker underfunded and no hub covers shortfall | Hub balances + observations |
 | External send 503 / `hub_busy` | Eligible hub(s) locked | Active leases / in-flight moves |
 | External send 503 / `worker_destination_missing` | Assign picked a send-capable wallet with no `destinations` row | Bless that wallet's existing dest (below) — do not mint another wallet |

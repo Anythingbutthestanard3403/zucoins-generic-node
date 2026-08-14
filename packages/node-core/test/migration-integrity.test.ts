@@ -228,6 +228,10 @@ const SCHEMA_FILES = [
   "verification-mode.sql",
   // ZTR-1306: PENDING dest backfill for node_generated wallets missing a row.
   "destinations-pending-backfill.sql",
+  // destination_state += WORKER. ALTER TYPE only.
+  "destination-state-worker.sql",
+  // Worker-sink CHECK + G2 overlay. ALTER / CREATE OR REPLACE only.
+  "destination-worker-sink.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -260,6 +264,8 @@ const NO_TABLE_SCHEMA_FILES = [
   "operator-accepted-risk-release.sql",
   "verification-mode.sql",
   "destinations-pending-backfill.sql",
+  "destination-state-worker.sql",
+  "destination-worker-sink.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -598,6 +604,14 @@ const GREENFIELD: Record<
   "destinations-pending-backfill.sql": {
     applies: false,
     missingFragment: "destinations-pending-backfill requires wallets",
+  },
+  "destination-state-worker.sql": {
+    applies: false,
+    missingFragment: "destination-state-worker requires destination_state",
+  },
+  "destination-worker-sink.sql": {
+    applies: false,
+    missingFragment: "destination-worker-sink requires destinations",
   },
 };
 

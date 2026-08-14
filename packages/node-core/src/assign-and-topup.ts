@@ -24,6 +24,9 @@
 //    auto-approve gate on top-up readiness). Same-group continuous transfer is not used
 //    (worker cannot hold MOVE_DESTINATION and SEND_SOURCE together under one-in-flight).
 // 5. Response source_wallet_id is always the sender/worker, never W (attribution).
+// 6. Top-up MOVE is always NODE_VERIFIED (node-owned hop). Landing releases MOVE_* leases
+//    in the same TX as INTERNAL_MOVE_LANDED — implementer verification-complete is never
+//    required for the top-up. The external SEND still carries the client's verification_mode.
 //
 // Auto-approve / claim-and-observe MUST call assertSendTopUpReady (or the SQL probe)
 // before advancing a send that references a MOVE_INTERNAL — policy still evaluates only
@@ -63,8 +66,9 @@ import {
  *   2. else free underfunded / unobserved send-capable worker
  * Within a tier: wallet id ASC. SKIP LOCKED is load-bearing (receive-pool symmetry).
  *
- * Eligibility: node_generated, AVAILABLE, recovery_verified, allow_external_send,
- * no active lease, no unsettled SEND_EXTERNAL on send_operations.
+ * Eligibility: node_generated, AVAILABLE, allow_external_send, no active lease,
+ * no unsettled SEND_EXTERNAL on send_operations. Recovery is not required —
+ * send-scaler WORKER sinks are usable before the receive-gated ceremony.
  * INTERNAL_ONLY / receive-only are excluded by allow_external_send IS TRUE.
  */
 export const SELECT_SEND_WORKER_SQL = `
@@ -82,7 +86,6 @@ SELECT w.id::text AS wallet_id,
  WHERE w.node_id = $1::uuid
    AND w.key_origin = 'node_generated'
    AND w.state = 'AVAILABLE'
-   AND w.recovery_verified_at IS NOT NULL
    AND w.allow_external_send IS TRUE
    AND NOT EXISTS (
          SELECT 1 FROM wallet_active_leases wal WHERE wal.wallet_id = w.id)
@@ -164,15 +167,15 @@ SELECT w.id::text AS wallet_id,
  FOR UPDATE OF w`;
 
 /**
- * Resolve the BLESSED destination id for a worker wallet (MOVE sink handle).
- * Workers that can receive internal top-ups must already be registered + blessed.
+ * Resolve the composition sink destination id for a worker wallet (MOVE sink handle).
+ * Operator-named BLESSED sinks and node-owned WORKER sinks both qualify.
  */
 export const SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL = `
 SELECT d.id::text AS destination_id
   FROM destinations d
   JOIN wallets w ON w.id = d.wallet_id
  WHERE d.wallet_id = $1::uuid
-   AND d.state = 'BLESSED'
+   AND d.state IN ('BLESSED', 'WORKER')
    AND w.allow_internal_move IS TRUE
  LIMIT 1`
   .replace(/\s+/g, " ")
@@ -354,7 +357,10 @@ export interface AssignAndTopUpRequest {
    * undefined preserves pre-1289 multi-hub behaviour (funding pin unset).
    */
   readonly fundingWalletId?: string | null;
-  /** Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend. */
+  /**
+   * Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend
+   * only. Top-up MOVE_INTERNAL is always NODE_VERIFIED (node-owned); never inherits this.
+   */
   readonly verificationMode?: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
@@ -916,6 +922,8 @@ export async function assignAndTopUpExternalSend(
     }
     const moveKey =
       (deps.moveIdempotencyKeyFor ?? defaultMoveIdempotencyKey)(request.idempotencyKey);
+    // Node-owned internal top-up: NODE_VERIFIED so money-workers release both MOVE_*
+    // leases on land (ZTR-1304). Not implementer verification — skip allow_node_verified.
     const moveOutcome: MoveCreateOutcome = await createInternalMove(
       deps.moveStore,
       {
@@ -926,8 +934,14 @@ export async function assignAndTopUpExternalSend(
         amountZkz: plan.funding.shortfallZkz,
         clientReference: request.clientReference,
         idempotencyKey: moveKey,
+        verificationMode: "NODE_VERIFIED",
+        allowWorkerSink: true,
       },
-      { generateId: deps.generateId, now: deps.now },
+      {
+        generateId: deps.generateId,
+        now: deps.now,
+        skipNodeVerifiedPolicyGate: true,
+      },
     );
     if (moveOutcome.outcome === "REJECTED") {
       // Funding-W path: map MOVE failures to insufficient_funding_wallet (no silent hub).

@@ -42,7 +42,7 @@ export type LeaseRole =
 
 export type ModeledWallet = SelectableWallet & {
   readonly publicKey: string;
-  readonly destinationState: "PENDING" | "BLESSED" | "RETIRED" | null;
+  readonly destinationState: "PENDING" | "BLESSED" | "RETIRED" | "WORKER" | null;
 };
 
 export type HoldAssignOutcome =

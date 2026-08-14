@@ -2,7 +2,7 @@
 //
 // After armMoneySurface:
 //   0. mirror CREATED receive_operations → operations (pool allocator surface)
-//   1. pool scale-up via runPoolScaleUp + node_generated mint (vault-sealed)
+//   1. pool scale-up via runSharedPoolScaleUp + role-typed mint (vault-sealed)
 //   2. promoteQueuedReceives → assignReceiveWallet (ReceiveLeasePort)
 //   3. expireQueueAgedReceives for never-assigned CREATED rows
 //   4. post-assign: real gateway T0 OBSERVE (get_transaction__v1; requires gatewayUrls
@@ -45,7 +45,7 @@ import {
   loadExpiredReceiveCandidates,
   promoteQueuedReceives,
   PushSubscriptionRequiredError,
-  runPoolScaleUp,
+  runSharedPoolScaleUp,
   runSendPostApproveFormation,
   SqlReceiveExpiryReleaseService,
   serializeFreshReadOutcome,
@@ -58,6 +58,7 @@ import {
   type FreshReadOutcome,
   type GatewayLimits,
   type MintWallet,
+  type PoolMintRole,
   type MoneyPathSignerGates,
   type MetricsHooks,
   type NodeEventSigner,
@@ -405,7 +406,7 @@ function createPoolMint(deps: {
   readonly vault: EncryptedWalletKeyStore;
   readonly nodeId: string;
 }): MintWallet {
-  return async (_db, _batchIndex) => {
+  return async (_db, _batchIndex, role: PoolMintRole = "RECEIVE_ONLY") => {
     const { privateKey, publicKey: pubObj } = generateKeyPairSync("ed25519");
     const spki = pubObj.export({ format: "der", type: "spki" });
     const publicKey = toBase64UrlPadded(Buffer.from(spki).subarray(-32)) as WalletPublicKey;
@@ -414,15 +415,17 @@ function createPoolMint(deps: {
     const seed = Buffer.from(d, "base64url");
     const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
     const walletId = randomUUID() as Uuid;
+    const sendOnly = role === "SEND_ONLY";
     try {
-      // Commit wallet + PENDING dest on the pool (not the scale-up txn client)
-      // so vault.seal's separate connection can see wallet_id for FK (vault
-      // insert is not on txn). Dest row makes the worker blessable without a
-      // second mint.
+      // Commit wallet + dest on the pool (not the scale-up txn client) so
+      // vault.seal's separate connection can see wallet_id for FK. SEND_ONLY
+      // gets WORKER dest (composition sink); otherwise PENDING (blessable).
       await insertNodeGeneratedWalletWithPendingDestination(deps.pool, {
         walletId,
         nodeId: deps.nodeId,
         publicKey,
+        label: sendOnly ? `send-worker-${walletId.slice(0, 8)}` : "",
+        role: sendOnly ? "SEND_ONLY" : "RECEIVE_ONLY",
       });
       // recovery_verified_at intentionally NULL — workers never stamp recovery verification.
       await deps.vault.seal(
@@ -1498,11 +1501,11 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
 
     let mintedWalletIds: readonly string[] = [];
     await withMoneyTx(async (tx) => {
-      const result = await runPoolScaleUp(tx, { limits, mint });
+      const result = await runSharedPoolScaleUp(tx, { limits, mint });
       mintedWalletIds = result.mintedWalletIds;
       if (result.mintedWalletIds.length > 0) {
         deps.logger.info(
-          `money-workers: pool scale-up minted=${result.mintedWalletIds.length} capCount=${result.plan.capCount} target=${result.plan.poolTargetTotal} (recovery_verified pending ceremony — not stamped here)`,
+          `money-workers: pool scale-up minted=${result.mintedWalletIds.length} send=${result.plan.sendMint} receive=${result.plan.receiveMint} capCount=${result.plan.capCount} (recovery_verified not stamped here)`,
         );
       }
     });

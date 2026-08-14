@@ -1,6 +1,7 @@
 import { defineConcernManifest } from "../testkit/concernManifest.ts";
 import {
   POOL_FLOOR,
+  SEND_POOL_FLOOR,
   POOL_CAP_DEFAULT,
   POOL_CAP_CEILING,
   MINT_BATCH_LIMIT,
@@ -59,6 +60,7 @@ export const POOL_POLICY_FLAGS = {
 export const poolPolicyContract = {
   sizing: {
     POOL_FLOOR,
+    SEND_POOL_FLOOR,
     POOL_CAP_DEFAULT,
     POOL_CAP_CEILING,
     MINT_BATCH_LIMIT,
@@ -105,7 +107,7 @@ export const POOL_POLICY_CONCERN_MANIFEST = defineConcernManifest({
   concernId: "pool-policy",
   decisionRefs: ["receive-queue-backpressure", "recovery-gated-eligibility", "permanent-key-material-cap", "pool-sizing-policy", "custody-evidence-requirements"],
   frozenValues: { poolPolicyContract },
-  goldenRefs: [{ path: "gen/pool-policy.json", sha256: "ad4c771c9ad44a8c73a7c0bd218e25f276cb1023aa3d5e3bf42fbfbcbf22ff65" }],
+  goldenRefs: [{ path: "gen/pool-policy.json", sha256: "ba9b29db5ef968bdd358306602be586732d06f07269b81e06cfcb48ef1f8f65f" }],
   scanRules: [
     "forbidden-terms:packages/generic-node-contracts/src",
     "dependency-boundary:packages/generic-node-contracts/src",

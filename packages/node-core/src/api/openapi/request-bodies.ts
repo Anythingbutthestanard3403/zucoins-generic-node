@@ -311,7 +311,7 @@ export const RECOVERY_ACTIONS_BODY: JsonSchema = {
 };
 
 export const LIST_DESTINATIONS_QUERY: Readonly<Record<string, JsonSchema>> = {
-  state: { type: "string", enum: ["PENDING", "BLESSED", "RETIRED"] },
+  state: { type: "string", enum: ["PENDING", "BLESSED", "RETIRED", "WORKER"] },
   after: uuid,
   limit: { type: "integer", minimum: 1, maximum: 100 },
 };

@@ -95,7 +95,7 @@ export const CreateDestinationBody = z.object({
 }).strict();
 
 export const ListDestinationsQuery = z.object({
-  state: z.enum(["PENDING", "BLESSED", "RETIRED"]).optional(),
+  state: z.enum(["PENDING", "BLESSED", "RETIRED", "WORKER"]).optional(),
   after: UuidSchema.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 }).strict();

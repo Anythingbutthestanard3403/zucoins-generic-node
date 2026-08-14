@@ -275,7 +275,7 @@ describe("admin inventory HTTP (contract)", () => {
     expect([...INVENTORY_OPERATION_KINDS]).toEqual([...OPERATION_KINDS]);
     expect([...WALLET_STATES]).toEqual(["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"]);
     expect([...WALLET_KEY_ORIGINS]).toEqual(["node_generated", "imported"]);
-    expect([...DESTINATION_STATES]).toEqual(["PENDING", "BLESSED", "RETIRED"]);
+    expect([...DESTINATION_STATES]).toEqual(["PENDING", "BLESSED", "RETIRED", "WORKER"]);
   });
 
   it("unauthenticated inventory GETs are 401", async () => {

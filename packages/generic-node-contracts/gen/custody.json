@@ -28,7 +28,20 @@
         "AVAILABLE",
         "PINNED"
       ]
-    }
+    },
+    "WORKER_SINK_CONJUNCTS": {
+      "keyOrigin": "node_generated",
+      "destinationState": "WORKER",
+      "requiresValidRecoveryVerifiedAt": false,
+      "allowedWalletStates": [
+        "AVAILABLE",
+        "PINNED"
+      ]
+    },
+    "COMPOSITION_SINK_STATES": [
+      "BLESSED",
+      "WORKER"
+    ]
   },
   "vocabulary": {
     "WALLET_KEY_ORIGINS": [
@@ -38,7 +51,8 @@
     "DESTINATION_STATES": [
       "PENDING",
       "BLESSED",
-      "RETIRED"
+      "RETIRED",
+      "WORKER"
     ],
     "WALLET_STATES": [
       "AVAILABLE",
@@ -51,6 +65,7 @@
       "KEY_ORIGIN_NOT_NODE_GENERATED",
       "INVALID_DESTINATION_STATE",
       "DESTINATION_NOT_BLESSED",
+      "DESTINATION_NOT_WORKER",
       "INVALID_RECOVERY_VERIFIED_AT",
       "INVALID_WALLET_STATE",
       "WALLET_STATE_NOT_AUTOMATIC_SINK_ELIGIBLE"

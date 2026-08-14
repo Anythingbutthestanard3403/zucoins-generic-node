@@ -446,6 +446,7 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(modeIdx).toBeGreaterThan(sendIdx);
     expect(modeIdx).toBeGreaterThan(settingsIdx);
     expect(modeIdx).toBeGreaterThan(auditIdx);
+    expect(modeIdx).toBeLessThan(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[modeIdx]!.sql).toContain("verification_mode");
     expect(files[modeIdx]!.sql).toContain("INDEPENDENT");
@@ -463,13 +464,29 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(custodyIdx).toBeGreaterThanOrEqual(0);
     expect(backfillIdx).toBeGreaterThan(modeIdx);
     expect(backfillIdx).toBeGreaterThan(custodyIdx);
-    expect(backfillIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[backfillIdx]!.sql).toContain("destinations-pending-backfill requires wallets");
     expect(files[backfillIdx]!.sql).toContain("destinations-pending-backfill requires destinations");
     expect(files[backfillIdx]!.sql).toContain("key_origin = 'node_generated'");
     expect(files[backfillIdx]!.sql).toContain("'PENDING'");
     expect(files[backfillIdx]!.sql).not.toMatch(/'BLESSED'/);
+  });
+
+  it("pack lands destination WORKER enum then worker-sink overlay after dest backfill", () => {
+    const modeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-mode");
+    const backfillIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-pending-backfill");
+    const enumIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destination-state-worker");
+    const sinkIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destination-worker-sink");
+    expect(enumIdx).toBeGreaterThan(modeIdx);
+    expect(enumIdx).toBeGreaterThan(backfillIdx);
+    expect(sinkIdx).toBeGreaterThan(enumIdx);
+    expect(sinkIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[enumIdx]!.sql).toContain("ALTER TYPE destination_state ADD VALUE 'WORKER'");
+    expect(files[sinkIdx]!.sql).toContain("destination-worker-sink requires destinations");
+    expect(files[sinkIdx]!.sql).toContain("AND destination_row.state IS DISTINCT FROM 'WORKER'");
+    expect(files[sinkIdx]!.sql).toContain("state <> 'WORKER'");
+    expect(files[sinkIdx]!.sql).not.toContain("(state = 'WORKER') = (");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

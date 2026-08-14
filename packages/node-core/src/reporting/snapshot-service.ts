@@ -27,7 +27,7 @@ export interface SnapshotOperation {
 
 export interface SnapshotDestination {
   readonly destinationId: string;
-  readonly state: "PENDING" | "BLESSED" | "RETIRED";
+  readonly state: "PENDING" | "BLESSED" | "RETIRED" | "WORKER";
   /** Live §7.2 eligibility — same predicate as GET /v1/destinations. */
   readonly moveEligible: boolean;
 }

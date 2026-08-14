@@ -20,6 +20,7 @@ describe("pool-policy manifest — frozen-constant census", () => {
   it("freezes the sizing constants (receive-queue backpressure)", () => {
     expect(poolPolicyContract.sizing).toEqual({
       POOL_FLOOR: 5,
+      SEND_POOL_FLOOR: 5,
       POOL_CAP_DEFAULT: 50,
       POOL_CAP_CEILING: 500,
       MINT_BATCH_LIMIT: 5,

@@ -356,6 +356,59 @@ describe("classifyRecovery + derivePermittedActions (pure)", () => {
     );
   });
 
+  it("does not offer RETRY_OBSERVATION for attention-parked EXPIRED receives (ZTR-1283)", () => {
+    // Default receiveFacts: RECEIVE_EXTERNAL + EXPIRED + attention_required.
+    // RETRY is a no-op CAS bump post-1277; only state-changing paths remain.
+    const parked = receiveFacts();
+    const parkedActions = derivePermittedActions(parked).permittedActions;
+    expect(parkedActions).not.toContain("RETRY_OBSERVATION");
+    expect(parkedActions).toContain("ACKNOWLEDGE_KEEP_PINNED");
+
+    // All-five release ground: RELEASE is offered, RETRY still suppressed.
+    const releasable = receiveFacts({
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: true,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    const releasableActions = derivePermittedActions(releasable).permittedActions;
+    expect(releasableActions).toContain("RELEASE_EXPIRED_RECEIVE");
+    expect(releasableActions).not.toContain("RETRY_OBSERVATION");
+    expect(releasableActions).toContain("ACKNOWLEDGE_KEEP_PINNED");
+
+    // Non-expiry RETRY paths unchanged: attention-parked non-EXPIRED receive still
+    // gets RETRY (e.g. READY parked for lineage/anomaly before expiry CAS).
+    const nonExpiredParked = receiveFacts({
+      status: "READY",
+      attentionReason: "LINEAGE_GAP",
+    });
+    expect(derivePermittedActions(nonExpiredParked).permittedActions).toContain(
+      "RETRY_OBSERVATION",
+    );
+
+    // EXPIRED without attention is terminal and not in the inbox; no RETRY.
+    const expiredClear = receiveFacts({
+      attentionRequired: false,
+      attentionReason: null,
+    });
+    expect(derivePermittedActions(expiredClear).permittedActions).not.toContain(
+      "RETRY_OBSERVATION",
+    );
+
+    // Send WAITING / NEEDS_ATTENTION RETRY path unchanged (covered above too).
+    expect(derivePermittedActions(baseFacts()).permittedActions).toContain(
+      "RETRY_OBSERVATION",
+    );
+  });
+
   it("REBUILD_INTERNAL_MOVE only with stored positive proof for cases 1/2", () => {
     const ok = moveFacts({
       move: {

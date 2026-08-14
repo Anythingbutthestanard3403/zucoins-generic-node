@@ -130,7 +130,8 @@ inbound to the receiver before expiry completes) and confirm:
 - wallet remains `PINNED`; `wallet_active_leases` still holds `RECEIVE_WINDOW`
 - **no** `receive_release_proofs` row
 - operator follows [`attention-triage.md`](attention-triage.md) § T0_RELEASE_MISMATCH
-  (`RETRY_OBSERVATION` — never `RELEASE_EXPIRED_RECEIVE` while mismatch holds)
+  (quarantine / escalate — never `RELEASE_EXPIRED_RECEIVE` while mismatch holds;
+  `RETRY_OBSERVATION` is not offered for attention-parked `EXPIRED` receives — ZTR-1283)
 
 ## Fail criteria (stop and escalate)
 

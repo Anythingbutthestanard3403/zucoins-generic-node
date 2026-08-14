@@ -390,7 +390,19 @@ export function derivePermittedActions(
     facts.status === "NEEDS_ATTENTION" ||
     !isTerminalStatus(facts.kind, facts.status);
 
-  if (nonterminalOrAttention) {
+  // ZTR-1283: RETRY_OBSERVATION is a row_version-only CAS bump — it does not
+  // re-enter expiry-release or re-evaluate predicates. After ZTR-1277 the
+  // automatic expiry sweep already excludes attention_required rows, so offering
+  // RETRY on attention-parked EXPIRED receives burns TOTP/nonce for zero effect.
+  // State-changing paths (RELEASE_EXPIRED_RECEIVE, ACKNOWLEDGE_KEEP_PINNED,
+  // QUARANTINE_WALLETS, attention retraction) remain available when their own
+  // predicates hold. Non-expiry RETRY paths are unchanged.
+  const expiryParkedReceive =
+    facts.kind === "RECEIVE_EXTERNAL" &&
+    facts.status === "EXPIRED" &&
+    facts.attentionRequired;
+
+  if (nonterminalOrAttention && !expiryParkedReceive) {
     actions.add("RETRY_OBSERVATION");
   }
 

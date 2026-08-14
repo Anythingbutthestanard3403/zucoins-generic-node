@@ -151,14 +151,19 @@ destination either.
 equal the recorded T0 for the wallet, so the "nothing happened while we held this" claim
 cannot be made (`packages/node-core/src/receive/expiry-release.ts`).
 
-**Resolved by.** `RETRY_OBSERVATION` — the read may be stale. If the mismatch is real, the
-wallet's head moved during the lease and this becomes a custody question: quarantine and
-escalate.
+**Resolved by.** Treat as a custody question once the row is attention-parked on `EXPIRED`
+(post ZTR-1277 the automatic expiry sweep will not re-pick it). Prefer
+`QUARANTINE_WALLETS` and escalate when the head truly moved during the lease. If a later
+fresh read (outside recovery) shows the head is back to T0 and all five release predicates
+hold, break-glass `RELEASE_EXPIRED_RECEIVE` is the state-changing path — not
+`RETRY_OBSERVATION` (ZTR-1283: that action is a row_version-only CAS bump and is not offered
+for attention-parked `EXPIRED` receives).
 
-**Never.** `RELEASE_EXPIRED_RECEIVE` anyway. That action requires all five release
-predicates, and this reason exists precisely because one failed. The safe terminal release
-status is `RELEASED_T0_UNCHANGED` — releasing on a *changed* T0 discards the evidence that
-something happened.
+**Never.** `RELEASE_EXPIRED_RECEIVE` while the mismatch still holds. That action requires
+all five release predicates, and this reason exists precisely because one failed. The safe
+terminal release status is `RELEASED_T0_UNCHANGED` — releasing on a *changed* T0 discards
+the evidence that something happened. Do not offer or press `RETRY_OBSERVATION` on these
+rows; it burns TOTP/nonce with no re-evaluate.
 
 ## VERIFICATION_REJECTED
 

@@ -1571,8 +1571,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
   });
 
   // ZTR-1278: attention-parked EXPIRED/REJECTED must remain operator-visible so recovery
-  // catalogue actions (RETRY_OBSERVATION / RELEASE_EXPIRED_RECEIVE / …) can fire. Landed
-  // terminals stay excluded (ZTR-1250); EXPIRED/REJECTED with attention cleared stay out.
+  // catalogue actions (RELEASE_EXPIRED_RECEIVE / ACKNOWLEDGE_KEEP_PINNED / …) can fire.
+  // ZTR-1283: RETRY_OBSERVATION is NOT offered for EXPIRED attention-parked receives
+  // (row_version-only no-op after the ZTR-1277 sweep exclusion). Landed terminals stay
+  // excluded (ZTR-1250); EXPIRED/REJECTED with attention cleared stay out.
   it("listNeedsAttention includes EXPIRED and REJECTED when attention_required is set (ZTR-1278)", async () => {
     const expiredId = randomUUID();
     await pool.query(
@@ -1637,9 +1639,11 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(rejectedRow.attentionRequired).toBe(true);
 
     // Catalogue still derives recovery actions for attention-parked terminals.
+    // ZTR-1283: EXPIRED receive suppresses no-op RETRY; REJECTED send keeps it.
     const expiredActions = derivePermittedActions(expiredRow).permittedActions;
     const rejectedActions = derivePermittedActions(rejectedRow).permittedActions;
-    expect(expiredActions).toContain("RETRY_OBSERVATION");
+    expect(expiredActions).not.toContain("RETRY_OBSERVATION");
+    expect(expiredActions).toContain("ACKNOWLEDGE_KEEP_PINNED");
     expect(rejectedActions).toContain("RETRY_OBSERVATION");
   });
 

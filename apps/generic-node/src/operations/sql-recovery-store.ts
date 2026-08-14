@@ -23,6 +23,7 @@ import {
   mintReleaseProof,
   releaseLease,
   completeGroupOperation,
+  SEND_CRASH_RECOVERY_SQL,
   type OperationKind,
   type RecoveryActionStore,
   type RecoveryActionCommitInput,
@@ -1006,6 +1007,24 @@ export function createSqlRecoveryActionStore(
                   detail: "close_never_started_cas_miss",
                 };
               }
+              const sendVersion = (await client.query<{ row_version: string | number }>(
+                `SELECT row_version FROM send_operations WHERE operation_id = $1`,
+                [input.operationId],
+              )).rows[0];
+              const sendCas = sendVersion === undefined
+                ? { rows: [] as const }
+                : await client.query(
+                    SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS,
+                    [input.operationId, sendVersion.row_version],
+                  );
+              if (sendCas.rows[0] === undefined) {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "close_never_started_cas_miss",
+                };
+              }
               if (effect.releaseSourceLease) {
                 await releaseSourceLeasesForOperation(client, input.operationId);
               }
@@ -1030,6 +1049,18 @@ export function createSqlRecoveryActionStore(
                 if (cur.row_version !== input.expectedRowVersion) {
                   return { ok: false, reason: "operation_version_conflict" };
                 }
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "close_proven_not_landed_cas_miss",
+                };
+              }
+              const sendCas = await client.query(
+                SEND_CRASH_RECOVERY_SQL.CLOSE_PROVEN_NOT_LANDED_CAS,
+                [input.operationId],
+              );
+              if (sendCas.rows[0] === undefined) {
+                await client.query("ROLLBACK");
                 return {
                   ok: false,
                   reason: "predicate_failed",

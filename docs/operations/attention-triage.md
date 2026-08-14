@@ -139,7 +139,9 @@ set.
 `CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` when complete-path exclusion proved non-landing
 (ZTR-1226: authorized under the bounded oracle — protocol expired + aging margin AND
 (freshHeadEqualsSourceT0 OR completePathExclusionProved); not timer-only; no generic
-PROVEN_NOT_LANDED oracle).
+PROVEN_NOT_LANDED oracle). Either CLOSE terminals **both** `operations` and
+`send_operations` to `REJECTED` in the same SERIALIZABLE TX (unique-index pin lifts only
+then).
 
 **Never.** `CHANGE_DESTINATION`. It does not exist. A send is formed against one destination
 and that is the only destination it can ever have. Boot does not auto-accept a new

@@ -828,6 +828,24 @@ describe("recovery surface census (parent AC)", () => {
     );
     expect(SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS).toMatch(/NOT EXISTS/);
     expect(SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS).toMatch(/signer_audit/);
+    expect(SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS).toMatch(/status = 'APPROVED'/);
+    expect(SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS).toMatch(/status = 'REJECTED'/);
+    expect(SEND_CRASH_RECOVERY_SQL.CLOSE_NEVER_STARTED_CAS).not.toMatch(
+      /EXTERNAL_SEND_LANDED/,
+    );
+  });
+
+  it("CLOSE_PROVEN_NOT_LANDED_CAS is NEEDS_ATTENTION→REJECTED + attention clear; no oracle in SQL", () => {
+    const cas = SEND_CRASH_RECOVERY_SQL.CLOSE_PROVEN_NOT_LANDED_CAS;
+    expect(cas).toMatch(/status = 'NEEDS_ATTENTION'/);
+    expect(cas).toMatch(/status = 'REJECTED'/);
+    expect(cas).toMatch(/attention_required = false/);
+    expect(cas).toMatch(/attention_reason = NULL/);
+    expect(cas).not.toMatch(/NOT EXISTS/);
+    expect(cas).not.toMatch(/EXTERNAL_SEND_LANDED/);
+    expect(cas).not.toMatch(/sign_intent/);
+    expect(cas).not.toMatch(/signer_audit/);
+    expect(cas).not.toMatch(/external_send_partials/);
   });
 
   // F4 — RESTORE must not demote NEEDS_ATTENTION; allowlist APPROVED only.

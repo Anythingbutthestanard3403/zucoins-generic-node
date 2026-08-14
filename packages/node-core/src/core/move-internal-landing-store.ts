@@ -23,9 +23,12 @@
 // gateway acknowledgement because LANDED_VERIFIED is the only input branch that produces one,
 // and the terminal observation ids it writes come from that verdict's landing-path proofs.
 //
-// Leases are untouched: step 6 keeps them until verification-complete/group release.
-// The node's private keys are not touched either — the signed event tuple arrives already
-// formed, and its bytes cross this seam verbatim as bound parameters (never re-serialized).
+// Leases: this CTE does not touch wallet_active_leases. NODE_VERIFIED same-TX release of
+// MOVE_SOURCE + MOVE_DESTINATION is composed by the outer reconcile TX after this statement
+// (releaseNodeVerifiedMoveLeasesOnLanding — ZTR-1304). INDEPENDENT keeps leases until
+// verification-complete. The node's private keys are not touched either — the signed event
+// tuple arrives already formed, and its bytes cross this seam verbatim as bound parameters
+// (never re-serialized).
 //
 // No database driver is linked here (the package carries none): statements are handed to an
 // injected SqlQueryFn.

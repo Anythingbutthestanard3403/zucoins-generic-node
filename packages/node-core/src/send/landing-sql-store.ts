@@ -6,8 +6,9 @@
 // can run multi-statement transactions (PoolClient or a test double).
 //
 // Atomicity: BEGIN → status UPDATE (guarded) → landing INSERT → event INSERT →
-// lease presence check → signed dual-chain append → COMMIT. Any failure rolls back. There is
-// no code path that DELETEs or UPDATEs wallet_active_leases.
+// lease presence check → (optional NODE_VERIFIED release) → signed dual-chain append →
+// COMMIT. Any failure rolls back. INDEPENDENT keeps the source lease held; NODE_VERIFIED
+// mints EXTERNAL_SEND_LANDED proof + releaseLease in the same TX (ZTR-1304).
 //
 // `external_send_landing_events` is a slice-local record, not the authoritative
 // event. Signed pull (09-operations-recovery.md) and SSE consumers read `node_events` and the
@@ -21,11 +22,20 @@
 // it is held for the shortest possible slice of the transaction. Same transaction is what
 // makes it atomic; last position is only what makes it cheap.
 
+import { createHash, randomUUID } from "node:crypto";
+
+import { RELEASED_NODE_VERIFIED } from "@zucoins/generic-node-contracts/operations";
+
 import {
   appendTerminalLandedEvent,
   type DualChainEventQuota,
   type NodeEventSigner,
 } from "../event-log/dual-chain-appender.js";
+import {
+  completeGroupOperation,
+  mintReleaseProof,
+  releaseLease,
+} from "../leases/repository.js";
 
 import type { SqlExecutor } from "./sql-store.js";
 import {
@@ -103,7 +113,70 @@ export const LANDING_STATEMENTS = {
 
   SELECT_ALREADY_LANDED:
     "SELECT status FROM send_operations WHERE operation_id = $1::uuid",
+
+  // Mode + lease-group identity for the ZTR-1304 release branch. Read after CAS so we
+  // observe the same row the status transition locked. Prefer operations.verification_mode
+  // (universal mirror) joined to the active SEND_SOURCE lease for this operation.
+  LOAD_RELEASE_CONTEXT:
+    "SELECT o.verification_mode::text AS verification_mode, " +
+    "o.source_wallet_id::text AS source_wallet_id, " +
+    "l.membership_id::text AS membership_id, " +
+    "l.lease_group_id::text AS lease_group_id, " +
+    "l.lease_epoch::text AS lease_epoch, " +
+    "l.owner_instance_id::text AS owner_instance_id " +
+    "FROM operations o " +
+    "JOIN wallet_active_leases l " +
+    "  ON l.wallet_id = o.source_wallet_id AND l.operation_id = o.id " +
+    "WHERE o.id = $1::uuid AND o.kind = 'SEND_EXTERNAL'",
+
+  // Forensic stamp on receive_release_status (shared column; RELEASED_NODE_VERIFIED admitted).
+  // operations.status is still the pre-land entry status here: the composition root
+  // mirrors EXTERNAL_SEND_LANDED from send_operations AFTER this store returns. Stamp
+  // only on receive_release_status IS NULL so the forensic mark co-commits with release.
+  SET_RELEASE_STATUS_NODE_VERIFIED:
+    "UPDATE operations SET receive_release_status = $2, " +
+    "row_version = row_version + 1, updated_at = now() " +
+    "WHERE id = $1::uuid " +
+    "AND kind = 'SEND_EXTERNAL' " +
+    "AND receive_release_status IS NULL " +
+    "RETURNING receive_release_status",
 } as const;
+
+/** Forensic release_reason on wallet_lease_memberships for NODE_VERIFIED send landing close. */
+export const NODE_VERIFIED_SEND_LANDING_RELEASE_REASON = "NODE_VERIFIED_LANDING" as const;
+
+/**
+ * Byte-stable proof digest for NODE_VERIFIED send landing release. Same injection-safe
+ * length-prefixed shape as receive's computeNodeVerifiedLandingReleaseDigest (nvland1).
+ */
+export function computeNodeVerifiedSendLandingReleaseDigest(fields: {
+  readonly operationId: string;
+  readonly walletId: string;
+  readonly membershipId: string;
+  readonly leaseGroupId: string;
+  readonly leaseEpoch: bigint;
+  readonly terminalObservationId: string;
+}): string {
+  const field = (value: string): string =>
+    `${new TextEncoder().encode(value).length}:${value}`;
+  const text =
+    field(fields.operationId) +
+    field(fields.walletId) +
+    field(fields.membershipId) +
+    field(fields.leaseGroupId) +
+    field(fields.leaseEpoch.toString()) +
+    field(fields.terminalObservationId);
+  return createHash("sha256").update(`nvland1:${text}`, "utf8").digest("hex");
+}
+
+interface SendReleaseContextRow {
+  readonly verification_mode: string;
+  readonly source_wallet_id: string;
+  readonly membership_id: string;
+  readonly lease_group_id: string;
+  readonly lease_epoch: string;
+  readonly owner_instance_id: string;
+}
 
 interface StatusRow {
   readonly operation_id: string;
@@ -184,13 +257,68 @@ export class SqlExternalSendLandingStore implements ExternalSendLandingStore {
         event.dataText,
       ]);
 
-      // 4. Lease must still be present — never released by this path.
+      // 4. Lease must still be present at land time (both modes).
       const lease = await tx.query<{ wallet_id: string }>(LANDING_STATEMENTS.SELECT_LEASE, [
         command.operationId,
       ]);
       if (lease.rows.length === 0) {
         // Abort the whole TX: a land without a held lease is a custody breach.
         throw new LeaseMissingError(command.operationId);
+      }
+
+      // 4b. NODE_VERIFIED → same-TX custody release (ZTR-1304).
+      // INDEPENDENT never releases here. Park paths never reach this store.
+      let sourceLeaseStillHeld = true;
+      const ctx = await tx.query<SendReleaseContextRow>(
+        LANDING_STATEMENTS.LOAD_RELEASE_CONTEXT,
+        [command.operationId],
+      );
+      const releaseCtx = ctx.rows[0];
+      if (releaseCtx !== undefined && releaseCtx.verification_mode === "NODE_VERIFIED") {
+        const leaseEpoch = BigInt(releaseCtx.lease_epoch);
+        const proofId = randomUUID();
+        const proofDigest = computeNodeVerifiedSendLandingReleaseDigest({
+          operationId: command.operationId,
+          walletId: releaseCtx.source_wallet_id,
+          membershipId: releaseCtx.membership_id,
+          leaseGroupId: releaseCtx.lease_group_id,
+          leaseEpoch,
+          terminalObservationId: command.terminalObservationId,
+        });
+        await completeGroupOperation(tx, {
+          leaseGroupId: releaseCtx.lease_group_id,
+          operationId: command.operationId,
+        });
+        await mintReleaseProof(tx, {
+          proofId,
+          walletId: releaseCtx.source_wallet_id,
+          operationId: command.operationId,
+          membershipId: releaseCtx.membership_id,
+          leaseGroupId: releaseCtx.lease_group_id,
+          leaseEpoch,
+          proofKind: "EXTERNAL_SEND_LANDED",
+          proofDigest,
+        });
+        await releaseLease(tx, {
+          walletId: releaseCtx.source_wallet_id,
+          ownerInstanceId: releaseCtx.owner_instance_id,
+          operationId: command.operationId,
+          membershipId: releaseCtx.membership_id,
+          leaseGroupId: releaseCtx.lease_group_id,
+          leaseEpoch,
+          releaseProofId: proofId,
+          releaseReason: NODE_VERIFIED_SEND_LANDING_RELEASE_REASON,
+        });
+        const stamped = await tx.query<{ receive_release_status: string }>(
+          LANDING_STATEMENTS.SET_RELEASE_STATUS_NODE_VERIFIED,
+          [command.operationId, RELEASED_NODE_VERIFIED],
+        );
+        if (stamped.rows.length !== 1) {
+          throw new Error(
+            `NODE_VERIFIED send receive_release_status CAS failed: ${command.operationId}`,
+          );
+        }
+        sourceLeaseStillHeld = false;
       }
 
       // 5. The authoritative terminal event, on both signed chains, on THIS transaction.
@@ -217,7 +345,7 @@ export class SqlExternalSendLandingStore implements ExternalSendLandingStore {
         applied: true,
         record,
         event,
-        sourceLeaseStillHeld: true,
+        sourceLeaseStillHeld,
       };
     }).catch((err: unknown) => {
       if (err instanceof LeaseMissingError) {
@@ -249,12 +377,18 @@ export class InMemoryExternalSendLandingStore implements ExternalSendLandingStor
       verificationMaterialAvailableUntilMs: number | null;
       landedAtMs: number | null;
       terminalObservationId: string | null;
+      verificationMode: "INDEPENDENT" | "NODE_VERIFIED";
+      receiveReleaseStatus: string | null;
     }
   >();
   readonly leases = new Set<string>();
   readonly records: ExternalSendLandingRecord[] = [];
   readonly events: ExternalSendLandedEvent[] = [];
-  /** When true, commitLanding simulates a store that illegally drops the lease. */
+  /**
+   * When true, commitLanding simulates an illegal mid-commit lease drop that the
+   * production store would never report as applied:true on INDEPENDENT. Kept for
+   * negative unit coverage of accidental release.
+   */
   releaseLeaseOnLand = false;
 
   seed(
@@ -262,6 +396,7 @@ export class InMemoryExternalSendLandingStore implements ExternalSendLandingStor
     status: "AWAITING_REDEMPTION" | "NEEDS_ATTENTION" | "EXTERNAL_SEND_LANDED" | "CREATED",
     sourceWalletId: string,
     leaseHeld = true,
+    opts: { readonly verificationMode?: "INDEPENDENT" | "NODE_VERIFIED" } = {},
   ): void {
     this.operations.set(operationId, {
       status,
@@ -269,6 +404,8 @@ export class InMemoryExternalSendLandingStore implements ExternalSendLandingStor
       verificationMaterialAvailableUntilMs: null,
       landedAtMs: null,
       terminalObservationId: null,
+      verificationMode: opts.verificationMode ?? "INDEPENDENT",
+      receiveReleaseStatus: null,
     });
     if (leaseHeld) this.leases.add(sourceWalletId);
   }
@@ -305,11 +442,18 @@ export class InMemoryExternalSendLandingStore implements ExternalSendLandingStor
     this.records.push(record);
     this.events.push(event);
 
+    // Illegal drop wins for the negative unit path (simulates a broken INDEPENDENT store).
     if (this.releaseLeaseOnLand) {
       this.leases.delete(op.sourceWalletId);
       return { applied: true, record, event, sourceLeaseStillHeld: false };
     }
 
+    // ZTR-1304: NODE_VERIFIED releases in the same commit.
+    if (op.verificationMode === "NODE_VERIFIED") {
+      this.leases.delete(op.sourceWalletId);
+      op.receiveReleaseStatus = RELEASED_NODE_VERIFIED;
+      return { applied: true, record, event, sourceLeaseStillHeld: false };
+    }
     return { applied: true, record, event, sourceLeaseStillHeld: true };
   }
 }

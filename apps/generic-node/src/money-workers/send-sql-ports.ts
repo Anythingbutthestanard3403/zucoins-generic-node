@@ -674,11 +674,13 @@ export function createSqlExternalSendLandingStore(
         const inner = new SqlExternalSendLandingStore(
           {
             // Pass-through: node-core's statements run on the transaction opened above.
+            // rowCount is required: releaseLease (NODE_VERIFIED same-TX release) fails closed
+            // without exact-one-row close/consume/DELETE counts.
             withTransaction: async (fn) =>
               fn({
                 query: async <R>(text: string, params: readonly unknown[]) => {
                   const result = await client.query(text, params as never[]);
-                  return { rows: result.rows as R[] };
+                  return { rows: result.rows as R[], rowCount: result.rowCount };
                 },
               }),
           },

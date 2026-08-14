@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
+  SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
   SELECT_SEND_BY_TOPUP_MOVE_SQL,
   SELECT_SEND_TOPUP_READY_SQL,
   SELECT_SEND_WORKER_SQL,
@@ -370,6 +371,31 @@ describe.skipIf(!TEST_DATABASE_URL)("send assign + multi-hub top-up (real PG)", 
       `BEGIN; SELECT coalesce((SELECT wallet_id FROM (${sql}) q), 'NONE'); ROLLBACK;`,
     );
     expect(picked).toContain("NONE");
+  });
+
+  it("ZTR-1289: funding wallet lock returns observed balance + flags", async () => {
+    const w = await seedWallet("INTERNAL_ONLY", { balance: "42" });
+    const sql = SELECT_FUNDING_WALLET_FOR_TOPUP_SQL.replace(
+      /\$1::uuid/g,
+      `'${w.walletId}'::uuid`,
+    ).replace(/\$2::uuid/g, `'${NODE_ID}'::uuid`);
+    const row = await must(`BEGIN; ${sql}; ROLLBACK;`);
+    expect(row).toContain(w.walletId);
+    expect(row).toContain("42");
+  });
+
+  it("ZTR-1289: dry/unobserved funding wallet still locks (caller fails closed)", async () => {
+    const w = await seedWallet("INTERNAL_ONLY", { balance: null });
+    const sql = SELECT_FUNDING_WALLET_FOR_TOPUP_SQL.replace(
+      /\$1::uuid/g,
+      `'${w.walletId}'::uuid`,
+    ).replace(/\$2::uuid/g, `'${NODE_ID}'::uuid`);
+    // Row returns; observed_balance_zkz is empty — evaluateFundingWalletForTopUp fails closed.
+    const row = await must(
+      `BEGIN; SELECT wallet_id, coalesce(observed_balance_zkz, 'NULL') FROM (${sql}) q; ROLLBACK;`,
+    );
+    expect(row).toContain(w.walletId);
+    expect(row).toContain("NULL");
   });
 
   it("blessed destination lookup for worker", async () => {

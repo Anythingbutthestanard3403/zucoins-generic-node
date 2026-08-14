@@ -1552,6 +1552,7 @@ components:
                 - verification_material_not_ready
                 - verification_material_expired
                 - protocol_predicate_failed
+                - insufficient_funding_wallet
                 - rate_limited
                 - receive_queue_full
                 - signer_unavailable

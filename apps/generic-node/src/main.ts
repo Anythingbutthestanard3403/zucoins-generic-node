@@ -64,6 +64,7 @@ import {
   createSqlOperationRouteStore,
   createStatfsDiskUtilization,
   CredentialService,
+  DEFAULT_FUNDING_WALLET_SETTING_KEY,
   deriveRootKey,
   EncryptedWalletKeyStore,
   ensureActiveNodeSigningKey,
@@ -73,6 +74,7 @@ import {
   migrateLeaseFoundation,
   migrateTotpSecretsAtRest,
   type NodeEventSigner,
+  resolveEffectiveFundingWallet,
   runDeterministicBootRecovery,
   SIGNER_LEADERSHIP_LOCK_ID,
   SqlCredentialStore,
@@ -696,6 +698,35 @@ async function main(): Promise<void> {
     assignSql: poolSql,
     assignSelectionTx: withPgTransaction,
     assertHaltAdmitsKind: (kind) => moneyPathPorts.assertHaltAdmitsKind(kind),
+    // ZTR-1289: integration funding wallet W preferred for W→sender hop.
+    resolveFundingWalletId: async (implementerId: string) => {
+      const impl = await poolSql.query<{
+        funding_wallet_id: string | null;
+      }>(
+        `SELECT funding_wallet_id::text AS funding_wallet_id
+           FROM implementers
+          WHERE id = $1::uuid AND retired_at IS NULL`,
+        [implementerId],
+      );
+      const nodeDefault = await poolSql.query<{ setting_value: string }>(
+        `SELECT setting_value
+           FROM node_settings
+          WHERE setting_key = $1`,
+        [DEFAULT_FUNDING_WALLET_SETTING_KEY],
+      );
+      const defaultId = nodeDefault.rows[0]?.setting_value ?? null;
+      const effective = resolveEffectiveFundingWallet({
+        implementerPin: {
+          funding_wallet_id: impl.rows[0]?.funding_wallet_id ?? null,
+          funding_wallet_public_key: null,
+        },
+        nodeDefault: {
+          funding_wallet_id: defaultId,
+          funding_wallet_public_key: null,
+        },
+      });
+      return effective.funding_wallet_id;
+    },
   });
   const operationAuth = createImplementerBearerAuthFromService(
     new CredentialService(credentialStore),

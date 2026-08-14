@@ -35,13 +35,6 @@ export {
 } from "./default-funding-wallet.js";
 
 export {
-  resolveEffectiveFundingWallet,
-  toFundingWalletWireFields,
-  type EffectiveFundingWallet,
-  type FundingWalletPin,
-} from "./resolve-effective-funding-wallet.js";
-
-export {
   INTEGRATION_REQUEST_APPROVED_ACTION,
   INTEGRATION_REQUEST_DECLINED_ACTION,
   IntegrationRequestStoreError,

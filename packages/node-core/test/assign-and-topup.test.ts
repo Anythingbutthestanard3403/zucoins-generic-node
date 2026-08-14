@@ -4,10 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalAssignRequestSha256,
   decideWorkerFunding,
-  evaluateFundingWalletForTopUp,
   evaluateTopUpReadiness,
   isTopUpHubEligible,
-  SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
   SELECT_SEND_WORKER_SQL,
   SELECT_TOPUP_HUB_SQL,
   SELECT_SEND_TOPUP_READY_SQL,
@@ -51,40 +49,6 @@ describe("isTopUpHubEligible", () => {
     expect(isTopUpHubEligible(WALLET_MONEY_MODE_FLAGS.SEND_ONLY)).toBe(false);
     expect(isTopUpHubEligible(WALLET_MONEY_MODE_FLAGS.RECEIVE_ONLY)).toBe(false);
     expect(isTopUpHubEligible(WALLET_MONEY_MODE_FLAGS.FULL)).toBe(false);
-  });
-});
-
-describe("evaluateFundingWalletForTopUp (ZTR-1289)", () => {
-  const base = {
-    shortfallZkz: "5",
-    observedBalanceZkz: "10" as string | null,
-    allowInternalMove: true,
-    state: "AVAILABLE",
-    keyOrigin: "node_generated",
-    isRetired: false,
-    hasActiveLease: false,
-  };
-
-  it("ok when W covers shortfall and is move-eligible", () => {
-    expect(evaluateFundingWalletForTopUp(base)).toEqual({
-      ok: true,
-      balanceZkz: "10",
-    });
-  });
-
-  it("dry / unobserved / short → insufficient", () => {
-    expect(
-      evaluateFundingWalletForTopUp({ ...base, observedBalanceZkz: null }),
-    ).toMatchObject({ ok: false, reason: "funding_wallet_unobserved" });
-    expect(
-      evaluateFundingWalletForTopUp({ ...base, observedBalanceZkz: "2" }),
-    ).toMatchObject({ ok: false });
-    expect(
-      evaluateFundingWalletForTopUp({ ...base, allowInternalMove: false }),
-    ).toMatchObject({ ok: false, reason: "funding_wallet_no_internal_move" });
-    expect(
-      evaluateFundingWalletForTopUp({ ...base, hasActiveLease: true }),
-    ).toMatchObject({ ok: false, reason: "funding_wallet_busy" });
   });
 });
 
@@ -145,14 +109,6 @@ describe("frozen selection SQL", () => {
     expect(SELECT_TOPUP_HUB_SQL).toContain("ORDER BY w.id ASC");
   });
 
-  it("funding wallet lock is by id + node (not INTERNAL_ONLY-only)", () => {
-    expect(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL).toContain("w.id = $1::uuid");
-    expect(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL).toContain("w.node_id = $2::uuid");
-    expect(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL).toContain("FOR UPDATE OF w");
-    expect(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL).toContain("allow_internal_move");
-    expect(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL).not.toContain("INTERNAL_ONLY");
-  });
-
   it("top-up ready probe requires INTERNAL_MOVE_LANDED", () => {
     expect(SELECT_SEND_TOPUP_READY_SQL).toContain("INTERNAL_MOVE_LANDED");
     expect(SELECT_SEND_TOPUP_READY_SQL).toContain("references_operation_id");
@@ -162,7 +118,6 @@ describe("frozen selection SQL", () => {
     expect(Object.keys(SEND_ASSIGN_SQL).sort()).toEqual(
       [
         "SELECT_BLESSED_DESTINATION_FOR_WALLET",
-        "SELECT_FUNDING_WALLET_FOR_TOPUP",
         "SELECT_SEND_BY_TOPUP_MOVE",
         "SELECT_SEND_TOPUP_READY",
         "SELECT_SEND_WORKER",

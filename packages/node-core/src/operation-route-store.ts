@@ -98,13 +98,6 @@ export interface SqlOperationRouteStoreConfig {
   readonly assignSelectionTx?: AssignSqlTxFn;
   /** Kind-scoped operator halt (MOVE + SEND) before durable assign rows. */
   readonly assertHaltAdmitsKind?: (kind: string) => void;
-  /**
-   * Resolve integration funding wallet W for assign top-up (ZTR-1289).
-   * When omitted, composition keeps multi-hub INTERNAL_ONLY behaviour only.
-   */
-  readonly resolveFundingWalletId?: (
-    implementerId: string,
-  ) => Promise<string | null>;
 }
 
 function wireAfterLanding(
@@ -438,7 +431,6 @@ export function createSqlOperationRouteStore(
         assertHaltAdmitsKind: config.assertHaltAdmitsKind,
         generateId,
         now,
-        resolveFundingWalletId: config.resolveFundingWalletId,
       };
       const composed = await assignAndTopUpExternalSend(assignDeps, {
         implementerId: input.implementerId,

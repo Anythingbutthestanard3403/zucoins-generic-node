@@ -52,9 +52,6 @@ export const API_ERROR_CODES = [
   { code: "verification_material_expired", http: 410 },
   // 422 — well-formed but fails custody/protocol predicate
   { code: "protocol_predicate_failed", http: 422 },
-  // Funding wallet W cannot cover external-send amount (ZTR-1289). Stable for
-  // Zukaz claim failure mapping — not a transient 503.
-  { code: "insufficient_funding_wallet", http: 422 },
   // 429 — rate limit
   { code: "rate_limited", http: 429 },
   // 503 — bounded queue / signer unavailable
@@ -96,8 +93,6 @@ const DIAGNOSTIC_MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   verification_material_not_ready: "Verification material is not yet available.",
   verification_material_expired: "The verification-material access window has expired.",
   protocol_predicate_failed: "The request fails a custody or protocol predicate.",
-  insufficient_funding_wallet:
-    "The integration funding wallet cannot cover the requested amount.",
   rate_limited: "The principal rate limit is exceeded.",
   receive_queue_full: "The receive bounded queue is at capacity.",
   signer_unavailable: "The signer leadership is currently unavailable.",

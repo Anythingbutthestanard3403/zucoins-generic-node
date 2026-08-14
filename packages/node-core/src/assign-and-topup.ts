@@ -1,29 +1,23 @@
 // External-send wallet assignment + multi-hub internal top-up composition (ZTR-1270).
-// Funding-wallet reserve hop (ZTR-1289): when the integration pins funding wallet W,
-// shortfall top-up prefers MOVE W→sender; dry / ineligible W → insufficient_funding_wallet
-// (no silent multi-hub substitute). When W is unset, multi-hub INTERNAL_ONLY path remains.
 //
 // Runtime inverse of receive-pool assign: pick a free send-capable worker, optionally
-// fund it via MOVE_INTERNAL from funding W (preferred) or an INTERNAL_ONLY hub, then
-// create SEND_EXTERNAL with durable references_operation_id linkage. No fourth money verb.
+// fund it via MOVE_INTERNAL from an INTERNAL_ONLY hub, then create SEND_EXTERNAL with
+// durable references_operation_id linkage. No fourth money verb.
 //
 // Freeze decisions (also in the PR body):
 // 1. Balance observation source — latest verified gateway_observations.b_amount for the
 //    wallet (same lateral shape as admin inventory). Null observation ⇒ treat balance as
 //    "0" for worker shortfall (underfunded / full-N top-up). Hubs with null observation
-//    are skipped (fail closed on unknown hub liquidity). Funding W with null observation
-//    is treated as dry (insufficient_funding_wallet).
+//    are skipped (fail closed on unknown hub liquidity).
 // 2. Top-up amount — exact shortfall (N − worker_balance), never full N when partial
 //    funds are already on the worker.
-// 3. Hub pick sequence — when fundingWalletId set: lock that wallet only (must cover
-//    shortfall + allow_internal_move). Else INTERNAL_ONLY only; observed balance ≥
-//    shortfall; wallet id ASC; FOR UPDATE SKIP LOCKED LIMIT 1.
+// 3. Hub pick sequence — INTERNAL_ONLY only; observed balance ≥ shortfall; wallet id ASC;
+//    FOR UPDATE SKIP LOCKED LIMIT 1.
 // 4. Lease groups — sequential separate groups: MOVE admits first (own lease group);
 //    SEND is created in the same composition call with references_operation_id = move id
 //    but acquires SEND_SOURCE only after the move has released wallets (formation /
 //    auto-approve gate on top-up readiness). Same-group continuous transfer is not used
 //    (worker cannot hold MOVE_DESTINATION and SEND_SOURCE together under one-in-flight).
-// 5. Response source_wallet_id is always the sender/worker, never W (attribution).
 //
 // Auto-approve / claim-and-observe MUST call assertSendTopUpReady (or the SQL probe)
 // before advancing a send that references a MOVE_INTERNAL — policy still evaluates only
@@ -133,35 +127,6 @@ SELECT w.id::text AS wallet_id,
  FOR UPDATE OF w SKIP LOCKED
  LIMIT 1`;
 
-/**
- * Lock the integration funding wallet W for a W→sender top-up hop (ZTR-1289).
- * $1 = funding wallet id, $2 = node id. Caller applies shortfall coverage +
- * allow_internal_move pure checks; null observation is dry (fail closed).
- */
-// Keep multiline (do not collapse): a trailing `-- contract-allow` comment would
-// swallow the rest of the statement if this were single-lined.
-export const SELECT_FUNDING_WALLET_FOR_TOPUP_SQL = `
-SELECT w.id::text AS wallet_id,
-       bal.b_amount::text AS observed_balance_zkz,
-       w.allow_internal_move,
-       w.state::text AS state,
-       w.key_origin::text AS key_origin,
-       w.retired_at IS NOT NULL AS is_retired,
-       EXISTS (
-         SELECT 1 FROM wallet_active_leases wal WHERE wal.wallet_id = w.id
-       ) AS has_active_lease
-  FROM wallets w
-  LEFT JOIN LATERAL (
-        SELECT go.b_amount
-          FROM gateway_observations go
-         WHERE go.wallet_id = w.id
-           AND go.b_amount IS NOT NULL
-         ORDER BY go.observed_at DESC, go.wallet_seq DESC -- contract-allow:order:frozen structural vocabulary
-         LIMIT 1
-       ) bal ON true
- WHERE w.id = $1::uuid
-   AND w.node_id = $2::uuid
- FOR UPDATE OF w`;
 
 /**
  * Resolve the BLESSED destination id for a worker wallet (MOVE sink handle).
@@ -213,7 +178,6 @@ SELECT s.operation_id::text AS send_operation_id,
 export const SEND_ASSIGN_SQL = {
   SELECT_SEND_WORKER: SELECT_SEND_WORKER_SQL,
   SELECT_TOPUP_HUB: SELECT_TOPUP_HUB_SQL,
-  SELECT_FUNDING_WALLET_FOR_TOPUP: SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
   SELECT_BLESSED_DESTINATION_FOR_WALLET: SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
   SELECT_SEND_TOPUP_READY: SELECT_SEND_TOPUP_READY_SQL,
   SELECT_SEND_BY_TOPUP_MOVE: SELECT_SEND_BY_TOPUP_MOVE_SQL,
@@ -229,7 +193,6 @@ export type SendAssignRejectionCode =
   | "worker_destination_missing"
   | "no_hub_liquidity"
   | "hub_busy"
-  | "insufficient_funding_wallet"
   | "move_rejected"
   | "send_rejected"
   | "halted";
@@ -348,12 +311,6 @@ export interface AssignAndTopUpRequest {
    * the send binds references_operation_id to that MOVE id.
    */
   readonly referencesOperationId: string | null;
-  /**
-   * Integration funding wallet W (ZTR-1289). When set, top-up MOVE source is W
-   * only — multi-hub INTERNAL_ONLY is not used as a silent substitute. Null/
-   * undefined preserves pre-1289 multi-hub behaviour (funding pin unset).
-   */
-  readonly fundingWalletId?: string | null;
 }
 
 export interface AssignAndTopUpDeps {
@@ -380,14 +337,6 @@ export interface AssignAndTopUpDeps {
    * `topup:` + send idempotency key (must stay within 16–255 ASCII).
    */
   readonly moveIdempotencyKeyFor?: (sendIdempotencyKey: string) => string;
-  /**
-   * Optional async resolver for funding wallet W when request.fundingWalletId is
-   * omitted. Wired by the route store from implementer pin + node default.
-   * Returning null means funding is unset → multi-hub fallback.
-   */
-  readonly resolveFundingWalletId?: (
-    implementerId: string,
-  ) => Promise<string | null>;
 }
 
 export type AssignAndTopUpOutcome =
@@ -397,8 +346,6 @@ export type AssignAndTopUpOutcome =
       readonly funding: "funded" | "top_up";
       readonly shortfallZkz: string | null;
       readonly hubWalletId: string | null;
-      /** Present when top-up sourced from integration funding wallet W. */
-      readonly fundingWalletId?: string | null;
       readonly move: MoveOperation | null;
       readonly send: SendOperation;
       readonly artifact: SendExpectedArtifact;
@@ -466,96 +413,6 @@ async function pickHub(
   return {
     walletId: row.wallet_id,
     observedBalanceZkz: row.observed_balance_zkz,
-  };
-}
-
-/**
- * Pure coverage check for funding wallet W as MOVE source for shortfall.
- * Null observation ⇒ dry. Busy / ineligible ⇒ insufficient (no hub fallback).
- */
-export function evaluateFundingWalletForTopUp(input: {
-  readonly shortfallZkz: string;
-  readonly observedBalanceZkz: string | null;
-  readonly allowInternalMove: boolean;
-  readonly state: string;
-  readonly keyOrigin: string;
-  readonly isRetired: boolean;
-  readonly hasActiveLease: boolean;
-}):
-  | { readonly ok: true; readonly balanceZkz: string }
-  | { readonly ok: false; readonly reason: string } {
-  if (input.isRetired) {
-    return { ok: false, reason: "funding_wallet_retired" };
-  }
-  if (input.state !== "AVAILABLE") {
-    return { ok: false, reason: `funding_wallet_state=${input.state}` };
-  }
-  if (input.keyOrigin !== "node_generated") {
-    return { ok: false, reason: "funding_wallet_not_node_generated" };
-  }
-  if (input.allowInternalMove !== true) {
-    return { ok: false, reason: "funding_wallet_no_internal_move" };
-  }
-  if (input.hasActiveLease) {
-    return { ok: false, reason: "funding_wallet_busy" };
-  }
-  if (input.observedBalanceZkz === null) {
-    return { ok: false, reason: "funding_wallet_unobserved" };
-  }
-  if (compareAmounts(input.observedBalanceZkz, input.shortfallZkz) < 0) {
-    return {
-      ok: false,
-      reason: `funding_wallet_shortfall balance=${input.observedBalanceZkz} need=${input.shortfallZkz}`,
-    };
-  }
-  return { ok: true, balanceZkz: input.observedBalanceZkz };
-}
-
-async function lockFundingWalletForTopUp(
-  tx: AssignSqlExecutor,
-  fundingWalletId: string,
-  nodeId: string,
-  shortfallZkz: string,
-): Promise<
-  | { readonly ok: true; readonly pick: HubPick }
-  | { readonly ok: false; readonly reason: string }
-> {
-  const result = await tx.query<{
-    wallet_id: string;
-    observed_balance_zkz: string | null;
-    allow_internal_move: boolean | string;
-    state: string;
-    key_origin: string;
-    is_retired: boolean | string;
-    has_active_lease: boolean | string;
-  }>(SELECT_FUNDING_WALLET_FOR_TOPUP_SQL, [fundingWalletId, nodeId]);
-  const row = result.rows[0];
-  if (row === undefined) {
-    return { ok: false, reason: "funding_wallet_not_found" };
-  }
-  const allowInternalMove =
-    row.allow_internal_move === true || row.allow_internal_move === "t";
-  const isRetired = row.is_retired === true || row.is_retired === "t";
-  const hasActiveLease =
-    row.has_active_lease === true || row.has_active_lease === "t";
-  const verdict = evaluateFundingWalletForTopUp({
-    shortfallZkz,
-    observedBalanceZkz: row.observed_balance_zkz,
-    allowInternalMove,
-    state: row.state,
-    keyOrigin: row.key_origin,
-    isRetired,
-    hasActiveLease,
-  });
-  if (!verdict.ok) {
-    return { ok: false, reason: verdict.reason };
-  }
-  return {
-    ok: true,
-    pick: {
-      walletId: row.wallet_id,
-      observedBalanceZkz: verdict.balanceZkz,
-    },
   };
 }
 
@@ -693,25 +550,6 @@ export async function assignAndTopUpExternalSend(
     }
   }
 
-  // Resolve funding wallet W once before selection (ZTR-1289). Request field wins;
-  // else optional dep resolver (route store). Null ⇒ multi-hub fallback.
-  let resolvedFundingWalletId: string | null =
-    request.fundingWalletId === undefined ? null : request.fundingWalletId;
-  if (resolvedFundingWalletId === null && deps.resolveFundingWalletId !== undefined) {
-    resolvedFundingWalletId = await deps.resolveFundingWalletId(request.implementerId);
-  }
-  if (resolvedFundingWalletId !== null) {
-    try {
-      parseUuid(resolvedFundingWalletId);
-    } catch {
-      return {
-        outcome: "REJECTED",
-        code: "insufficient_funding_wallet",
-        detail: "invalid_funding_wallet_id",
-      };
-    }
-  }
-
   const runSelection = deps.withSelectionTx ?? (async (body) => body(deps.sql));
 
   type Plan =
@@ -720,7 +558,6 @@ export async function assignAndTopUpExternalSend(
         readonly workerWalletId: string;
         readonly funding: ReturnType<typeof decideWorkerFunding>;
         readonly hubWalletId: string | null;
-        readonly fundingWalletId: string | null;
         readonly workerDestinationId: string | null;
       }
     | {
@@ -728,7 +565,6 @@ export async function assignAndTopUpExternalSend(
         readonly workerWalletId: string;
         readonly funding: ReturnType<typeof decideWorkerFunding>;
         readonly hubWalletId: string | null;
-        readonly fundingWalletId: string | null;
         readonly workerDestinationId: string | null;
       }
     | { readonly mode: "reject"; readonly code: SendAssignRejectionCode; readonly detail?: string };
@@ -788,18 +624,6 @@ export async function assignAndTopUpExternalSend(
       observed = worker.observedBalanceZkz;
     }
 
-    // Funding W must not be the external-send source (reserve ≠ sender).
-    if (
-      resolvedFundingWalletId !== null &&
-      workerWalletId === resolvedFundingWalletId
-    ) {
-      return {
-        mode: "reject",
-        code: "send_rejected",
-        detail: "funding_wallet_cannot_be_send_source",
-      };
-    }
-
     const funding = decideWorkerFunding(request.amountZkz, observed);
     if (funding.kind === "funded") {
       return {
@@ -807,7 +631,6 @@ export async function assignAndTopUpExternalSend(
         workerWalletId,
         funding,
         hubWalletId: null,
-        fundingWalletId: resolvedFundingWalletId,
         workerDestinationId: null,
       };
     }
@@ -818,31 +641,6 @@ export async function assignAndTopUpExternalSend(
         mode: "reject",
         code: "worker_destination_missing",
         detail: workerWalletId,
-      };
-    }
-
-    // ZTR-1289: preferred reserve root is funding W when configured.
-    if (resolvedFundingWalletId !== null) {
-      const lockedW = await lockFundingWalletForTopUp(
-        tx,
-        resolvedFundingWalletId,
-        request.nodeId,
-        funding.shortfallZkz,
-      );
-      if (!lockedW.ok) {
-        return {
-          mode: "reject",
-          code: "insufficient_funding_wallet",
-          detail: lockedW.reason,
-        };
-      }
-      return {
-        mode: request.sourceWalletId !== null ? "explicit" : "assigned",
-        workerWalletId,
-        funding,
-        hubWalletId: lockedW.pick.walletId,
-        fundingWalletId: resolvedFundingWalletId,
-        workerDestinationId: destId,
       };
     }
 
@@ -887,7 +685,6 @@ export async function assignAndTopUpExternalSend(
       workerWalletId,
       funding,
       hubWalletId: hub.walletId,
-      fundingWalletId: null,
       workerDestinationId: destId,
     };
   });
@@ -901,13 +698,7 @@ export async function assignAndTopUpExternalSend(
 
   if (plan.funding.kind === "needs_topup") {
     if (plan.hubWalletId === null || plan.workerDestinationId === null) {
-      return {
-        outcome: "REJECTED",
-        code:
-          plan.fundingWalletId !== null
-            ? "insufficient_funding_wallet"
-            : "no_hub_liquidity",
-      };
+      return { outcome: "REJECTED", code: "no_hub_liquidity" };
     }
     const moveKey =
       (deps.moveIdempotencyKeyFor ?? defaultMoveIdempotencyKey)(request.idempotencyKey);
@@ -925,23 +716,6 @@ export async function assignAndTopUpExternalSend(
       { generateId: deps.generateId, now: deps.now },
     );
     if (moveOutcome.outcome === "REJECTED") {
-      // Funding-W path: map MOVE failures to insufficient_funding_wallet (no silent hub).
-      if (plan.fundingWalletId !== null) {
-        if (moveOutcome.code === "wallet_busy") {
-          return {
-            outcome: "REJECTED",
-            code: "insufficient_funding_wallet",
-            detail: "funding_wallet_busy",
-            causeCode: moveOutcome.code,
-          };
-        }
-        return {
-          outcome: "REJECTED",
-          code: "insufficient_funding_wallet",
-          detail: moveOutcome.detail ?? moveOutcome.code,
-          causeCode: moveOutcome.code,
-        };
-      }
       if (moveOutcome.code === "wallet_busy") {
         return {
           outcome: "REJECTED",
@@ -959,7 +733,6 @@ export async function assignAndTopUpExternalSend(
     }
     if (moveOutcome.outcome === "IDEMPOTENT_REPLAY") {
       // Prior composition created the move; bind send to that operation id.
-      // Idempotent create must not double-hop (same move key → same move id).
       referencesOperationId = moveOutcome.operation.operationId;
       moveOp = null;
     } else {
@@ -1008,7 +781,6 @@ export async function assignAndTopUpExternalSend(
     funding: plan.funding.kind === "funded" ? "funded" : "top_up",
     shortfallZkz: plan.funding.kind === "needs_topup" ? plan.funding.shortfallZkz : null,
     hubWalletId: plan.hubWalletId,
-    fundingWalletId: plan.fundingWalletId,
     move: moveOp,
     send: sendOutcome.operation,
     artifact: sendOutcome.artifact,

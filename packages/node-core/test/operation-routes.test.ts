@@ -392,11 +392,6 @@ describe("handleCreateExternalSend", () => {
     const cases: Array<{ code: string; detail?: string; status: number; wire: string }> = [
       { code: "no_free_send_worker", status: 503, wire: "service_unavailable" },
       { code: "no_hub_liquidity", status: 503, wire: "service_unavailable" },
-      {
-        code: "insufficient_funding_wallet",
-        status: 422,
-        wire: "insufficient_funding_wallet",
-      },
       { code: "hub_busy", status: 409, wire: "wallet_busy" },
       { code: "halted", status: 503, wire: "service_unavailable" },
       { code: "worker_destination_missing", status: 503, wire: "service_unavailable" },

@@ -67,3 +67,38 @@ describe("destinationServiceForSql production wiring", () => {
     expect(region).not.toContain("createFailClosedDestinationService");
   });
 });
+
+describe("ZTR-1307 · mint-time push provision wiring", () => {
+  it("destination key generator receives onWalletMinted and routes through the holder", () => {
+    const region = mainSrc.slice(
+      mainSrc.indexOf("createNodeGeneratedWalletKeyGenerator({"),
+      mainSrc.indexOf("createNodeGeneratedWalletKeyGenerator({") + 500,
+    );
+    expect(region).toContain("onWalletMinted:");
+    expect(region).toContain("onWalletsMintedHolder.current");
+  });
+
+  it("createProductionRouteSurface receives onWalletsMinted for funding CREATE mint", () => {
+    const region = mainSrc.slice(
+      mainSrc.indexOf("walletVault: vaultKeyStore"),
+      mainSrc.indexOf("walletVault: vaultKeyStore") + 350,
+    );
+    expect(region).toContain("onWalletsMinted:");
+    expect(region).toContain("onWalletsMintedHolder.current");
+  });
+
+  it("composePush success arms the mint holder", () => {
+    expect(mainSrc).toMatch(
+      /onWalletsMintedHolder\.current\s*=\s*\(walletIds\)\s*=>\s*push\?\.onWalletsMinted\(walletIds\)/,
+    );
+  });
+
+  it("full-http-mount mintFundingWallet invokes onWalletsMinted after seal", () => {
+    const fhm = readFileSync(join(here, "../src/full-http-mount.ts"), "utf8");
+    expect(fhm).toContain("readonly onWalletsMinted?:");
+    const mintStart = fhm.indexOf("const mintFundingWallet =");
+    const mint = fhm.slice(mintStart, mintStart + 2500);
+    expect(mint).toContain("config.onWalletsMinted?.([walletId])");
+    expect(mint.indexOf("config.onWalletsMinted")).toBeGreaterThan(mint.indexOf("await vault.seal"));
+  });
+});

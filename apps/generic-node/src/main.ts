@@ -256,6 +256,13 @@ function createLeadershipPool(pool: Pool): LeadershipLockPool {
 function createNodeGeneratedWalletKeyGenerator(deps: {
   readonly pool: Pool;
   readonly vault: EncryptedWalletKeyStore;
+  /**
+   * ZTR-1307 — post-commit push provision hook. Called after wallet+vault commit so
+   * EXTERNAL gates can see an ACTIVE subscription without an operator chore.
+   * Optional: unit tests / fail-closed surfaces omit it; boot reconcile remains the
+   * backstop when the push stack is not yet composed.
+   */
+  readonly onWalletMinted?: (walletId: string) => void;
 }): {
   generate(nodeId: Uuid): Promise<{ readonly walletId: Uuid; readonly publicKey: WalletPublicKey }>;
 } {
@@ -291,6 +298,8 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
           },
           secret64,
         );
+        // Post-commit only — never fire on a rolled-back mint.
+        deps.onWalletMinted?.(walletId);
         return { walletId, publicKey };
       } catch (err) {
         try {
@@ -759,9 +768,19 @@ async function main(): Promise<void> {
     auditLog: vaultAccessAuditLog,
   });
 
+  // Late-bound: composePush runs after the destination key generator is built.
+  // Every mint path (destination register, funding CREATE, pool scale-up) routes
+  // through onWalletsMintedHolder so push provision is not an operator chore (ZTR-1307).
+  const onWalletsMintedHolder: {
+    current: ((walletIds: readonly string[]) => void) | null;
+  } = { current: null };
+
   const destinationKeyGenerator = createNodeGeneratedWalletKeyGenerator({
     pool,
     vault: vaultKeyStore,
+    onWalletMinted: (walletId) => {
+      onWalletsMintedHolder.current?.([walletId]);
+    },
   });
   // Live device dual-control bless (A.4.2). operator_device_keys +
   // destination_blessing_artifacts + audit_log; public keys only (never private).
@@ -845,6 +864,8 @@ async function main(): Promise<void> {
     vaultRootKey: rootKey,
     // Funding wallet CREATE mint (ZTR-1287) seals into the same vault as pool mint.
     walletVault: vaultKeyStore,
+    // ZTR-1307 — same post-mint push hook as destination + pool scale-up.
+    onWalletsMinted: (walletIds) => onWalletsMintedHolder.current?.(walletIds),
     newRequestId: (): string => randomUUID(),
     metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
     destinationService,
@@ -1013,6 +1034,8 @@ async function main(): Promise<void> {
     logger.info(`push: VAPID mode=${vapidMode} (observe counts without blocking; enforce fails closed)`);
     logger.info(`push: composed (api=${pushApiBase}, endpoint base=${publicBaseUrl})`);
     pushConfiguredRef.current = true;
+    // Arm mint-time provision for destination/funding/pool mints (ZTR-1307).
+    onWalletsMintedHolder.current = (walletIds) => push?.onWalletsMinted(walletIds);
   }
 
   // Options first, listener second: without them node's defaults hold a socket and a request

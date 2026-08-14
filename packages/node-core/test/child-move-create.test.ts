@@ -350,4 +350,28 @@ describe("createChildMoveAtomically", () => {
     expect(result.child.leaseGroupId).toBe(LANDED_PARENT.leaseGroupId);
     expect(store.groupOps.get(result.child.operationId)).toBe(LEASE_GROUP_ID);
   });
+
+  it("AC3: child inherits NODE_VERIFIED from parent receive (ZTR-1304)", async () => {
+    const store = new ConstraintStore();
+    store.parent = { ...LANDED_PARENT, verificationMode: "NODE_VERIFIED" };
+    const result = await create(store);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.child.verificationMode).toBe("NODE_VERIFIED");
+    expect(store.operations.get(CHILD_OP_ID)?.verificationMode).toBe("NODE_VERIFIED");
+  });
+
+  it("AC3: child inherits INDEPENDENT from parent receive (ZTR-1304)", async () => {
+    const store = new ConstraintStore();
+    store.parent = { ...LANDED_PARENT, verificationMode: "INDEPENDENT" };
+    const result = await create(store);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.child.verificationMode).toBe("INDEPENDENT");
+  });
+
+  it("INSERT_CHILD binds verification_mode column (ZTR-1304 inheritance)", () => {
+    expect(CHILD_MOVE_STATEMENTS.INSERT_CHILD).toContain("verification_mode");
+    expect(CHILD_MOVE_STATEMENTS.SELECT_PARENT_RECEIVE).toContain("verification_mode");
+  });
 });

@@ -241,14 +241,44 @@ describe("commitExternalSendLanding", () => {
     expect(store.leases.has(WALLET_ID)).toBe(true);
   });
 
-  it("refuses a store that releases the source lease as part of landing", async () => {
+  it("INDEPENDENT accidental mid-commit drop still reports APPLIED with sourceLeaseStillHeld false (store authority)", async () => {
+    // ZTR-1304: commit no longer rejects stillHeld=false; the store owns intentional
+    // NODE_VERIFIED release. This flag only simulates a broken store for diagnostics.
     const store = new InMemoryExternalSendLandingStore();
     store.seed(OP_ID, "AWAITING_REDEMPTION", WALLET_ID, true);
     store.releaseLeaseOnLand = true;
     const verdict = verifiedVerdict();
     const outcome = await commitExternalSendLanding(verdict, store);
-    expect(outcome.outcome).toBe("CONFLICT");
-    if (outcome.outcome === "CONFLICT") expect(outcome.reason).toBe("LEASE_MISSING");
+    expect(outcome.outcome).toBe("APPLIED");
+    if (outcome.outcome !== "APPLIED") return;
+    expect(outcome.sourceLeaseStillHeld).toBe(false);
+  });
+
+  it("NODE_VERIFIED: APPLIED with sourceLeaseStillHeld false (same-TX release)", async () => {
+    const store = new InMemoryExternalSendLandingStore();
+    store.seed(OP_ID, "AWAITING_REDEMPTION", WALLET_ID, true, {
+      verificationMode: "NODE_VERIFIED",
+    });
+    const verdict = verifiedVerdict();
+    const outcome = await commitExternalSendLanding(verdict, store);
+    expect(outcome.outcome).toBe("APPLIED");
+    if (outcome.outcome !== "APPLIED") return;
+    expect(outcome.sourceLeaseStillHeld).toBe(false);
+    expect(store.leases.has(WALLET_ID)).toBe(false);
+    expect(store.operations.get(OP_ID)!.receiveReleaseStatus).toBe("RELEASED_NODE_VERIFIED");
+  });
+
+  it("INDEPENDENT: APPLIED keeps source lease held", async () => {
+    const store = new InMemoryExternalSendLandingStore();
+    store.seed(OP_ID, "AWAITING_REDEMPTION", WALLET_ID, true, {
+      verificationMode: "INDEPENDENT",
+    });
+    const verdict = verifiedVerdict();
+    const outcome = await commitExternalSendLanding(verdict, store);
+    expect(outcome.outcome).toBe("APPLIED");
+    if (outcome.outcome !== "APPLIED") return;
+    expect(outcome.sourceLeaseStillHeld).toBe(true);
+    expect(store.leases.has(WALLET_ID)).toBe(true);
   });
 
   it("wrong entry status is STATUS_GUARD_MISMATCH (no partial write)", async () => {

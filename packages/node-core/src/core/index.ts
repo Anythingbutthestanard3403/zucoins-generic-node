@@ -32,6 +32,13 @@ export * from "./receive-submit-once.js";
 export * from "./receive-settle.js";
 export * from "./submit-decision-claim-store.js";
 export * from "./move-internal-landing-store.js";
+export {
+  NODE_VERIFIED_MOVE_LANDING_RELEASE_REASON,
+  computeNodeVerifiedMoveLandingReleaseDigest,
+  releaseNodeVerifiedMoveLeasesOnLanding,
+  type MoveNodeVerifiedLandingReleaseInput,
+  type MoveNodeVerifiedLandingReleaseResult,
+} from "./move-node-verified-landing-release.js";
 export * from "./execution-phase.js";
 export * from "./transaction-material-store.js";
 export * from "./audit-writer.js";

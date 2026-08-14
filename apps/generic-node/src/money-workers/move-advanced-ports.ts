@@ -28,6 +28,7 @@ import {
   parsePositiveZkzAmount,
   persistMoveInnerAttemptSql,
   persistMoveOutcome,
+  releaseNodeVerifiedMoveLeasesOnLanding,
   proveExactHeadLanding,
   signMoveStepsUnderLeases,
   resumeMoveStep2FromPersistedStep1,
@@ -1171,13 +1172,40 @@ export function createMoveAdvancedPorts(
             if (outcome.kind === "INVARIANT_BREACH") {
               deps.metricsHooks?.onInvariantBreach();
             }
-            // Both leases stay held and no retry is licensed: an ambiguous move grants no
-            // release and no non-landing conclusion. What it now also grants is visibility.
+            // Both leases stay held on park (no release in either mode) and no retry is licensed:
+            // an ambiguous move grants no release and no non-landing conclusion. What it
+            // now also grants is visibility.
             deps.logger.info(
               `move reconcile: op=${operationId} parked NEEDS_ATTENTION outcome=${outcome.kind} ` +
                 `reason=${toAttentionReason(outcome.reason)}`,
             );
             return { ok: false, reason: `reconcile: ${outcome.kind}`, holdReconcile: true };
+          }
+
+          // ZTR-1304: NODE_VERIFIED → same-TX release of MOVE_SOURCE + MOVE_DESTINATION.
+          // INDEPENDENT skips (leases held until verification-complete). Must run before
+          // COMMIT on this client; failure aborts the whole landing CAS.
+          {
+            const srcPath = outcome.sourcePath;
+            const dstPath = outcome.destinationPath;
+            // Lease helpers need rowCount; adapt the SqlQueryFn surface.
+            const leaseTx = {
+              query: async <R,>(text: string, params?: readonly unknown[]) => {
+                const result = await client.query(text, (params ?? []) as never[]);
+                return { rows: result.rows as R[], rowCount: result.rowCount };
+              },
+            };
+            const releaseResult = await releaseNodeVerifiedMoveLeasesOnLanding(leaseTx, {
+              operationId,
+              sourceTerminalObservationId: srcPath.freshHeadObservationId,
+              destinationTerminalObservationId: dstPath.freshHeadObservationId,
+            });
+            if (releaseResult.kind === "RELEASED") {
+              deps.logger.info(
+                `move reconcile: op=${operationId} NODE_VERIFIED released wallets=` +
+                  releaseResult.releasedWalletIds.join(","),
+              );
+            }
           }
 
           // Derived wallet_settled_ledger SOURCE + DESTINATION rows.

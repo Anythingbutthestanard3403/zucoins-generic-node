@@ -384,14 +384,17 @@ describe("send-external landing PG drills", () => {
     expect(upd.stderr).toMatch(/EXTERNAL_SEND_LANDING_INSERT_ONLY/);
   });
 
-  it("6. landing store never deletes wallet_active_leases; lease still SEND_SOURCE", () => {
+  it("6. INDEPENDENT landing path leaves SEND_SOURCE held; store has no raw DELETE", () => {
     if (skip()) return;
     drillsRun += 1;
     expect(
       runPsql(db!, `SELECT lease_role FROM wallet_active_leases WHERE wallet_id='${WALLET_ID}'`).stdout.trim(),
     ).toBe("SEND_SOURCE");
     const storeSrc = readFileSync(join(HERE, "../src/send/landing-sql-store.ts"), "utf8");
+    // Raw DELETE remains forbidden; NODE_VERIFIED release goes through releaseLease (ZTR-1304).
     expect(storeSrc).not.toMatch(/DELETE\s+FROM\s+wallet_active_leases/i);
     expect(storeSrc).toMatch(/SELECT_LEASE/);
+    expect(storeSrc).toMatch(/NODE_VERIFIED/);
+    expect(storeSrc).toMatch(/releaseLease/);
   });
 });

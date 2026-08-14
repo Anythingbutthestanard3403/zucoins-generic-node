@@ -18,7 +18,8 @@
 //
 // Proves:
 //   AC1  AWAITING_REDEMPTION → EXTERNAL_SEND_LANDED; landing record + event committed,
-//        operations mirror synced (B2), source lease still held (One-in-flight); re-run idempotent.
+//        operations mirror synced (B2), source lease still held for INDEPENDENT (One-in-flight);
+//        NODE_VERIFIED releases SEND_SOURCE same-TX (ZTR-1304); re-run idempotent.
 //   AC3  a head that is unchanged T0 and still inside the signed redemption window → WAITING
 //        (stay AWAITING_REDEMPTION, no park).
 //   B4   a head that is a different transaction → PARK NEEDS_ATTENTION; genesis → INDETERMINATE.
@@ -47,6 +48,7 @@ import {
   ensureActiveNodeSigningKey,
   InMemoryDeviceKeyStore,
   listEvents,
+  RELEASED_NODE_VERIFIED,
   sha256Hex,
   fingerprintEndpoint,
   toBase64UrlPadded,
@@ -366,8 +368,10 @@ const logger = {
   info(message: string) {
     this.lines.push(message);
   },
-  error(message: string) {
-    this.lines.push(`ERROR ${message}`);
+  error(message: string, err?: unknown) {
+    const extra =
+      err instanceof Error ? ` :: ${err.name}: ${err.message}` : err !== undefined ? ` :: ${String(err)}` : "";
+    this.lines.push(`ERROR ${message}${extra}`);
   },
 };
 
@@ -476,6 +480,10 @@ async function seedParkedSend(
     sourcePubkey?: string;
     /** Pin signed redemption expiry at INSERT (sign_intents are insert-only). */
     signedExpiryUnixSecs?: number;
+    /** Per-op mode (ZTR-1304). Default INDEPENDENT keeps lease held at land. */
+    verificationMode?: "INDEPENDENT" | "NODE_VERIFIED";
+    /** When false, omit lease_group_operations so NODE_VERIFIED release fails closed. */
+    joinGroupOperation?: boolean;
   } = {},
 ): Promise<ParkedSend> {
   const sourcePubkey = options.sourcePubkey ?? SOURCE_PUBKEY;
@@ -490,6 +498,9 @@ async function seedParkedSend(
   const sourceT0ObsId = randomUUID();
   const destT0ObsId = randomUUID();
   const leaseEpoch = 1;
+  const verificationMode = options.verificationMode ?? "INDEPENDENT";
+  const joinGroupOperation = options.joinGroupOperation !== false;
+  const ownerInstanceId = randomUUID();
   const nodeSeed = randomBytes(32);
   const nodeIdentityPrivateKey = privateKeyFromSeed(nodeSeed);
   const nodeIdentityPublicKey = publicKeyFromSeed(nodeSeed);
@@ -650,23 +661,24 @@ async function seedParkedSend(
        operation_id, implementer_id, node_id, kind, status, row_version,
        attention_required, formation_state, http_method, route, idempotency_key,
        request_sha256, source_wallet_id, destination_address, amount_zkz,
-       references_operation_id, created_at)
+       references_operation_id, created_at, verification_mode)
      VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', 'AWAITING_REDEMPTION', 1,
        false, 'PARTIAL_DELIVERED', 'POST', '/v1/external-sends', $4, $5,
-       $6::uuid, $7, $8, NULL, now())`,
+       $6::uuid, $7, $8, NULL, now(), $9)`,
     [operationId, implementerId, nodeId, `idem-${operationId}`,
-     sha256HexOfText(operationId), walletId, DEST_PUBKEY, AMOUNT_ZKZ],
+     sha256HexOfText(operationId), walletId, DEST_PUBKEY, AMOUNT_ZKZ, verificationMode],
   );
 
   await pool.query(
     `INSERT INTO operations (
        id, node_id, implementer_id, kind, status, amount_zkz,
        source_wallet_id, destination_address, references_operation_id,
-       client_reference, description, idempotency_key, request_sha256, formation_state)
+       client_reference, description, idempotency_key, request_sha256, formation_state,
+       verification_mode)
      VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', 'AWAITING_REDEMPTION', $4,
-       $5::uuid, $6, NULL, NULL, NULL, $7, $8, 'PARTIAL_DELIVERED')`,
+       $5::uuid, $6, NULL, NULL, NULL, $7, $8, 'PARTIAL_DELIVERED', $9)`,
     [operationId, nodeId, implementerId, AMOUNT_ZKZ, walletId, DEST_PUBKEY,
-     `idem-${operationId}`, sha256HexOfText(operationId)],
+     `idem-${operationId}`, sha256HexOfText(operationId), verificationMode],
   );
 
   await pool.query(
@@ -737,10 +749,17 @@ async function seedParkedSend(
   );
 
   await pool.query(
-    `INSERT INTO lease_groups (id, root_operation_id, created_at)
-     VALUES ($1::uuid, $2::uuid, now())`,
+    `INSERT INTO lease_groups (id, root_operation_id, created_at, child_disposition)
+     VALUES ($1::uuid, $2::uuid, now(), 'NONE')`,
     [leaseGroupId, operationId],
   );
+  if (joinGroupOperation) {
+    await pool.query(
+      `INSERT INTO lease_group_operations (lease_group_id, operation_id, joined_at)
+       VALUES ($1::uuid, $2::uuid, now())`,
+      [leaseGroupId, operationId],
+    );
+  }
   await pool.query(
     `INSERT INTO wallet_lease_memberships
        (id, lease_group_id, wallet_id, operation_id, lease_role, lease_epoch, acquired_at)
@@ -753,7 +772,7 @@ async function seedParkedSend(
         lease_role, lease_epoch, acquired_at, heartbeat_at, owner_instance_id)
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid,
              'SEND_SOURCE', $5, now(), now(), $6::uuid)`,
-    [walletId, membershipId, leaseGroupId, operationId, leaseEpoch, randomUUID()],
+    [walletId, membershipId, leaseGroupId, operationId, leaseEpoch, ownerInstanceId],
   );
 
   // a landing appends its signed dual-chain event in the landing transaction, so the
@@ -871,6 +890,31 @@ async function leaseHeld(walletId: string): Promise<boolean> {
   );
   return (row.rowCount ?? 0) === 1;
 }
+
+async function releaseStatusOf(operationId: string): Promise<string | null> {
+  const r = await pool.query<{ s: string | null }>(
+    `SELECT receive_release_status::text AS s FROM operations WHERE id = $1::uuid`,
+    [operationId],
+  );
+  return r.rows[0]?.s ?? null;
+}
+
+async function proofKindOf(operationId: string): Promise<string | null> {
+  const r = await pool.query<{ k: string | null }>(
+    `SELECT proof_kind AS k FROM lease_release_proofs WHERE operation_id = $1::uuid LIMIT 1`,
+    [operationId],
+  );
+  return r.rows[0]?.k ?? null;
+}
+
+async function walletStateOf(walletId: string): Promise<string> {
+  const r = await pool.query<{ s: string }>(
+    `SELECT state::text AS s FROM wallets WHERE id = $1::uuid`,
+    [walletId],
+  );
+  return r.rows[0]!.s;
+}
+
 
 describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   const templateDb = `landertpl_${process.pid}_${Date.now()}`;
@@ -995,6 +1039,79 @@ describe.skipIf(!PG_AVAILABLE)("send completion lander (disposable PG)", () => {
   );
 
   it(
+    "ZTR-1304 AC1: NODE_VERIFIED landing releases SEND_SOURCE same-TX with EXTERNAL_SEND_LANDED proof",
+    async () => {
+      const parked = await seedParkedSend({ verificationMode: "NODE_VERIFIED" });
+      const metrics = createNodeMetrics();
+      const metricsHooks = createMetricsHooks(metrics);
+      const result = await tickSendCompletionLander({
+        ...landerDeps(parked.nodeId, headExchange()),
+        metricsHooks,
+      });
+      expect(result.landed).toContain(parked.operationId);
+      expect(await sendStatusOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
+      expect(await leaseHeld(parked.walletId)).toBe(false);
+      expect(await releaseStatusOf(parked.operationId)).toBe(RELEASED_NODE_VERIFIED);
+      expect(await proofKindOf(parked.operationId)).toBe("EXTERNAL_SEND_LANDED");
+      expect(await walletStateOf(parked.walletId)).toBe("AVAILABLE");
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1304 AC1: INDEPENDENT landing keeps SEND_SOURCE held",
+    async () => {
+      const parked = await seedParkedSend({ verificationMode: "INDEPENDENT" });
+      const result = await tickSendCompletionLander(landerDeps(parked.nodeId, headExchange()));
+      expect(result.landed).toContain(parked.operationId);
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+      expect(await releaseStatusOf(parked.operationId)).toBeNull();
+      expect(await proofKindOf(parked.operationId)).toBeNull();
+      expect(await walletStateOf(parked.walletId)).toBe("PINNED");
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1304 AC1 atomicity: NODE_VERIFIED release failure rolls back landing",
+    async () => {
+      const parked = await seedParkedSend({
+        verificationMode: "NODE_VERIFIED",
+        joinGroupOperation: false,
+      });
+      const result = await tickSendCompletionLander(landerDeps(parked.nodeId, headExchange()));
+      expect(result.landed).not.toContain(parked.operationId);
+      expect(await sendStatusOf(parked.operationId)).toBe("AWAITING_REDEMPTION");
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+      expect(await releaseStatusOf(parked.operationId)).toBeNull();
+      expect(await proofKindOf(parked.operationId)).toBeNull();
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "ZTR-1304 AC4: NEEDS_ATTENTION / POST_EXPIRY park releases nothing (NODE_VERIFIED)",
+    async () => {
+      const pastExpiry = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+      const parked = await seedParkedSend({
+        verificationMode: "NODE_VERIFIED",
+        signedExpiryUnixSecs: pastExpiry,
+      });
+      // Unchanged T0 head past expiry → park path, never land/release.
+      const result = await tickSendCompletionLander(
+        landerDeps(parked.nodeId, scriptedExchange(() => headEnvelopeBytes(PREDECESSOR_SETTLED_TEXT))),
+      );
+      expect(result.landed).not.toContain(parked.operationId);
+      expect(await leaseHeld(parked.walletId)).toBe(true);
+      expect(await releaseStatusOf(parked.operationId)).toBeNull();
+      expect(await proofKindOf(parked.operationId)).toBeNull();
+      expect(await walletStateOf(parked.walletId)).toBe("PINNED");
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+
     "AC3: unchanged T0 head BEFORE the signed expiry → WAITING (stay AWAITING_REDEMPTION, no park, no landing)",
     async () => {
       const parked = await seedParkedSend({

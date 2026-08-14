@@ -399,7 +399,8 @@ export type LateLandingApplyOutcome =
       readonly classification: Extract<LateLandingClassification, { kind: "LANDED_VERIFIED" }>;
       readonly commit: Extract<CommitExternalSendLandingOutcome, { outcome: "APPLIED" }>;
       readonly proofProgress: LateLandingProofProgress;
-      readonly sourceLeaseStillHeld: true;
+      /** False only after intentional NODE_VERIFIED same-TX release (ZTR-1304). */
+      readonly sourceLeaseStillHeld: boolean;
     }
   | {
       readonly kind: "REMAIN_ATTENTION";
@@ -821,7 +822,7 @@ async function completeLandFromPositiveProof(
       },
       commit,
       proofProgress: progress,
-      sourceLeaseStillHeld: true,
+      sourceLeaseStillHeld: commit.sourceLeaseStillHeld,
     };
   }
 
@@ -1125,7 +1126,7 @@ export async function applyLateLandingCycle(
       classification,
       commit,
       proofProgress: progress,
-      sourceLeaseStillHeld: true,
+      sourceLeaseStillHeld: commit.sourceLeaseStillHeld,
     };
   }
 

@@ -1029,7 +1029,10 @@ export async function tickSendCompletionLander(
           deps.metricsHooks?.onOperationCompleted("SEND_EXTERNAL");
           deps.logger.info(
             `send-landing: op=${candidate.operationId} EXTERNAL_SEND_LANDED ` +
-              `terminal_observation=${verdict.terminalObservationId} (source lease still held — releases on verification-complete)`,
+              `terminal_observation=${verdict.terminalObservationId} ` +
+              (outcome.sourceLeaseStillHeld
+                ? "(source lease still held — releases on verification-complete)"
+                : "(NODE_VERIFIED source lease released same-TX)"),
           );
         } else {
           deps.logger.info(

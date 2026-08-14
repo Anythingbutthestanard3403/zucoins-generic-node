@@ -11,9 +11,10 @@
 // 5. sets proof-access expiry (terminal_at + window);
 // 6. commits.
 //
-// The source lease is deliberately NOT released here (step 6). Release is a
-// later verification-complete step. Callers must never invoke a lease-release path
-// as part of this commit.
+// Step 6 (ZTR-1304): for NODE_VERIFIED only, the landing store mints a terminal-positive
+// release proof and releases SEND_SOURCE in the same TX (EXTERNAL_SEND_LANDED proof kind).
+// INDEPENDENT keeps the lease held until verification-complete. Attention/park paths never
+// reach this commit, so they release nothing.
 //
 // The arbiter is the database: the status guard is in the UPDATE WHERE clause. A race
 // that already landed (or left the entry set) matches zero rows → CONFLICT, no partial write.
@@ -75,8 +76,11 @@ export type CommitExternalSendLandingOutcome =
       readonly status: typeof EXTERNAL_SEND_LANDED_STATUS;
       readonly record: ExternalSendLandingRecord;
       readonly event: ExternalSendLandedEvent;
-      /** Always true after a successful land — lease release is out of scope. */
-      readonly sourceLeaseStillHeld: true;
+      /**
+       * True when SEND_SOURCE remains held after commit (INDEPENDENT). False only when
+       * NODE_VERIFIED released custody in the same landing TX (ZTR-1304).
+       */
+      readonly sourceLeaseStillHeld: boolean;
     }
   | {
       readonly outcome: "CONFLICT";
@@ -95,12 +99,15 @@ export type CommitExternalSendLandingOutcome =
 /**
  * Persistence port for the landing DB-TX. Implementations MUST run the status transition,
  * settled-body insert, event append, and proof-access write in a single transaction.
- * Implementations MUST NOT delete or update wallet_active_leases rows.
+ * Lease mutation is allowed only for the NODE_VERIFIED release branch (mintReleaseProof +
+ * releaseLease on the same pinned executor); INDEPENDENT MUST leave wallet_active_leases
+ * byte-identical.
  */
 export interface ExternalSendLandingStore {
   /**
-   * Atomically land the operation. Returns null when the status guard matched no row
-   * (already landed, wrong state, or missing). MUST leave the source lease intact.
+   * Atomically land the operation. Returns applied:false when the status guard matched no row
+   * (already landed, wrong state, or missing). `sourceLeaseStillHeld` reports post-commit
+   * custody: false only after an intentional NODE_VERIFIED same-TX release.
    */
   commitLanding(command: CommitExternalSendLandingCommand): Promise<{
     readonly applied: boolean;
@@ -113,7 +120,7 @@ export interface ExternalSendLandingStore {
 
 function buildEventData(terminalObservationId: string, landedAtMs: number): string {
   // external_send.landed data: terminal_observation_id, landed_at.
-  // Byte-stable field ordering for audit reproducibility.
+  // Byte-stable field sequence for audit reproducibility.
   return JSON.stringify({
     terminal_observation_id: terminalObservationId,
     landed_at: new Date(landedAtMs).toISOString(),
@@ -181,7 +188,8 @@ export function buildLandedEvent(
 
 /**
  * Commit a landing only when the nine-predicate pipeline returned VERIFIED.
- * Never lands on FAILED or INDETERMINATE. Never releases the source lease.
+ * Never lands on FAILED or INDETERMINATE. Lease release is store-owned: NODE_VERIFIED
+ * may clear SEND_SOURCE inside the landing TX (ZTR-1304); INDEPENDENT keeps it held.
  */
 export async function commitExternalSendLanding(
   verdict: SendLandingVerdict,
@@ -233,20 +241,14 @@ export async function commitExternalSendLanding(
       detail: "status guard matched no row or lease missing; no partial landing write",
     };
   }
-  if (!result.sourceLeaseStillHeld) {
-    // A store that releases the lease has violated step 6. Surface as conflict so
-    // callers never treat a lease-releasing implementation as a successful land.
-    return {
-      outcome: "CONFLICT",
-      reason: "LEASE_MISSING",
-      detail: "landing store reported source lease not held after commit — step 6 breach",
-    };
-  }
+  // NODE_VERIFIED may clear the lease inside the landing TX (ZTR-1304). The store is the
+  // authority: applied:true with sourceLeaseStillHeld:false is intentional release, not a
+  // custody breach. applied:false + LEASE_MISSING still surfaces missing-lease races.
   return {
     outcome: "APPLIED",
     status: EXTERNAL_SEND_LANDED_STATUS,
     record: result.record,
     event: result.event,
-    sourceLeaseStillHeld: true,
+    sourceLeaseStillHeld: result.sourceLeaseStillHeld,
   };
 }

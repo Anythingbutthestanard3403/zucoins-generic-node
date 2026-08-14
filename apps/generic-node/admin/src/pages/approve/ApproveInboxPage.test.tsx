@@ -115,7 +115,7 @@ describe("ApproveInboxPage", () => {
     expect(isLiveRecoveryAction("CLOSE_NEVER_STARTED_EXTERNAL_SEND")).toBe(true);
     expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(true);
     expect(isLiveRecoveryAction("REBUILD_INTERNAL_MOVE")).toBe(false);
-    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(8);
+    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(9);
   });
 
   it("never paints pending fetch as clear or unavailable", () => {

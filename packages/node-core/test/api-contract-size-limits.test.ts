@@ -106,6 +106,12 @@ const VALID_RECEIVE_BODY = {
   after_landing: { kind: "HOLD", destination_id: null },
 };
 
+/** Zod defaults omitted verification_mode to INDEPENDENT on parse (ZTR-1299). */
+const PARSED_RECEIVE_BODY = {
+  ...VALID_RECEIVE_BODY,
+  verification_mode: "INDEPENDENT",
+};
+
 // --- Pipeline integration: stage ordering and error mapping ---
 
 describe("validation pipeline — happy path", () => {
@@ -124,7 +130,7 @@ describe("validation pipeline — happy path", () => {
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
       expect(outcome.context.requestId).toBe(REQUEST_ID);
-      expect(outcome.context.parsedBody).toEqual(VALID_RECEIVE_BODY);
+      expect(outcome.context.parsedBody).toEqual(PARSED_RECEIVE_BODY);
       expect(outcome.context.principal).toEqual(RECEIVE_CREATE_PRINCIPAL);
       expect(outcome.context.idempotencyTenantId).toBe(RECEIVE_CREATE_PRINCIPAL.implementerId);
     }

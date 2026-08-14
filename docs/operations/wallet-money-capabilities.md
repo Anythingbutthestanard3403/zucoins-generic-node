@@ -116,7 +116,7 @@ When auto-approve is off, halt is engaged, or you have paused money workers:
 | External send 503 / `hub_busy` | Eligible hub(s) locked | Active leases / in-flight moves |
 | External send 503 / `worker_destination_missing` | Assign picked a send-capable wallet with no `destinations` row | Bless that wallet's existing dest (below) — do not mint another wallet |
 | External send 422 with internal-only source | Explicit `source_wallet_id` pinned to hub | Omit source or pick send-capable wallet |
-| Receive assign never picks a wallet | Only send-only / internal-only in pool | Need receive-capable modes |
+| Receive assign never picks a wallet | Only send-only / internal-only in pool, or dest is already `BLESSED` | Need receive-capable modes. A `PENDING` dest is blessable, not a receive-pool exclusion |
 | Top-up MOVE stuck; SEND parked | Move not `INTERNAL_MOVE_LANDED` | [`attention-triage.md`](attention-triage.md) composition section |
 | Halt engaged | Operator halt | Halt contract — new MOVE/SEND formation blocked |
 

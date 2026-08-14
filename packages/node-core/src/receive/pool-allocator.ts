@@ -98,10 +98,12 @@ export const RECEIVE_ALLOCATOR_STATEMENTS = {
    * next free wallet, which under load either serialises the whole pool onto one row or
    * reports a false "pool exhausted".
    *
-   * This predicate is deliberately NOT the automatic-sink predicate — that one additionally
-   * requires BLESSED. Receivers never move and destinations are never blessed, so
-   * reusing the sink form here would reject every legitimate receive. Finding no eligible
-   * row never licenses widening any conjunct: assignment simply fails and the receive falls
+   * This predicate is deliberately NOT the automatic-sink predicate — that one
+   * additionally requires BLESSED as a positive conjunct. Dest exclusion here is
+   * "already a BLESSED sink", not "any dest row". Dest-on-mint PENDING is
+   * blessability, not custody, and must not exclude a receive worker. Requiring
+   * BLESSED would reject every legitimate receive. Finding no eligible row never
+   * licenses widening any conjunct: assignment simply fails and the receive falls
    * through the backpressure ladder (receive-gate enforcement).
    */
   SELECT_ELIGIBLE_WALLET: `
@@ -115,7 +117,7 @@ SELECT w.id
          SELECT 1
            FROM destinations d
           WHERE d.wallet_id = w.id
-            AND d.state IS DISTINCT FROM 'RETIRED')
+            AND d.state = 'BLESSED')
    AND NOT EXISTS (
          SELECT 1
            FROM receive_release_proofs rrp

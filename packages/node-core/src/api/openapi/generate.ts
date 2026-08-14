@@ -744,6 +744,8 @@ function componentsBlock(
           "expected_artifact_public_keys",
           "canonical_suite_versions",
           "key_validity_intervals",
+          "funding_wallet_id",
+          "funding_wallet_public_key",
         ],
         properties: {
           node_id: { type: "string", format: "uuid" },
@@ -756,6 +758,9 @@ function componentsBlock(
           expected_artifact_public_keys: { type: "array", items: { type: "object" } },
           canonical_suite_versions: { type: "array", items: { type: "string" } },
           key_validity_intervals: { type: "array", items: { type: "object" } },
+          // ZTR-1288: node-default funding pin; null when unset (never a worker key).
+          funding_wallet_id: { type: ["string", "null"], format: "uuid" },
+          funding_wallet_public_key: { type: ["string", "null"] },
         },
       },
       LivenessResponse: {

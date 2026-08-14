@@ -1004,6 +1004,7 @@ async function main(): Promise<void> {
       nodeId: config.NODE_ID,
       adminRouteDeps: routeSurface.adminRouteDeps,
       discoveryDocument: routeSurface.discoveryDocument,
+      implementerIdentityLoaders: routeSurface.implementerIdentityLoaders,
       reportingListener: routeSurface.reportingListener,
       subscribeDeps: routeSurface.subscribeDeps,
       // Anonymous lane. Volume-throttled per socket peer in the listener (ZTR-1216),

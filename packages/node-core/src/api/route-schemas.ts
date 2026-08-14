@@ -243,6 +243,7 @@ export const ROUTE_SCHEMAS: readonly RouteSchema[] = [
   { method: "GET", path: "/v1/external-sends/:operation_id", requiresIdempotencyKey: false },
   { method: "POST", path: "/v1/destinations", bodySchema: CreateDestinationBody, requiresIdempotencyKey: true },
   { method: "GET", path: "/v1/destinations", querySchema: ListDestinationsQuery, requiresIdempotencyKey: false },
+  { method: "GET", path: "/v1/implementer/identity", requiresIdempotencyKey: false },
   { method: "GET", path: "/v1/events", querySchema: ListEventsQuery, requiresIdempotencyKey: false },
   { method: "GET", path: "/v1/events/stream", querySchema: EventStreamQuery, requiresIdempotencyKey: false },
   { method: "GET", path: "/v1/state/snapshot", requiresIdempotencyKey: false },

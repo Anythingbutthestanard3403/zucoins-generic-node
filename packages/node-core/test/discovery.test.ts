@@ -54,6 +54,32 @@ describe("discovery document builder", () => {
     expect(doc.event_signing_public_keys).toHaveLength(1);
     expect(doc.expected_artifact_public_keys).toHaveLength(1);
     expect(doc.key_validity_intervals).toHaveLength(1);
+    // ZTR-1288: unset funding is explicit null (never omitted / never a worker key).
+    expect(doc.funding_wallet_id).toBeNull();
+    expect(doc.funding_wallet_public_key).toBeNull();
+  });
+
+  it("publishes node-default funding pin when configured (ZTR-1288)", () => {
+    const fundingId = "0192e3a4-b5c6-7d8e-9f0a-1b2c3d4e5f6c";
+    const doc = buildNodeIdentityDocument({
+      ...validDiscoveryConfig(),
+      fundingWalletId: fundingId,
+      fundingWalletPublicKey: VALID_PUBKEY,
+    });
+    expect(doc.funding_wallet_id).toBe(fundingId);
+    expect(doc.funding_wallet_public_key).toBe(VALID_PUBKEY);
+    expect(Object.keys(doc)).toEqual([...DISCOVERY_RESPONSE_FIELDS]);
+    expect(NodeIdentityDocumentSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("never invents funding keys from empty strings (ZTR-1288)", () => {
+    const doc = buildNodeIdentityDocument({
+      ...validDiscoveryConfig(),
+      fundingWalletId: "",
+      fundingWalletPublicKey: "",
+    });
+    expect(doc.funding_wallet_id).toBeNull();
+    expect(doc.funding_wallet_public_key).toBeNull();
   });
 
   it("emits exactly DISCOVERY_RESPONSE_FIELDS in canon sequence", () => {

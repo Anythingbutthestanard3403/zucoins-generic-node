@@ -469,6 +469,7 @@ export interface ProductionRouteSurface {
   readonly adminUserStore: AdminUserStore;
   readonly adminCsrfAllowedOrigins: readonly string[];
   readonly discoveryDocument: WellKnownDeps["buildDocument"];
+  readonly implementerIdentityLoaders: import("@zucoins/node-core").ImplementerIdentityLoaders;
   readonly reportingListener: (
     request: IncomingMessage,
     response: ServerResponse,
@@ -1092,10 +1093,36 @@ export function createProductionRouteSurface(
   // active key PLUS every retained-valid prior key so an artifact/event signed before the
   // most recent rotation stays independently verifiable ("key validity intervals").
   const signingKeyRegistry = new SigningKeyRegistry(poolAsSigningKeySqlExecutor(config.pool));
+
+  // ZTR-1288: bearer identity loaders (effective funding pin per implementer).
+  const implementerIdentityLoaders = Object.freeze({
+    async loadImplementerPin(implementerId: string) {
+      const row = await implementerRegistry.get(implementerId);
+      if (row === null) return null;
+      return {
+        funding_wallet_id: row.funding_wallet_id,
+        funding_wallet_public_key: row.funding_wallet_public_key,
+      };
+    },
+    async loadNodeDefaultPin() {
+      const snap = await defaultFundingWallet.get();
+      return {
+        funding_wallet_id: snap.wallet_id,
+        funding_wallet_public_key: snap.public_key,
+      };
+    },
+  });
+
   const discoveryDocument = async () => {
-    const [eventSigningKeys, artifactSigningKeys] = await Promise.all([
+    const [eventSigningKeys, artifactSigningKeys, defaultFunding] = await Promise.all([
       signingKeyRegistry.findRetainedNodeSigningKeys(config.nodeId, "EVENT_SIGNING"),
       signingKeyRegistry.findRetainedNodeSigningKeys(config.nodeId, "NODE_IDENTITY"),
+      // ZTR-1288: node-default funding pin on public discovery (explicit null when unset).
+      defaultFundingWallet.get().catch(() => ({
+        wallet_id: null as string | null,
+        public_key: null as string | null,
+        row_version: 0,
+      })),
     ]);
     return buildNodeIdentityDocument({
       nodeId: config.nodeId,
@@ -1104,6 +1131,8 @@ export function createProductionRouteSurface(
       canonicalSuites: ["zp-v1"],
       eventSigningKeys: eventSigningKeys.map(toDiscoveryKeyConfig),
       artifactSigningKeys: artifactSigningKeys.map(toDiscoveryKeyConfig),
+      fundingWalletId: defaultFunding.wallet_id,
+      fundingWalletPublicKey: defaultFunding.public_key,
     });
   };
 
@@ -1205,6 +1234,7 @@ export function createProductionRouteSurface(
     adminUserStore: userStore,
     adminCsrfAllowedOrigins,
     discoveryDocument,
+    implementerIdentityLoaders,
     reportingListener,
     reportingStore,
     reportingStoreKind: DURABLE_REPORTING_STORE,

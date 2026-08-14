@@ -78,7 +78,7 @@ export const AUTOMATED_AXES: readonly AutomatedAxis[] = [
   {
     axis: "discovery",
     coverage:
-      "DISCOVERY_PATH, all seven DISCOVERY_RESPONSE_FIELDS (in sequence) and all five DISCOVERY_EXCLUSIONS resolve against the api contract's discovery prose under snake_case normalisation.",
+      "DISCOVERY_PATH, all nine DISCOVERY_RESPONSE_FIELDS (in sequence) and all five DISCOVERY_EXCLUSIONS resolve against the api contract's discovery prose under snake_case normalisation.",
     deferred: "",
   },
   {

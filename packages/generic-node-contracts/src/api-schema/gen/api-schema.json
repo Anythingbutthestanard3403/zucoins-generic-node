@@ -219,7 +219,9 @@
       "event_signing_public_keys",
       "expected_artifact_public_keys",
       "canonical_suite_versions",
-      "key_validity_intervals"
+      "key_validity_intervals",
+      "funding_wallet_id",
+      "funding_wallet_public_key"
     ],
     "exclusions": [
       "private_configuration",

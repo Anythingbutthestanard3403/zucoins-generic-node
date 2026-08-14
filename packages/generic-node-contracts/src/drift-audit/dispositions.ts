@@ -122,7 +122,7 @@ export const AXIS_DISPOSITIONS: readonly AxisDisposition[] = [
     governingConcerns: ["api-schema", "compat-literals"],
     docCitations: ["api-contract discovery endpoint"],
     closure:
-      "DISCOVERY_PATH, all seven DISCOVERY_RESPONSE_FIELDS, and all five DISCOVERY_EXCLUSIONS resolve one-for-one against the api contract's discovery prose under snake_case normalisation, in the doc's own sequence. The `zupay` literal is retained per the compatibility-literal preservation rule.",
+      "DISCOVERY_PATH, all nine DISCOVERY_RESPONSE_FIELDS, and all five DISCOVERY_EXCLUSIONS resolve one-for-one against the api contract's discovery prose under snake_case normalisation, in the doc's own sequence. The `zupay` literal is retained per the compatibility-literal preservation rule.",
   },
   {
     axis: "subscription-handles",

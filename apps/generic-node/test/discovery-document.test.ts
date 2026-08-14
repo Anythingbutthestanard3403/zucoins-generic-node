@@ -102,6 +102,9 @@ describe("discovery document reads the durable signing-key registry", () => {
     expect(doc.event_signing_public_keys).toEqual([
       { key_id: EVENT_KEY_ID, public_key: EVENT_PUBLIC_KEY },
     ]);
+    // ZTR-1288: node-default funding unset → explicit null (never omitted / worker-swapped).
+    expect(doc.funding_wallet_id).toBeNull();
+    expect(doc.funding_wallet_public_key).toBeNull();
     const identityInterval = doc.key_validity_intervals.find((i) => i.key_id === IDENTITY_KEY_ID);
     expect(identityInterval).toEqual({
       key_id: IDENTITY_KEY_ID,

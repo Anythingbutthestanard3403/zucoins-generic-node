@@ -76,6 +76,8 @@ export const ROUTE_POLICIES = [
   // Route 2 public handshake (platform intake + one-time claim poll)
   { method: "POST", path: "/v1/integration-requests", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
   { method: "GET", path: "/v1/integration-requests/:id", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
+  // Implementer identity (funding pin — ZTR-1288)
+  { method: "GET", path: "/v1/implementer/identity", authClass: "IMPLEMENTER_BEARER", scope: null, tenantScoped: true, idempotency: "NA" },
   // Discovery
   { method: "GET", path: "/.well-known/zupay-node", authClass: "PUBLIC", scope: null, tenantScoped: false, idempotency: "NA" },
   // Liveness (public, unauthenticated, no Idempotency-Key) — closes the ROUTE_SCHEMAS census.

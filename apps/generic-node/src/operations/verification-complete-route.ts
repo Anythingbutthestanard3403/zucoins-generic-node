@@ -145,6 +145,14 @@ function mapStoreError(err: unknown, requestId: string): ReportingHttpResponse {
     const api = apiErrorResponse("protocol_predicate_failed", requestId);
     return { status: api.status, headers: api.headers, bodyBytes: new TextEncoder().encode(api.body) };
   }
+  // ZTR-1303: NODE_VERIFIED ops refuse verification-complete (409, wallet untouched).
+  if (
+    err instanceof Error &&
+    (err.name === "VerificationModeMismatchError" || err.message === "verification_mode_mismatch")
+  ) {
+    const api = apiErrorResponse("verification_mode_mismatch", requestId);
+    return { status: api.status, headers: api.headers, bodyBytes: new TextEncoder().encode(api.body) };
+  }
   return reportingErrorResponse("internal_error", requestId);
 }
 

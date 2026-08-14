@@ -49,6 +49,20 @@ import { MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT } from "../config/constants.js"
 import { applyMoneyPathStatementTimeout } from "../db/client.js";
 
 /**
+ * NODE_VERIFIED ops close custody at landing (ZTR-1303). verification-complete is a
+ * consumer path and must refuse without mutating wallet/lease state.
+ */
+export class VerificationModeMismatchError extends Error {
+  constructor() {
+    super("verification_mode_mismatch");
+    this.name = "VerificationModeMismatchError";
+  }
+}
+
+const SELECT_VERIFICATION_MODE =
+  "SELECT verification_mode::text AS verification_mode FROM operations WHERE id = $1::uuid";
+
+/**
  * One pinned connection for the whole unit of work. Structurally satisfies both node-core
  * SQL surfaces this module drives (`AckSqlExecutor` and the leases `SqlExecutor`), so the
  * acknowledgement insert and the lease release provably share a transaction rather than
@@ -223,6 +237,15 @@ export function createSqlVerificationCompleteStore(
       const envelope = await deps.envelopeFor(operationId, input);
 
       return deps.txFactory.withTransaction(async (tx) => {
+        // Fail closed before any acknowledgement/lease work: NODE_VERIFIED custody
+        // already closed (or will close) at landing — never via this consumer path.
+        const modeRow = await tx.query<{ verification_mode: string }>(SELECT_VERIFICATION_MODE, [
+          operationId,
+        ]);
+        if (modeRow.rows[0]?.verification_mode === "NODE_VERIFIED") {
+          throw new VerificationModeMismatchError();
+        }
+
         let outcome;
         try {
           outcome = await service.acknowledge(tx, operationId, {

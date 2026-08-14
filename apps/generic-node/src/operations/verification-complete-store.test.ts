@@ -47,6 +47,7 @@ import {
 
 import {
   VERIFICATION_COMPLETE_RELEASE_REASON,
+  VerificationModeMismatchError,
   computeReleaseProofDigest,
   createSqlVerificationCompleteStore,
   type VerificationCompleteEnvelope,
@@ -91,6 +92,8 @@ interface ProofRow {
 
 interface World {
   operations: Map<string, AckOperationFacts>;
+  /** operationId → frozen verification_mode (ZTR-1303 gate). */
+  verificationModes: Map<string, "INDEPENDENT" | "NODE_VERIFIED">;
   acks: Map<string, StoredAcknowledgement>;
   /** leaseGroupId → operationIds stamped terminal. */
   completedOps: Map<string, Set<string>>;
@@ -104,6 +107,7 @@ interface World {
 function cloneWorld(world: World): World {
   return {
     operations: new Map(world.operations),
+    verificationModes: new Map(world.verificationModes),
     acks: new Map(world.acks),
     completedOps: new Map([...world.completedOps].map(([k, v]) => [k, new Set(v)])),
     openMemberships: [...world.openMemberships],
@@ -129,6 +133,7 @@ function receiveOperation(operationId: string, rowVersion = 7): AckOperationFact
 function seedWorld(overrides: Partial<World> = {}): World {
   return {
     operations: new Map([[OP, receiveOperation(OP)]]),
+    verificationModes: new Map([[OP, "INDEPENDENT"]]),
     acks: new Map(),
     completedOps: new Map([[GROUP, new Set<string>()]]),
     openMemberships: [
@@ -161,12 +166,20 @@ function harness(seed: World) {
 
   const txFactory: VerificationCompleteTxFactory = {
     async withTransaction<T>(fn: (tx: VerificationCompleteTx) => Promise<T>): Promise<T> {
+      const pending = cloneWorld(committed);
       const tx: VerificationCompleteTx = {
-        async query<R>() {
+        async query<R>(text: string, params?: readonly unknown[]) {
+          // ZTR-1303: mode gate reads operations.verification_mode before ack/release.
+          if (text.includes("verification_mode") && params !== undefined && params[0] !== undefined) {
+            const mode = pending.verificationModes.get(String(params[0])) ?? "INDEPENDENT";
+            return {
+              rows: [{ verification_mode: mode }] as R[],
+              rowCount: 1,
+            };
+          }
           return { rows: [] as R[], rowCount: 0 };
         },
       };
-      const pending = cloneWorld(committed);
       views.set(tx, pending);
       try {
         const value = await fn(tx);
@@ -653,5 +666,23 @@ describe("createSqlVerificationCompleteStore", () => {
     });
     // Sanity: the service really did raise the typed failure the mapper consumed.
     expect(new AcknowledgementError("OPERATION_NOT_FOUND", "x").reason).toBe("OPERATION_NOT_FOUND");
+  });
+
+  it("NODE_VERIFIED → verification_mode_mismatch; no ack, mint, release, or wallet change (AC3)", async () => {
+    const seed = seedWorld();
+    seed.verificationModes.set(OP, "NODE_VERIFIED");
+    const h = harness(seed);
+
+    await expect(storeOver(h).verificationComplete(OP, input())).rejects.toBeInstanceOf(
+      VerificationModeMismatchError,
+    );
+
+    expect(h.calls.rollbacks).toBe(1);
+    expect(h.calls.commits).toBe(0);
+    expect(h.calls.mint).toBe(0);
+    expect(h.calls.release).toBe(0);
+    expect(h.committed.acks.size).toBe(0);
+    expect(h.committed.wallets.get(WALLET_A)).toBe("PINNED");
+    expect(h.committed.openMemberships).toHaveLength(1);
   });
 });

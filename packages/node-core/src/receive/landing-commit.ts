@@ -11,11 +11,14 @@
 // 3. transitions READY → RECEIVE_LANDED under a row_version + status CAS;
 // 4. appends receive.landed with {terminal_observation_id, landed_at};
 // 5. sets proof-access expiry (landed_at + window);
-// 6. commits.
+// 6. for NODE_VERIFIED + HOLD only: mint terminal-positive release proof + release the
+//    receiver lease + stamp receive_release_status = RELEASED_NODE_VERIFIED (same TX);
+//    INDEPENDENT keeps the lease held; NODE_VERIFIED + INTERNAL_MOVE keeps the lease held
+//    for child handoff (handoff intent wins over release);
+// 7. commits.
 //
-// The receiver lease is deliberately NOT released here — it stays held. Release follows
-// the expiry / verification-complete path and is out of scope for
-// this module; callers must never invoke a lease-release path as part of this commit.
+// INDEPENDENT receivers still release via verification-complete / expiry. A NODE_VERIFIED
+// park (NEEDS_ATTENTION) releases nothing — only a successful land on HOLD does.
 //
 // The arbiter is the database, never this file: the CAS lives in the UPDATE WHERE clause and
 // the exactly-once guarantee lives in a unique index. A race that already landed matches zero
@@ -129,8 +132,12 @@ export type CommitReceiveLandingOutcome =
       readonly proof: ReceiveLandingProofRecord;
       readonly path: readonly ReceiveLandingPathBody[];
       readonly event: ReceiveLandedEvent;
-      /** Always true after a successful land — lease release is out of scope. */
-      readonly receiverLeaseStillHeld: true;
+      /**
+       * True when the receiver lease remains held after commit (INDEPENDENT, or
+       * NODE_VERIFIED with after_landing=INTERNAL_MOVE child handoff). False only when
+       * NODE_VERIFIED + HOLD released custody in the same landing TX (ZTR-1303).
+       */
+      readonly receiverLeaseStillHeld: boolean;
     }
   | {
       readonly outcome: "CONFLICT";
@@ -161,13 +168,16 @@ export type ReceiveLandingRejectReason =
 /**
  * Persistence port for the landing DB-TX. Implementations MUST run the guarded status
  * transition, proof-header insert, ordered path insert, and event append in a single
- * transaction. Implementations MUST NOT delete, update or re-insert wallet_active_leases rows.
+ * transaction. Lease mutation is allowed only for the NODE_VERIFIED + HOLD release branch
+ * (mintReleaseProof + releaseLease on the same pinned executor); INDEPENDENT and child-handoff
+ * paths MUST leave wallet_active_leases byte-identical.
  */
 export interface ReceiveLandingStore {
   /**
    * Atomically land the operation. `applied: false` when the CAS matched no row (already
    * landed, wrong status, wrong row_version, or missing) or the persisted path was refused.
-   * MUST leave the receiver lease row byte-identical.
+   * `receiverLeaseStillHeld` reports post-commit custody: false only after an intentional
+   * NODE_VERIFIED same-TX release.
    */
   commitLanding(command: CommitReceiveLandingCommand): Promise<{
     readonly applied: boolean;
@@ -436,22 +446,16 @@ export async function commitReceiveLanding(
       detail: "CAS matched no row or the persisted path was refused; no partial landing write",
     };
   }
-  if (!result.receiverLeaseStillHeld) {
-    // A store that released the lease has violated step 5. Surface as conflict so no
-    // caller can treat a lease-releasing implementation as a successful land.
-    return {
-      outcome: "CONFLICT",
-      reason: "LEASE_MISSING",
-      detail: "landing store reported the receiver lease not held after commit — F breach",
-    };
-  }
+  // NODE_VERIFIED + HOLD may clear the lease inside the landing TX (ZTR-1303). The store
+  // is the authority: applied:true with receiverLeaseStillHeld:false is intentional release,
+  // not a custody breach. applied:false + LEASE_MISSING still surfaces missing-lease races.
   return {
     outcome: "APPLIED",
     status: RECEIVE_LANDED_STATUS,
     proof,
     path,
     event,
-    receiverLeaseStillHeld: true,
+    receiverLeaseStillHeld: result.receiverLeaseStillHeld,
   };
 }
 

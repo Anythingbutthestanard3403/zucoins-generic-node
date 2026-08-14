@@ -60,6 +60,7 @@ const RECEIVE_RESPONSE: ReceiveResponse = {
     updated_at: "2026-01-01T00:00:01.000Z",
     terminal_at: null,
     verification_material_available_until: null,
+    verification_mode: "INDEPENDENT",
   },
   receiver_pubkey: "wUlP99lNH660FAgVMrSJmkB-G15KnagFFcSxv1BGCrM=",
   discriminator: OP_ID,

@@ -174,11 +174,13 @@ export {
 
 export {
   InMemoryReceiveLandingStore,
+  NODE_VERIFIED_LANDING_RELEASE_REASON,
   PATH_INCOMPLETE_MESSAGES as RECEIVE_LANDING_PATH_INCOMPLETE_MESSAGES,
   RECEIVE_LANDED_EVENT_UNIQUE_INDEX,
   RECEIVE_LANDING_STATEMENTS,
   SqlReceiveLandingStore,
   classifyLandingError as classifyReceiveLandingError,
+  computeNodeVerifiedLandingReleaseDigest,
 } from "./landing-sql-store.js";
 
 // Transfer code + zp-receive-expected-v1 preimage/signature.

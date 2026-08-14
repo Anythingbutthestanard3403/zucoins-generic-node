@@ -389,12 +389,36 @@ describe("receive landing commit — the CAS is the arbiter, and the lease is un
     expect([...store.leases]).toEqual(before);
   });
 
-  it("treats a store that released the lease as a conflict, never a successful land", async () => {
-    const store = seededStore();
-    store.releaseLeaseOnLand = true;
+  it("NODE_VERIFIED + HOLD: APPLIED with receiverLeaseStillHeld false (same-TX release)", async () => {
+    const store = new InMemoryReceiveLandingStore();
+    store.seed(OPERATION_ID, "READY", WALLET_ROW_ID, 1, true, {
+      verificationMode: "NODE_VERIFIED",
+      afterLanding: "HOLD",
+    });
     const result = await commitReceiveLanding(exactProof, commitInput([PREDECESSOR]), store);
 
-    expect(result).toMatchObject({ outcome: "CONFLICT", reason: "LEASE_MISSING" });
+    expect(result.outcome).toBe("APPLIED");
+    if (result.outcome !== "APPLIED") return;
+    expect(result.receiverLeaseStillHeld).toBe(false);
+    expect(store.leases.has(WALLET_ROW_ID)).toBe(false);
+    expect(store.operations.get(OPERATION_ID)!.receiveReleaseStatus).toBe(
+      "RELEASED_NODE_VERIFIED",
+    );
+  });
+
+  it("NODE_VERIFIED + INTERNAL_MOVE: APPLIED keeps receiver lease for child handoff", async () => {
+    const store = new InMemoryReceiveLandingStore();
+    store.seed(OPERATION_ID, "READY", WALLET_ROW_ID, 1, true, {
+      verificationMode: "NODE_VERIFIED",
+      afterLanding: "INTERNAL_MOVE",
+    });
+    const result = await commitReceiveLanding(exactProof, commitInput([PREDECESSOR]), store);
+
+    expect(result.outcome).toBe("APPLIED");
+    if (result.outcome !== "APPLIED") return;
+    expect(result.receiverLeaseStillHeld).toBe(true);
+    expect(store.leases.has(WALLET_ROW_ID)).toBe(true);
+    expect(store.operations.get(OPERATION_ID)!.receiveReleaseStatus).toBeNull();
   });
 
   it("refuses to land when the receiver lease is already gone", async () => {

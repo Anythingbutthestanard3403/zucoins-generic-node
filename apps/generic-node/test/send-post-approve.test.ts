@@ -197,6 +197,7 @@ describe("SEND post-approve formation (offline)", () => {
       createdAt: Date.parse("2026-01-15T00:00:00.000Z"),
       responseStatus: null,
       responseBody: null,
+      verificationMode: "INDEPENDENT",
     };
     const store = {
       findByOperationId: async () => ({

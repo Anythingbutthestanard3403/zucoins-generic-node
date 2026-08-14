@@ -13,7 +13,7 @@
     "build:tsc": "tsc -b",
     "typecheck": "pnpm build:tsc && pnpm --filter @zucoins/generic-node typecheck:tests",
     "release:validate": "node scripts/release-targets.mjs validate",
-    "release:test": "node --test scripts/release-targets-strict-dual.test.mjs scripts/money-path-scan.test.mjs scripts/release-targets.test.mjs",
+    "release:test": "node --test scripts/release-targets-strict-dual.test.mjs scripts/money-path-scan.test.mjs scripts/release-targets.test.mjs docs/operations/annotate-forged-expired-t0-releases.test.mjs",
     "release:fence": "node scripts/release-targets-strict-dual.mjs"
   },
   "devDependencies": {

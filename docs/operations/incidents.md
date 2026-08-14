@@ -433,14 +433,18 @@ and ZTR-1281.
 # From a clean checkout of this commit, with staging DATABASE_URL only.
 # Default is dry-run (BEGIN … plan … ROLLBACK). Nothing commits without --execute.
 
-export DATABASE_URL='postgres://…staging…'   # refuse if this is production
+export DATABASE_URL='postgres://…staging…'   # host must match --expect-host
 export STAGING_CONFIRM=ZTR-1281            # required hard gate
+# Hostname (or unix-socket path) resolved from DATABASE_URL — required (ZTR-1296).
+EXPECT_HOST='…staging-db-hostname…'
 
-# Preview
-node docs/operations/annotate-forged-expired-t0-releases.mjs
+# Preview (JSON names databaseHost it would write to)
+node docs/operations/annotate-forged-expired-t0-releases.mjs \
+  --expect-host "$EXPECT_HOST"
 
 # Apply (idempotent: skips ops that already have the annotation action)
-node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
+node docs/operations/annotate-forged-expired-t0-releases.mjs \
+  --expect-host "$EXPECT_HOST" --execute
 ```
 
 **What the script does:**
@@ -449,6 +453,9 @@ node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
 - Refuses unless `STAGING_CONFIRM=ZTR-1281`.
 - Refuses if `PUBLIC_BASE_URL` / heuristic markers look like production (see script
   header).
+- Refuses unless `--expect-host` is passed and equals the host resolved from
+  `DATABASE_URL` (gates the connection target, not ambient shell env — ZTR-1296).
+  Dry-run / execute JSON always includes `databaseHost`.
 - For each of the four ops: verifies the membership is released with
   `EXPIRED_T0_UNCHANGED`, verifies **zero** `receive_release_proofs` rows (still
   forged), and `INSERT`s exactly one `audit_log` annotation when absent.

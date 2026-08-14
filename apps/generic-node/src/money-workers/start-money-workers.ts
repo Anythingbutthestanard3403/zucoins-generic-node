@@ -1442,30 +1442,40 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
   // store are stateless closures over the pool. The reader needs non-empty gatewayUrls
   // (the same SPLITCHAIN_GATEWAY_URLS that submitGateway's endpoint comes from), so it is
   // null when no gateway is configured — the tick gate then skips the landing step.
-  const receiveLandingDeps =
+  const gatewayReaderBase =
     deps.config.gatewayUrls !== undefined && deps.config.gatewayUrls.length > 0
       ? {
-          readFreshHead: createSqlFreshHeadReader({
-            pool: deps.pool,
-            nodeId: deps.config.nodeId,
-            gatewayUrls: deps.config.gatewayUrls,
-            exchange: deps.gatewayExchange,
-            ...(deps.gatewayMaxAttempts !== undefined
-              ? { maxAttempts: deps.gatewayMaxAttempts }
-              : {}),
-            ...(deps.gatewayBackoffMaxMs !== undefined
-              ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
-              : {}),
-            moneyPathStatementTimeoutMs: statementTimeoutMs,
-            ...(deps.readGatewayAction !== undefined
-              ? { readGatewayAction: deps.readGatewayAction }
-              : {}),
-          }),
+          pool: deps.pool,
+          nodeId: deps.config.nodeId,
+          gatewayUrls: deps.config.gatewayUrls,
+          exchange: deps.gatewayExchange,
+          ...(deps.gatewayMaxAttempts !== undefined
+            ? { maxAttempts: deps.gatewayMaxAttempts }
+            : {}),
+          ...(deps.gatewayBackoffMaxMs !== undefined
+            ? { backoffMaxMs: deps.gatewayBackoffMaxMs }
+            : {}),
+          moneyPathStatementTimeoutMs: statementTimeoutMs,
+          ...(deps.readGatewayAction !== undefined
+            ? { readGatewayAction: deps.readGatewayAction }
+            : {}),
+        }
+      : null;
+  // Landing / send-completion: suppress exact-repeat (no per-tick DUPLICATE bloat).
+  const receiveLandingDeps =
+    gatewayReaderBase !== null
+      ? {
+          readFreshHead: createSqlFreshHeadReader(gatewayReaderBase),
           store: createSqlReceiveLandingStore(deps.pool, deps.eventSigner?.() ?? null, {
             statementTimeoutMs,
           }),
         }
       : null;
+  // Expiry + recovery confirm-read: appendExactRepeat so FRESH_VERIFIED_T0_EXACT is mintable.
+  const expiryConfirmReadFreshHead =
+    gatewayReaderBase !== null
+      ? createSqlFreshHeadReader({ ...gatewayReaderBase, appendExactRepeat: true })
+      : undefined;
 
   let stopped = false;
   let tickInFlight = false;
@@ -1834,8 +1844,8 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
           eventSigner: deps.eventSigner,
           ...(deps.eventQuota !== undefined ? { eventQuota: deps.eventQuota } : {}),
           ...(deps.metricsHooks !== undefined ? { metricsHooks: deps.metricsHooks } : {}),
-          ...(receiveLandingDeps !== null
-            ? { readFreshHead: receiveLandingDeps.readFreshHead }
+          ...(expiryConfirmReadFreshHead !== undefined
+            ? { readFreshHead: expiryConfirmReadFreshHead }
             : {}),
         });
         if (expiryResult.released > 0) {

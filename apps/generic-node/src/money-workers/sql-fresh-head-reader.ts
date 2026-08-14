@@ -81,6 +81,13 @@ export interface SqlFreshHeadReaderDeps {
    * on every outcome. Absent → bare readGatewayAction (unit tests).
    */
   readonly readGatewayAction?: typeof readGatewayAction;
+  /**
+   * ZTR-1275 / scope fix: when true, exact byte-identical verified repeats APPEND a
+   * DUPLICATE observation row (needed so expiry/recovery confirm-reads can mint a
+   * post-expiry fresh id). Default false — landing, send-completion lander, and MOVE
+   * baseline observation must keep SUPPRESS_AS_SIGHTING to avoid per-tick ledger bloat.
+   */
+  readonly appendExactRepeat?: boolean;
 }
 
 /**
@@ -238,10 +245,9 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
     }
 
     try {
-      // ZTR-1275: confirm-reads must APPEND a DUPLICATE row on exact byte-identical
-      // repeats so FRESH_VERIFIED_T0_EXACT can name a post-expiry observation id.
-      // Only this reader sets appendExactRepeat; other persistSqlObservation callers
-      // keep SUPPRESS_AS_SIGHTING default.
+      // ZTR-1275: expiry/recovery confirm-reads opt in via deps.appendExactRepeat so
+      // FRESH_VERIFIED_T0_EXACT can name a post-expiry observation id. Landing / MOVE /
+      // send-completion keep default false (SUPPRESS_AS_SIGHTING) — ZTR-1282 scope.
       const persisted = await persistSqlObservation({
         pool: deps.pool,
         nodeId: deps.nodeId,
@@ -258,7 +264,7 @@ export function createSqlFreshHeadReader(deps: SqlFreshHeadReaderDeps): ReadFres
           semanticFingerprint,
         },
         projection: rowProjectionBase,
-        appendExactRepeat: true,
+        ...(deps.appendExactRepeat === true ? { appendExactRepeat: true as const } : {}),
       });
       // Landing oracle must not mint proofs from anomalous heads. Evidence is durable;
       // the read fails closed so terminal_observation_id cannot pin a REGRESSION/JUMP.

@@ -329,6 +329,10 @@ export async function postRecoveryAction(
     recovery_nonce: string;
     proof_id?: string | null;
     operator_note?: string;
+    device_key_id?: string;
+    device_signature?: string;
+    override_rationale?: string;
+    wallet_to_available?: boolean;
   },
   totp: string,
 ): Promise<RecoveryActionSuccess> {
@@ -341,6 +345,22 @@ export async function postRecoveryAction(
       idempotencyKey: newIdempotencyKey(),
     },
   );
+}
+
+/** Deterministic preimage for ZTR-1280 operator-risk device signature. */
+export function buildOperatorRiskRecoveryPreimage(input: {
+  readonly operationId: string;
+  readonly recoveryNonce: string;
+  readonly overrideRationale: string;
+  readonly walletToAvailable: boolean;
+}): string {
+  return [
+    "zp-recovery-operator-risk-v1",
+    `operation_id=${input.operationId}`,
+    `recovery_nonce=${input.recoveryNonce}`,
+    `override_rationale=${input.overrideRationale}`,
+    `wallet_to_available=${input.walletToAvailable ? "true" : "false"}`,
+  ].join("\n");
 }
 
 export interface AttentionRetractionSuccess {
@@ -421,6 +441,8 @@ const RECOVERY_ACTION_LABELS: Readonly<Record<string, string>> = {
   CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED: "Close send (proven not landed)",
   REBUILD_INTERNAL_MOVE: "Rebuild internal transfer",
   RELEASE_EXPIRED_RECEIVE: "Release expired receive",
+  RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK:
+    "Release on operator-accepted risk (T0-unchanged NOT proven)",
   QUARANTINE_WALLETS: "Quarantine wallets",
   ACKNOWLEDGE_KEEP_PINNED: "Acknowledge (keep pinned)",
 };

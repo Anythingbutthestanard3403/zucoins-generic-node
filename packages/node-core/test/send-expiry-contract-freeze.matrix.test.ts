@@ -268,6 +268,7 @@ function b0Facts(
     move: null,
     send,
     haltEngaged: false,
+    receiveExpiryAttentionEventExists: false,
     ...patch,
   };
 }

@@ -50,6 +50,7 @@ const SECTION_8_1_ACTIONS = [
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
+  "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
   "QUARANTINE_WALLETS",
   "ACKNOWLEDGE_KEEP_PINNED",
 ] as const;
@@ -140,6 +141,7 @@ function baseSend(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
       hasMatchingExactByteRecord: true,
     },
     haltEngaged: false,
+    receiveExpiryAttentionEventExists: false,
     ...patch,
   };
 }
@@ -298,7 +300,7 @@ function applyEffect(
       readonly ok: true;
       readonly status: string;
       readonly attentionRequired: boolean;
-      readonly releaseStatus: "RELEASED_T0_UNCHANGED" | null;
+      readonly releaseStatus: "RELEASED_T0_UNCHANGED" | "RELEASED_OPERATOR_ACCEPTED_RISK" | null;
       readonly transferCodeText: string | null;
       readonly transferCodeSha256: string | null;
     }
@@ -358,6 +360,15 @@ function applyEffect(
         status: "EXPIRED",
         attentionRequired: false,
         releaseStatus: "RELEASED_T0_UNCHANGED",
+        transferCodeText: null,
+        transferCodeSha256: null,
+      };
+    case "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK":
+      return {
+        ok: true,
+        status: "EXPIRED",
+        attentionRequired: false,
+        releaseStatus: "RELEASED_OPERATOR_ACCEPTED_RISK",
         transferCodeText: null,
         transferCodeSha256: null,
       };
@@ -426,11 +437,11 @@ function walkTsFiles(dir: string): string[] {
 }
 
 describe("route/type scan vs frozen ADMIN_ROUTES", () => {
-  it("action catalog is exactly nine, order-matched across contracts + openapi + node-core", () => {
+  it("action catalog is exactly ten, order-matched across contracts + openapi + node-core", () => {
     expect([...OPERATOR_RECOVERY_ACTIONS]).toEqual([...SECTION_8_1_ACTIONS]);
     expect([...CONTRACT_OPERATOR_RECOVERY_ACTIONS]).toEqual([...SECTION_8_1_ACTIONS]);
     expect(RECOVERY_ACTIONS_BODY.properties.action.enum).toEqual([...SECTION_8_1_ACTIONS]);
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(9);
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
     // no case-insensitive alias / deprecated synonym admitted
     for (const a of SECTION_8_1_ACTIONS) {
       expect(isOperatorRecoveryAction(a.toLowerCase())).toBe(false);
@@ -553,7 +564,17 @@ describe("api-contract — body cannot carry economics/submit fields (schema-lev
     expect(RECOVERY_ACTIONS_BODY.additionalProperties).toBe(false);
     const keys = Object.keys(RECOVERY_ACTIONS_BODY.properties).sort();
     expect(keys).toEqual(
-      ["action", "expected_row_version", "operator_note", "proof_id", "recovery_nonce"].sort(),
+      [
+        "action",
+        "device_key_id",
+        "device_signature",
+        "expected_row_version",
+        "operator_note",
+        "override_rationale",
+        "proof_id",
+        "recovery_nonce",
+        "wallet_to_available",
+      ].sort(),
     );
     for (const f of SECTION_8_2_FORBIDDEN) {
       expect(RECOVERY_ACTIONS_BODY.properties.action.enum).not.toContain(f);

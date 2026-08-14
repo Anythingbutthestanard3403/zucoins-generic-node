@@ -95,6 +95,20 @@ export type RecoveryActionEffect =
       readonly walletPinnedToAvailable: true;
     }
   | {
+      /**
+       * ZTR-1280 last-resort override. Never mints EXPIRED_T0_UNCHANGED —
+       * release kind is OPERATOR_ACCEPTED_RISK with failed predicates embedded.
+       */
+      readonly kind: "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK";
+      readonly releaseStatus: "RELEASED_OPERATOR_ACCEPTED_RISK";
+      readonly releaseKind: "OPERATOR_ACCEPTED_RISK";
+      /** Operator must explicitly choose AVAILABLE (true) vs leave QUARANTINED (false). */
+      readonly walletPinnedToAvailable: boolean;
+      readonly failedPredicates: readonly string[];
+      readonly overrideRationale: string;
+      readonly deviceKeyId: string;
+    }
+  | {
       readonly kind: "QUARANTINE_WALLETS";
       readonly walletIds: readonly string[];
     }
@@ -123,6 +137,19 @@ export interface RecoveryActionRequest {
    * The evaluator refuses when this is not affirmatively true.
    */
   readonly csrfValidated: true;
+  /**
+   * ZTR-1280 max-ceremony factors for RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK.
+   * Required (and verified) only for that action; other actions ignore them.
+   */
+  readonly deviceKeyId?: string | null;
+  readonly deviceSignature?: string | null;
+  /** Explicit override rationale (distinct from free-form operator_note). */
+  readonly overrideRationale?: string | null;
+  /**
+   * When true, wallet returns AVAILABLE after risk release.
+   * When false, wallet is left QUARANTINED. Required for operator-risk action.
+   */
+  readonly walletToAvailable?: boolean | null;
 }
 
 export type RecoveryActionRejectReason =
@@ -137,7 +164,15 @@ export type RecoveryActionRejectReason =
   | "proof_id_mismatch"
   | "halt_engaged"
   | "predicate_failed"
-  | "idempotency_conflict";
+  | "idempotency_conflict"
+  | "device_signature_required"
+  | "device_signature_invalid"
+  | "override_rationale_required"
+  | "wallet_disposition_required";
+
+export type RecoveryReleaseStatus =
+  | "RELEASED_T0_UNCHANGED"
+  | "RELEASED_OPERATOR_ACCEPTED_RISK";
 
 export interface RecoveryActionSuccessBody {
   readonly operation_id: string;
@@ -145,7 +180,7 @@ export interface RecoveryActionSuccessBody {
   readonly classification: RecoveryClassification;
   readonly status: string;
   readonly row_version: number;
-  readonly release_status: "RELEASED_T0_UNCHANGED" | null;
+  readonly release_status: RecoveryReleaseStatus | null;
   readonly transfer_code_text: string | null;
   readonly transfer_code_sha256: string | null;
   readonly effect: RecoveryActionEffect["kind"];
@@ -183,7 +218,7 @@ export type RecoveryActionCommitResult =
       readonly ok: true;
       readonly rowVersion: number;
       readonly status: string;
-      readonly releaseStatus: "RELEASED_T0_UNCHANGED" | null;
+      readonly releaseStatus: RecoveryReleaseStatus | null;
       readonly transferCodeText: string | null;
       readonly transferCodeSha256: string | null;
     }
@@ -193,7 +228,8 @@ export type RecoveryActionCommitResult =
         | "operation_version_conflict"
         | "recovery_nonce_invalid"
         | "predicate_failed"
-        | "operation_not_found";
+        | "operation_not_found"
+        | "device_signature_invalid";
       readonly detail?: string;
     };
 
@@ -239,13 +275,49 @@ export interface RecoveryActionStore {
  * Pure gate: map a permitted action + facts into a typed effect, or reject.
  * No I/O. Callers re-derive permitted set before invoking this.
  */
+export interface PlanRecoveryEffectOptions {
+  readonly proofId: string | null;
+  readonly operatorNote?: string | null;
+  readonly overrideRationale?: string | null;
+  readonly deviceKeyId?: string | null;
+  readonly deviceSignature?: string | null;
+  readonly walletToAvailable?: boolean | null;
+}
+
+/**
+ * Derive the list of release-predicate names that are currently failing from
+ * RecoveryFacts.receive. Used to embed honest failed_predicates on the override proof.
+ */
+export function failedReceivePredicatesFromFacts(
+  facts: RecoveryFacts,
+): readonly string[] {
+  const r = facts.receive;
+  if (r === null) return [];
+  const failed: string[] = [];
+  if (!r.codeExpiredPlusMargin) failed.push("EXPIRY_PLUS_SAFETY_MARGIN");
+  if (!r.noPersistedLandedProof) failed.push("NO_LANDED_PROOF");
+  if (!r.freshObservationEqualsT0) failed.push("FRESH_VERIFIED_T0_EXACT");
+  if (!r.noAnomalyOrSubmitReconcileDebt) failed.push("NO_ANOMALY_LINEAGE_OR_SUBMIT");
+  if (!r.childAbsentOrTerminal) failed.push("CHILD_ABSENT_OR_SAFE_TERMINAL");
+  return failed;
+}
+
 export function planRecoveryEffect(
   action: OperatorRecoveryAction,
   facts: RecoveryFacts,
-  proofId: string | null,
+  proofIdOrOptions: string | null | PlanRecoveryEffectOptions,
 ):
   | { readonly ok: true; readonly effect: RecoveryActionEffect }
   | { readonly ok: false; readonly reason: RecoveryActionRejectReason; readonly detail?: string } {
+  // Back-compat: third arg was proofId: string | null.
+  const options: PlanRecoveryEffectOptions =
+    proofIdOrOptions !== null &&
+    typeof proofIdOrOptions === "object" &&
+    !Array.isArray(proofIdOrOptions)
+      ? proofIdOrOptions
+      : { proofId: proofIdOrOptions as string | null };
+  const proofId = options.proofId;
+
   if (!isActionAdmittedUnderHalt(action, facts.haltEngaged)) {
     return { ok: false, reason: "halt_engaged", detail: action };
   }
@@ -411,6 +483,94 @@ export function planRecoveryEffect(
       };
     }
 
+    case "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK": {
+      const r = facts.receive;
+      if (facts.kind !== "RECEIVE_EXTERNAL" || r === null) {
+        return { ok: false, reason: "predicate_failed", detail: "not_receive" };
+      }
+      if (facts.status !== "EXPIRED" || !facts.attentionRequired) {
+        return {
+          ok: false,
+          reason: "predicate_failed",
+          detail: "operator_risk_requires_expired_attention",
+        };
+      }
+      if (!facts.receiveExpiryAttentionEventExists) {
+        return {
+          ok: false,
+          reason: "predicate_failed",
+          detail: "operator_risk_requires_prior_attention_event",
+        };
+      }
+      // Must NOT be the clean five-predicate path — that is RELEASE_EXPIRED_RECEIVE.
+      if (
+        r.codeExpiredPlusMargin &&
+        r.noPersistedLandedProof &&
+        r.freshObservationEqualsT0 &&
+        r.noAnomalyOrSubmitReconcileDebt &&
+        r.childAbsentOrTerminal
+      ) {
+        return {
+          ok: false,
+          reason: "predicate_failed",
+          detail: "operator_risk_refused_when_canonical_release_available",
+        };
+      }
+      const rationale =
+        (options.overrideRationale ?? options.operatorNote ?? "").trim();
+      if (rationale.length < 8) {
+        return { ok: false, reason: "override_rationale_required" };
+      }
+      const deviceKeyId = options.deviceKeyId ?? null;
+      const deviceSignature = options.deviceSignature ?? null;
+      if (
+        deviceKeyId === null ||
+        deviceKeyId.length === 0 ||
+        deviceSignature === null ||
+        deviceSignature.length === 0
+      ) {
+        return { ok: false, reason: "device_signature_required" };
+      }
+      if (options.walletToAvailable !== true && options.walletToAvailable !== false) {
+        return { ok: false, reason: "wallet_disposition_required" };
+      }
+      const failed = failedReceivePredicatesFromFacts(facts);
+      // Prefer durable attention_detail failed_predicates when present.
+      let durableFailed = failed;
+      if (facts.attentionDetail !== null && facts.attentionDetail.length > 0) {
+        try {
+          const parsed = JSON.parse(facts.attentionDetail) as {
+            failed_predicates?: unknown;
+          };
+          if (Array.isArray(parsed.failed_predicates)) {
+            const fromDetail = parsed.failed_predicates.filter(
+              (p): p is string => typeof p === "string" && p.length > 0,
+            );
+            if (fromDetail.length > 0) durableFailed = fromDetail;
+          }
+        } catch {
+          // keep computed failed list
+        }
+      }
+      if (durableFailed.length === 0) {
+        // Still require at least one recorded failure so the proof cannot claim
+        // "all predicates held" under the risk kind.
+        durableFailed = ["FRESH_VERIFIED_T0_EXACT"];
+      }
+      return {
+        ok: true,
+        effect: {
+          kind: "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+          releaseStatus: "RELEASED_OPERATOR_ACCEPTED_RISK",
+          releaseKind: "OPERATOR_ACCEPTED_RISK",
+          walletPinnedToAvailable: options.walletToAvailable,
+          failedPredicates: durableFailed,
+          overrideRationale: rationale,
+          deviceKeyId,
+        },
+      };
+    }
+
     case "QUARANTINE_WALLETS":
       return {
         ok: true,
@@ -503,7 +663,14 @@ export async function executeRecoveryAction(
     };
   }
 
-  const planned = planRecoveryEffect(action, facts, request.proofId);
+  const planned = planRecoveryEffect(action, facts, {
+    proofId: request.proofId,
+    operatorNote: request.operatorNote,
+    overrideRationale: request.overrideRationale ?? null,
+    deviceKeyId: request.deviceKeyId ?? null,
+    deviceSignature: request.deviceSignature ?? null,
+    walletToAvailable: request.walletToAvailable ?? null,
+  });
   if (!planned.ok) {
     return { status: "rejected", reason: planned.reason, detail: planned.detail };
   }

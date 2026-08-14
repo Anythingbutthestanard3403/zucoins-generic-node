@@ -226,6 +226,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1287: implementers.funding_wallet_id nullable FK → wallets (reserve/proof pin).
   // Pure ALTER on implementers (reporting/registry owner); ON DELETE RESTRICT. Appended only.
   "implementer-funding-wallet",
+  // ZTR-1280: OPERATOR_ACCEPTED_RISK release kind/status + lease proof kind.
+  // CHECK-constraint ALTERs on receive_release_proofs / operations / lease_release_proofs.
+  // Requires receive-expiry-release + lease-foundation. Appended only.
+  "operator-accepted-risk-release",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

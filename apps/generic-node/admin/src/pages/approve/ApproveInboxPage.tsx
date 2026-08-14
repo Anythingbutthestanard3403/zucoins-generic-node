@@ -62,6 +62,10 @@ import {
 import type { NeedsAttentionListItem } from "../../lib/ops.js";
 import { useAuth } from "../../store/auth.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
+import {
+  postRecoveryActionWithCeremony,
+  recoveryActionConfirmDetail,
+} from "../../lib/post-recovery-action-with-ceremony.js";
 
 function shortDigest(hex: string | null | undefined): string {
   if (!hex || hex.length < 12) return hex ?? "—";
@@ -396,20 +400,11 @@ export function ApproveInboxPage() {
       if (!isLiveRecoveryAction(vars.action)) {
         throw new Error(`Recovery action not implemented on this node: ${vars.action}`);
       }
-      const fresh = await getRecovery(vars.operationId);
-      return postRecoveryAction(
-        vars.operationId,
-        {
-          action: vars.action,
-          expected_row_version: fresh.row_version,
-          recovery_nonce: fresh.recovery_nonce,
-        },
-        totp,
-      );
+      return postRecoveryActionWithCeremony(vars.operationId, vars.action, totp);
     },
     {
       title: "Confirm recovery action",
-      detail: (v) => `${v.action} on ${v.operationId}`,
+      detail: (v) => `${recoveryActionConfirmDetail(v.action)} on ${v.operationId}`,
       onSuccess: () => {
         setErr(null);
         setMsg("Recovery action accepted.");

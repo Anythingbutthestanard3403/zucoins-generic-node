@@ -61,13 +61,16 @@ export const HALT_NEVER_GATED_INTERNAL_PATHS = [
 export type HaltNeverGatedInternalPath = (typeof HALT_NEVER_GATED_INTERNAL_PATHS)[number];
 
 /**
- * The nine operator recovery actions of the operator-action catalog ("Allowed action
+ * The ten operator recovery actions of the operator-action catalog ("Allowed action
  * values"), transcribed in the doc's table sequence as a CLOSED set. This is the byte-exact
  * quotation of the spec's action column and the diff anchor for spec↔freeze drift: the census
  * (halt.census.test.ts) pins this sequence against an inline literal and asserts every member is
  * classified exactly once, so adding, removing, or reordering a the operator-action catalog action without updating
  * this contract fails the build. "Actions that do not exist" is deliberately NOT modeled
  * — those tokens are non-actions.
+ *
+ * ZTR-1280 added RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK after RELEASE_EXPIRED_RECEIVE — the
+ * audited last-resort pressure valve when the five/six canonical release predicates cannot hold.
  */
 export const OPERATOR_RECOVERY_ACTIONS = [
   "RETRY_OBSERVATION",
@@ -77,6 +80,7 @@ export const OPERATOR_RECOVERY_ACTIONS = [
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
+  "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
   "QUARANTINE_WALLETS",
   "ACKNOWLEDGE_KEEP_PINNED",
 ] as const;
@@ -122,6 +126,9 @@ export type RecoveryActionHaltDisposition = "HALT_GATED" | "HALT_NEVER_GATED";
  *                                         signer surface the kill-switch rule's kill-switch stops.
  *   RELEASE_EXPIRED_RECEIVE               never — releases an inbound receive pin/group; no
  *                                         send-side signing (inbound is the kill-switch rule-exempt regardless).
+ *   RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK never — audited last-resort release under operator-
+ *                                         accepted risk; mints OPERATOR_ACCEPTED_RISK (never
+ *                                         EXPIRED_T0_UNCHANGED); no send-side signing.
  *   QUARANTINE_WALLETS                    never — a safety escalation that DISABLES money paths;
  *                                         strictly de-risking, must stay available while halted.
  *   ACKNOWLEDGE_KEEP_PINNED               never — records operator awareness only; no state change.

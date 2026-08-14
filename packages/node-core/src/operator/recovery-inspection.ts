@@ -23,7 +23,7 @@ export const RECOVERY_CLASSIFICATIONS = [
 
 export type RecoveryClassification = (typeof RECOVERY_CLASSIFICATIONS)[number];
 
-/** Closed set of nine operator recovery actions. */
+/** Closed set of ten operator recovery actions (ZTR-1280 added operator-risk release). */
 export const OPERATOR_RECOVERY_ACTIONS = [
   "RETRY_OBSERVATION",
   "REDELIVER_EXACT_PARTIAL",
@@ -32,6 +32,7 @@ export const OPERATOR_RECOVERY_ACTIONS = [
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
+  "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
   "QUARANTINE_WALLETS",
   "ACKNOWLEDGE_KEEP_PINNED",
 ] as const;
@@ -158,6 +159,12 @@ export interface RecoveryFacts {
   readonly send: SendRecoveryFacts | null;
   /** When true, REBUILD_INTERNAL_MOVE is refused (halt gate). */
   readonly haltEngaged: boolean;
+  /**
+   * ZTR-1280: at least one durable receive_expiry_attention_events row exists for this
+   * operation (canonical release has predicate-failed / parked at least once). Required
+   * gate for RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK; false for non-receive kinds.
+   */
+  readonly receiveExpiryAttentionEventExists: boolean;
 }
 
 export interface ClassificationResult {
@@ -422,6 +429,18 @@ export function derivePermittedActions(
     if (receiveExpiredNoPaymentAllFive(facts.receive)) {
       actions.add("RELEASE_EXPIRED_RECEIVE");
     }
+    // ZTR-1280: operator-risk override is offered only when the canonical release has
+    // already predicate-failed at least once (durable attention event) AND the five
+    // clean-release predicates do NOT all hold (so this path cannot shadow the proven
+    // RELEASE_EXPIRED_RECEIVE). Status must be EXPIRED with attention still open.
+    if (
+      facts.status === "EXPIRED" &&
+      facts.attentionRequired &&
+      facts.receiveExpiryAttentionEventExists &&
+      !receiveExpiredNoPaymentAllFive(facts.receive)
+    ) {
+      actions.add("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
+    }
   }
 
   if (facts.kind === "MOVE_INTERNAL" && facts.move !== null) {
@@ -466,6 +485,7 @@ export function derivePermittedActions(
   // no resolving operator action beyond acknowledgement if already attention-flagged.
   if (classification === "LANDED_VERIFIED") {
     actions.delete("RELEASE_EXPIRED_RECEIVE");
+    actions.delete("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
     actions.delete("REBUILD_INTERNAL_MOVE");
     actions.delete("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
     actions.delete("CLOSE_NEVER_STARTED_EXTERNAL_SEND");

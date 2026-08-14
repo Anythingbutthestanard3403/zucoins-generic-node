@@ -219,6 +219,10 @@ const SCHEMA_FILES = [
   "wallet-money-capability-lease-guard.sql",
   // ZTR-1287: nullable implementers.funding_wallet_id FK → wallets. ALTER-only.
   "implementer-funding-wallet.sql",
+  // ZTR-1287: implementers.funding_wallet_id nullable FK → wallets. ALTER-only.
+  // ZTR-1280: OPERATOR_ACCEPTED_RISK release kind/status + lease proof kind.
+  // CHECK-constraint ALTERs only (no CREATE TABLE).
+  "operator-accepted-risk-release.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -248,6 +252,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "wallet-money-capability.sql",
   "wallet-money-capability-lease-guard.sql",
   "implementer-funding-wallet.sql",
+  "operator-accepted-risk-release.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -568,9 +573,15 @@ const GREENFIELD: Record<
     missingRelation: "wallets",
   },
   // DO RAISE when implementers/wallets absent (same pattern as dual-control-policy).
+  // DO RAISE when implementers or wallets absent.
   "implementer-funding-wallet.sql": {
     applies: false,
     missingFragment: "implementer-funding-wallet requires implementers",
+  },
+  // DO RAISE when operations / receive_release_proofs / lease_release_proofs absent.
+  "operator-accepted-risk-release.sql": {
+    applies: false,
+    missingFragment: "operator-accepted-risk-release requires operations",
   },
 };
 

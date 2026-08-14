@@ -70,6 +70,7 @@ function baseFacts(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
       hasMatchingExactByteRecord: true,
     },
     haltEngaged: false,
+    receiveExpiryAttentionEventExists: false,
     ...patch,
   };
 }
@@ -229,8 +230,8 @@ describe("NeedsAttentionQuerySchema", () => {
 });
 
 describe("classifyRecovery + derivePermittedActions (pure)", () => {
-  it("closed action set is exactly nine", () => {
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(9);
+  it("closed action set is exactly ten", () => {
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
   });
 
   it("NEVER includes forbidden actions for any fixture", () => {
@@ -305,6 +306,7 @@ describe("classifyRecovery + derivePermittedActions (pure)", () => {
     // Never a resolving action.
     for (const resolving of [
       "RELEASE_EXPIRED_RECEIVE",
+      "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
       "REBUILD_INTERNAL_MOVE",
       "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
       "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
@@ -361,6 +363,61 @@ describe("classifyRecovery + derivePermittedActions (pure)", () => {
       classification: "LANDED_VERIFIED",
       rationale: "landing_exact",
     });
+  });
+
+  it("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK only when parked with prior attention and five fail", () => {
+    const parkedFailing = receiveFacts({
+      receiveExpiryAttentionEventExists: true,
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: false,
+        noAnomalyOrSubmitReconcileDebt: false,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(derivePermittedActions(parkedFailing).permittedActions).toContain(
+      "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+    );
+    expect(derivePermittedActions(parkedFailing).permittedActions).not.toContain(
+      "RELEASE_EXPIRED_RECEIVE",
+    );
+
+    // No prior attention event → not offered.
+    expect(
+      derivePermittedActions(
+        receiveFacts({
+          receiveExpiryAttentionEventExists: false,
+          receive: parkedFailing.receive!,
+        }),
+      ).permittedActions,
+    ).not.toContain("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
+
+    // Clean five predicates → only canonical release, not risk.
+    const clean = receiveFacts({
+      receiveExpiryAttentionEventExists: true,
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: true,
+        noAnomalyOrSubmitReconcileDebt: true,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+    });
+    expect(derivePermittedActions(clean).permittedActions).toContain("RELEASE_EXPIRED_RECEIVE");
+    expect(derivePermittedActions(clean).permittedActions).not.toContain(
+      "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+    );
   });
 
   it("RELEASE_EXPIRED_RECEIVE only when all five predicates hold", () => {
@@ -591,6 +648,7 @@ describe("classifyRecovery + derivePermittedActions (pure)", () => {
     expect(actions).not.toContain("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
     expect(actions).not.toContain("REBUILD_INTERNAL_MOVE");
     expect(actions).not.toContain("RELEASE_EXPIRED_RECEIVE");
+    expect(actions).not.toContain("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
   });
 });
 

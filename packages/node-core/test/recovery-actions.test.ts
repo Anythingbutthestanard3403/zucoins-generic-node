@@ -69,6 +69,7 @@ function baseSend(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
       hasMatchingExactByteRecord: true,
     },
     haltEngaged: false,
+    receiveExpiryAttentionEventExists: false,
     ...patch,
   };
 }
@@ -229,7 +230,7 @@ function applyEffect(
       readonly ok: true;
       readonly status: string;
       readonly attentionRequired: boolean;
-      readonly releaseStatus: "RELEASED_T0_UNCHANGED" | null;
+      readonly releaseStatus: "RELEASED_T0_UNCHANGED" | "RELEASED_OPERATOR_ACCEPTED_RISK" | null;
       readonly transferCodeText: string | null;
       readonly transferCodeSha256: string | null;
     }
@@ -292,6 +293,15 @@ function applyEffect(
         status: "EXPIRED",
         attentionRequired: false,
         releaseStatus: "RELEASED_T0_UNCHANGED",
+        transferCodeText: null,
+        transferCodeSha256: null,
+      };
+    case "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK":
+      return {
+        ok: true,
+        status: "EXPIRED",
+        attentionRequired: false,
+        releaseStatus: "RELEASED_OPERATOR_ACCEPTED_RISK",
         transferCodeText: null,
         transferCodeSha256: null,
       };
@@ -383,8 +393,8 @@ describe("route registration", () => {
 });
 
 describe("structural forbidden surface", () => {
-  it("closed catalog is exactly nine and has no forbidden tokens", () => {
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(9);
+  it("closed catalog is exactly ten and has no forbidden tokens", () => {
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
     for (const f of FORBIDDEN_RECOVERY_ACTIONS) {
       expect(isOperatorRecoveryAction(f)).toBe(false);
       expect(isForbiddenRecoveryAction(f)).toBe(true);
@@ -856,5 +866,118 @@ describe("planRecoveryEffect exhaustiveness over every action", () => {
       const planned = planRecoveryEffect(f.action, f.facts, f.proof);
       expect(planned.ok, f.action).toBe(true);
     }
+  });
+});
+
+describe("ZTR-1280 RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK", () => {
+  function parkedReceive(patch: Partial<RecoveryFacts> = {}): RecoveryFacts {
+    return receiveAllFive({
+      attentionRequired: true,
+      attentionReason: "T0_RELEASE_MISMATCH",
+      attentionDetail: JSON.stringify({
+        failed_predicates: ["FRESH_VERIFIED_T0_EXACT", "NO_ANOMALY_LINEAGE_OR_SUBMIT"],
+      }),
+      receiveExpiryAttentionEventExists: true,
+      receive: {
+        codeExpiredPlusMargin: true,
+        noPersistedLandedProof: true,
+        freshObservationEqualsT0: false,
+        noAnomalyOrSubmitReconcileDebt: false,
+        childAbsentOrTerminal: true,
+        hasT0: true,
+        hasCodeOrArtifactPreimage: true,
+        hasArtifactSignature: true,
+        hasSignerAudit: false,
+        hasMatchingExactByteRecord: true,
+      },
+      ...patch,
+    });
+  }
+
+  it("plans OPERATOR_ACCEPTED_RISK effect and never RELEASED_T0_UNCHANGED", () => {
+    const facts = parkedReceive();
+    const planned = planRecoveryEffect("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK", facts, {
+      proofId: null,
+      overrideRationale: "Gateway permanently gone after attention park",
+      deviceKeyId: "00000000-0000-4000-8000-0000000000aa",
+      deviceSignature: "A".repeat(86) + "==",
+      walletToAvailable: true,
+    });
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    expect(planned.effect.kind).toBe("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
+    if (planned.effect.kind !== "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK") return;
+    expect(planned.effect.releaseKind).toBe("OPERATOR_ACCEPTED_RISK");
+    expect(planned.effect.releaseStatus).toBe("RELEASED_OPERATOR_ACCEPTED_RISK");
+    expect(planned.effect.releaseStatus).not.toBe("RELEASED_T0_UNCHANGED");
+    expect(planned.effect.failedPredicates.length).toBeGreaterThan(0);
+  });
+
+  it("refuses when canonical five predicates hold (use RELEASE_EXPIRED_RECEIVE)", () => {
+    const facts = receiveAllFive({
+      attentionRequired: true,
+      receiveExpiryAttentionEventExists: true,
+    });
+    const planned = planRecoveryEffect("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK", facts, {
+      proofId: null,
+      overrideRationale: "should not matter",
+      deviceKeyId: "00000000-0000-4000-8000-0000000000aa",
+      deviceSignature: "A".repeat(86) + "==",
+      walletToAvailable: true,
+    });
+    expect(planned.ok).toBe(false);
+    if (planned.ok) return;
+    expect(planned.reason).toBe("predicate_failed");
+  });
+
+  it("refuses without device signature / rationale / prior attention event", () => {
+    const facts = parkedReceive();
+    expect(
+      planRecoveryEffect("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK", facts, {
+        proofId: null,
+        overrideRationale: "enough text here",
+        deviceKeyId: null,
+        deviceSignature: null,
+        walletToAvailable: true,
+      }).ok,
+    ).toBe(false);
+    expect(
+      planRecoveryEffect("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK", facts, {
+        proofId: null,
+        overrideRationale: "short",
+        deviceKeyId: "00000000-0000-4000-8000-0000000000aa",
+        deviceSignature: "A".repeat(86) + "==",
+        walletToAvailable: true,
+      }).ok,
+    ).toBe(false);
+    expect(
+      planRecoveryEffect(
+        "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+        parkedReceive({ receiveExpiryAttentionEventExists: false }),
+        {
+          proofId: null,
+          overrideRationale: "enough text here",
+          deviceKeyId: "00000000-0000-4000-8000-0000000000aa",
+          deviceSignature: "A".repeat(86) + "==",
+          walletToAvailable: true,
+        },
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("executeRecoveryAction succeeds with ceremony fields and reports operator-risk status", async () => {
+    const store = new MemoryRecoveryStore(parkedReceive());
+    const outcome = await executeRecoveryAction(store, OP, {
+      ...req("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK"),
+      overrideRationale: "Gateway permanently unreadable after durable attention",
+      deviceKeyId: "00000000-0000-4000-8000-0000000000aa",
+      deviceSignature: "A".repeat(86) + "==",
+      walletToAvailable: true,
+    });
+    expect(outcome.status).toBe("ok");
+    if (outcome.status !== "ok") return;
+    expect(outcome.body.release_status).toBe("RELEASED_OPERATOR_ACCEPTED_RISK");
+    expect(outcome.body.release_status).not.toBe("RELEASED_T0_UNCHANGED");
+    expect(outcome.body.effect).toBe("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
   });
 });

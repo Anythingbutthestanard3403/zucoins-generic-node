@@ -31,6 +31,10 @@ import {
 } from "../../lib/labels.js";
 import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
+import {
+  postRecoveryActionWithCeremony,
+  recoveryActionConfirmDetail,
+} from "../../lib/post-recovery-action-with-ceremony.js";
 
 type LoadResult =
   | { kind: "ok"; inventory: OperationInventoryDetail | null; recovery: RecoveryDetail | null }
@@ -182,20 +186,11 @@ export function OperationDetailPage() {
 
   const act = useTotpGatedMutation(
     async (action: string, totp: string) => {
-      const fresh = await getRecovery(id);
-      return postRecoveryAction(
-        id,
-        {
-          action,
-          expected_row_version: fresh.row_version,
-          recovery_nonce: fresh.recovery_nonce,
-        },
-        totp,
-      );
+      return postRecoveryActionWithCeremony(id, action, totp);
     },
     {
       title: "Confirm recovery action",
-      detail: (a) => String(a),
+      detail: (a) => recoveryActionConfirmDetail(String(a)),
       onSuccess: () => {
         setErr(null);
         setMsg("Recovery action accepted.");
@@ -599,6 +594,21 @@ export function OperationDetailPage() {
                 : "No permitted recovery actions right now."}
             </p>
           ) : (
+            {recovery.permitted_actions.includes(
+              "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+            ) ? (
+              <p
+                className="muted"
+                style={{ fontSize: 12.5, marginTop: 8 }}
+                data-testid="operator-risk-release-notice"
+              >
+                Operator-risk release is available: this path records{" "}
+                <strong>OPERATOR_ACCEPTED_RISK</strong> with the failing predicates —
+                T0-unchanged is <strong>not</strong> proven. Prefer canonical{" "}
+                <code className="mono">RELEASE_EXPIRED_RECEIVE</code> when the five
+                predicates hold. See Evidence-gap for recorded predicate failures.
+              </p>
+            ) : null}
             <RecoveryActions
               permittedActions={recovery.permitted_actions}
               disabled={act.isPending}

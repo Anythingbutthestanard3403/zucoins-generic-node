@@ -6,7 +6,8 @@
 // authMode: operator_session_totp (session + CSRF + fresh single-use TOTP)
 // Idempotency-Key: required
 //
-// Body (frozen): {action, expected_row_version, recovery_nonce, proof_id, operator_note}
+// Body (frozen): {action, expected_row_version, recovery_nonce, proof_id, operator_note,
+//   device_key_id?, device_signature?, override_rationale?, wallet_to_available?}
 //
 // Pure planning + guarded execution live in `../operator/recovery-actions.js`.
 // This module is the request surface: body schema, handler outcome → HTTP map.
@@ -107,6 +108,10 @@ function mapReject(
     case "proof_id_mismatch":
     case "halt_engaged":
     case "predicate_failed":
+    case "device_signature_required":
+    case "device_signature_invalid":
+    case "override_rationale_required":
+    case "wallet_disposition_required":
       return {
         ok: false,
         status: 422,
@@ -145,6 +150,10 @@ export async function handleRecoveryAction(
     operatorId: auth.operatorId,
     totpTimestep: auth.totpTimestep,
     csrfValidated: true,
+    deviceKeyId: body.device_key_id ?? null,
+    deviceSignature: body.device_signature ?? null,
+    overrideRationale: body.override_rationale ?? null,
+    walletToAvailable: body.wallet_to_available ?? null,
   };
 
   const outcome = await executeRecoveryAction(store, operationId, request);

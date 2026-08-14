@@ -180,6 +180,12 @@ export const RecoveryActionsBody = z
     recovery_nonce: z.string().uuid(),
     proof_id: z.string().uuid().nullable().optional(),
     operator_note: z.string().max(1024).optional(),
+    // ZTR-1280 max-ceremony factors (required by planner for OPERATOR_RISK action).
+    device_key_id: UuidSchema.optional(),
+    device_signature: Ed25519SignatureSchema.optional(),
+    override_rationale: z.string().min(8).max(2048).optional(),
+    /** Explicit wallet disposition after risk release; required for operator-risk action. */
+    wallet_to_available: z.boolean().optional(),
   })
   .strict();
 

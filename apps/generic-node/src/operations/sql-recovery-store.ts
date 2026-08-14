@@ -13,6 +13,7 @@ import {
   sha256HexUtf8,
   LEASE_STATEMENTS,
   SqlReceiveExpiryReleaseService,
+  commitOperatorAcceptedRiskRelease,
   withSerializationRetry,
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   redeliverExactPartialViaSql,
@@ -89,6 +90,8 @@ export const RECOVERY_ACTION_LABELS: Readonly<Record<RecoveryActionEffect["kind"
   CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED: "Close send (proven not landed)",
   REBUILD_INTERNAL_MOVE: "Rebuild internal transfer",
   RELEASE_EXPIRED_RECEIVE: "Release expired receive",
+  RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK:
+    "Release expired receive (operator-accepted risk — T0-unchanged NOT proven)",
   QUARANTINE_WALLETS: "Quarantine wallets",
   ACKNOWLEDGE_KEEP_PINNED: "Acknowledge (keep pinned)",
 };
@@ -809,6 +812,112 @@ export function createSqlRecoveryActionStore(
               finalStatus = after.status;
               break;
             }
+            case "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK": {
+              // ZTR-1280: max-ceremony last resort. Never mints EXPIRED_T0_UNCHANGED.
+              if (effect.releaseKind !== "OPERATOR_ACCEPTED_RISK") {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "operator_risk_kind_must_be_OPERATOR_ACCEPTED_RISK",
+                };
+              }
+              if (effect.releaseStatus !== "RELEASED_OPERATOR_ACCEPTED_RISK") {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "operator_risk_status_mismatch",
+                };
+              }
+              const casResult = await client.query<{ row_version: number; status: string }>(
+                SQL_CAS_BUMP_ROW_VERSION, [input.operationId, input.expectedRowVersion],
+              );
+              if (casResult.rows[0] === undefined) {
+                await client.query("ROLLBACK");
+                return { ok: false, reason: "operation_version_conflict" };
+              }
+              const txExec = {
+                query: async <R>(text: string, params: readonly unknown[] = []) => {
+                  const result = await client.query(text, params as never[]);
+                  return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 };
+                },
+              };
+              const riskOutcome = await commitOperatorAcceptedRiskRelease(
+                txExec,
+                {
+                  completeGroupOperation,
+                  mintReleaseProof,
+                  releaseLease,
+                },
+                {
+                  operationId: input.operationId,
+                  operatorId: input.operatorId,
+                  deviceKeyId: effect.deviceKeyId,
+                  overrideRationale: effect.overrideRationale,
+                  failedPredicates: effect.failedPredicates,
+                  walletToAvailable: effect.walletPinnedToAvailable,
+                },
+              );
+              if (riskOutcome.kind === "REFUSED" || riskOutcome.kind === "NOT_FOUND") {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail:
+                    riskOutcome.kind === "REFUSED"
+                      ? `operator_risk_${riskOutcome.reason}`
+                      : "operator_risk_not_found",
+                };
+              }
+              if (riskOutcome.kind === "CONFLICT") {
+                await client.query("ROLLBACK");
+                return { ok: false, reason: "operation_version_conflict" };
+              }
+              // RELEASED | ALREADY_RELEASED — both must carry OPERATOR risk status, never T0.
+              if (riskOutcome.releaseStatus === "RELEASED_T0_UNCHANGED") {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "operator_risk_refused_EXPIRED_T0_UNCHANGED",
+                };
+              }
+              if (riskOutcome.releaseStatus !== "RELEASED_OPERATOR_ACCEPTED_RISK") {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: `operator_risk_status_mismatch:${riskOutcome.releaseStatus}`,
+                };
+              }
+              // Defence-in-depth: proof row must be OPERATOR_ACCEPTED_RISK, never EXPIRED_T0.
+              const proofKindRow = (await client.query<{ release_kind: string }>(
+                `SELECT release_kind FROM receive_release_proofs WHERE operation_id = $1::uuid`,
+                [input.operationId],
+              )).rows[0];
+              if (
+                proofKindRow === undefined ||
+                proofKindRow.release_kind === "EXPIRED_T0_UNCHANGED" ||
+                proofKindRow.release_kind !== "OPERATOR_ACCEPTED_RISK"
+              ) {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: `operator_risk_proof_kind:${proofKindRow?.release_kind ?? "missing"}`,
+                };
+              }
+              releaseStatus = riskOutcome.releaseStatus;
+              const after = (await client.query<{ row_version: number; status: string }>(
+                `SELECT row_version::int AS row_version, status::text AS status
+                   FROM operations WHERE id = $1::uuid`,
+                [input.operationId],
+              )).rows[0]!;
+              finalRowVersion = after.row_version;
+              finalStatus = after.status;
+              break;
+            }
             case "REDELIVER_EXACT_PARTIAL": {
               const casResult = await client.query<{ row_version: number; status: string }>(
                 SQL_CAS_BUMP_ROW_VERSION, [input.operationId, input.expectedRowVersion],
@@ -983,9 +1092,19 @@ export function createSqlRecoveryActionStore(
           const walletIdsNote = effect.kind === "QUARANTINE_WALLETS"
             ? `;wallet_ids=${effect.walletIds.join(",")}`
             : "";
+          const riskNote =
+            effect.kind === "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK"
+              ? `;release_kind=OPERATOR_ACCEPTED_RISK` +
+                `;failed_predicates=${effect.failedPredicates.join(",")}` +
+                `;override_rationale=${effect.overrideRationale}` +
+                `;device_key_id=${effect.deviceKeyId}` +
+                `;wallet_to_available=${effect.walletPinnedToAvailable}` +
+                `;t0_unchanged_proven=false`
+              : "";
           const details = `action=${input.action};operation_id=${input.operationId};` +
             `classification=${input.classification};operator_note=${input.operatorNote ?? ""}` +
-            walletIdsNote;
+            walletIdsNote +
+            riskNote;
           await client.query(SQL_INSERT_AUDIT_LOG, [
             randomUUID(), nodeId, input.operatorId, input.action, input.operationId,
             details, sha256HexUtf8(details),
@@ -1367,6 +1486,16 @@ async function loadRecoveryFactsFromRow(
     };
   }
 
+  // ZTR-1280: durable evidence that canonical expiry release already parked once.
+  let receiveExpiryAttentionEventExists = false;
+  if (parsedKind === "RECEIVE_EXTERNAL") {
+    const attnEv = await pool.query(
+      `SELECT 1 FROM receive_expiry_attention_events WHERE operation_id = $1::uuid LIMIT 1`,
+      [operationId],
+    );
+    receiveExpiryAttentionEventExists = (attnEv.rowCount ?? 0) > 0;
+  }
+
   return {
     operationId,
     kind: parsedKind,
@@ -1398,5 +1527,6 @@ async function loadRecoveryFactsFromRow(
     move,
     send,
     haltEngaged: false,
+    receiveExpiryAttentionEventExists,
   };
 }

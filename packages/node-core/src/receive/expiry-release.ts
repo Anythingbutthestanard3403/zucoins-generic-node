@@ -43,23 +43,33 @@ export const RECEIVE_NEEDS_ATTENTION_EVENT = "operation.needs_attention" as cons
 export const RECEIVE_EXPIRED_RELEASE_KIND = "EXPIRED_T0_UNCHANGED" as const;
 export const RECEIVE_PROVEN_NOT_STARTED_RELEASE_KIND =
   "EXPIRED_PROVEN_NOT_STARTED" as const;
+/** ZTR-1280 — audited last-resort; never a T0-unchanged proof. */
+export const RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND =
+  "OPERATOR_ACCEPTED_RISK" as const;
 export const RECEIVE_EXPIRED_LEASE_PROOF_KIND = "RECEIVE_EXPIRED_T0" as const;
+export const RECEIVE_OPERATOR_ACCEPTED_RISK_LEASE_PROOF_KIND =
+  "RECEIVE_OPERATOR_ACCEPTED_RISK" as const;
 export const RECEIVE_EXPIRED_RELEASE_STATUS = SAFE_TERMINAL_RELEASE_STATUS;
+export const RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_STATUS =
+  "RELEASED_OPERATOR_ACCEPTED_RISK" as const;
 
 export type ReceiveExpiryReleaseStatus =
   | typeof RECEIVE_EXPIRED_RELEASE_STATUS
-  | typeof RECEIVE_PROVEN_NOT_STARTED_RELEASE_STATUS;
+  | typeof RECEIVE_PROVEN_NOT_STARTED_RELEASE_STATUS
+  | typeof RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_STATUS;
 
 export type ReceiveExpiryReleaseKind =
   | typeof RECEIVE_EXPIRED_RELEASE_KIND
-  | typeof RECEIVE_PROVEN_NOT_STARTED_RELEASE_KIND;
+  | typeof RECEIVE_PROVEN_NOT_STARTED_RELEASE_KIND
+  | typeof RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND;
 
 function isSafeTerminalReleaseStatus(
   value: string | null,
 ): value is ReceiveExpiryReleaseStatus {
   return (
     value === RECEIVE_EXPIRED_RELEASE_STATUS ||
-    value === RECEIVE_PROVEN_NOT_STARTED_RELEASE_STATUS
+    value === RECEIVE_PROVEN_NOT_STARTED_RELEASE_STATUS ||
+    value === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_STATUS
   );
 }
 
@@ -206,7 +216,7 @@ export type ExpireReceiveOutcome =
       readonly releaseProofId: string;
       readonly receiveReleaseProofId: string;
       readonly walletId: string;
-      readonly walletState: "AVAILABLE";
+      readonly walletState: "AVAILABLE" | "QUARANTINED";
     }
   | {
       readonly kind: "ALREADY_RELEASED";
@@ -619,6 +629,18 @@ UPDATE wallets
  WHERE id = $1::uuid
    AND state IN ('PINNED','QUARANTINED')
  RETURNING state::text AS state`.replace(/\s+/g, " ").trim(),
+
+  /** ZTR-1280: after risk-release lease drop, leave wallet quarantined on explicit choice. */
+  QUARANTINE_AFTER_OPERATOR_RISK: `
+UPDATE wallets
+   SET state = 'QUARANTINED',
+       quarantine_reason = COALESCE(
+         quarantine_reason,
+         'OPERATOR_ACCEPTED_RISK_RELEASE'
+       )
+ WHERE id = $1::uuid
+   AND state IN ('AVAILABLE','PINNED','QUARANTINED')
+ RETURNING state::text AS state`.replace(/\s+/g, " ").trim(),
 } as const;
 
 interface OperationRow {
@@ -924,9 +946,14 @@ function releaseProofManifest(input: {
   readonly freshObservedAt: string | null;
   readonly safetyMarginSecs: number;
   readonly predicates: ReceiveReleasePredicates;
+  readonly failedPredicates?: readonly string[];
+  readonly overrideRationale?: string;
+  readonly operatorId?: string;
+  readonly deviceKeyId?: string;
+  readonly t0UnchangedProven?: boolean;
 }): string {
   // Fixed insertion sequence: this digest is durable proof evidence.
-  return JSON.stringify({
+  const body: Record<string, unknown> = {
     release_kind: input.releaseKind,
     release_status: input.releaseStatus,
     operation_id: input.operationId,
@@ -944,7 +971,18 @@ function releaseProofManifest(input: {
       child_absent_or_safe_terminal: input.predicates.childAbsentOrSafeTerminal,
       pre_code_formation_proven_safe: input.predicates.preCodeFormationProvenSafe,
     },
-  });
+  };
+  if (input.releaseKind === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND) {
+    // Honest non-proof shape — T0-unchanged is NOT claimed.
+    body.t0_unchanged_proven = false;
+    body.failed_predicates = input.failedPredicates ?? [];
+    body.override_rationale = input.overrideRationale ?? "";
+    body.operator_id = input.operatorId ?? null;
+    body.device_key_id = input.deviceKeyId ?? null;
+    body.notice =
+      "released on operator-accepted risk; T0-unchanged NOT proven";
+  }
+  return JSON.stringify(body);
 }
 
 export interface ReceiveExpiryLeaseRepository {
@@ -1425,8 +1463,31 @@ async function commitRelease(
     readonly predicates: ReceiveReleasePredicates;
     readonly newId: () => string;
     readonly dualChain?: ReceiveExpiryDualChainEmitter;
+    readonly failedPredicates?: readonly string[];
+    readonly overrideRationale?: string;
+    readonly operatorId?: string;
+    readonly deviceKeyId?: string;
+    readonly walletToAvailable?: boolean;
+    readonly leaseProofKind?: string;
   },
 ): Promise<Extract<ExpireReceiveOutcome, { kind: "RELEASED" }>> {
+  // Structural guard: OPERATOR_ACCEPTED_RISK path must never mint EXPIRED_T0_UNCHANGED.
+  // releaseKind is already narrowed when equal to OPERATOR_ACCEPTED_RISK — refuse bad status only.
+  if (
+    input.releaseKind === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND &&
+    input.releaseStatus === RECEIVE_EXPIRED_RELEASE_STATUS
+  ) {
+    throw new Error(
+      "OPERATOR_ACCEPTED_RISK path refused to mint EXPIRED_T0_UNCHANGED",
+    );
+  }
+  if (
+    input.releaseStatus === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_STATUS &&
+    input.releaseKind !== RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND
+  ) {
+    throw new Error("RELEASED_OPERATOR_ACCEPTED_RISK requires OPERATOR_ACCEPTED_RISK kind");
+  }
+
   const leaseProofId = input.newId();
   const receiveProofId = input.newId();
   const manifest = releaseProofManifest({
@@ -1440,6 +1501,10 @@ async function commitRelease(
     freshObservedAt: input.freshObservedAt,
     safetyMarginSecs: input.safetyMarginSecs,
     predicates: input.predicates,
+    failedPredicates: input.failedPredicates,
+    overrideRationale: input.overrideRationale,
+    operatorId: input.operatorId,
+    deviceKeyId: input.deviceKeyId,
   });
   const manifestSha = createHash("sha256").update(manifest, "utf8").digest("hex");
 
@@ -1458,6 +1523,20 @@ async function commitRelease(
     leaseGroupId: input.lease.lease_group_id,
     operationId: input.operationId,
   });
+  const leaseProofKind =
+    input.leaseProofKind ??
+    (input.releaseKind === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND
+      ? RECEIVE_OPERATOR_ACCEPTED_RISK_LEASE_PROOF_KIND
+      : RECEIVE_EXPIRED_LEASE_PROOF_KIND);
+  // Never allow operator-risk path to fall through to RECEIVE_EXPIRED_T0.
+  if (
+    input.releaseKind === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND &&
+    leaseProofKind === RECEIVE_EXPIRED_LEASE_PROOF_KIND
+  ) {
+    throw new Error(
+      "OPERATOR_ACCEPTED_RISK path refused RECEIVE_EXPIRED_T0 lease proof kind",
+    );
+  }
   await leaseRepository.mintReleaseProof(tx, {
     proofId: leaseProofId,
     walletId: input.lease.wallet_id,
@@ -1465,7 +1544,9 @@ async function commitRelease(
     membershipId: input.lease.membership_id,
     leaseGroupId: input.lease.lease_group_id,
     leaseEpoch: BigInt(input.lease.lease_epoch),
-    proofKind: RECEIVE_EXPIRED_LEASE_PROOF_KIND,
+    proofKind: leaseProofKind as
+      | "RECEIVE_EXPIRED_T0"
+      | "RECEIVE_OPERATOR_ACCEPTED_RISK",
     proofDigest: manifestSha,
   });
   await leaseRepository.releaseLease(tx, {
@@ -1485,6 +1566,21 @@ async function commitRelease(
   if (released.rows.length !== 1) {
     throw new Error(`receive release status CAS failed: ${input.operationId}`);
   }
+
+  let walletState: "AVAILABLE" | "QUARANTINED" = "AVAILABLE";
+  if (
+    input.releaseKind === RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND &&
+    input.walletToAvailable === false
+  ) {
+    const q = await tx.query<{ state: string }>(
+      RECEIVE_EXPIRY_RELEASE_STATEMENTS.QUARANTINE_AFTER_OPERATOR_RISK,
+      [input.lease.wallet_id],
+    );
+    if (q.rows[0]?.state === "QUARANTINED") {
+      walletState = "QUARANTINED";
+    }
+  }
+
   await appendExpiredEvent(tx, input.operationId, {
     previousState: input.previousState,
     expiredAt: new Date(input.nowMs).toISOString(),
@@ -1499,8 +1595,146 @@ async function commitRelease(
     releaseProofId: leaseProofId,
     receiveReleaseProofId: receiveProofId,
     walletId: input.lease.wallet_id,
-    walletState: "AVAILABLE",
+    walletState,
   };
+}
+
+/**
+ * ZTR-1280: release an expired receive under operator-accepted risk when the
+ * six canonical predicates cannot hold. Commits via the lease repository only
+ * (never raw DELETE). Mints OPERATOR_ACCEPTED_RISK — never EXPIRED_T0_UNCHANGED.
+ */
+export interface OperatorAcceptedRiskReleaseInput {
+  readonly operationId: string;
+  readonly operatorId: string;
+  readonly deviceKeyId: string;
+  readonly overrideRationale: string;
+  readonly failedPredicates: readonly string[];
+  /** true → AVAILABLE; false → QUARANTINED after lease release. */
+  readonly walletToAvailable: boolean;
+  readonly nowMs?: number;
+  readonly newId?: () => string;
+}
+
+export type OperatorAcceptedRiskReleaseOutcome =
+  | Extract<ExpireReceiveOutcome, { kind: "RELEASED" | "ALREADY_RELEASED" | "NOT_FOUND" | "CONFLICT" }>
+  | {
+      readonly kind: "REFUSED";
+      readonly reason: string;
+    };
+
+export async function commitOperatorAcceptedRiskRelease(
+  tx: SqlExecutor,
+  leaseRepository: ReceiveExpiryLeaseRepository,
+  input: OperatorAcceptedRiskReleaseInput,
+  dualChain?: ReceiveExpiryDualChainEmitter,
+): Promise<OperatorAcceptedRiskReleaseOutcome> {
+  const newId = input.newId ?? randomUUID;
+  const nowMs = input.nowMs ?? Date.now();
+
+  const operation = firstRow(
+    await tx.query<OperationRow>(
+      RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOCK_OPERATION,
+      [input.operationId],
+    ),
+  );
+  if (operation === undefined) {
+    return { kind: "NOT_FOUND" };
+  }
+  if (isSafeTerminalReleaseStatus(operation.receive_release_status)) {
+    return {
+      kind: "ALREADY_RELEASED",
+      status: "EXPIRED",
+      releaseStatus: operation.receive_release_status,
+    };
+  }
+  if (operation.status !== "EXPIRED") {
+    return {
+      kind: "REFUSED",
+      reason: `status_not_expired:${operation.status}`,
+    };
+  }
+  if (!asBool(operation.attention_required)) {
+    return { kind: "REFUSED", reason: "attention_not_required" };
+  }
+
+  const lease = firstRow(
+    await tx.query<ActiveLeaseRow>(
+      RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOCK_RECEIVER_LEASE,
+      [input.operationId],
+    ),
+  );
+  if (lease === undefined) {
+    return { kind: "REFUSED", reason: "no_active_receive_lease" };
+  }
+
+  const binding = firstRow(
+    await tx.query<ReceiverBindingRow>(
+      RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_RECEIVER_BINDING,
+      [input.operationId],
+    ),
+  );
+
+  const materialRaw = firstRow(
+    await tx.query<MaterialFactsRow>(
+      RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_MATERIAL_FACTS,
+      [input.operationId],
+    ),
+  );
+  // Landed proof still forbids any release — override is not FORCE_LANDED.
+  if (materialRaw !== undefined && asBool(materialRaw.landed_proof_exists)) {
+    return { kind: "REFUSED", reason: "landed_proof_present" };
+  }
+
+  if (materialRaw !== undefined && asBool(materialRaw.code_exists)) {
+    await tx.query(RECEIVE_EXPIRY_RELEASE_STATEMENTS.REVOKE_CODE, [
+      input.operationId,
+    ]);
+  }
+
+  const t0ObservationId =
+    binding?.t0_observation_id ?? operation.t0_observation_id;
+
+  // Predicates recorded as currently failing (honest — not claimed true).
+  const predicates: ReceiveReleasePredicates = {
+    expiryPlusSafetyMargin: false,
+    noLandedProof: materialRaw === undefined || !asBool(materialRaw.landed_proof_exists),
+    freshVerifiedT0Exact: false,
+    noAnomalyLineageOrSubmit: false,
+    childAbsentOrSafeTerminal: false,
+    preCodeFormationProvenSafe: false,
+  };
+  // Overlay any names the caller already captured so the manifest matches UI.
+  const failed =
+    input.failedPredicates.length > 0
+      ? input.failedPredicates
+      : failedReceiveReleasePredicates(predicates);
+
+  // Structural: never call commitRelease with EXPIRED_T0_UNCHANGED from this path.
+  return commitRelease(tx, leaseRepository, {
+    operationId: input.operationId,
+    previousState: "READY",
+    nowMs,
+    safetyMarginSecs: RECEIVE_EXPIRY_SAFETY_MARGIN_SECS,
+    lease,
+    expiryUnixTimeSecs: operation.expiry_unix_time_secs,
+    releaseKind: RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_KIND,
+    releaseStatus: RECEIVE_OPERATOR_ACCEPTED_RISK_RELEASE_STATUS,
+    t0ObservationId,
+    // Observations optional under OPERATOR_ACCEPTED_RISK CHECK — leave null so
+    // the proof cannot be mistaken for a T0-exact pair.
+    freshObservationId: null,
+    freshObservedAt: null,
+    predicates,
+    newId,
+    dualChain,
+    failedPredicates: failed,
+    overrideRationale: input.overrideRationale,
+    operatorId: input.operatorId,
+    deviceKeyId: input.deviceKeyId,
+    walletToAvailable: input.walletToAvailable,
+    leaseProofKind: RECEIVE_OPERATOR_ACCEPTED_RISK_LEASE_PROOF_KIND,
+  });
 }
 
 // ── — worker-level scan for expired receives ──────────────────────

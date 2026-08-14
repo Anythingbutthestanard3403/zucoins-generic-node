@@ -280,4 +280,44 @@ describe("discovery document reads the durable signing-key registry", () => {
     expect(doc.event_signing_public_keys).toEqual([]);
     expect(doc.expected_artifact_public_keys).toEqual([]);
   });
+
+  // ZTR-1288: default-funding read failure must reject discoveryDocument (fail closed),
+  // never coerce to null pin that looks like healthy unset funding.
+  it("rejects discoveryDocument when the default-funding wallet read throws", async () => {
+    const base = fakePool([
+      {
+        id: IDENTITY_KEY_ID,
+        node_id: NODE_ID,
+        purpose: "NODE_IDENTITY",
+        public_key: IDENTITY_PUBLIC_KEY,
+        activated_at: "2026-01-15T00:00:00.000Z",
+        retired_at: null,
+      },
+      {
+        id: EVENT_KEY_ID,
+        node_id: NODE_ID,
+        purpose: "EVENT_SIGNING",
+        public_key: EVENT_PUBLIC_KEY,
+        activated_at: "2026-01-15T00:00:00.000Z",
+        retired_at: null,
+      },
+    ]) as { query: (text: string, params?: readonly unknown[]) => Promise<{ rows: unknown[] }> };
+    const pool = {
+      query: async (text: string, params?: readonly unknown[]) => {
+        if (text.includes("FROM node_settings") && text.includes("setting_key")) {
+          throw new Error("simulated default-funding settings read failure");
+        }
+        return base.query(text, params);
+      },
+    } as never;
+    const surface = createProductionRouteSurface({
+      dualControlMode: "single_operator",
+      vaultRootKey: ZTR_1134_TEST_VAULT_ROOT,
+      nodeId: NODE_ID,
+      pool,
+    });
+    await expect(surface.discoveryDocument()).rejects.toThrow(
+      /simulated default-funding settings read failure/,
+    );
+  });
 });

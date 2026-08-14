@@ -1114,15 +1114,13 @@ export function createProductionRouteSurface(
   });
 
   const discoveryDocument = async () => {
+    // ZTR-1288: node-default funding pin on public discovery (explicit null when unset).
+    // Fail closed on read errors — never mask DB failure as "unset" (same class as
+    // implementer identity loaders → service_unavailable).
     const [eventSigningKeys, artifactSigningKeys, defaultFunding] = await Promise.all([
       signingKeyRegistry.findRetainedNodeSigningKeys(config.nodeId, "EVENT_SIGNING"),
       signingKeyRegistry.findRetainedNodeSigningKeys(config.nodeId, "NODE_IDENTITY"),
-      // ZTR-1288: node-default funding pin on public discovery (explicit null when unset).
-      defaultFundingWallet.get().catch(() => ({
-        wallet_id: null as string | null,
-        public_key: null as string | null,
-        row_version: 0,
-      })),
+      defaultFundingWallet.get(),
     ]);
     return buildNodeIdentityDocument({
       nodeId: config.nodeId,

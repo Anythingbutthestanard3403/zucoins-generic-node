@@ -365,3 +365,55 @@ describe("the named concern frozen public operation schema surface", () => {
     );
   });
 });
+
+describe("verification_mode defaults (ZTR-1299)", () => {
+  it("omitted verification_mode on create requests defaults to INDEPENDENT", () => {
+    const receive = ReceiveExternalRequestSchema.safeParse(RECEIVE_REQUEST);
+    expect(receive.success).toBe(true);
+    if (receive.success) expect(receive.data.verification_mode).toBe("INDEPENDENT");
+
+    const move = MoveInternalRequestSchema.safeParse(MOVE_REQUEST);
+    expect(move.success).toBe(true);
+    if (move.success) expect(move.data.verification_mode).toBe("INDEPENDENT");
+
+    const send = SendExternalRequestSchema.safeParse(SEND_REQUEST);
+    expect(send.success).toBe(true);
+    if (send.success) expect(send.data.verification_mode).toBe("INDEPENDENT");
+  });
+
+  it("accepts explicit NODE_VERIFIED on create requests", () => {
+    expect(
+      ReceiveExternalRequestSchema.safeParse({
+        ...RECEIVE_REQUEST,
+        verification_mode: "NODE_VERIFIED",
+      }).success,
+    ).toBe(true);
+    expect(
+      MoveInternalRequestSchema.safeParse({
+        ...MOVE_REQUEST,
+        verification_mode: "NODE_VERIFIED",
+      }).success,
+    ).toBe(true);
+    expect(
+      SendExternalRequestSchema.safeParse({
+        ...SEND_REQUEST,
+        verification_mode: "NODE_VERIFIED",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects unknown verification_mode values", () => {
+    expect(
+      ReceiveExternalRequestSchema.safeParse({
+        ...RECEIVE_REQUEST,
+        verification_mode: "HYBRID",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("operation responses accept omitted verification_mode (defaults to INDEPENDENT)", () => {
+    expect(ReceiveExternalReadyResponseSchema.safeParse(RECEIVE_READY_RESPONSE).success).toBe(true);
+    expect(MoveInternalResponseSchema.safeParse(MOVE_RESPONSE).success).toBe(true);
+    expect(SendExternalResponseSchema.safeParse(SEND_RESPONSE).success).toBe(true);
+  });
+});

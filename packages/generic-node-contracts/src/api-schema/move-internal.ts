@@ -5,6 +5,10 @@ import {
   MoveInternalOperationSchema,
 } from "./common-operation.ts";
 import { ClientReferenceSchema, PositiveZkzAmountSchema, UuidSchema } from "./scalars.ts";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+} from "../operations/verification-mode.contract.ts";
 
 export const MoveInternalRequestSchema = z
   .object({
@@ -12,6 +16,8 @@ export const MoveInternalRequestSchema = z
     destination_id: UuidSchema,
     amount_zkz: PositiveZkzAmountSchema,
     client_reference: ClientReferenceSchema.optional(),
+    /** Optional; defaults to INDEPENDENT when omitted. */
+    verification_mode: z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE),
   })
   .strict();
 

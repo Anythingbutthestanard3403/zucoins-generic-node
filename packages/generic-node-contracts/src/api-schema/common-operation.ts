@@ -7,6 +7,10 @@ import {
   SEND_EXTERNAL_STATES,
 } from "../operations/states.contract.ts";
 import {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+} from "../operations/verification-mode.contract.ts";
+import {
   Ed25519SignatureSchema,
   PositiveZkzAmountSchema,
   PreviousStateSignatureSchema,
@@ -26,6 +30,8 @@ const CommonOperationFields = {
   updated_at: Rfc3339MsSchema,
   terminal_at: Rfc3339MsSchema.nullable(),
   verification_material_available_until: Rfc3339MsSchema.nullable(),
+  /** Immutable after admission; omitted on wire only before clients adopt the field — default INDEPENDENT. */
+  verification_mode: z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE),
 } as const;
 
 export const ReceiveExternalOperationSchema = z
@@ -42,6 +48,7 @@ export const ReceiveExternalOperationSchema = z
     terminal_at: CommonOperationFields.terminal_at,
     verification_material_available_until:
       CommonOperationFields.verification_material_available_until,
+    verification_mode: CommonOperationFields.verification_mode,
   })
   .strict();
 
@@ -59,6 +66,7 @@ export const MoveInternalOperationSchema = z
     terminal_at: CommonOperationFields.terminal_at,
     verification_material_available_until:
       CommonOperationFields.verification_material_available_until,
+    verification_mode: CommonOperationFields.verification_mode,
   })
   .strict();
 
@@ -76,6 +84,7 @@ export const SendExternalOperationSchema = z
     terminal_at: CommonOperationFields.terminal_at,
     verification_material_available_until:
       CommonOperationFields.verification_material_available_until,
+    verification_mode: CommonOperationFields.verification_mode,
   })
   .strict();
 

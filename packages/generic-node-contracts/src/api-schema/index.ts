@@ -107,3 +107,15 @@ export { OPERATION_STATES, RECEIVE_EXTERNAL_TRANSITIONS, MOVE_INTERNAL_TRANSITIO
 export { DURABLE_EVENTS, ATTENTION_REASONS } from "../operations/events.contract.ts";
 export type { DurableEvent } from "../operations/events.contract.ts";
 export { OPERATION_KINDS } from "../operations/operations.contract.ts";
+export {
+  VERIFICATION_MODES,
+  DEFAULT_VERIFICATION_MODE,
+  RELEASED_NODE_VERIFIED,
+  ALLOW_NODE_VERIFIED_SETTING_KEY,
+  ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,
+  VERIFICATION_MODE_ERROR_CODES,
+} from "../operations/verification-mode.contract.ts";
+export type {
+  VerificationMode,
+  VerificationModeErrorCode,
+} from "../operations/verification-mode.contract.ts";

@@ -12,6 +12,10 @@ import {
   UuidSchema,
   WalletPublicKeySchema,
 } from "./scalars.ts";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+} from "../operations/verification-mode.contract.ts";
 
 const HoldAfterLandingSchema = z
   .object({
@@ -38,6 +42,8 @@ export const ReceiveExternalRequestSchema = z
     anchor: AnchorSchema,
     expires_in_seconds: z.number().int().positive().safe().optional(),
     after_landing: AfterLandingSchema,
+    /** Optional; defaults to INDEPENDENT when omitted. */
+    verification_mode: z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE),
   })
   .strict();
 

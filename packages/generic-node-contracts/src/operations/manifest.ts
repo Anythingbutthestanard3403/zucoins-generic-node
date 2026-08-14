@@ -3,6 +3,13 @@ import { OPERATION_KINDS, CHILD_LINK, WORKFLOW_GRAPH_SUPPORTED } from "./operati
 import { AFTER_LANDING_KINDS, LIFECYCLE_RULES } from "./lifecycle.contract.ts";
 import { OPERATION_STATES, FORBIDDEN_STATE_ALIASES } from "./states.contract.ts";
 import { DURABLE_EVENTS, FORBIDDEN_EVENT_ALIASES } from "./events.contract.ts";
+import {
+  VERIFICATION_MODES,
+  DEFAULT_VERIFICATION_MODE,
+  RELEASED_NODE_VERIFIED,
+  ALLOW_NODE_VERIFIED_SETTING_KEY,
+  VERIFICATION_MODE_ERROR_CODES,
+} from "./verification-mode.contract.ts";
 import { PUBLIC_ROUTES, ADMIN_ROUTES, RETIRED_ROUTES } from "./routes.contract.ts";
 import { CORE_CAPABILITIES, ABSENT_CAPABILITIES, LAUNCH_EXCLUSIONS } from "./capabilities.contract.ts";
 
@@ -24,6 +31,11 @@ export const OPERATIONS_CONCERN_MANIFEST = defineConcernManifest({
     FORBIDDEN_STATE_ALIASES,
     DURABLE_EVENTS,
     FORBIDDEN_EVENT_ALIASES,
+    VERIFICATION_MODES,
+    DEFAULT_VERIFICATION_MODE,
+    RELEASED_NODE_VERIFIED,
+    ALLOW_NODE_VERIFIED_SETTING_KEY,
+    VERIFICATION_MODE_ERROR_CODES,
     PUBLIC_ROUTES,
     ADMIN_ROUTES,
     RETIRED_ROUTES,
@@ -45,5 +57,6 @@ export const OPERATIONS_CONCERN_MANIFEST = defineConcernManifest({
     "core capabilities and launch exclusions",
     "API contract: route inventory and retired paths",
     "state-event reference: states, events, transitions, forbidden aliases",
+    "per-operation verification mode: INDEPENDENT | NODE_VERIFIED metadata (ZTR-1299)",
   ],
 });

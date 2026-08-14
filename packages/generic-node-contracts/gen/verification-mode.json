@@ -1,0 +1,23 @@
+{
+  "ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION": "ops.allow_node_verified_changed",
+  "ALLOW_NODE_VERIFIED_SETTING_KEY": "ops.allow_node_verified",
+  "DEFAULT_VERIFICATION_MODE": "INDEPENDENT",
+  "RELEASED_NODE_VERIFIED": "RELEASED_NODE_VERIFIED",
+  "SOURCE": "per-operation verification mode: INDEPENDENT | NODE_VERIFIED metadata; RELEASED_NODE_VERIFIED; ops.allow_node_verified",
+  "VERIFICATION_MODE_ERROR_CODES": [
+    {
+      "code": "verification_mode_mismatch",
+      "http": 409,
+      "meaning": "armed or verification-complete was called on an operation whose verification_mode does not admit that path."
+    },
+    {
+      "code": "verification_mode_not_allowed",
+      "http": 422,
+      "meaning": "NODE_VERIFIED was requested at admission but operator policy does not allow it for the calling implementer."
+    }
+  ],
+  "VERIFICATION_MODES": [
+    "INDEPENDENT",
+    "NODE_VERIFIED"
+  ]
+}

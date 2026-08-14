@@ -161,6 +161,55 @@ describe("OperationsPage honesty", () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("after="))).toBe(true);
   });
 
+  it("surfaces EXPIRED + attention_required receives in the needs-attention inbox (ZTR-1278/1285)", async () => {
+    const expiredOp = {
+      operation_id: "recv-expired-1",
+      operation_type: "RECEIVE_EXTERNAL",
+      status: "EXPIRED",
+      attention_required: true,
+      attention_reason: "T0_RELEASE_MISMATCH",
+      classification: "NEEDS_ATTENTION",
+      classification_rationale: "fresh head does not match T0",
+      severity: "P1",
+      permitted_actions: ["QUARANTINE_WALLETS", "RELEASE_EXPIRED_RECEIVE"],
+      row_version: 3,
+      lease_epoch: 1,
+      attention_since: "2026-08-14T00:00:00.000Z",
+      wallet_ids: ["wallet-recv-1"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            operations: [expiredOp],
+            summary: {
+              total: 1,
+              by_classification: { NEEDS_ATTENTION: 1 },
+              p0_invariant_breach: 0,
+            },
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const { container } = renderPage();
+    expect(await screen.findByText(/recv-expired-1/)).toBeInTheDocument();
+    // Parked stat mirrors summary.total from the same payload (badge/page parity).
+    const statValues = Array.from(container.querySelectorAll(".stat .v")).map(
+      (el) => el.textContent,
+    );
+    expect(statValues[0]).toBe("1");
+    expect(screen.getByText(/T0 release mismatch/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open detail/i })).toHaveAttribute(
+      "href",
+      "/operations/recv-expired-1",
+    );
+    expect(screen.queryByText("No operations need attention.")).not.toBeInTheDocument();
+  });
+
   it("history tab lists inventory ops with receive detail links", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

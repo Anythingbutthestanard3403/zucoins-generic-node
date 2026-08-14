@@ -253,7 +253,7 @@ export function planRecoveryEffect(
   switch (action) {
     case "RETRY_OBSERVATION": {
       // Defence-in-depth mirror of derivePermittedActions (ZTR-1283): expiry-parked
-      // receives cannot usefully retry — effect is row_version-only and the sweep
+      // receives cannot usefully retry — effect is row_version-only and the expiry worker
       // will not re-pick attention_required rows.
       if (
         facts.kind === "RECEIVE_EXTERNAL" &&

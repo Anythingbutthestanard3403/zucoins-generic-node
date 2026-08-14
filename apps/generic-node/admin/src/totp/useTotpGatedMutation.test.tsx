@@ -165,7 +165,20 @@ describe("withTotpRetry ceiling", () => {
     );
     renderHarness(attempt);
 
-    for (const code of ["111111", "222222", "333333", "999999"]) await enterCode(code);
+    // Wait for wrong-code banner / slot reset between entries (same race the
+    // ceiling test covers). Blind consecutive enterCode calls flake ~1/3 under
+    // load when the dialog is mid-reset (ZTR-1285).
+    await enterCode("111111");
+    expect(await screen.findByText(/^Code invalid — try again\.$/)).toBeInTheDocument();
+    await enterCode("222222");
+    expect(
+      await screen.findByText(/wait for the next authenticator code/),
+    ).toBeInTheDocument();
+    await enterCode("333333");
+    expect(
+      await screen.findByText(/wait for the next authenticator code/),
+    ).toBeInTheDocument();
+    await enterCode("999999");
 
     expect(await screen.findByText("done: engaged")).toBeInTheDocument();
     expect(attempt).toHaveBeenCalledTimes(4);

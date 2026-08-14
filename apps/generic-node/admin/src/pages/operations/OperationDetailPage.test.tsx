@@ -162,6 +162,64 @@ describe("OperationDetailPage", () => {
     expect(screen.getByText(/Recovery detail unavailable/i)).toBeInTheDocument();
   });
 
+  it("renders the Evidence-gap card from structured attention_detail (ZTR-1279/1285)", async () => {
+    const detail = JSON.stringify({
+      failed_predicates: ["FRESH_VERIFIED_T0_EXACT"],
+      predicate_causes: [
+        {
+          predicate: "FRESH_VERIFIED_T0_EXACT",
+          cause:
+            "fresh verified head does not match T0 exactly; post-expiry confirm-read was skipped: wallet_row_undefined",
+        },
+      ],
+      fresh_read: {
+        kind: "skipped",
+        reason: "wallet_row_undefined",
+        summary: "skipped:wallet_row_undefined",
+      },
+    });
+    const flagged = {
+      ...recovery,
+      status: "EXPIRED",
+      attention_required: true,
+      attention_reason: "T0_RELEASE_MISMATCH",
+      classification: "NEEDS_ATTENTION",
+      classification_rationale: "expiry release predicates failed",
+      attention_detail: detail,
+      permitted_actions: ["QUARANTINE_WALLETS"],
+    };
+    const flaggedInv = {
+      ...inventory,
+      status: "EXPIRED",
+      attention_required: true,
+      attention_reason: "T0_RELEASE_MISMATCH",
+      terminal_at: "2026-08-14T00:10:00.000Z",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(`/operations/${OP_ID}/recovery`)) {
+        return new Response(JSON.stringify(flagged), { status: 200 });
+      }
+      if (url.match(new RegExp(`/operations/${OP_ID}$`))) {
+        return new Response(JSON.stringify(flaggedInv), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: { code: "not_found", message: url } }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderDetail();
+
+    expect(await screen.findByTestId("attention-detail-evidence")).toBeInTheDocument();
+    expect(screen.getByText("Evidence gap")).toBeInTheDocument();
+    expect(screen.getAllByText(/wallet_row_undefined/).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("fresh-read-outcome")).toHaveTextContent(
+      "skipped:wallet_row_undefined",
+    );
+    expect(screen.getByText(/Attention required/i)).toBeInTheDocument();
+  });
+
 
   it("renders lifecycle and honest absent fields for partial inventory", async () => {
     vi.stubGlobal(

@@ -904,8 +904,10 @@ async function openAttention(
     attentionEpisode: Number(existing.attention_episode),
     eventAppended: false,
     failedPredicates: failed,
-    // Prefer the just-built detail when this tick re-evaluated predicates; fall back
-    // to whatever is already durable when the episode was held without rewrite.
+    // In-process detail from this tick's predicate re-eval. Not written to
+    // operations.attention_detail on the held path (only OPEN / ESCALATE write).
+    // Legacy parked rows therefore keep open-time detail until escalation or
+    // operator recovery — see docs/operations/attention-triage.md (ZTR-1285).
     attentionDetail: detail,
     walletStillPinned: true,
   };

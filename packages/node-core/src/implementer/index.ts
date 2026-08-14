@@ -58,10 +58,3 @@ export {
   type IntegrationRequestStoreErrorCode,
 } from "./integration-requests.js";
 
-export {
-  resolveEffectiveFundingWallet,
-  toFundingWalletWireFields,
-  type EffectiveFundingWallet,
-  type FundingWalletPin,
-} from "./resolve-effective-funding-wallet.js";
-

@@ -659,8 +659,12 @@ describe("ZTR-1273 composition scenarios (assign + top-up)", () => {
     expect(out.move).not.toBeNull();
     expect(out.move!.sourceWalletId).toBe(hub.id);
     expect(out.move!.destinationWalletId).toBe(worker.id);
+    // Node-owned top-up hop: NODE_VERIFIED so landing releases leases without implementer ACK.
+    expect(out.move!.verificationMode).toBe("NODE_VERIFIED");
     expect(out.send.sourceWalletId).toBe(worker.id);
     expect(out.send.referencesOperationId).toBe(out.move!.operationId);
+    // Client omitted mode → send stays INDEPENDENT (implementer chooses SEND verification).
+    expect(out.send.verificationMode).toBe("INDEPENDENT");
   });
 
   it("S2: worker pre-funded SEND_ONLY → no MOVE", async () => {

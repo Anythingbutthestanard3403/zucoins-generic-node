@@ -24,6 +24,9 @@
 //    auto-approve gate on top-up readiness). Same-group continuous transfer is not used
 //    (worker cannot hold MOVE_DESTINATION and SEND_SOURCE together under one-in-flight).
 // 5. Response source_wallet_id is always the sender/worker, never W (attribution).
+// 6. Top-up MOVE is always NODE_VERIFIED (node-owned hop). Landing releases MOVE_* leases
+//    in the same TX as INTERNAL_MOVE_LANDED — implementer verification-complete is never
+//    required for the top-up. The external SEND still carries the client's verification_mode.
 //
 // Auto-approve / claim-and-observe MUST call assertSendTopUpReady (or the SQL probe)
 // before advancing a send that references a MOVE_INTERNAL — policy still evaluates only
@@ -354,7 +357,10 @@ export interface AssignAndTopUpRequest {
    * undefined preserves pre-1289 multi-hub behaviour (funding pin unset).
    */
   readonly fundingWalletId?: string | null;
-  /** Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend. */
+  /**
+   * Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend
+   * only. Top-up MOVE_INTERNAL is always NODE_VERIFIED (node-owned); never inherits this.
+   */
   readonly verificationMode?: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
@@ -916,6 +922,8 @@ export async function assignAndTopUpExternalSend(
     }
     const moveKey =
       (deps.moveIdempotencyKeyFor ?? defaultMoveIdempotencyKey)(request.idempotencyKey);
+    // Node-owned internal top-up: NODE_VERIFIED so money-workers release both MOVE_*
+    // leases on land (ZTR-1304). Not implementer verification — skip allow_node_verified.
     const moveOutcome: MoveCreateOutcome = await createInternalMove(
       deps.moveStore,
       {
@@ -926,8 +934,13 @@ export async function assignAndTopUpExternalSend(
         amountZkz: plan.funding.shortfallZkz,
         clientReference: request.clientReference,
         idempotencyKey: moveKey,
+        verificationMode: "NODE_VERIFIED",
       },
-      { generateId: deps.generateId, now: deps.now },
+      {
+        generateId: deps.generateId,
+        now: deps.now,
+        skipNodeVerifiedPolicyGate: true,
+      },
     );
     if (moveOutcome.outcome === "REJECTED") {
       // Funding-W path: map MOVE failures to insufficient_funding_wallet (no silent hub).

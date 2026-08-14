@@ -443,6 +443,13 @@ export interface MoveCreateConfig {
    * (fail closed) — NODE_VERIFIED is never silently admitted.
    */
   readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
+  /**
+   * Node-owned composition hops (assign+top-up internal MOVE) force NODE_VERIFIED so
+   * custody closes at landing without an implementer verification-complete. That path
+   * is not an implementer-chosen mode, so it must not require ops.allow_node_verified.
+   * Public POST /v1/internal-moves never sets this — fail-closed policy still applies.
+   */
+  readonly skipNodeVerifiedPolicyGate?: boolean;
 }
 
 export async function createInternalMove(
@@ -484,7 +491,8 @@ export async function createInternalMove(
   }
 
   // New admit only: fail-closed NODE_VERIFIED gate (never silent-downgrade).
-  if (verificationMode === "NODE_VERIFIED") {
+  // Node-owned top-up hops skip the implementer policy — see skipNodeVerifiedPolicyGate.
+  if (verificationMode === "NODE_VERIFIED" && config.skipNodeVerifiedPolicyGate !== true) {
     const policyDoc = await policy.getPolicy();
     const modeAdmit = admitVerificationMode(
       verificationMode,

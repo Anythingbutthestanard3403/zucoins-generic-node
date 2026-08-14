@@ -89,7 +89,7 @@ export const ROUTE_POLICY_CONCERN_MANIFEST = defineConcernManifest({
   goldenRefs: [
     {
       path: "src/route-policy/gen/route-policy.json",
-      sha256: "ecd9f84b548288f39b1904b880cb87c6d66523eaa2d060bbf12da123f89f1bce",
+      sha256: "931db1f4fb1b01de1398c8f498cedbdfa8328a1b074788c185c301024ae26daf",
     },
   ],
   scanRules: [

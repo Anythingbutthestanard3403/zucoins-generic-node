@@ -3,8 +3,9 @@
  *
  * The discovery endpoint response shape. `GET /.well-known/zupay-node` is public and returns
  * node identity, API version, supported operation types, event-signing public keys,
- * expected-artifact public keys, canonical-suite versions, and key validity intervals.
- * The `zupay` literal is intentionally retained.
+ * expected-artifact public keys, canonical-suite versions, key validity intervals, and
+ * the node-default funding wallet pin (ZTR-1288). Unset funding fields are explicit null
+ * — never a silent worker/send-key substitute. The `zupay` literal is intentionally retained.
  */
 
 /** The discovery endpoint path. */
@@ -19,6 +20,8 @@ export const DISCOVERY_RESPONSE_FIELDS = [
   "expected_artifact_public_keys",
   "canonical_suite_versions",
   "key_validity_intervals",
+  "funding_wallet_id",
+  "funding_wallet_public_key",
 ] as const;
 
 /** Properties the discovery endpoint must NOT expose. */

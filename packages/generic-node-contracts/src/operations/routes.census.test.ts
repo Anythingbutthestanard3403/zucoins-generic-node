@@ -73,6 +73,7 @@ const FROZEN_PUBLIC_ROUTES: readonly RouteEntry[] = [
   },
   { method: "POST", path: "/v1/integration-requests", authMode: "public" },
   { method: "GET", path: "/v1/integration-requests/:id", authMode: "public" },
+  { method: "GET", path: "/v1/implementer/identity", authMode: "implementer_bearer" },
   { method: "GET", path: "/.well-known/zupay-node", authMode: "public" },
   { method: "GET", path: "/health", authMode: "public" },
 ];

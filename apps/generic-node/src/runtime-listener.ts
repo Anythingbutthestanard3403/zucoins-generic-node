@@ -23,6 +23,8 @@ import {
   CachedDbProbe,
   consumeOriginRelayAttempt,
   createDestinationsRouter,
+  createImplementerIdentityRouter,
+  type ImplementerIdentityLoaders,
   createIntegrationRequestRouter,
   type PublicIntegrationRequestStore,
   createOperationRouter,
@@ -185,6 +187,11 @@ export interface NodeRuntimeListenerDeps {
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;
   readonly discoveryDocument?: WellKnownDeps["buildDocument"];
+  /**
+   * Loaders for GET /v1/implementer/identity (ZTR-1288). When set with
+   * operationAuth, mounts the bearer-scoped funding pin endpoint.
+   */
+  readonly implementerIdentityLoaders?: ImplementerIdentityLoaders;
   /**
    * Embedding-site origins allowed to frame GET /embed/:token (embed CSP
    * frame-ancestors). Empty/omit → 'self' only. Co-located with discovery
@@ -596,6 +603,7 @@ export function runtimeMountedRouteKeys(opts: {
       "GET /admin/v1/operations/needs-attention",
       "GET /admin/v1/operations/:operation_id/recovery",
       "POST /admin/v1/operations/:operation_id/recovery-actions",
+      "GET /v1/implementer/identity",
       "GET /.well-known/zupay-node",
       "POST /v1/integration-requests",
       "GET /v1/integration-requests/:id",
@@ -656,6 +664,16 @@ export function createNodeRuntimeListener(
           destinationService: deps.destinationService,
           nodeId: deps.nodeId as never,
           newRequestId,
+        })
+      : null;
+
+  const implementerIdentityRouter =
+    deps.implementerIdentityLoaders !== undefined
+      ? createImplementerIdentityRouter({
+          store: operationStore,
+          auth: operationAuth,
+          newRequestId,
+          loaders: deps.implementerIdentityLoaders,
         })
       : null;
 
@@ -991,6 +1009,12 @@ export function createNodeRuntimeListener(
           }
         }
       })();
+      return;
+    }
+
+    // Implementer identity / funding pin (ZTR-1288)
+    if (pathname === "/v1/implementer/identity" && implementerIdentityRouter !== null) {
+      void handleJsonRoute(implementerIdentityRouter, newRequestId, logger, request, response);
       return;
     }
 

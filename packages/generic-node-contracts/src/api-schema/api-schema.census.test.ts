@@ -370,8 +370,8 @@ describe("the crypto-goldens concern.2 discovery endpoint census", () => {
     expect(DISCOVERY_PATH).toBe("/.well-known/zupay-node");
   });
 
-  it("has exactly 7 response fields", () => {
-    expect(DISCOVERY_RESPONSE_FIELDS).toHaveLength(7);
+  it("has exactly 9 response fields (includes funding wallet pin ZTR-1288)", () => {
+    expect(DISCOVERY_RESPONSE_FIELDS).toHaveLength(9);
   });
 
   it("has exactly 5 exclusions", () => {
@@ -380,16 +380,16 @@ describe("the crypto-goldens concern.2 discovery endpoint census", () => {
 });
 
 describe("the crypto-goldens concern.2 route census", () => {
-  it("has exactly 19 public routes", () => {
-    expect(PUBLIC_ROUTES).toHaveLength(19);
+  it("has exactly 20 public routes", () => {
+    expect(PUBLIC_ROUTES).toHaveLength(20);
   });
 
   it("has exactly 8 admin routes", () => {
     expect(ADMIN_ROUTES).toHaveLength(8);
   });
 
-  it("has exactly 27 total active routes", () => {
-    expect(PUBLIC_ROUTES.length + ADMIN_ROUTES.length).toBe(27);
+  it("has exactly 28 total active routes", () => {
+    expect(PUBLIC_ROUTES.length + ADMIN_ROUTES.length).toBe(28);
   });
 
   it("has exactly 5 retired route patterns", () => {

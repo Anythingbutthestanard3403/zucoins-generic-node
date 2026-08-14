@@ -4,6 +4,9 @@
 //
 // Wire field names match packages/generic-node-contracts DISCOVERY_RESPONSE_FIELDS
 // (canon prose under snake_case normalisation).
+//
+// ZTR-1288: funding_wallet_id + funding_wallet_public_key are the node-default
+// funding pin (reserve/proof). Explicit null when unset — never a worker key.
 
 import { z } from "zod";
 import { UuidSchema, WalletPublicKeySchema, Rfc3339MsSchema } from "./scalars.js";
@@ -37,6 +40,9 @@ export const NodeIdentityDocumentSchema = z
     expected_artifact_public_keys: z.array(DiscoveryPublicKeySchema),
     canonical_suite_versions: z.array(z.string()),
     key_validity_intervals: z.array(KeyValidityIntervalSchema),
+    // ZTR-1288 — node-default funding pin; null when unset / unhealthy.
+    funding_wallet_id: UuidSchema.nullable(),
+    funding_wallet_public_key: WalletPublicKeySchema.nullable(),
   })
   .strict();
 
@@ -59,6 +65,12 @@ export interface DiscoveryConfig {
   readonly canonicalSuites: readonly string[];
   readonly eventSigningKeys: readonly DiscoveryKeyConfig[];
   readonly artifactSigningKeys: readonly DiscoveryKeyConfig[];
+  /**
+   * Node-default funding wallet pin (ZTR-1288). Omit or pass nulls when unset.
+   * Discovery never invents a worker/send key here.
+   */
+  readonly fundingWalletId?: string | null;
+  readonly fundingWalletPublicKey?: string | null;
 }
 
 export function buildNodeIdentityDocument(config: DiscoveryConfig): NodeIdentityDocument {
@@ -69,6 +81,19 @@ export function buildNodeIdentityDocument(config: DiscoveryConfig): NodeIdentity
     ...config.artifactSigningKeys.map(toInterval),
   ]);
 
+  const fundingId =
+    config.fundingWalletId !== undefined &&
+    config.fundingWalletId !== null &&
+    config.fundingWalletId.length > 0
+      ? config.fundingWalletId
+      : null;
+  const fundingKey =
+    config.fundingWalletPublicKey !== undefined &&
+    config.fundingWalletPublicKey !== null &&
+    config.fundingWalletPublicKey.length > 0
+      ? config.fundingWalletPublicKey
+      : null;
+
   const doc: NodeIdentityDocument = {
     node_id: config.nodeId,
     api_version: config.apiVersion,
@@ -77,6 +102,8 @@ export function buildNodeIdentityDocument(config: DiscoveryConfig): NodeIdentity
     expected_artifact_public_keys: artifactKeys,
     canonical_suite_versions: [...config.canonicalSuites],
     key_validity_intervals: intervals,
+    funding_wallet_id: fundingId,
+    funding_wallet_public_key: fundingKey,
   };
 
   // Fail closed if builder drift reorders / renames canon fields.

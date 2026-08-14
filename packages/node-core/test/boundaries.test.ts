@@ -57,7 +57,9 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // api/routes/operation-routes maps MoveAdmissionError for MOVE_INTERNAL.
   // Admin recovery inspection/actions live under operator/ and surface via api/.
   // api/routes/operation-routes maps PushSubscriptionRequiredError from push.
-  api: ["protocol", "core", "reporting", "move", "operator", "push"],
+  // GET /v1/implementer/identity resolves effective funding pin via implementer/
+  // (ZTR-1288); implementer imports only core — no cycle.
+  api: ["protocol", "core", "reporting", "move", "operator", "push", "implementer"],
   operator: ["protocol"],
   // Reporting wraps protocol/ed25519-verify for UTF-8 preimage convenience.
   reporting: ["protocol"],

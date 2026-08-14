@@ -257,6 +257,14 @@
     },
     {
       "method": "GET",
+      "path": "/v1/implementer/identity",
+      "authClass": "IMPLEMENTER_BEARER",
+      "scope": null,
+      "tenantScoped": true,
+      "idempotency": "NA"
+    },
+    {
+      "method": "GET",
       "path": "/.well-known/zupay-node",
       "authClass": "PUBLIC",
       "scope": null,

@@ -35,8 +35,10 @@ const FIXED_TIME = "2026-07-26T12:00:00.000Z";
 const VERSION = "0.0.0-fixture";
 const now = () => FIXED_TIME;
 
+// funding_wallet_id / funding_wallet_public_key are intentional public discovery fields (ZTR-1288).
+// Keep wallet_list / secret-class wallet tokens; do not match the public funding pin field names.
 const LEAK_PATTERN =
-  /password|supersecret|private_key|credential|wallet_|tenant_|connectionString|DATABASE_URL|ECONNREFUSED|stack|db\.internal|postgresql:\/\//i;
+  /password|supersecret|private_key|credential|wallet_list|wallet_secret|tenant_|connectionString|DATABASE_URL|ECONNREFUSED|stack|db\.internal|postgresql:\/\//i;
 
 function fullyStamped(state: NodeCoreReadinessState, leadership = true): void {
   state.markSchemaMigrated();
@@ -647,10 +649,14 @@ describe("cross-cutting — no sensitive leak under any fault condition", () => 
       "canonical_suite_versions",
       "event_signing_public_keys",
       "expected_artifact_public_keys",
+      "funding_wallet_id",
+      "funding_wallet_public_key",
       "key_validity_intervals",
       "node_id",
       "supported_operation_types",
     ]);
+    expect(doc.funding_wallet_id).toBeNull();
+    expect(doc.funding_wallet_public_key).toBeNull();
   });
 
   it("liveness body is exactly {status, version, timestamp}", () => {

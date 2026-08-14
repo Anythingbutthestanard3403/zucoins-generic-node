@@ -777,6 +777,32 @@ paths:
         - IMPLEMENTER_BEARER
       x-zupay-scope: "send:read"
       x-zupay-idempotency: NA
+  /v1/implementer/identity:
+    get:
+      tags:
+        - Operations
+      operationId: getV1ImplementerIdentity
+      summary: GET /v1/implementer/identity
+      security:
+        - implementerBearer: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      x-zupay-auth-classes:
+        - IMPLEMENTER_BEARER
+      x-zupay-scope: null
+      x-zupay-idempotency: NA
   /v1/integration-requests:
     post:
       tags:
@@ -1774,6 +1800,8 @@ components:
         - expected_artifact_public_keys
         - canonical_suite_versions
         - key_validity_intervals
+        - funding_wallet_id
+        - funding_wallet_public_key
       properties:
         node_id:
           type: string
@@ -1804,6 +1832,15 @@ components:
           type: array
           items:
             type: object
+        funding_wallet_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        funding_wallet_public_key:
+          type:
+            - string
+            - "null"
     LivenessResponse:
       type: object
       additionalProperties: false
@@ -1965,7 +2002,7 @@ x-zupay-frozen:
     - "/v1/refunds*"
     - "/admin/v1/drains*"
   retired_routes_non_path_category: any import endpoint
-  public_route_count: 19
+  public_route_count: 20
   admin_route_count: 8
   money_moving_create_paths:
     - /v1/receives

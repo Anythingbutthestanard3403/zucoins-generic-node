@@ -521,3 +521,11 @@ export {
   type HardenedServerConfig,
   type HardenedServerOverrides,
 } from "./transport-hardening.js";
+
+export {
+  createImplementerIdentityRouter,
+  type ImplementerIdentityRouter,
+  type ImplementerIdentityRouterDeps,
+  type ImplementerIdentityLoaders,
+} from "./implementer-identity-router.js";
+

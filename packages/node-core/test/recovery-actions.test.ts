@@ -499,6 +499,34 @@ describe("fresh evaluation under locks", () => {
     expect(denied.status).toBe("rejected");
   });
 
+  it("rejects RETRY_OBSERVATION on attention-parked EXPIRED receive (ZTR-1283)", async () => {
+    // receiveAllFive is EXPIRED + attention_required — RETRY must not be permitted
+    // (derivePermittedActions) and planRecoveryEffect must also fail closed.
+    const parked = receiveAllFive();
+    expect(derivePermittedActions(parked).permittedActions).not.toContain("RETRY_OBSERVATION");
+
+    const planned = planRecoveryEffect("RETRY_OBSERVATION", parked, null);
+    expect(planned.ok).toBe(false);
+    if (!planned.ok) {
+      expect(planned.reason).toBe("predicate_failed");
+      expect(planned.detail).toBe("expiry_parked_receive_no_retry");
+    }
+
+    const store = new MemoryRecoveryStore(parked);
+    const out = await executeRecoveryAction(store, OP, req("RETRY_OBSERVATION"));
+    expect(out.status).toBe("rejected");
+    if (out.status === "rejected") {
+      expect(out.reason).toBe("action_not_permitted");
+    }
+
+    // Non-expiry RETRY still plans and executes.
+    const sendRetry = planRecoveryEffect("RETRY_OBSERVATION", baseSend(), null);
+    expect(sendRetry.ok).toBe(true);
+    const sendStore = new MemoryRecoveryStore(baseSend());
+    const sendOut = await executeRecoveryAction(sendStore, OP, req("RETRY_OBSERVATION"));
+    expect(sendOut.status).toBe("ok");
+  });
+
   it("CLOSE_NEVER_STARTED re-proves five negatives under lock", async () => {
     const clean = baseSend({
       status: "APPROVED",

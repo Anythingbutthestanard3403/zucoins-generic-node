@@ -251,8 +251,23 @@ export function planRecoveryEffect(
   }
 
   switch (action) {
-    case "RETRY_OBSERVATION":
+    case "RETRY_OBSERVATION": {
+      // Defence-in-depth mirror of derivePermittedActions (ZTR-1283): expiry-parked
+      // receives cannot usefully retry — effect is row_version-only and the sweep
+      // will not re-pick attention_required rows.
+      if (
+        facts.kind === "RECEIVE_EXTERNAL" &&
+        facts.status === "EXPIRED" &&
+        facts.attentionRequired
+      ) {
+        return {
+          ok: false,
+          reason: "predicate_failed",
+          detail: "expiry_parked_receive_no_retry",
+        };
+      }
       return { ok: true, effect: { kind: "RETRY_OBSERVATION" } };
+    }
 
     case "REDELIVER_EXACT_PARTIAL": {
       if (facts.kind !== "SEND_EXTERNAL" || facts.send === null || !facts.send.hasDurablePartial) {

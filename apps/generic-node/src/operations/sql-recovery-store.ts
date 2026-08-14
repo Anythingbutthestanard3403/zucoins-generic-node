@@ -128,8 +128,9 @@ const SQL_STORE_IDEMPOTENCY = `
 // braces so landed ghosts already in the DB disappear without a second operator
 // action. EXPIRED / REJECTED are NOT excluded here: attention-parked expiry and
 // rejection still need operator recovery (RELEASE_EXPIRED_RECEIVE /
-// RETRY_OBSERVATION / ACKNOWLEDGE_KEEP_PINNED). Rows with attention cleared
-// stay out via the attention_required / NEEDS_ATTENTION predicate above.
+// ACKNOWLEDGE_KEEP_PINNED / QUARANTINE_WALLETS; RETRY_OBSERVATION is suppressed
+// for EXPIRED receives per ZTR-1283). Rows with attention cleared stay out via
+// the attention_required / NEEDS_ATTENTION predicate above.
 const SQL_LIST_NEEDS_ATTENTION = `
   SELECT id::text AS operation_id, kind::text AS kind, status::text AS status,
          attention_required, attention_reason, attention_detail,

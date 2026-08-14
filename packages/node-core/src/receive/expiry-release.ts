@@ -1512,8 +1512,10 @@ async function commitRelease(
 // (ZTR-1249). EXPIRED + receiver still assigned stays in the scan so lease
 // release can finish. Attention-parked rows (`attention_required = true`) are
 // excluded (ZTR-1277): each candidate may cost a live gateway fresh-head read,
-// and parked rows cannot progress until operator RETRY_OBSERVATION /
-// RELEASE_EXPIRED_RECEIVE or attention retraction — re-scanning them only
+// and parked rows cannot progress until operator RELEASE_EXPIRED_RECEIVE
+// (when the five predicates hold), quarantine, or attention retraction —
+// RETRY_OBSERVATION is deliberately not offered on EXPIRED attention-parked
+// receives (ZTR-1283; row_version-only no-op). Re-scanning parked rows only
 // hammers the gateway and bloats gateway_observations. After retraction the
 // flag clears and the row naturally rejoins. The service itself re-derives
 // every predicate under SERIALIZABLE isolation; this scan is selection only.

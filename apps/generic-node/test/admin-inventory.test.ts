@@ -137,6 +137,7 @@ function inventorySeed() {
           terminal_at: null,
           expiry_unix_time_secs: null,
           destination_address: null,
+          verification_mode: "INDEPENDENT",
         },
         detail: {
           source_wallet_id: null,
@@ -164,6 +165,7 @@ function inventorySeed() {
           terminal_at: null,
           expiry_unix_time_secs: null,
           destination_address: SEND_DESTINATION_ADDRESS,
+          verification_mode: "INDEPENDENT",
         },
       },
     ],
@@ -628,11 +630,15 @@ describe("admin inventory HTTP (contract)", () => {
 
     expect(texts).toHaveLength(1);
     expect(texts[0]!).toContain("o.destination_address");
+    expect(texts[0]!).toContain("o.verification_mode");
     // Straight off `operations o` — no join added to the scanning read.
     expect(texts[0]!).not.toContain("JOIN");
 
     expect(page.data[0]!.destination_address).toBe(SEND_DESTINATION_ADDRESS);
     expect(page.data[1]!.destination_address).toBeNull();
+    // ZTR-1305: mapper defaults missing mode to INDEPENDENT.
+    expect(page.data[0]!.verification_mode).toBe("INDEPENDENT");
+    expect(page.data[1]!.verification_mode).toBe("INDEPENDENT");
   });
 
   it("D3: wallet inventory allowlist is custody view + observed_balance + holding op (shared contracts)", () => {

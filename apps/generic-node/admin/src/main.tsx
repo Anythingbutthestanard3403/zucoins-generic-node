@@ -63,6 +63,11 @@ const AutoApprovePolicyPage = lazy(() =>
     default: m.AutoApprovePolicyPage,
   })),
 );
+const AllowNodeVerifiedPolicyPage = lazy(() =>
+  import("./pages/verification-mode/AllowNodeVerifiedPolicyPage.js").then((m) => ({
+    default: m.AllowNodeVerifiedPolicyPage,
+  })),
+);
 const ReportingKeysPage = lazy(() => import("./pages/reporting-keys/ReportingKeysPage.js").then((m) => ({ default: m.ReportingKeysPage })));
 const LabReceivePage = lazy(() => import("./pages/lab/LabReceivePage.js").then((m) => ({ default: m.LabReceivePage })));
 const IntegrationPage = lazy(() => import("./pages/integration/IntegrationPage.js").then((m) => ({ default: m.IntegrationPage })));
@@ -312,6 +317,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/api-keys" element={<ApiKeysPage />} />
                   <Route path="/integrations" element={<IntegrationsPage />} />
                   <Route path="/auto-approve" element={<AutoApprovePolicyPage />} />
+                  <Route path="/verification-mode" element={<AllowNodeVerifiedPolicyPage />} />
                   <Route path="/devices" element={<DevicesPage />} />
                   <Route path="/devices/enrol" element={<DevicesPage />} />
                   <Route path="/reporting-keys" element={<ReportingKeysPage />} />

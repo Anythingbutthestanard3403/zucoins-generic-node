@@ -275,7 +275,11 @@ export function createMemoryAdminInventoryStore(
         implementer_id: "00000000-0000-4000-8000-000000000000",
         client_reference: null,
       };
-      return { ...found.list, ...extra };
+      return {
+        ...found.list,
+        verification_mode: found.list.verification_mode ?? ("INDEPENDENT" as const),
+        ...extra,
+      };
     },
 
     async listDestinations(nodeId, filter) {
@@ -563,7 +567,8 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
                 o.attention_required, o.attention_reason,
                 o.created_at, o.updated_at, o.terminal_at,
                 o.expiry_unix_time_secs,
-                o.destination_address
+                o.destination_address,
+                o.verification_mode
            FROM operations o
           WHERE ${where.join(" AND ")}
           ORDER BY o.created_at DESC, o.id DESC -- contract-allow:order:frozen structural vocabulary
@@ -583,7 +588,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
                 o.source_wallet_id, o.receiver_wallet_id, o.destination_id,
                 o.destination_address, o.after_landing, o.after_landing_destination_id,
                 o.formation_state, o.verification_verdict, o.implementer_id,
-                o.client_reference
+                o.client_reference, o.verification_mode
            FROM operations o
           WHERE o.node_id = $1 AND o.id = $2::uuid
           LIMIT 1`,
@@ -715,6 +720,12 @@ export async function loadObservedBalance(
 export const OBSERVED_BALANCE_SQL_FRAGMENT = "FROM gateway_observations";
 
 function mapOpList(row: Record<string, unknown>): OperationInventoryListItem {
+  const modeRaw =
+    row.verification_mode === null || row.verification_mode === undefined
+      ? "INDEPENDENT"
+      : String(row.verification_mode);
+  const verification_mode =
+    modeRaw === "NODE_VERIFIED" ? ("NODE_VERIFIED" as const) : ("INDEPENDENT" as const);
   return {
     operation_id: String(row.id),
     operation_type: row.kind as InventoryOperationKind,
@@ -737,6 +748,8 @@ function mapOpList(row: Record<string, unknown>): OperationInventoryListItem {
     // Summary-row field: the operator scanning view renders a destination per row, so the
     // list SELECT above must keep projecting it (admin-inventory.test.ts pins both).
     destination_address: row.destination_address == null ? null : String(row.destination_address),
+    // ZTR-1305: admission-time mode badge authority for list + detail.
+    verification_mode,
   };
 }
 

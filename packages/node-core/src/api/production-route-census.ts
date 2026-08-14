@@ -149,6 +149,24 @@ export const LIVE_AUTO_APPROVE_POLICY_ROUTES = Object.freeze([
 ] as const);
 
 /**
+ * Live allow-node-verified policy surface (ZTR-1305). Not in ROUTE_POLICIES;
+ * mounted on the admin dispatcher (session for GET; session+CSRF+fresh TOTP for POST).
+ * Operator-only writer of ops.allow_node_verified.
+ */
+export const LIVE_ALLOW_NODE_VERIFIED_POLICY_ROUTES = Object.freeze([
+  {
+    method: "GET" as const,
+    path: "/admin/v1/allow-node-verified-policy",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "POST" as const,
+    path: "/admin/v1/allow-node-verified-policy",
+    authMode: "operator_session_totp" as const,
+  },
+] as const);
+
+/**
  * Live integration-request operator surface (ZTR-1240). Not in ROUTE_POLICIES;
  * mounted on the admin dispatcher (session GET; session+CSRF+fresh TOTP for
  * approve/decline). Approve creates implementer + binds auto-approve rule.

@@ -51,7 +51,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // Observation capture may surface through api routes and data ports.
   observation: ["protocol"],
   verifier: ["protocol"],
-  core: ["protocol", "data", "gateway", "verifier"],
+  // ZTR-1304: NODE_VERIFIED move landing release mints lease proofs via leases/.
+  core: ["protocol", "data", "gateway", "verifier", "leases"],
   // GET /v1/events binds the reporting credential pipeline to the
   // implementer-scoped read-service; api may import reporting for that binder only.
   // api/routes/operation-routes maps MoveAdmissionError for MOVE_INTERNAL.
@@ -95,7 +96,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // Landing store adds "event-log": the landing store appends the signed dual-chain terminal
   // event inside the landing transaction. event-log imports only protocol — no cycle.
   // ZTR-1301: createExternalSend gates NODE_VERIFIED via verification policy port.
-  send: ["protocol", "device", "verifier", "reporting", "observation", "workers", "data", "proof", "core", "totp", "event-log", "verification"],
+  // ZTR-1304: SEND NODE_VERIFIED landing release uses leases repository.
+  send: ["protocol", "device", "verifier", "reporting", "observation", "workers", "data", "proof", "core", "totp", "event-log", "verification", "leases"],
   // MOVE_INTERNAL admission: amount/UUID parsers live in protocol.
   // dual-lease acquisition drives the one canonical lease repository rather than
   // re-sorting or re-inserting wallet_active_leases itself. The live point-read reuses

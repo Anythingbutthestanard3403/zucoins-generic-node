@@ -157,7 +157,8 @@ const SQL_LIST_NEEDS_ATTENTION = `
          row_version::int AS row_version,
          t0_observation_id::text AS t0_observation_id,
          terminal_observation_id::text AS terminal_observation_id,
-         expiry_unix_time_secs, formation_state::text AS formation_state
+         expiry_unix_time_secs, formation_state::text AS formation_state,
+         verification_mode::text AS verification_mode
     FROM operations
    WHERE ${SQL_NEEDS_ATTENTION_WHERE}
      AND (
@@ -183,7 +184,8 @@ const SQL_LOAD_RECOVERY_FACTS = `
          o.t0_observation_id::text AS t0_observation_id,
          o.terminal_observation_id::text AS terminal_observation_id,
          o.verification_material_available_until,
-         o.expiry_unix_time_secs, o.formation_state::text AS formation_state
+         o.expiry_unix_time_secs, o.formation_state::text AS formation_state,
+         o.verification_mode::text AS verification_mode
     FROM operations o
    WHERE o.id = $1::uuid
 `;
@@ -570,6 +572,7 @@ export function createSqlRecoveryInspectionStore(
           attention_detail: string | null; row_version: number;
           t0_observation_id: string | null; terminal_observation_id: string | null;
           expiry_unix_time_secs: string | null; formation_state: string | null;
+          verification_mode: string | null;
         }>(SQL_LIST_NEEDS_ATTENTION, [kind, after, limit + 1]),
         pool.query<{ total: number }>(SQL_COUNT_NEEDS_ATTENTION, [kind]),
       ]);
@@ -584,6 +587,7 @@ export function createSqlRecoveryInspectionStore(
             terminalObservationId: r.terminal_observation_id,
             expiryUnixTimeSecs: r.expiry_unix_time_secs,
             formationState: r.formation_state,
+            verificationMode: r.verification_mode === "NODE_VERIFIED" ? "NODE_VERIFIED" : "INDEPENDENT",
           });
         if (f !== null) facts.push(f);
       }
@@ -1164,6 +1168,7 @@ async function loadRecoveryFactsById(
     t0_observation_id: string | null; terminal_observation_id: string | null;
     verification_material_available_until: string | null;
     expiry_unix_time_secs: string | null; formation_state: string | null;
+    verification_mode: string | null;
   }>(SQL_LOAD_RECOVERY_FACTS, [operationId]);
   const r = result.rows[0];
   if (r === undefined) return null;
@@ -1173,6 +1178,7 @@ async function loadRecoveryFactsById(
       terminalObservationId: r.terminal_observation_id,
       expiryUnixTimeSecs: r.expiry_unix_time_secs,
       formationState: r.formation_state,
+      verificationMode: r.verification_mode === "NODE_VERIFIED" ? "NODE_VERIFIED" : "INDEPENDENT",
     }, readFreshHead);
 }
 
@@ -1181,6 +1187,7 @@ interface RecoveryFactsRowExtra {
   readonly terminalObservationId: string | null;
   readonly expiryUnixTimeSecs: string | null;
   readonly formationState: string | null;
+  readonly verificationMode: "INDEPENDENT" | "NODE_VERIFIED";
 }
 
 async function loadRecoveryFactsFromRow(
@@ -1503,6 +1510,7 @@ async function loadRecoveryFactsFromRow(
     attentionRequired,
     attentionReason,
     attentionDetail,
+    verificationMode: extra.verificationMode,
     rowVersion,
     leaseEpoch: maxEpoch,
     heldLeases,

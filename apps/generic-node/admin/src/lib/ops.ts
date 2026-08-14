@@ -31,10 +31,13 @@ export interface NeedsAttentionListItem {
 export interface NeedsAttentionResponse {
   operations: readonly NeedsAttentionListItem[];
   summary: {
+    /** Full filtered-set size — badge authority; never page length (ZTR-1284). */
     total: number;
     by_classification: Readonly<Record<string, number>>;
     p0_invariant_breach: number;
   };
+  has_more: boolean;
+  next_cursor: string | null;
 }
 
 export const EMPTY_NEEDS_ATTENTION: NeedsAttentionResponse = {
@@ -44,4 +47,6 @@ export const EMPTY_NEEDS_ATTENTION: NeedsAttentionResponse = {
     by_classification: {},
     p0_invariant_breach: 0,
   },
+  has_more: false,
+  next_cursor: null,
 };

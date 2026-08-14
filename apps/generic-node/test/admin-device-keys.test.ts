@@ -127,7 +127,7 @@ function makeRouter(deviceStore: InMemoryDeviceKeyStore) {
       },
       deviceStore,
       recoveryStore: {
-        listNeedsAttention: async () => [],
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
         loadRecoveryFacts: async () => null,
         issueRecoveryNonce: async () => {
           throw new Error("unused");
@@ -202,7 +202,7 @@ function makeRouterWithEnrol(
       deviceRevocationSideEffects: new NoopDeviceRevocationSideEffects(),
       adminIdempotencyStore: new MemoryAdminIdempotencyStore(),
       recoveryStore: {
-        listNeedsAttention: async () => [],
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
         loadRecoveryFacts: async () => null,
         issueRecoveryNonce: async () => {
           throw new Error("unused");

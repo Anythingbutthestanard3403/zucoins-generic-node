@@ -63,6 +63,8 @@ export {
 // Recovery inspection (read-only).
 export {
   FORBIDDEN_RECOVERY_ACTIONS,
+  NEEDS_ATTENTION_DEFAULT_LIMIT,
+  NEEDS_ATTENTION_MAX_LIMIT,
   NEEDS_ATTENTION_PATH,
   NeedsAttentionQuerySchema,
   OPERATOR_RECOVERY_ACTIONS,
@@ -79,6 +81,7 @@ export {
   type NeedsAttentionListItem,
   type NeedsAttentionQuery,
   type NeedsAttentionResponse,
+  type NeedsAttentionStorePage,
   type OperatorRecoveryAction,
   type RecoveryClassification,
   type RecoveryDetailResponse,

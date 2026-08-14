@@ -77,7 +77,7 @@ function emptyAttention() {
   return new Response(
     JSON.stringify({
       operations: [],
-      summary: { total: 0, by_classification: {}, p0_invariant_breach: 0 },
+      summary: { total: 0, by_classification: {}, p0_invariant_breach: 0  }, has_more: false, next_cursor: null,
     }),
     { status: 200 },
   );
@@ -334,6 +334,8 @@ describe("ApproveInboxPage", () => {
                 },
               ],
               summary: { total: 1, by_classification: { INDETERMINATE: 1 }, p0_invariant_breach: 0 },
+              has_more: false,
+              next_cursor: null,
             }),
             { status: 200 },
           );

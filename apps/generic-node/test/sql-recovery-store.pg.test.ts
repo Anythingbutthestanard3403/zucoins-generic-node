@@ -1180,9 +1180,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     const listed = await createSqlRecoveryInspectionStore(pool, countingHead)
       .listNeedsAttention({ limit: 200 });
 
-    expect(listed.map((f) => f.operationId)).toContain(operationId);
+    expect(listed.items.map((f) => f.operationId)).toContain(operationId);
+    expect(listed.total).toBeGreaterThanOrEqual(1);
     expect(headReads).toBe(0);
-    const send = listed.find((f) => f.operationId === operationId)!.send!;
+    const send = listed.items.find((f) => f.operationId === operationId)!.send!;
     expect(send.protocolExpiredPlusMargin).toBe(true);
     expect(send.freshHeadEqualsSourceT0).toBe(false);
     expect(send.completePathExclusionProved).toBe(false);
@@ -1535,9 +1536,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     const destinationId = await insertDestination(await insertWallet());
     const operationId = await seedMoveOperation({ status: "NEEDS_ATTENTION", attentionReason: "listed", sourceWalletId, destinationId });
 
-    const facts = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const page = await inspectionStore.listNeedsAttention({ limit: 200 });
 
-    expect(facts.map((f) => f.operationId)).toContain(operationId);
+    expect(page.items.map((f) => f.operationId)).toContain(operationId);
+    expect(page.total).toBeGreaterThanOrEqual(1);
   });
 
   it("listNeedsAttention excludes landed terminals even with sticky attention_required (ZTR-1250)", async () => {
@@ -1564,8 +1566,8 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       destinationId: await insertDestination(await insertWallet()),
     });
 
-    const facts = await inspectionStore.listNeedsAttention({ limit: 200 });
-    const ids = facts.map((f) => f.operationId);
+    const page = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const ids = page.items.map((f) => f.operationId);
     expect(ids).toContain(openId);
     expect(ids).not.toContain(stickyId);
   });
@@ -1623,16 +1625,16 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       [stickyLandedId],
     );
 
-    const facts = await inspectionStore.listNeedsAttention({ limit: 200 });
-    const ids = facts.map((f) => f.operationId);
+    const page = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const ids = page.items.map((f) => f.operationId);
     expect(ids).toContain(expiredId);
     expect(ids).toContain(rejectedId);
     expect(ids).not.toContain(clearedExpiredId);
     expect(ids).not.toContain(clearedRejectedId);
     expect(ids).not.toContain(stickyLandedId);
 
-    const expiredRow = facts.find((f) => f.operationId === expiredId)!;
-    const rejectedRow = facts.find((f) => f.operationId === rejectedId)!;
+    const expiredRow = page.items.find((f) => f.operationId === expiredId)!;
+    const rejectedRow = page.items.find((f) => f.operationId === rejectedId)!;
     expect(expiredRow.status).toBe("EXPIRED");
     expect(expiredRow.attentionRequired).toBe(true);
     expect(rejectedRow.status).toBe("REJECTED");
@@ -1645,6 +1647,61 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(expiredActions).not.toContain("RETRY_OBSERVATION");
     expect(expiredActions).toContain("ACKNOWLEDGE_KEEP_PINNED");
     expect(rejectedActions).toContain("RETRY_OBSERVATION");
+  });
+
+  // ZTR-1284: keyset pages every parked row; summary.total is COUNT(*) not page length.
+  it("listNeedsAttention keyset pages and reports honest total (ZTR-1284)", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const sourceWalletId = await insertWallet();
+      const destinationId = await insertDestination(await insertWallet());
+      const operationId = await seedMoveOperation({
+        status: "NEEDS_ATTENTION",
+        attentionReason: `page-${i}`,
+        sourceWalletId,
+        destinationId,
+      });
+      // Distinct created_at so newest-first keyset is stable under parallel inserts.
+      await pool.query(
+        `UPDATE operations SET created_at = now() - ($2::int * interval '1 minute') WHERE id = $1::uuid`,
+        [operationId, i],
+      );
+      ids.push(operationId);
+    }
+
+    const page1 = await inspectionStore.listNeedsAttention({ limit: 2 });
+    expect(page1.items).toHaveLength(2);
+    expect(page1.total).toBeGreaterThanOrEqual(5);
+    expect(page1.has_more).toBe(true);
+    expect(page1.next_cursor).toBeTruthy();
+    expect(page1.total).not.toBe(page1.items.length);
+
+    const page2 = await inspectionStore.listNeedsAttention({
+      limit: 2,
+      after: page1.next_cursor!,
+    });
+    expect(page2.items).toHaveLength(2);
+    expect(page2.total).toBe(page1.total);
+    expect(page2.has_more).toBe(true);
+
+    const seen = new Set([
+      ...page1.items.map((f) => f.operationId),
+      ...page2.items.map((f) => f.operationId),
+    ]);
+    // Walk remaining pages until exhausted — every seeded id must appear.
+    let cursor = page2.next_cursor;
+    let guard = 0;
+    while (cursor !== null && guard < 20) {
+      const next = await inspectionStore.listNeedsAttention({ limit: 2, after: cursor });
+      expect(next.total).toBe(page1.total);
+      for (const f of next.items) seen.add(f.operationId);
+      cursor = next.next_cursor;
+      if (!next.has_more) break;
+      guard += 1;
+    }
+    for (const id of ids) {
+      expect(seen.has(id), `seeded ${id} reachable via keyset`).toBe(true);
+    }
   });
 
   it("RELEASE_EXPIRED_RECEIVE releases via SqlReceiveExpiryReleaseService, unpins the wallet, and records dual proof rows", async () => {

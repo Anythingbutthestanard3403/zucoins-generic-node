@@ -171,7 +171,7 @@ function makeRouter(opts?: {
         `zp-op-push-auth-v1.test.${Buffer.from(auth, "utf8").toString("base64")}`,
     },
     recoveryStore: {
-      listNeedsAttention: async () => [],
+      listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
       issueRecoveryNonce: async () => {
         throw new Error("unused");

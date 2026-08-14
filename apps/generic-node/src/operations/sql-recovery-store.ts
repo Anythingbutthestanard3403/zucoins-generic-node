@@ -32,6 +32,8 @@ import {
   type RecoveryInspectionStore,
   type IssuedRecoveryNonce,
   type NeedsAttentionQuery,
+  type NeedsAttentionStorePage,
+  NEEDS_ATTENTION_DEFAULT_LIMIT,
   type EvidenceManifestEntry,
   type PathBaseline,
   type ReadFreshHead,
@@ -131,6 +133,21 @@ const SQL_STORE_IDEMPOTENCY = `
 // ACKNOWLEDGE_KEEP_PINNED / QUARANTINE_WALLETS; RETRY_OBSERVATION is suppressed
 // for EXPIRED receives per ZTR-1283). Rows with attention cleared stay out via
 // the attention_required / NEEDS_ATTENTION predicate above.
+//
+// Shared WHERE for list + COUNT. Newest-first keyset (created_at DESC, id DESC)
+// so fresh parks are never stuck behind a LIMIT of older rows. `after` is the
+// prior page's last operation_id (inventory-shaped next_cursor). Fetch limit+1
+// to compute has_more (ZTR-1284).
+const SQL_NEEDS_ATTENTION_WHERE = `
+  (attention_required = true OR status = 'NEEDS_ATTENTION')
+  AND status NOT IN (
+        'RECEIVE_LANDED',
+        'INTERNAL_MOVE_LANDED',
+        'EXTERNAL_SEND_LANDED'
+      )
+  AND ($1::text IS NULL OR kind::text = $1)
+`;
+
 const SQL_LIST_NEEDS_ATTENTION = `
   SELECT id::text AS operation_id, kind::text AS kind, status::text AS status,
          attention_required, attention_reason, attention_detail,
@@ -139,15 +156,21 @@ const SQL_LIST_NEEDS_ATTENTION = `
          terminal_observation_id::text AS terminal_observation_id,
          expiry_unix_time_secs, formation_state::text AS formation_state
     FROM operations
-   WHERE (attention_required = true OR status = 'NEEDS_ATTENTION')
-     AND status NOT IN (
-           'RECEIVE_LANDED',
-           'INTERNAL_MOVE_LANDED',
-           'EXTERNAL_SEND_LANDED'
+   WHERE ${SQL_NEEDS_ATTENTION_WHERE}
+     AND (
+           $2::uuid IS NULL
+           OR (created_at, id) < (
+                SELECT o2.created_at, o2.id FROM operations o2 WHERE o2.id = $2::uuid
+              )
          )
-     AND ($2::text IS NULL OR kind::text = $2)
-   ORDER BY created_at ASC -- contract-allow:order:frozen structural vocabulary
-   LIMIT $1
+   ORDER BY created_at DESC, id DESC -- contract-allow:order:frozen structural vocabulary
+   LIMIT $3
+`;
+
+const SQL_COUNT_NEEDS_ATTENTION = `
+  SELECT COUNT(*)::int AS total
+    FROM operations
+   WHERE ${SQL_NEEDS_ATTENTION_WHERE}
 `;
 
 const SQL_LOAD_RECOVERY_FACTS = `
@@ -519,8 +542,11 @@ export function createSqlRecoveryInspectionStore(
   return {
     // kind is bound into SQL before LIMIT (ZTR-1198). classification is derived at read
     // time by classifyRecovery (not a durable column), so it still filters in
-    // handleNeedsAttention after the page is truncated — a short page is possible when
+    // handleNeedsAttention after the page is loaded — a short page is possible when
     // classification is set. Follow-up: denormalize classification or over-fetch+repage.
+    //
+    // ZTR-1284: newest-first keyset (`after` = prior next_cursor) + COUNT(*) total so the
+    // badge is never silently capped at the page size. Fetch limit+1 for has_more.
     //
     // `readFreshHead` is deliberately NOT threaded into the listing. Every parked SEND in it
     // is past T2 + the aging margin with a durable partial by construction (that is what
@@ -530,17 +556,25 @@ export function createSqlRecoveryInspectionStore(
     // oracle belongs on the single-operation paths below, which is where an operator actually
     // decides an action; a listing that omits it is fail-closed (both predicates false), never
     // wrong in the permissive direction.
-    async listNeedsAttention(query: NeedsAttentionQuery): Promise<readonly RecoveryFacts[]> {
-      const limit = query.limit ?? 50;
-      const result = await pool.query<{
-        operation_id: string; kind: string; status: string;
-        attention_required: boolean; attention_reason: string | null;
-        attention_detail: string | null; row_version: number;
-        t0_observation_id: string | null; terminal_observation_id: string | null;
-        expiry_unix_time_secs: string | null; formation_state: string | null;
-      }>(SQL_LIST_NEEDS_ATTENTION, [limit, query.kind ?? null]);
+    async listNeedsAttention(query: NeedsAttentionQuery): Promise<NeedsAttentionStorePage> {
+      const limit = query.limit ?? NEEDS_ATTENTION_DEFAULT_LIMIT;
+      const kind = query.kind ?? null;
+      const after = query.after ?? null;
+      const [result, countResult] = await Promise.all([
+        pool.query<{
+          operation_id: string; kind: string; status: string;
+          attention_required: boolean; attention_reason: string | null;
+          attention_detail: string | null; row_version: number;
+          t0_observation_id: string | null; terminal_observation_id: string | null;
+          expiry_unix_time_secs: string | null; formation_state: string | null;
+        }>(SQL_LIST_NEEDS_ATTENTION, [kind, after, limit + 1]),
+        pool.query<{ total: number }>(SQL_COUNT_NEEDS_ATTENTION, [kind]),
+      ]);
+      const total = Number(countResult.rows[0]?.total ?? 0);
+      const hasMore = result.rows.length > limit;
+      const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows;
       const facts: RecoveryFacts[] = [];
-      for (const r of result.rows) {
+      for (const r of pageRows) {
         const f = await loadRecoveryFactsFromRow(pool, r.operation_id, r.kind, r.status,
           r.attention_required, r.attention_reason, r.attention_detail, r.row_version, {
             t0ObservationId: r.t0_observation_id,
@@ -550,7 +584,13 @@ export function createSqlRecoveryInspectionStore(
           });
         if (f !== null) facts.push(f);
       }
-      return facts;
+      const last = facts[facts.length - 1];
+      return {
+        items: facts,
+        total,
+        has_more: hasMore,
+        next_cursor: hasMore && last !== undefined ? last.operationId : null,
+      };
     },
 
     async loadRecoveryFacts(operationId: string): Promise<RecoveryFacts | null> {

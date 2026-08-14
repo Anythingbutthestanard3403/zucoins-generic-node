@@ -466,6 +466,8 @@ export {
 // recovery inspection handlers (read-only). Pure
 // classification symbols live on./operator (package barrel) to avoid TS2308.
 export {
+  NEEDS_ATTENTION_DEFAULT_LIMIT,
+  NEEDS_ATTENTION_MAX_LIMIT,
   NEEDS_ATTENTION_PATH,
   NeedsAttentionQuerySchema,
   RECOVERY_DETAIL_PATH,
@@ -476,6 +478,7 @@ export {
   type NeedsAttentionListItem,
   type NeedsAttentionQuery,
   type NeedsAttentionResponse,
+  type NeedsAttentionStorePage,
   type RecoveryDetailResponse,
   type RecoveryInspectionStore,
 } from "./recovery-inspection.js";

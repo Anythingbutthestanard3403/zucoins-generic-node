@@ -206,7 +206,7 @@ export function OverviewPage() {
   const packRows = packChecklistRowsForEnabled(loadEnabledPacks());
 
   const liveAttn = attentionQ.data?.live === true ? attentionQ.data.data : null;
-  const attentionCount = liveAttn?.summary.total ?? 0;
+  const attentionCount = liveAttn?.summary?.total ?? 0;
   const attentionLive = liveAttn?.operations ?? [];
   const haltErrored = haltQ.isError;
   const haltEngaged = !haltErrored && haltQ.data?.engaged === true;

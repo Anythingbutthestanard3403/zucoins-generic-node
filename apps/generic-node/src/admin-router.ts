@@ -6517,7 +6517,7 @@ export function createFailClosedAdminRouteDeps(base: {
     ...(base.secondDeviceEnrol !== undefined ? { secondDeviceEnrol: base.secondDeviceEnrol } : {}),
     ...(base.operatorPush !== undefined ? { operatorPush: base.operatorPush } : {}),
     recoveryStore: {
-      listNeedsAttention: async () => [],
+      listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
       issueRecoveryNonce: reject,
     },

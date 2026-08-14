@@ -122,10 +122,39 @@ class MemoryStore implements RecoveryInspectionStore {
   readonly nonces: string[] = [];
   constructor(private readonly byId: Map<string, RecoveryFacts>) {}
 
-  async listNeedsAttention(): Promise<readonly RecoveryFacts[]> {
-    return [...this.byId.values()].filter(
+  async listNeedsAttention(query: {
+    readonly limit?: number;
+    readonly after?: string;
+    readonly kind?: string;
+  } = {}): Promise<{
+    readonly items: readonly RecoveryFacts[];
+    readonly total: number;
+    readonly has_more: boolean;
+    readonly next_cursor: string | null;
+  }> {
+    let rows = [...this.byId.values()].filter(
       (f) => f.attentionRequired || f.status === "NEEDS_ATTENTION",
     );
+    if (query.kind !== undefined) {
+      rows = rows.filter((f) => f.kind === query.kind);
+    }
+    // Newest-first by operationId (fixtures use sequential UUIDs).
+    rows.sort((a, b) => (a.operationId < b.operationId ? 1 : a.operationId > b.operationId ? -1 : 0));
+    const total = rows.length;
+    if (query.after !== undefined) {
+      const idx = rows.findIndex((f) => f.operationId === query.after);
+      rows = idx >= 0 ? rows.slice(idx + 1) : [];
+    }
+    const limit = query.limit ?? 50;
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    const last = items[items.length - 1];
+    return {
+      items,
+      total,
+      has_more: hasMore,
+      next_cursor: hasMore && last !== undefined ? last.operationId : null,
+    };
   }
 
   async loadRecoveryFacts(operationId: string): Promise<RecoveryFacts | null> {
@@ -171,6 +200,15 @@ describe("NeedsAttentionQuerySchema", () => {
     const ceiling = NeedsAttentionQuerySchema.safeParse({ limit: "200" });
     expect(ceiling.success).toBe(true);
     if (ceiling.success) expect(ceiling.data.limit).toBe(200);
+    const withCursor = NeedsAttentionQuerySchema.safeParse({
+      after: "00000000-0000-4000-8000-000000000001",
+      limit: "25",
+    });
+    expect(withCursor.success).toBe(true);
+    if (withCursor.success) {
+      expect(withCursor.data.after).toBe("00000000-0000-4000-8000-000000000001");
+      expect(withCursor.data.limit).toBe(25);
+    }
   });
   it("rejects unknown fields and bad enums", () => {
     expect(NeedsAttentionQuerySchema.safeParse({ bog: 1 }).success).toBe(false);
@@ -181,6 +219,12 @@ describe("NeedsAttentionQuerySchema", () => {
     for (const limit of ["abc", "0", "-1", "201", "1.5", NaN]) {
       expect(NeedsAttentionQuerySchema.safeParse({ limit }).success, String(limit)).toBe(false);
     }
+  });
+  it("rejects non-uuid after cursor (ZTR-1284)", () => {
+    expect(NeedsAttentionQuerySchema.safeParse({ after: "not-a-uuid" }).success).toBe(false);
+    expect(NeedsAttentionQuerySchema.safeParse({ after: "ABCDEF00-0000-4000-8000-000000000001" }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -581,6 +625,8 @@ describe("handleNeedsAttention / handleGetRecovery", () => {
     const result = await handleNeedsAttention(store, {});
     expect(result.operations).toHaveLength(2);
     expect(result.summary.total).toBe(2);
+    expect(result.has_more).toBe(false);
+    expect(result.next_cursor).toBeNull();
     expect(result.summary.p0_invariant_breach).toBe(1);
     const breach = result.operations.find((o) => o.classification === "INVARIANT_BREACH");
     expect(breach?.severity).toBe("P0");
@@ -588,6 +634,46 @@ describe("handleNeedsAttention / handleGetRecovery", () => {
       "QUARANTINE_WALLETS",
       "ACKNOWLEDGE_KEEP_PINNED",
     ]);
+  });
+
+  it("summary.total is full set size when page is truncated (ZTR-1284)", async () => {
+    const byId = new Map<string, RecoveryFacts>();
+    for (let i = 1; i <= 5; i += 1) {
+      const id = `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
+      byId.set(id, baseFacts({ operationId: id }));
+    }
+    const store = new MemoryStore(byId);
+    const page1 = await handleNeedsAttention(store, { limit: 2 });
+    expect(page1.operations).toHaveLength(2);
+    expect(page1.summary.total).toBe(5);
+    expect(page1.has_more).toBe(true);
+    expect(page1.next_cursor).toBeTruthy();
+    // Page length must never become the badge authority.
+    expect(page1.summary.total).not.toBe(page1.operations.length);
+
+    const page2 = await handleNeedsAttention(store, {
+      limit: 2,
+      after: page1.next_cursor!,
+    });
+    expect(page2.operations).toHaveLength(2);
+    expect(page2.summary.total).toBe(5);
+    expect(page2.has_more).toBe(true);
+
+    const page3 = await handleNeedsAttention(store, {
+      limit: 2,
+      after: page2.next_cursor!,
+    });
+    expect(page3.operations).toHaveLength(1);
+    expect(page3.summary.total).toBe(5);
+    expect(page3.has_more).toBe(false);
+    expect(page3.next_cursor).toBeNull();
+
+    const seen = new Set([
+      ...page1.operations.map((o) => o.operation_id),
+      ...page2.operations.map((o) => o.operation_id),
+      ...page3.operations.map((o) => o.operation_id),
+    ]);
+    expect(seen.size).toBe(5);
   });
 
   it("detail returns classification, evidence, row_version, lease_epoch, diagnostics", async () => {

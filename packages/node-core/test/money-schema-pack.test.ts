@@ -424,12 +424,36 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(riskIdx).toBeGreaterThan(fundingIdx);
     expect(riskIdx).toBeGreaterThan(releaseIdx);
     expect(riskIdx).toBeGreaterThan(leaseIdx);
-    expect(riskIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[riskIdx]!.sql).toContain("OPERATOR_ACCEPTED_RISK");
     expect(files[riskIdx]!.sql).toContain("RELEASED_OPERATOR_ACCEPTED_RISK");
     expect(files[riskIdx]!.sql).toContain("RECEIVE_OPERATOR_ACCEPTED_RISK");
     expect(files[riskIdx]!.sql).toContain("operator-accepted-risk-release requires operations");
+  });
+
+  it("pack lands verification-mode after operator-accepted-risk-release (ZTR-1300)", () => {
+    const riskIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operator-accepted-risk-release");
+    const modeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-mode");
+    const opsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operations");
+    const recvIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("receive-admission");
+    const sendIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-external-create");
+    const settingsIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operational-stores");
+    const auditIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("audit-log");
+    expect(riskIdx).toBeGreaterThanOrEqual(0);
+    expect(modeIdx).toBeGreaterThan(riskIdx);
+    expect(modeIdx).toBeGreaterThan(opsIdx);
+    expect(modeIdx).toBeGreaterThan(recvIdx);
+    expect(modeIdx).toBeGreaterThan(sendIdx);
+    expect(modeIdx).toBeGreaterThan(settingsIdx);
+    expect(modeIdx).toBeGreaterThan(auditIdx);
+    expect(modeIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[modeIdx]!.sql).toContain("verification_mode");
+    expect(files[modeIdx]!.sql).toContain("INDEPENDENT");
+    expect(files[modeIdx]!.sql).toContain("NODE_VERIFIED");
+    expect(files[modeIdx]!.sql).toContain("RELEASED_NODE_VERIFIED");
+    expect(files[modeIdx]!.sql).toContain("verification-mode requires operations");
+    expect(files[modeIdx]!.sql).toContain("VERIFICATION_MODE_IMMUTABLE");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

@@ -70,6 +70,7 @@
     "vault.sql",
     "verification-access-windows.sql",
     "verification-acknowledgements.sql",
+    "verification-mode.sql",
     "verification-proofs.sql",
     "wallet-money-capability-lease-guard.sql",
     "wallet-money-capability.sql",

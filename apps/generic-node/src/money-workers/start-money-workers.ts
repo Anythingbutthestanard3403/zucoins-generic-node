@@ -33,6 +33,8 @@ import {
   commitAutoApproval,
   createMoneySignerBoundaryDeps,
   createSqlAutoApprovePolicy,
+  insertNodeGeneratedWalletWithPendingDestination,
+  deleteNodeGeneratedWalletMint,
   createSqlSignerAuditLog,
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   evaluateAutoApproveRule,
@@ -413,18 +415,15 @@ function createPoolMint(deps: {
     const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
     const walletId = randomUUID() as Uuid;
     try {
-      // Commit wallet on the pool (not the scale-up txn client) so vault.seal's
-      // separate connection can see wallet_id for FK (vault insert is not on txn).
-      await deps.pool.query(
-        `INSERT INTO wallets (
-           id, node_id, public_key, key_origin, state,
-           allow_external_receive, allow_external_send, allow_internal_move, money_mode
-         ) VALUES (
-           $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
-           true, true, true, 'FULL'
-         )`,
-        [walletId, deps.nodeId, publicKey],
-      );
+      // Commit wallet + PENDING dest on the pool (not the scale-up txn client)
+      // so vault.seal's separate connection can see wallet_id for FK (vault
+      // insert is not on txn). Dest row makes the worker blessable without a
+      // second mint.
+      await insertNodeGeneratedWalletWithPendingDestination(deps.pool, {
+        walletId,
+        nodeId: deps.nodeId,
+        publicKey,
+      });
       // recovery_verified_at intentionally NULL — workers never stamp recovery verification.
       await deps.vault.seal(
         {
@@ -439,7 +438,7 @@ function createPoolMint(deps: {
       return walletId;
     } catch (err) {
       try {
-        await deps.pool.query(`DELETE FROM wallets WHERE id = $1::uuid`, [walletId]);
+        await deleteNodeGeneratedWalletMint(deps.pool, walletId);
       } catch {
         /* best-effort */
       }

@@ -451,6 +451,17 @@ export {
   type DestinationSqlExecutor,
 } from "./sql-destination-store.js";
 
+export {
+  INSERT_NODE_GENERATED_WALLET_SQL,
+  INSERT_PENDING_DESTINATION_FOR_WALLET_SQL,
+  DELETE_PENDING_DESTINATION_FOR_WALLET_SQL,
+  DELETE_NODE_GENERATED_WALLET_SQL,
+  insertNodeGeneratedWalletWithPendingDestination,
+  deleteNodeGeneratedWalletMint,
+  type InsertNodeGeneratedWalletInput,
+  type NodeGeneratedWalletSqlExecutor,
+} from "./insert-node-generated-wallet.js";
+
 // wallet custody administration: safe public metadata, recovery
 // status/evidence exposure, and the direct quarantine transition. Retirement stays with
 // above; this slice adds no route that could become an import path.

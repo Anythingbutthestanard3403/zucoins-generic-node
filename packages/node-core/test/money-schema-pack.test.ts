@@ -446,7 +446,6 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(modeIdx).toBeGreaterThan(sendIdx);
     expect(modeIdx).toBeGreaterThan(settingsIdx);
     expect(modeIdx).toBeGreaterThan(auditIdx);
-    expect(modeIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[modeIdx]!.sql).toContain("verification_mode");
     expect(files[modeIdx]!.sql).toContain("INDEPENDENT");
@@ -454,6 +453,23 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[modeIdx]!.sql).toContain("RELEASED_NODE_VERIFIED");
     expect(files[modeIdx]!.sql).toContain("verification-mode requires operations");
     expect(files[modeIdx]!.sql).toContain("VERIFICATION_MODE_IMMUTABLE");
+  });
+
+  it("pack lands destinations-pending-backfill after verification-mode (ZTR-1306)", () => {
+    const modeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("verification-mode");
+    const backfillIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-pending-backfill");
+    const custodyIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("custody-eligibility");
+    expect(modeIdx).toBeGreaterThanOrEqual(0);
+    expect(custodyIdx).toBeGreaterThanOrEqual(0);
+    expect(backfillIdx).toBeGreaterThan(modeIdx);
+    expect(backfillIdx).toBeGreaterThan(custodyIdx);
+    expect(backfillIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[backfillIdx]!.sql).toContain("destinations-pending-backfill requires wallets");
+    expect(files[backfillIdx]!.sql).toContain("destinations-pending-backfill requires destinations");
+    expect(files[backfillIdx]!.sql).toContain("key_origin = 'node_generated'");
+    expect(files[backfillIdx]!.sql).toContain("'PENDING'");
+    expect(files[backfillIdx]!.sql).not.toMatch(/'BLESSED'/);
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

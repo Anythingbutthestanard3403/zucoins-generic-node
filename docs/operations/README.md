@@ -30,7 +30,7 @@ under pressure. Before you change anything at 3am, read this:
 | [`full-suite-test-runs.md`](full-suite-test-runs.md) | You need full-suite vs targeted test expectations (ZTR-1209) |
 | [`auto-approve-external-sends.md`](auto-approve-external-sends.md) | Auto-approved external sends: setup (both routes), omit-source default, spend vs cap, three stop levers, audit, wallet pool |
 | [`zukaz-source-omit-cutover.md`](zukaz-source-omit-cutover.md) | Zukaz / implementer cutover: stop supplying source wallet id (checklist + config keys) |
-| [`wallet-money-capabilities.md`](wallet-money-capabilities.md) | Designate hubs/workers, fund hubs, manual rebalance, capability failure map (ZTR-1273) |
+| [`wallet-money-capabilities.md`](wallet-money-capabilities.md) | Designate hubs/workers, fund hubs, bless existing dest (no re-mint), capability failure map (ZTR-1273 / ZTR-1306) |
 | [`expiry-release-staging-drill.md`](expiry-release-staging-drill.md) | Post-deploy lab: unpaid receive auto-releases via worker fresh-head (ZTR-1276) |
 | [`verification-modes.md`](verification-modes.md) | INDEPENDENT vs NODE_VERIFIED, ops.allow_node_verified, residual risk, staging drill (ZTR-1305) |
 | [`incidents.md`](incidents.md) § forged `EXPIRED_T0_UNCHANGED` (staging 2026-08-12) | Four hand-SQL membership releases without proofs — timeline, verifier allowlist, audit annotation runbook (ZTR-1281) |

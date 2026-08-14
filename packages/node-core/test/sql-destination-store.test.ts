@@ -16,7 +16,22 @@ describe("createSqlDestinationStore", () => {
     const sql = {
       query: vi.fn(async (text: string, params?: readonly unknown[]) => {
         calls.push({ text, params });
-        return { rows: [] };
+        return {
+          rows: [
+            {
+              id: DEST,
+              node_id: NODE,
+              wallet_id: WALLET,
+              label: "sink",
+              state: "PENDING",
+              created_at: "2026-07-29T00:00:00.000Z",
+              blessed_at: null,
+              blessed_by_device_key_id: null,
+              blessing_artifact_id: null,
+              retired_at: null,
+            },
+          ],
+        };
       }),
     };
     const store = createSqlDestinationStore(sql);
@@ -32,6 +47,7 @@ describe("createSqlDestinationStore", () => {
       "idem-key-should-not-appear-in-sql",
     );
     expect(created.state).toBe("PENDING");
+    expect(created.destinationId).toBe(DEST);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.text).toMatch(/\$1/);
     expect(calls[0]!.text).not.toContain(DEST);
@@ -43,6 +59,8 @@ describe("createSqlDestinationStore", () => {
       "2026-07-29T00:00:00.000Z",
     ]);
     expect(calls[0]!.text).toMatch(/label/);
+    expect(calls[0]!.text).toMatch(/ON CONFLICT \(wallet_id\)/);
+    expect(calls[0]!.text).toMatch(/RETURNING/);
   });
 
   it("findById maps a row and returns null when missing", async () => {

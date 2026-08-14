@@ -235,6 +235,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // Requires ops tables + node_settings + audit_log; follows operator-accepted-risk-release
   // so the release-status CHECK rewrite includes the prior risk token. Appended only.
   "verification-mode",
+  // ZTR-1306: PENDING destinations row for every node_generated wallet missing one.
+  // Pure data fix-forward on destinations; requires wallets + destinations
+  // (custody-eligibility, far earlier). Appended only.
+  "destinations-pending-backfill",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

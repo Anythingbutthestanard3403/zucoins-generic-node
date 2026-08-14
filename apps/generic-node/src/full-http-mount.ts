@@ -112,6 +112,8 @@ import {
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
   toBase64UrlPadded,
+  insertNodeGeneratedWalletWithPendingDestination,
+  deleteNodeGeneratedWalletMint,
   type DualControlMode,
   type DualControlPolicyPort,
   type AutoApprovePolicyPort,
@@ -773,16 +775,11 @@ export function createProductionRouteSurface(
           const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
           const walletId = randomUUID() as Uuid;
           try {
-            await config.pool.query(
-              `INSERT INTO wallets (
-                 id, node_id, public_key, key_origin, state,
-                 allow_external_receive, allow_external_send, allow_internal_move, money_mode
-               ) VALUES (
-                 $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
-                 true, true, true, 'FULL'
-               )`,
-              [walletId, config.nodeId, publicKey],
-            );
+            await insertNodeGeneratedWalletWithPendingDestination(config.pool, {
+              walletId,
+              nodeId: config.nodeId,
+              publicKey,
+            });
             await vault.seal(
               {
                 nodeId: config.nodeId as Uuid,
@@ -799,7 +796,7 @@ export function createProductionRouteSurface(
             return { walletId, publicKey };
           } catch (err) {
             try {
-              await config.pool.query(`DELETE FROM wallets WHERE id = $1::uuid`, [walletId]);
+              await deleteNodeGeneratedWalletMint(config.pool, walletId);
             } catch {
               /* best-effort */
             }

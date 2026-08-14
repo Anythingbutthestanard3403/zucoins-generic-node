@@ -45,6 +45,38 @@ observed balance ≥ shortfall, wallet id ascending, `FOR UPDATE SKIP LOCKED`.
 5. Re-read the wallet row and confirm `money_mode` and the three allow flags
    match the table above.
 
+## Bless an existing wallet (do not mint another sink)
+
+Every node-generated mint (destination register, pool scale-up, funding CREATE)
+now inserts a `destinations` row in `PENDING`. Blessing stays dual-control
+(device + TOTP). You do **not** create a new destination to get a sink for an
+already-minted worker.
+
+1. Open **Destinations** on the admin SPA (`GET /v1/destinations`).
+2. Find the row whose `wallet_id` is the existing worker (or the dest id from
+   the fleet query below). State will be `PENDING` until blessed.
+3. Bless that `destination_id` with the enrolled device key + fresh TOTP
+   (`POST /admin/v1/destinations/:id/bless`). Do not POST a new destination.
+4. Confirm the row is `BLESSED` before expecting omit-source assign to pick it
+   as a top-up sink.
+
+Fleet check after deploy (staging / ops — not required to land this change):
+
+```sql
+SELECT w.id AS wallet_id,
+       w.money_mode,
+       d.id AS dest_id,
+       d.state AS dest_state
+  FROM wallets w
+  LEFT JOIN destinations d ON d.wallet_id = w.id
+ WHERE w.key_origin = 'node_generated';
+```
+
+Every node_generated row should have `dest_id IS NOT NULL`. The only
+intentional exclusion is `key_origin = 'imported'` (never a destination).
+A missing dest on an already-applied fleet is healed by the
+`destinations-pending-backfill` money-pack slice on next migrate / boot.
+
 CAS conflicts (`expected_row_version` stale) mean another operator changed the
 row — re-read and retry; do not force.
 
@@ -82,8 +114,9 @@ When auto-approve is off, halt is engaged, or you have paused money workers:
 | External send 503 / `no_free_send_worker` | No free send-capable wallet | Mode mix; leases; unsettled sends |
 | External send 503 / `no_hub_liquidity` | Worker underfunded and no hub covers shortfall | Hub balances + observations |
 | External send 503 / `hub_busy` | Eligible hub(s) locked | Active leases / in-flight moves |
+| External send 503 / `worker_destination_missing` | Assign picked a send-capable wallet with no `destinations` row | Bless that wallet's existing dest (below) — do not mint another wallet |
 | External send 422 with internal-only source | Explicit `source_wallet_id` pinned to hub | Omit source or pick send-capable wallet |
-| Receive assign never picks a wallet | Only send-only / internal-only in pool | Need receive-capable modes |
+| Receive assign never picks a wallet | Only send-only / internal-only in pool, or dest is already `BLESSED` | Need receive-capable modes. A `PENDING` dest is blessable, not a receive-pool exclusion |
 | Top-up MOVE stuck; SEND parked | Move not `INTERNAL_MOVE_LANDED` | [`attention-triage.md`](attention-triage.md) composition section |
 | Halt engaged | Operator halt | Halt contract — new MOVE/SEND formation blocked |
 

@@ -28,6 +28,7 @@ import {
   createLeaseGroup,
   migrateLeaseFoundation,
 } from "../../src/leases/index.ts";
+import { INSERT_PENDING_DESTINATION_FOR_WALLET_SQL } from "../../src/api/insert-node-generated-wallet.ts";
 import {
   RECEIVE_ALLOCATOR_STATEMENTS,
   ReceiveAllocatorError,
@@ -183,6 +184,7 @@ TRUNCATE receive_release_proofs, operation_wallets, wallet_active_leases, wallet
          lease_audit_events, wallet_lease_epoch_highwater
   RESTART IDENTITY CASCADE;
 DELETE FROM operations;
+DELETE FROM destinations;
 UPDATE wallets
    SET state = 'AVAILABLE', retired_at = NULL, quarantine_reason = NULL
  WHERE state <> 'AVAILABLE';
@@ -242,6 +244,41 @@ function seedWallets(url: string): void {
   // that conjunct isolated.
   verifyRecovery(url, IMPORTED_WALLET, ELIGIBLE_COUNT + 2, pubkey("WIMPORT"));
   // UNVERIFIED_WALLET is deliberately left unstamped.
+}
+
+function insertPendingDest(url: string, walletId: string, label = "pool"): void {
+  psqlMust(
+    url,
+    INSERT_PENDING_DESTINATION_FOR_WALLET_SQL.replace(/\$1::uuid/g, `'${walletId}'::uuid`)
+      .replace(/\$2::uuid/g, `'${NODE}'::uuid`)
+      .replace("$3", `'${label}'`),
+  );
+}
+
+function blessDest(url: string, walletId: string): void {
+  psqlMust(
+    url,
+    `UPDATE destinations
+        SET state = 'BLESSED',
+            blessed_at = now(),
+            blessed_by_device_key_id = '${randomUUID()}',
+            blessing_artifact_id = '${randomUUID()}',
+            retired_at = NULL
+      WHERE wallet_id = '${walletId}';`,
+  );
+}
+
+function retireDest(url: string, walletId: string): void {
+  psqlMust(
+    url,
+    `UPDATE destinations
+        SET state = 'RETIRED',
+            blessed_at = COALESCE(blessed_at, now()),
+            blessed_by_device_key_id = COALESCE(blessed_by_device_key_id, '${randomUUID()}'),
+            blessing_artifact_id = COALESCE(blessing_artifact_id, '${randomUUID()}'),
+            retired_at = now()
+      WHERE wallet_id = '${walletId}';`,
+  );
 }
 
 /**
@@ -363,7 +400,8 @@ describe("bounded receive-pool allocator (real PG / separate processes)", () => 
     expect(sql).toContain("w.state = 'AVAILABLE'");
     expect(sql).toContain("w.allow_external_receive IS TRUE");
     expect(sql).toContain("FROM destinations d");
-    expect(sql).toContain("d.state IS DISTINCT FROM 'RETIRED'");
+    expect(sql).toContain("d.state = 'BLESSED'");
+    expect(sql).not.toContain("IS DISTINCT FROM 'RETIRED'");
     expect(sql).toContain("FROM receive_release_proofs rrp");
     expect(sql).toContain("JOIN operation_wallets ow");
     expect(sql).toContain("ow.wallet_id = w.id");
@@ -371,10 +409,108 @@ describe("bounded receive-pool allocator (real PG / separate processes)", () => 
     expect(sql).toContain("lrp.proof_kind = 'RECEIVE_EXPIRED_T0'");
     expect(sql).toContain("FOR UPDATE SKIP LOCKED");
     expect(sql).toContain("LIMIT 1");
-    // Receivers never move and destinations are never blessed: the automatic-sink form
-    // must not have leaked in.
-    expect(sql).not.toContain("BLESSED");
+    // Dest exclusion is "already a BLESSED sink". Automatic-sink must not leak in as a
+    // positive conjunct (that would require blessing to receive).
+    const destExclusion =
+      "NOT EXISTS ( SELECT 1 FROM destinations d WHERE d.wallet_id = w.id AND d.state = 'BLESSED')";
+    expect(sql).toContain(destExclusion);
+    expect(sql.replace(destExclusion, "")).not.toContain("BLESSED");
   });
+
+  it.skipIf(!live)(
+    "dest-on-mint PENDING dest still assigns as a receive worker",
+    async () => {
+      psqlMust(dbUrl, RESET_STATE);
+      keepEligible(dbUrl, 1);
+      insertPendingDest(dbUrl, W(1));
+      expect(
+        psqlMust(dbUrl, `SELECT state::text FROM destinations WHERE wallet_id = '${W(1)}';`).trim(),
+      ).toBe("PENDING");
+
+      const operationId = OP(80);
+      seedReceive(dbUrl, operationId);
+      const outcome = await withTx(dbUrl, (tx) =>
+        assignReceiveWallet(tx, { operationId, ownerInstanceId: OWNER, leases: LEASES }),
+      );
+      expect(outcome.kind).toBe("ASSIGNED");
+      if (outcome.kind !== "ASSIGNED") return;
+      expect(outcome.walletId).toBe(W(1));
+    },
+    60_000,
+  );
+
+  it.skipIf(!live)(
+    "backfill PENDING dest does not poison a receive-eligible wallet",
+    async () => {
+      psqlMust(dbUrl, RESET_STATE);
+      keepEligible(dbUrl, 1);
+      expect(countRows(dbUrl, "destinations", `wallet_id = '${W(1)}'`)).toBe(0);
+
+      execFileSync("psql", [dbUrl, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
+        input: readSchema("destinations-pending-backfill.sql"),
+        encoding: "utf-8",
+        timeout: 30_000,
+      });
+
+      expect(
+        psqlMust(dbUrl, `SELECT state::text FROM destinations WHERE wallet_id = '${W(1)}';`).trim(),
+      ).toBe("PENDING");
+      expect(countRows(dbUrl, "destinations", `wallet_id = '${IMPORTED_WALLET}'`)).toBe(0);
+
+      const selected = await db.query<{ id: string }>(
+        RECEIVE_ALLOCATOR_STATEMENTS.SELECT_ELIGIBLE_WALLET,
+      );
+      expect(selected.rows[0]?.id).toBe(W(1));
+    },
+    60_000,
+  );
+
+  it.skipIf(!live)(
+    "BLESSED dest is excluded; PENDING dest is admitted",
+    async () => {
+      psqlMust(dbUrl, RESET_STATE);
+      keepEligible(dbUrl, 1);
+      insertPendingDest(dbUrl, W(1));
+
+      const pending = await db.query<{ id: string }>(
+        RECEIVE_ALLOCATOR_STATEMENTS.SELECT_ELIGIBLE_WALLET,
+      );
+      expect(pending.rows[0]?.id).toBe(W(1));
+
+      const oldConjunct = RECEIVE_ALLOCATOR_STATEMENTS.SELECT_ELIGIBLE_WALLET.replace(
+        "d.state = 'BLESSED'",
+        "d.state IS DISTINCT FROM 'RETIRED'",
+      );
+      const poisoned = await db.query<{ id: string }>(oldConjunct);
+      expect(poisoned.rows).toEqual([]);
+
+      blessDest(dbUrl, W(1));
+      const blessed = await db.query<{ id: string }>(
+        RECEIVE_ALLOCATOR_STATEMENTS.SELECT_ELIGIBLE_WALLET,
+      );
+      expect(blessed.rows).toEqual([]);
+    },
+    60_000,
+  );
+
+  it.skipIf(!live)(
+    "RETIRED dest stays receive-eligible",
+    async () => {
+      psqlMust(dbUrl, RESET_STATE);
+      keepEligible(dbUrl, 1);
+      insertPendingDest(dbUrl, W(1));
+      retireDest(dbUrl, W(1));
+      expect(
+        psqlMust(dbUrl, `SELECT state::text FROM destinations WHERE wallet_id = '${W(1)}';`).trim(),
+      ).toBe("RETIRED");
+
+      const selected = await db.query<{ id: string }>(
+        RECEIVE_ALLOCATOR_STATEMENTS.SELECT_ELIGIBLE_WALLET,
+      );
+      expect(selected.rows[0]?.id).toBe(W(1));
+    },
+    60_000,
+  );
 
   it.skipIf(!live)(
     "a released AVAILABLE wallet is permanently excluded from a later receive T0",

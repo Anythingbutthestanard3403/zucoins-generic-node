@@ -153,3 +153,19 @@ inbound to the receiver before expiry completes) and confirm:
   recovery PG tests
 - Formed READY with code/artifact material when fresh head cannot be obtained — expected
   attention path, not this drill's happy path
+
+### Operator-accepted risk release (ZTR-1280)
+
+When predicates stay unsatisfiable after a durable attention park, do **not** hand-write
+memberships. Use catalogue action `RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK` (TOTP + device
+sig + recovery nonce + rationale). Expect:
+
+| Field | Value |
+| --- | --- |
+| `receive_release_proofs.release_kind` | `OPERATOR_ACCEPTED_RISK` |
+| `operations.receive_release_status` | `RELEASED_OPERATOR_ACCEPTED_RISK` |
+| `wallet_lease_memberships.release_reason` | `OPERATOR_ACCEPTED_RISK` |
+| `lease_release_proofs.proof_kind` | `RECEIVE_OPERATOR_ACCEPTED_RISK` |
+
+`EXPIRED_T0_UNCHANGED` must be absent on this path. Proof manifest includes
+`failed_predicates`, `override_rationale`, and `t0_unchanged_proven: false`.

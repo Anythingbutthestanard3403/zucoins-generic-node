@@ -408,12 +408,28 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     const fundingIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("implementer-funding-wallet");
     expect(guardIdx).toBeGreaterThanOrEqual(0);
     expect(fundingIdx).toBeGreaterThan(guardIdx);
-    expect(fundingIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[fundingIdx]!.sql).toContain("funding_wallet_id");
     expect(files[fundingIdx]!.sql).toContain("implementers_funding_wallet_id_fkey");
     expect(files[fundingIdx]!.sql).toContain("ON DELETE RESTRICT");
     expect(files[fundingIdx]!.sql).toContain("implementer-funding-wallet requires wallets");
+  });
+
+  it("pack lands operator-accepted-risk-release after funding-wallet (ZTR-1280)", () => {
+    const fundingIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("implementer-funding-wallet");
+    const riskIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operator-accepted-risk-release");
+    const releaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("receive-expiry-release");
+    const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
+    expect(fundingIdx).toBeGreaterThanOrEqual(0);
+    expect(riskIdx).toBeGreaterThan(fundingIdx);
+    expect(riskIdx).toBeGreaterThan(releaseIdx);
+    expect(riskIdx).toBeGreaterThan(leaseIdx);
+    expect(riskIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[riskIdx]!.sql).toContain("OPERATOR_ACCEPTED_RISK");
+    expect(files[riskIdx]!.sql).toContain("RELEASED_OPERATOR_ACCEPTED_RISK");
+    expect(files[riskIdx]!.sql).toContain("RECEIVE_OPERATOR_ACCEPTED_RISK");
+    expect(files[riskIdx]!.sql).toContain("operator-accepted-risk-release requires operations");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

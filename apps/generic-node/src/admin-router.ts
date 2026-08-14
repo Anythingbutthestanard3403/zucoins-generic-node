@@ -32,6 +32,7 @@ import {
   handleGetRecovery,
   handleNeedsAttention,
   handleRecoveryAction,
+  verifyDetachedEd25519,
   NeedsAttentionQuerySchema,
   IMPLEMENTER_SCOPES,
   issueEnrollmentChallenge,
@@ -318,6 +319,35 @@ function parseRejectBody(raw: unknown): ParseOk<ReturnType<typeof RejectBody.par
     return { ok: false, status: 400, code: "invalid_scalar", message: "request body failed validation" };
   }
   return { ok: true, body: r.data };
+}
+
+
+/** ZTR-1280 — deterministic device-sig preimage for operator-risk recovery (SPA twin). */
+function buildOperatorRiskRecoveryPreimage(input: {
+  readonly operationId: string;
+  readonly recoveryNonce: string;
+  readonly overrideRationale: string;
+  readonly walletToAvailable: boolean;
+}): string {
+  return [
+    "zp-recovery-operator-risk-v1",
+    `operation_id=${input.operationId}`,
+    `recovery_nonce=${input.recoveryNonce}`,
+    `override_rationale=${input.overrideRationale}`,
+    `wallet_to_available=${input.walletToAvailable ? "true" : "false"}`,
+  ].join("\n");
+}
+
+function decodePaddedBase64UrlSig(value: string): Uint8Array | null {
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
 }
 
 function parseRecoveryBody(
@@ -4663,6 +4693,67 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               validateBody: parseRecoveryBody,
               nowMs: nowMs(),
               mutate: async ({ body, user, timestep }) => {
+                // ZTR-1280: device signature is mandatory for operator-risk release.
+                if (body.action === "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK") {
+                  const store = deps.deviceStore;
+                  if (store === null || store === undefined) {
+                    throw Object.assign(new Error("device_signature_required"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                  const deviceKeyId = body.device_key_id;
+                  const deviceSignature = body.device_signature;
+                  const rationale = body.override_rationale ?? body.operator_note ?? "";
+                  if (
+                    typeof deviceKeyId !== "string" ||
+                    typeof deviceSignature !== "string" ||
+                    (body.wallet_to_available !== true && body.wallet_to_available !== false)
+                  ) {
+                    throw Object.assign(new Error("device_signature_required"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                  const deviceKey = store.findById(deviceKeyId);
+                  if (deviceKey === null || deviceKey === undefined) {
+                    throw Object.assign(new Error("device_signature_invalid"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                  const sigBytes = decodePaddedBase64UrlSig(deviceSignature);
+                  if (sigBytes === null) {
+                    throw Object.assign(new Error("device_signature_invalid"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                  const rawKey = decodePaddedBase64UrlSig(deviceKey.publicKey);
+                  if (rawKey === null || rawKey.length !== 32 || deviceKey.revokedAt !== null) {
+                    throw Object.assign(new Error("device_signature_invalid"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                  const preimage = buildOperatorRiskRecoveryPreimage({
+                    operationId: m[1]!,
+                    recoveryNonce: body.recovery_nonce,
+                    overrideRationale: String(rationale),
+                    walletToAvailable: body.wallet_to_available,
+                  });
+                  const okSig = verifyDetachedEd25519({
+                    publicKeyBytes: rawKey,
+                    preimageText: preimage,
+                    signatureBytes: sigBytes,
+                  });
+                  if (!okSig) {
+                    throw Object.assign(new Error("device_signature_invalid"), {
+                      code: "protocol_predicate_failed",
+                      status: 422,
+                    });
+                  }
+                }
                 const auth: RecoveryActionAuthContext = {
                   operatorId: user.id,
                   totpTimestep: timestep,

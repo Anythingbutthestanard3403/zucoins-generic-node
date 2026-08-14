@@ -29,6 +29,10 @@ import {
   type NeedsAttentionListItem,
 } from "../../lib/ops.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
+import {
+  postRecoveryActionWithCeremony,
+  recoveryActionConfirmDetail,
+} from "../../lib/post-recovery-action-with-ceremony.js";
 import { operationKindLabel, severityShort, statusLabel } from "../../lib/labels.js";
 
 type Tab = "attention" | "history";
@@ -138,20 +142,11 @@ export function OperationsPage() {
   const act = useTotpGatedMutation(
     async (action: string, totp: string) => {
       if (!detail) throw new Error("No recovery detail");
-      const fresh = await getRecovery(detail.operation_id);
-      return postRecoveryAction(
-        detail.operation_id,
-        {
-          action,
-          expected_row_version: fresh.row_version,
-          recovery_nonce: fresh.recovery_nonce,
-        },
-        totp,
-      );
+      return postRecoveryActionWithCeremony(detail.operation_id, action, totp);
     },
     {
       title: "Confirm recovery action",
-      detail: (a) => String(a),
+      detail: (a) => recoveryActionConfirmDetail(String(a)),
       onSuccess: async () => {
         setErr(null);
         setMsg("Recovery action accepted.");

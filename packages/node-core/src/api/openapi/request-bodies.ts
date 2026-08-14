@@ -283,6 +283,7 @@ export const RECOVERY_ACTIONS_BODY: JsonSchema = {
         "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
         "REBUILD_INTERNAL_MOVE",
         "RELEASE_EXPIRED_RECEIVE",
+        "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
         "QUARANTINE_WALLETS",
         "ACKNOWLEDGE_KEEP_PINNED",
       ],
@@ -291,6 +292,10 @@ export const RECOVERY_ACTIONS_BODY: JsonSchema = {
     recovery_nonce: uuid,
     proof_id: { ...uuid, nullable: true },
     operator_note: { type: "string", maxLength: 1024 },
+    device_key_id: uuid,
+    device_signature: { type: "string" },
+    override_rationale: { type: "string", minLength: 8, maxLength: 2048 },
+    wallet_to_available: { type: "boolean" },
   },
 };
 

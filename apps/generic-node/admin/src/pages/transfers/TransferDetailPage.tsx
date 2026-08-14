@@ -25,6 +25,10 @@ import { APPROVE_SUCCESS_NOTE, operationKindLabel, statusLabel } from "../../lib
 import { signApproveChallengePreimage } from "../../lib/approve-device-sign.js";
 import { invalidateNeedsAttention } from "../../lib/needs-attention.js";
 import { useTotpGatedMutation } from "../../totp/useTotpGatedMutation.js";
+import {
+  postRecoveryActionWithCeremony,
+  recoveryActionConfirmDetail,
+} from "../../lib/post-recovery-action-with-ceremony.js";
 
 type LoadState =
   | { kind: "loading" }
@@ -227,20 +231,11 @@ export function TransferDetailPage() {
       const recovery = data.recovery;
       if (!recovery) throw new Error("Open recovery first");
       // Fresh nonce per GET
-      const fresh = await getRecovery(id);
-      return postRecoveryAction(
-        id,
-        {
-          action,
-          expected_row_version: fresh.row_version,
-          recovery_nonce: fresh.recovery_nonce,
-        },
-        totp,
-      );
+      return postRecoveryActionWithCeremony(id, action, totp);
     },
     {
       title: "Confirm recovery action",
-      detail: (action) => String(action),
+      detail: (action) => recoveryActionConfirmDetail(String(action)),
       onSuccess: () => {
         setErr(null);
         setMsg("Recovery action accepted.");

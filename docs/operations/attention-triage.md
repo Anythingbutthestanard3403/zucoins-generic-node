@@ -165,6 +165,16 @@ terminal release status is `RELEASED_T0_UNCHANGED` — releasing on a *changed* 
 the evidence that something happened. Do not offer or press `RETRY_OBSERVATION` on these
 rows; it burns TOTP/nonce with no re-evaluate.
 
+**Last resort (ZTR-1280).** When the canonical release has already predicate-failed at least
+once (durable `receive_expiry_attention_events` row) and the five predicates still cannot
+hold, the catalogue offers `RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK`. Max ceremony: fresh
+TOTP + recovery nonce + device signature + override rationale + explicit wallet disposition
+(AVAILABLE vs QUARANTINED). It mints `receive_release_proofs.release_kind =
+OPERATOR_ACCEPTED_RISK` and `receive_release_status = RELEASED_OPERATOR_ACCEPTED_RISK` with
+`failed_predicates` embedded — **never** `EXPIRED_T0_UNCHANGED` / `RELEASED_T0_UNCHANGED`.
+UI copy must say the release is operator-risk-accepted, not proven. Prefer this over hand
+SQL (see [`incidents.md`](incidents.md) forged `EXPIRED_T0_UNCHANGED` section).
+
 ### Legacy / held-episode `attention_detail` (ZTR-1279 / ZTR-1285)
 
 **What operators see.** The SPA Evidence-gap card reads durable

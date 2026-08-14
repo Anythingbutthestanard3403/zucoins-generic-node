@@ -45,6 +45,7 @@
     "operations-landed-attention-clear-backfill.sql",
     "operations-response-columns.sql",
     "operations.sql",
+    "operator-accepted-risk-release.sql",
     "privileges.sql",
     "proof-body-store.sql",
     "push-subscriptions.sql",

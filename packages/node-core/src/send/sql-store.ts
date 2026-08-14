@@ -21,6 +21,10 @@
 // by constraint name. There is no pre-read anywhere in this file that could decide either
 // outcome ahead of the database.
 
+import {
+  DEFAULT_VERIFICATION_MODE,
+  type VerificationMode,
+} from "../verification/allow-node-verified-policy.js";
 import type {
   SendCreateStore,
   SendExpectedArtifact,
@@ -92,6 +96,7 @@ export const OPERATION_COLUMNS = [
   "client_reference",
   "description",
   "created_at",
+  "verification_mode",
 ] as const;
 
 export const ARTIFACT_COLUMNS = [
@@ -172,6 +177,7 @@ interface OperationRow {
   readonly client_reference: string | null;
   readonly description: string | null;
   readonly created_at: string | Date;
+  readonly verification_mode?: string | null;
   readonly completed_at: string | Date | null;
   readonly response_status: number | null;
   readonly response_body: string | null;
@@ -199,6 +205,11 @@ interface WalletRow {
 const epochMs = (value: string | Date): number =>
   value instanceof Date ? value.getTime() : Date.parse(value);
 
+function asVerificationMode(value: string | null | undefined): VerificationMode {
+  if (value === "NODE_VERIFIED" || value === "INDEPENDENT") return value;
+  return DEFAULT_VERIFICATION_MODE;
+}
+
 function toStoredOperation(row: OperationRow): StoredSendOperation {
   return {
     operationId: row.operation_id,
@@ -221,6 +232,7 @@ function toStoredOperation(row: OperationRow): StoredSendOperation {
     idempotencyKey: row.idempotency_key,
     requestSha256: row.request_sha256,
     createdAt: epochMs(row.created_at),
+    verificationMode: asVerificationMode(row.verification_mode),
     responseStatus: row.response_status === null ? null : Number(row.response_status),
     responseBody: row.response_body,
   };
@@ -335,6 +347,7 @@ export class SqlSendCreateStore implements SendCreateStore {
       operation.clientReference,
       operation.description,
       operation.createdAt,
+      operation.verificationMode,
       // ARTIFACT_COLUMNS sequence, minus operation_id which the statement takes from the CTE.
       artifact.artifactId,
       artifact.purpose,

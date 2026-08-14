@@ -78,6 +78,7 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // The landing store appends the signed node_events + implementer_events pair
   // inside the landing transaction, so it depends on the event-log leaf. event-log
   // imports only protocol, so this adds no cycle.
+  // ZTR-1301: admitReceiveExternal gates NODE_VERIFIED via verification policy port.
   receive: ["protocol", "api", "verifier", "data", "leases", "verification", "event-log"],
   // device enrolment: protocol suite parsers + reporting ed25519 verify.
   device: ["protocol", "reporting"],
@@ -93,14 +94,16 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // baselines, proof surfaces, and worker handoff ports as landed on main.
   // Landing store adds "event-log": the landing store appends the signed dual-chain terminal
   // event inside the landing transaction. event-log imports only protocol — no cycle.
-  send: ["protocol", "device", "verifier", "reporting", "observation", "workers", "data", "proof", "core", "totp", "event-log"],
+  // ZTR-1301: createExternalSend gates NODE_VERIFIED via verification policy port.
+  send: ["protocol", "device", "verifier", "reporting", "observation", "workers", "data", "proof", "core", "totp", "event-log", "verification"],
   // MOVE_INTERNAL admission: amount/UUID parsers live in protocol.
   // dual-lease acquisition drives the one canonical lease repository rather than
   // re-sorting or re-inserting wallet_active_leases itself. The live point-read reuses
   // core's canonical execution-phase derivation and transaction-material fact reader;
   // move remains read-only across that edge.
   // dual-chain internal_move.created (ZTR-1146) adds event-log — leaf over protocol only.
-  move: ["protocol", "leases", "core", "event-log"],
+  // ZTR-1301: createInternalMove gates NODE_VERIFIED via verification policy port.
+  move: ["protocol", "leases", "core", "event-log", "verification"],
   // persisted lease foundation: reads frozen schema version/file constants only.
   leases: ["schema"],
   workers: ["protocol", "core", "gateway"],
@@ -125,7 +128,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // the evidence-set digest and declares its own SqlExecutor port, like every other
   // persist module here. It never imports `leases` — the release decision travels back to the
   // composition root, which drives the proof-backed release itself (the one-in-flight-per-wallet rule).
-  verification: ["reporting"],
+  // allow-node-verified policy (ZTR-1301) uses protocol UUID parse only.
+  verification: ["reporting", "protocol"],
   // Canonical HOTP/window TOTP matcher + TOTP_SECRET seal/rewrap (vault root DEK).
   // Leaf shared by send approval + http chain; seal site mirrors push/signing-keys.
   totp: ["vault"],

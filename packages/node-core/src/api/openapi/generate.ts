@@ -589,6 +589,12 @@ function componentsBlock(
             format: "date-time",
             nullable: true,
           },
+          verification_mode: {
+            type: "string",
+            enum: ["INDEPENDENT", "NODE_VERIFIED"],
+            description:
+              "Immutable after admission. Omitted on legacy bodies defaults to INDEPENDENT.",
+          },
         },
       },
       ExpectedArtifact: {

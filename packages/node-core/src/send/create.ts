@@ -24,9 +24,18 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import type { VerificationMode } from "@zucoins/generic-node-contracts/operations";
+import { DEFAULT_VERIFICATION_MODE } from "@zucoins/generic-node-contracts/operations";
+
 import { parsePositiveZkzAmount } from "../protocol/amounts.js";
 import { parseUuid, parseWalletPublicKey } from "../protocol/scalars.js";
 import { buildSendExternalExpectedArtifact } from "../protocol/suite/builders.js";
+import {
+  admitVerificationMode,
+  refuseAllNodeVerifiedPolicy,
+  resolveVerificationMode,
+  type AllowNodeVerifiedPolicyPort,
+} from "../verification/allow-node-verified-policy.js";
 
 // The idempotency scope includes the HTTP method and the canonical
 // route, never the key alone. This slice serves exactly one route.
@@ -63,6 +72,11 @@ export interface SendCreateRequest {
   readonly description: string | null;
   readonly idempotencyKey: string;
   /**
+   * Optional admission-time verification mode (ZTR-1301). Omitted → INDEPENDENT.
+   * NODE_VERIFIED requires operator policy ops.allow_node_verified for the implementer.
+   */
+  readonly verificationMode?: VerificationMode;
+  /**
    * Client-visible source for the idempotency fingerprint (ZTR-1271).
    * When set (including `null` = omitted on the public body), hashed instead of the
    * resolved `sourceWalletId` so assign-path replay stays stable across worker picks.
@@ -97,6 +111,8 @@ export interface SendOperation {
   readonly idempotencyKey: string;
   readonly requestSha256: string;
   readonly createdAt: number;
+  /** Immutable after admission (ZTR-1301 / schema ZTR-1300). */
+  readonly verificationMode: VerificationMode;
 }
 
 // A-canonical-fields: the exact artifact envelope. `keyId` is the wire name of the
@@ -137,7 +153,8 @@ export type SendRejectionCode =
   | "signing_key_unavailable"
   | "wallet_in_flight"
   | "idempotency_key_reused"
-  | "idempotency_in_progress";
+  | "idempotency_in_progress"
+  | "verification_mode_not_allowed";
 
 export type SendCreateOutcome =
   | {
@@ -268,7 +285,9 @@ export function canonicalRequestSha256(request: SendCreateRequest): string {
     request.idempotencyReferencesOperationId !== undefined
       ? request.idempotencyReferencesOperationId
       : request.referencesOperationId;
-  const canonical = JSON.stringify({
+  // verification_mode in fingerprint only when non-default (ZTR-1301 AC2/AC3).
+  const mode = resolveVerificationMode(request.verificationMode);
+  const base = {
     implementer_id: request.implementerId,
     node_id: request.nodeId,
     source_wallet_id: sourceForFingerprint,
@@ -277,7 +296,11 @@ export function canonicalRequestSha256(request: SendCreateRequest): string {
     references_operation_id: referencesForFingerprint,
     client_reference: request.clientReference,
     description: request.description,
-  });
+  };
+  const canonical =
+    mode === DEFAULT_VERIFICATION_MODE
+      ? JSON.stringify(base)
+      : JSON.stringify({ ...base, verification_mode: mode });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
@@ -297,6 +320,11 @@ export interface SendCreateConfig {
    * NOT inject this port.
    */
   readonly requireActiveSubscription?: (walletId: string) => Promise<void>;
+  /**
+   * Operator policy gating NODE_VERIFIED (ZTR-1301). When omitted, refuse-all
+   * (fail closed) — NODE_VERIFIED is never silently admitted.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
 }
 
 export async function createExternalSend(
@@ -307,11 +335,38 @@ export async function createExternalSend(
 ): Promise<SendCreateOutcome> {
   const generateId = config.generateId ?? (() => randomUUID());
   const now = config.now ?? (() => Date.now());
+  const policy = config.allowNodeVerifiedPolicy ?? refuseAllNodeVerifiedPolicy();
 
   // Step 1 — validate the exact source/destination/amount before anything is resolved.
   const validation = validateSendCreateRequest(request);
   if (!validation.ok) {
     return { outcome: "REJECTED", code: validation.code, detail: validation.detail };
+  }
+
+  // Resolve mode. NODE_VERIFIED fail-closed gate runs before insert, with
+  // same-hash idempotent replay still honoured if a prior row exists.
+  const verificationMode = resolveVerificationMode(request.verificationMode);
+  const requestSha256 = canonicalRequestSha256(request);
+
+  if (verificationMode === "NODE_VERIFIED") {
+    const policyDoc = await policy.getPolicy();
+    const modeAdmit = admitVerificationMode(
+      verificationMode,
+      policyDoc,
+      request.implementerId,
+    );
+    if (!modeAdmit.ok) {
+      const existing = await store.findByIdempotency(
+        request.implementerId,
+        SEND_HTTP_METHOD,
+        SEND_CANONICAL_ROUTE,
+        request.idempotencyKey,
+      );
+      if (existing !== null && existing.requestSha256 === requestSha256) {
+        return resolveIdempotencyConflict(store, request, requestSha256);
+      }
+      return { outcome: "REJECTED", code: modeAdmit.code };
+    }
   }
 
   // Step 2 — the source must be a node-generated wallet controlled by this node. These
@@ -399,8 +454,9 @@ export async function createExternalSend(
     clientReference: request.clientReference,
     description: request.description,
     idempotencyKey: request.idempotencyKey,
-    requestSha256: canonicalRequestSha256(request),
+    requestSha256,
     createdAt: now(),
+    verificationMode,
   };
 
   // Step 3 — one DB-TX creates the operation row and its one artifact, or neither. The
@@ -485,6 +541,7 @@ export interface ExternalSendResponse {
     readonly updated_at: string;
     readonly terminal_at: null;
     readonly verification_material_available_until: null;
+    readonly verification_mode: VerificationMode;
   };
   readonly source_wallet_id: string;
   readonly destination_address: string;
@@ -513,6 +570,10 @@ export function buildExternalSendResponse(
       : operation.status === "APPROVED"
         ? "APPROVED"
         : "CONSUMED";
+  const verificationMode =
+    "verificationMode" in operation && operation.verificationMode !== undefined
+      ? operation.verificationMode
+      : DEFAULT_VERIFICATION_MODE;
   return {
     operation: {
       operation_id: operation.operationId,
@@ -526,6 +587,7 @@ export function buildExternalSendResponse(
       updated_at: createdAt,
       terminal_at: null,
       verification_material_available_until: null,
+      verification_mode: verificationMode,
     },
     source_wallet_id: operation.sourceWalletId,
     destination_address: operation.destinationAddress,

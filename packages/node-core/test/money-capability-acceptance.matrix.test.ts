@@ -307,6 +307,7 @@ class MoveStore implements MoveCreateStore {
       leaseGroupId,
       idempotencyKey: op.idempotencyKey,
       requestSha256: op.requestSha256,
+      verificationMode: op.verificationMode,
       createdAt: op.createdAt,
       updatedAt: op.createdAt,
     });

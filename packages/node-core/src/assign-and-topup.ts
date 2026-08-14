@@ -354,6 +354,8 @@ export interface AssignAndTopUpRequest {
    * undefined preserves pre-1289 multi-hub behaviour (funding pin unset).
    */
   readonly fundingWalletId?: string | null;
+  /** Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend. */
+  readonly verificationMode?: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
 export interface AssignAndTopUpDeps {
@@ -608,6 +610,9 @@ export function canonicalAssignRequestSha256(request: AssignAndTopUpRequest): st
     idempotencyKey: request.idempotencyKey,
     idempotencySourceWalletId: request.sourceWalletId,
     idempotencyReferencesOperationId: request.referencesOperationId,
+    ...(request.verificationMode !== undefined
+      ? { verificationMode: request.verificationMode }
+      : {}),
   };
   return canonicalRequestSha256(fingerprint);
 }
@@ -985,6 +990,9 @@ export async function assignAndTopUpExternalSend(
       // Client-visible source (null when omitted) — not the resolved worker. ZTR-1271.
       idempotencySourceWalletId: request.sourceWalletId,
       idempotencyReferencesOperationId: request.referencesOperationId,
+      ...(request.verificationMode !== undefined
+        ? { verificationMode: request.verificationMode }
+        : {}),
     },
     deps.sendCreateConfig ?? { generateId: deps.generateId, now: deps.now },
   );

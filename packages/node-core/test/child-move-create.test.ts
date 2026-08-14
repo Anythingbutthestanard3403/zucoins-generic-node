@@ -64,6 +64,7 @@ const LANDED_PARENT: LandedParentReceive = {
   afterLanding: "INTERNAL_MOVE",
   afterLandingDestinationId: DESTINATION_ID,
   leaseGroupId: LEASE_GROUP_ID,
+  verificationMode: "INDEPENDENT",
 };
 
 /** Constraint-accurate store double: UNIQUE spawned_from_operation_id + lease join. */
@@ -150,6 +151,7 @@ class ConstraintStore implements ChildMoveCreateStore {
       leaseGroupId: input.leaseGroupId,
       idempotencyKey: input.idempotencyKey,
       requestSha256: input.requestSha256,
+      verificationMode: input.verificationMode,
       createdAt: Date.parse(input.createdAtIso),
     };
     this.operations.set(child.operationId, child);

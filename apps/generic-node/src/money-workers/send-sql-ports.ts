@@ -100,7 +100,8 @@ export async function mirrorSendOperationsToOperations(
        id, node_id, implementer_id, kind, status, amount_zkz,
        source_wallet_id, destination_address,
        references_operation_id, client_reference, description,
-       idempotency_key, request_sha256, formation_state
+       idempotency_key, request_sha256, formation_state,
+       verification_mode
      )
      SELECT
        s.operation_id,
@@ -116,7 +117,8 @@ export async function mirrorSendOperationsToOperations(
        s.description,
        s.idempotency_key,
        s.request_sha256,
-       s.formation_state::external_formation_state
+       s.formation_state::external_formation_state,
+       s.verification_mode
      FROM send_operations s
      WHERE s.status IN ('CREATED', 'APPROVED', 'AWAITING_REDEMPTION')
        AND NOT EXISTS (SELECT 1 FROM operations o WHERE o.id = s.operation_id)

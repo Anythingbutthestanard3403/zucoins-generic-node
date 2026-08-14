@@ -136,6 +136,14 @@ const walletEvidence: JsonSchema = {
   },
 };
 
+/** Optional create-body verification_mode (ZTR-1301). Omitted → INDEPENDENT. */
+const verificationMode: JsonSchema = {
+  type: "string",
+  enum: ["INDEPENDENT", "NODE_VERIFIED"],
+  description:
+    "Per-operation verification mode. Omitted defaults to INDEPENDENT. NODE_VERIFIED requires operator policy ops.allow_node_verified for the calling implementer; otherwise 422 verification_mode_not_allowed.",
+};
+
 /** POST /v1/receives — CreateReceiveBody. No callback_url (reporting-key enrolment ceremony). */
 export const CREATE_RECEIVE_BODY: JsonSchema = {
   type: "object",
@@ -173,6 +181,7 @@ export const CREATE_RECEIVE_BODY: JsonSchema = {
         },
       ],
     },
+    verification_mode: verificationMode,
   },
 };
 
@@ -185,6 +194,7 @@ export const CREATE_INTERNAL_MOVE_BODY: JsonSchema = {
     destination_id: uuid,
     amount_zkz: positiveZkz,
     client_reference: { type: "string", maxLength: 256 },
+    verification_mode: verificationMode,
   },
 };
 
@@ -200,6 +210,7 @@ export const CREATE_EXTERNAL_SEND_BODY: JsonSchema = {
     references_operation_id: uuid,
     client_reference: { type: "string", maxLength: 256 },
     description: { type: "string", maxLength: 512 },
+    verification_mode: verificationMode,
   },
 };
 

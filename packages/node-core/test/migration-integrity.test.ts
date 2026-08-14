@@ -217,6 +217,8 @@ const SCHEMA_FILES = [
   "wallet-money-capability.sql",
   // ZTR-1268: CREATE OR REPLACE custody_reject_ineligible_lease (capability conjuncts).
   "wallet-money-capability-lease-guard.sql",
+  // ZTR-1287: nullable implementers.funding_wallet_id FK → wallets. ALTER-only.
+  "implementer-funding-wallet.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -245,6 +247,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "approval-stores-auto-policy.sql",
   "wallet-money-capability.sql",
   "wallet-money-capability-lease-guard.sql",
+  "implementer-funding-wallet.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -563,6 +566,11 @@ const GREENFIELD: Record<
   "wallet-money-capability-lease-guard.sql": {
     applies: false,
     missingRelation: "wallets",
+  },
+  // DO RAISE when implementers/wallets absent (same pattern as dual-control-policy).
+  "implementer-funding-wallet.sql": {
+    applies: false,
+    missingFragment: "implementer-funding-wallet requires implementers",
   },
 };
 

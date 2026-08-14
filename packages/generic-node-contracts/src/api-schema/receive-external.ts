@@ -55,20 +55,43 @@ const ReceiveCreatedOperationSchema = ReceiveExternalOperationSchema.extend({
   state: z.literal("CREATED"),
 }).strict();
 
-export const ReceiveExternalReadyResponseSchema = z
+const ReceiveReadyCommonFields = {
+  operation: ReceiveReadyOperationSchema,
+  receiver_pubkey: WalletPublicKeySchema,
+  discriminator: UuidSchema,
+  expires_at: Rfc3339MsSchema,
+  after_landing: AfterLandingSchema,
+  expected_artifact: ExpectedArtifactSchema,
+  t0: T0EvidenceSchema,
+  subscription_handle: z.string().min(1),
+} as const;
+
+/** INDEPENDENT ready: code withheld until arm. */
+const ReceiveExternalReadyAwaitingArmSchema = z
   .object({
-    operation: ReceiveReadyOperationSchema,
-    receiver_pubkey: WalletPublicKeySchema,
-    discriminator: UuidSchema,
-    expires_at: Rfc3339MsSchema,
-    after_landing: AfterLandingSchema,
+    ...ReceiveReadyCommonFields,
     code_status: z.literal("AWAITING_ARM"),
     transfer_code: z.null(),
-    expected_artifact: ExpectedArtifactSchema,
-    t0: T0EvidenceSchema,
-    subscription_handle: z.string().min(1),
   })
   .strict();
+
+/**
+ * NODE_VERIFIED ready (ZTR-1302): code auto-released at ready-commit.
+ * Same READY operation state; transfer_code plaintext is present.
+ * Also covers post-arm INDEPENDENT GET overlays that surface RELEASED.
+ */
+const ReceiveExternalReadyReleasedSchema = z
+  .object({
+    ...ReceiveReadyCommonFields,
+    code_status: z.literal("RELEASED"),
+    transfer_code: z.string().min(1),
+  })
+  .strict();
+
+export const ReceiveExternalReadyResponseSchema = z.discriminatedUnion("code_status", [
+  ReceiveExternalReadyAwaitingArmSchema,
+  ReceiveExternalReadyReleasedSchema,
+]);
 
 export const ReceiveExternalQueuedResponseSchema = z
   .object({

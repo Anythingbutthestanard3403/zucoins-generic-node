@@ -90,6 +90,9 @@ export const ARM_LIVE_SQL = {
     "AND o.kind = 'RECEIVE_EXTERNAL'",
   LOAD_OPERATION_STATE:
     "SELECT status::text AS state FROM operations WHERE id = $1::uuid",
+  /** Frozen admission-time mode — NODE_VERIFIED refuses arm (ZTR-1302). */
+  LOAD_VERIFICATION_MODE:
+    "SELECT verification_mode::text AS verification_mode FROM operations WHERE id = $1::uuid",
   /** Receive-side receiver wallet — same column the arm gate locks (receive_codes). */
   LOAD_RECEIVER_WALLET:
     "SELECT receiver_wallet_id::text AS wallet_id FROM receive_codes WHERE operation_id = $1::uuid",
@@ -223,7 +226,10 @@ export function createSqlArmDurableT0(pool: Pool): ArmPreopenDurableT0Port {
  */
 function createBaseOperationState(
   pool: Pool,
-): Pick<ArmOperationState, "getState" | "getAssignedWallet" | "getT0" | "markAttention"> {
+): Pick<
+  ArmOperationState,
+  "getState" | "getAssignedWallet" | "getT0" | "getVerificationMode" | "markAttention"
+> {
   const query = poolQuery(pool);
   return {
     async getState(operationId: string): Promise<string | null> {
@@ -232,6 +238,18 @@ function createBaseOperationState(
         operationId,
       ]);
       return result.rows[0]?.state ?? null;
+    },
+    async getVerificationMode(
+      operationId: string,
+    ): Promise<"INDEPENDENT" | "NODE_VERIFIED" | null> {
+      // Advisory pre-lock — mode is immutable after admission (ZTR-1300 trigger).
+      const result = await query<{ verification_mode: string }>(
+        ARM_LIVE_SQL.LOAD_VERIFICATION_MODE,
+        [operationId],
+      );
+      const mode = result.rows[0]?.verification_mode;
+      if (mode === "NODE_VERIFIED" || mode === "INDEPENDENT") return mode;
+      return null;
     },
     async getAssignedWallet(operationId: string): Promise<string | null> {
       // Advisory pre-lock (F8). Commit path uses LOAD_RECEIVER_WALLET_SCOPED under tenant.

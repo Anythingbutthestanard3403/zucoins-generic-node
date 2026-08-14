@@ -3,14 +3,24 @@
 // Writes receive_codes, returns the 201 body, and appends the receive.ready event;
 // the byte-exact signing rule (response body bytes are the idempotency result — never reshaped on replay).
 //
-// Rechecks operation / lease epoch / destination eligibility / expiry, persists the code in
-// withheld form (code_status=AWAITING_ARM), attaches T0 evidence already bound,
-// transitions CREATED→READY, appends receive.ready, completes the idempotency result with 201,
-// and commits. The transfer_code plaintext is stored on receive_codes but MUST NOT appear on
-// any non-arm surface (point GET, subscription, event, callback, log, audit) — the 201 body
-// carries transfer_code:null and code_status:"AWAITING_ARM".
+// Rechecks operation / lease epoch / destination eligibility / expiry, persists the code,
+// attaches T0 evidence already bound, transitions CREATED→READY, appends receive.ready,
+// completes the idempotency result with 201, and commits.
+//
+// INDEPENDENT (default): code_status=AWAITING_ARM — transfer_code plaintext is durable but
+// withheld from every non-arm surface (201 body, point GET, subscription, event, callback,
+// log, audit) until a successful armed.
+//
+// NODE_VERIFIED (ZTR-1302): code_status=RELEASED in the same TX as READY. There is no
+// consumer verifier, so holding the code for arm would strand the receive. Point GET
+// surfaces transfer_code once RELEASED. The arm-time standing recheck is intentionally
+// NOT replicated here — this TX already runs under the operation's wallet lease.
+// receive.ready event payload shape is mode-invariant (AC4): still transfer_code:null /
+// code_status:"AWAITING_ARM" vocabulary on the event (code bytes never on the event bus).
 
 import { createHash } from "node:crypto";
+
+import type { VerificationMode } from "@zucoins/generic-node-contracts/operations";
 
 import type { FormedReceiveCode } from "./code-formation.js";
 
@@ -32,7 +42,8 @@ SELECT o.id::text AS operation_id,
        o.row_version::int AS row_version,
        o.amount_zkz,
        o.created_at,
-       o.updated_at
+       o.updated_at,
+       o.verification_mode::text AS verification_mode
   FROM operations o
   JOIN wallet_active_leases l
     ON l.operation_id = o.id
@@ -57,8 +68,11 @@ SELECT d.id::text AS destination_id
     .trim(),
 
   /**
-   * Withheld code row. transfer_code_text is durable but code_status=AWAITING_ARM means
-   * every non-arm surface must omit/null the plaintext.
+   * Code row. $10 = code_status, $11 = ready_at, $12 = released_at.
+   * INDEPENDENT inserts AWAITING_ARM / NULL released_at.
+   * NODE_VERIFIED inserts RELEASED / readyAt as released_at (ZTR-1302) — atomic with READY.
+   * Arm-time wallet standing recheck is NOT replicated here: ready-commit already holds the
+   * operation's RECEIVE_WINDOW lease on this wallet.
    */
   INSERT_RECEIVE_CODE: `
 INSERT INTO receive_codes (
@@ -68,8 +82,22 @@ INSERT INTO receive_codes (
 ) VALUES (
   $1, $2, $3, $4,
   $5, $6, $7,
-  $8, $9, 'AWAITING_ARM', $10, NULL
+  $8, $9, $10, $11, $12
 )`
+    .replace(/\s+/g, " ")
+    .trim(),
+
+  /**
+   * Crash-recovery / completeReadyFromDurableCode: if a prior insert left AWAITING_ARM on a
+   * NODE_VERIFIED op, promote to RELEASED under the same ready TX (idempotent).
+   */
+  ENSURE_CODE_RELEASED: `
+UPDATE receive_codes
+   SET code_status = 'RELEASED',
+       released_at = COALESCE(released_at, $2::timestamptz)
+ WHERE operation_id = $1
+   AND code_status = 'AWAITING_ARM'
+RETURNING operation_id::text AS operation_id`
     .replace(/\s+/g, " ")
     .trim(),
 
@@ -145,7 +173,8 @@ export interface CommitReceiveReadyInput {
   readonly events: ReceiveReadyEventAppender;
   /**
    * Optional override for the 201 body. Default builds the shape with
-   * transfer_code:null / code_status:AWAITING_ARM.
+   * transfer_code:null / code_status:AWAITING_ARM (INDEPENDENT) or
+   * RELEASED + transfer_code plaintext (NODE_VERIFIED).
    */
   readonly buildResponseBody?: (input: {
     readonly formed: FormedReceiveCode;
@@ -153,6 +182,7 @@ export interface CommitReceiveReadyInput {
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly subscriptionHandle: string;
+    readonly codeStatus?: CommitReceiveReadyCodeStatus;
   }) => string;
   /**
    * Create-time `sh_…` plaintext (required, min length 1). Must match the handle
@@ -175,6 +205,8 @@ export type CommitReceiveReadyRejectionReason =
   /** Create-time `sh_…` plaintext missing/empty — refuse READY rather than emit schema-illegal null. */
   | "subscription_handle_missing";
 
+export type CommitReceiveReadyCodeStatus = "AWAITING_ARM" | "RELEASED";
+
 export type CommitReceiveReadyResult =
   | {
       readonly ok: true;
@@ -182,13 +214,23 @@ export type CommitReceiveReadyResult =
       readonly rowVersion: number;
       readonly responseStatus: 201;
       readonly responseBody: string;
-      readonly codeStatus: "AWAITING_ARM";
+      /** Durable receive_codes.code_status after this TX (NODE_VERIFIED → RELEASED). */
+      readonly codeStatus: CommitReceiveReadyCodeStatus;
     }
   | {
       readonly ok: false;
       readonly reason: CommitReceiveReadyRejectionReason;
       readonly detail: string;
     };
+
+function asVerificationMode(value: string | null | undefined): VerificationMode {
+  return value === "NODE_VERIFIED" ? "NODE_VERIFIED" : "INDEPENDENT";
+}
+
+/** Durable code_status written at ready-commit for the operation's verification_mode. */
+export function readyCommitCodeStatus(mode: VerificationMode): CommitReceiveReadyCodeStatus {
+  return mode === "NODE_VERIFIED" ? "RELEASED" : "AWAITING_ARM";
+}
 
 const SQLSTATE_UNIQUE_VIOLATION = "23505";
 
@@ -212,11 +254,17 @@ export function isNonEmptySubscriptionHandle(handle: unknown): handle is string 
  * Synchronous-assignment 201 body. Explicit key insertion sequence (the byte-exact signing rule):
  * these bytes are the idempotency result and are replayed verbatim.
  *
- * Secrecy: `transfer_code` is the JSON null literal — never the withheld plaintext, never
- * omitted, never the empty string. `code_status` is exactly `"AWAITING_ARM"`.
+ * Secrecy (INDEPENDENT): `transfer_code` is the JSON null literal — never the withheld
+ * plaintext, never omitted, never the empty string. `code_status` is exactly `"AWAITING_ARM"`.
+ *
+ * NODE_VERIFIED (ZTR-1302): `code_status` is `"RELEASED"` and `transfer_code` carries the
+ * plaintext (auto-released at ready-commit). Create/idempotency replay of this body is the
+ * only non-GET surface that embeds plaintext; events still withhold it (see
+ * buildReceiveReadyEventData).
  *
  * `subscription_handle` is the create-time `sh_…` plaintext (required, min length 1) —
- * never null, never empty (frozen ReceiveExternalReadyResponseSchema).
+ * never null, never empty (frozen ReceiveExternalReadyResponseSchema for INDEPENDENT;
+ * NODE_VERIFIED READY body is the same shape with RELEASED + code bytes).
  */
 export function buildReceiveReady201Body(input: {
   readonly formed: FormedReceiveCode;
@@ -224,6 +272,8 @@ export function buildReceiveReady201Body(input: {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly subscriptionHandle: string;
+  /** Defaults INDEPENDENT. NODE_VERIFIED embeds RELEASED + transfer_code plaintext. */
+  readonly codeStatus?: CommitReceiveReadyCodeStatus;
 }): string {
   if (!isNonEmptySubscriptionHandle(input.subscriptionHandle)) {
     throw new Error(
@@ -231,6 +281,7 @@ export function buildReceiveReady201Body(input: {
     );
   }
   const { formed } = input;
+  const codeStatus = input.codeStatus ?? "AWAITING_ARM";
   const expiresAt = new Date(Number(formed.expiryUnixTimeSecs) * 1000).toISOString();
   return JSON.stringify({
     operation: {
@@ -250,8 +301,9 @@ export function buildReceiveReady201Body(input: {
     discriminator: formed.discriminator,
     expires_at: expiresAt,
     after_landing: formed.afterLanding,
-    code_status: "AWAITING_ARM",
-    transfer_code: null,
+    code_status: codeStatus,
+    transfer_code:
+      codeStatus === "RELEASED" ? formed.transferCode.transferCodeText : null,
     expected_artifact: {
       key_id: formed.artifact.envelope.key_id,
       preimage_text: formed.artifact.envelope.preimage_text,
@@ -271,8 +323,10 @@ export function buildReceiveReady201Body(input: {
 }
 
 /**
- * receive.ready event data — deliberately excludes transfer_code plaintext.
- * Hash of these exact bytes becomes data_sha256 on the event row.
+ * receive.ready event data — deliberately excludes transfer_code plaintext for both modes
+ * (AC4: event vocabulary/shape is mode-invariant). Hash of these exact bytes becomes
+ * data_sha256 on the event row. `code_status` on the event remains the literal
+ * `"AWAITING_ARM"` token for both modes so dual-chain append stays byte-identical in shape.
  */
 export function buildReceiveReadyEventData(
   formed: FormedReceiveCode,
@@ -292,7 +346,8 @@ export function buildReceiveReadyEventData(
 
 /**
  * Structural secrecy check: the withheld transfer-code plaintext must not appear in any
- * string that leaves the READY commit (201 body, event data). Used by tests and as a
+ * string that leaves the READY commit when the code is still AWAITING_ARM (201 body for
+ * INDEPENDENT, and receive.ready event data for both modes). Used by tests and as a
  * last-line guard inside the commit path.
  */
 export function assertWithheldTransferCode(
@@ -308,7 +363,12 @@ export function assertWithheldTransferCode(
 
 async function finishReadyTransition(
   input: CommitReceiveReadyInput,
-  op: { readonly row_version: number; readonly created_at: string | Date },
+  op: {
+    readonly row_version: number;
+    readonly created_at: string | Date;
+    readonly verification_mode?: string | null;
+  },
+  codeStatus: CommitReceiveReadyCodeStatus,
 ): Promise<CommitReceiveReadyResult> {
   const { formed, sql } = input;
 
@@ -354,8 +414,13 @@ async function finishReadyTransition(
     createdAt,
     updatedAt,
     subscriptionHandle,
+    codeStatus,
   });
-  assertWithheldTransferCode(responseBody, formed.transferCode.transferCodeText);
+  // INDEPENDENT 201 body and both-mode event data must never embed plaintext.
+  // NODE_VERIFIED 201 body intentionally carries transfer_code once RELEASED.
+  if (codeStatus === "AWAITING_ARM") {
+    assertWithheldTransferCode(responseBody, formed.transferCode.transferCodeText);
+  }
 
   const eventData = buildReceiveReadyEventData(formed, input.receiverWalletId);
   assertWithheldTransferCode(eventData, formed.transferCode.transferCodeText);
@@ -386,7 +451,7 @@ async function finishReadyTransition(
     rowVersion: ready.row_version,
     responseStatus: 201,
     responseBody,
-    codeStatus: "AWAITING_ARM",
+    codeStatus,
   };
 }
 
@@ -427,6 +492,7 @@ export async function commitReceiveReady(
     amount_zkz: string;
     created_at: string | Date;
     updated_at: string | Date;
+    verification_mode: string | null;
   }>(RECEIVE_READY_STATEMENTS.RECHECK_CREATED_AND_LEASE, [
     formed.discriminator,
     input.receiverWalletId,
@@ -455,6 +521,11 @@ export async function commitReceiveReady(
     }
   }
 
+  // Branch on the operation's frozen verification_mode inside this TX (not the worker
+  // step) so RELEASED is atomic with READY for NODE_VERIFIED (ZTR-1302).
+  const codeStatus = readyCommitCodeStatus(asVerificationMode(op.verification_mode));
+  const releasedAt = codeStatus === "RELEASED" ? input.readyAt : null;
+
   try {
     await sql.query(RECEIVE_READY_STATEMENTS.INSERT_RECEIVE_CODE, [
       formed.discriminator,
@@ -466,7 +537,9 @@ export async function commitReceiveReady(
       formed.expiryUnixTimeSecs,
       formed.transferCode.transferCodeText,
       formed.transferCode.transferCodeSha256,
+      codeStatus,
       input.readyAt,
+      releasedAt,
     ]);
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -479,7 +552,7 @@ export async function commitReceiveReady(
     throw error;
   }
 
-  return finishReadyTransition(input, op);
+  return finishReadyTransition(input, op, codeStatus);
 }
 
 /**
@@ -507,6 +580,7 @@ export async function completeReadyFromDurableCode(
     amount_zkz: string;
     created_at: string | Date;
     updated_at: string | Date;
+    verification_mode: string | null;
   }>(RECEIVE_READY_STATEMENTS.RECHECK_CREATED_AND_LEASE, [
     formed.discriminator,
     input.receiverWalletId,
@@ -530,6 +604,16 @@ export async function completeReadyFromDurableCode(
     return commitReceiveReady(input);
   }
 
+  const codeStatus = readyCommitCodeStatus(asVerificationMode(op.verification_mode));
+  // NODE_VERIFIED crash recovery: a prior insert may have left AWAITING_ARM before the
+  // mode branch landed — promote under the same ready TX (idempotent).
+  if (codeStatus === "RELEASED") {
+    await sql.query(RECEIVE_READY_STATEMENTS.ENSURE_CODE_RELEASED, [
+      formed.discriminator,
+      input.readyAt,
+    ]);
+  }
+
   // Code already durable: only CAS + event + idempotency (do not regenerate / re-insert).
-  return finishReadyTransition(input, op);
+  return finishReadyTransition(input, op, codeStatus);
 }

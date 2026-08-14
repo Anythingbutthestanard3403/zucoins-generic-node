@@ -384,16 +384,18 @@ export function createSqlArmStore(deps: {
 
 /**
  * Wrap a base ArmOperationState so lockAndReadGate / transitionToArmed issue DML on the
- * wallet-lock TX. Pre-lock reads (getState / getAssignedWallet / getT0) stay on the base.
+ * wallet-lock TX. Pre-lock reads (getState / getAssignedWallet / getT0 / getVerificationMode)
+ * stay on the base.
  */
 export function createSqlTxBoundOperationState(
   base: Pick<ArmOperationState, "getState" | "getAssignedWallet" | "getT0"> &
-    Partial<Pick<ArmOperationState, "markAttention">>,
+    Partial<Pick<ArmOperationState, "markAttention" | "getVerificationMode">>,
 ): ArmOperationState {
   return {
     getState: (id) => base.getState(id),
     getAssignedWallet: (id) => base.getAssignedWallet(id),
     getT0: (id) => base.getT0(id),
+    getVerificationMode: base.getVerificationMode?.bind(base),
     markAttention: base.markAttention?.bind(base),
     async lockAndReadGate(
       operationId: string,

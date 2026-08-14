@@ -206,6 +206,18 @@ function receiveFromStored(row: StoredReceiveOperation): ReceiveResponse {
     },
   };
 
+  // Overlay live receive_codes when RELEASED so GET returns transfer_code after
+  // NODE_VERIFIED ready-commit or INDEPENDENT arm (ZTR-1302). AWAITING_ARM keeps
+  // frozen null; EXPIRED keeps status without plaintext.
+  if (row.liveCodeStatus !== undefined && row.liveCodeStatus !== null) {
+    body = {
+      ...body,
+      code_status: row.liveCodeStatus,
+      transfer_code:
+        row.liveCodeStatus === "RELEASED" ? (row.liveTransferCode ?? null) : null,
+    };
+  }
+
   // overlay live operations facts. Frozen READY response_body keeps
   // row_version/state from the READY commit; land bumps operations.row_version and
   // status to RECEIVE_LANDED. verification-complete CAS needs the live version.

@@ -113,6 +113,13 @@ function mapOutcomeToHandlerResult(
       persistChild: null,
     };
   }
+  if (outcome.status === "verification_mode_mismatch") {
+    // NODE_VERIFIED refuse — no mutation, no attention (ZTR-1302 AC3).
+    return {
+      response: apiToReporting(apiErrorResponse("verification_mode_mismatch", requestId)),
+      persistChild: null,
+    };
+  }
   if (outcome.status === "operation_version_conflict") {
     return {
       response: apiToReporting(apiErrorResponse("operation_version_conflict", requestId)),

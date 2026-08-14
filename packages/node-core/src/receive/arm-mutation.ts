@@ -57,6 +57,14 @@ export type ArmOutcome =
       readonly status: "operation_not_armable";
       readonly operationId: string;
       readonly reason: string;
+    }
+  /**
+   * armed called on a NODE_VERIFIED op (ZTR-1302). Code was auto-released at ready-commit;
+   * consumer arm is not admitted. Idempotent: no state change, no attention row.
+   */
+  | {
+      readonly status: "verification_mode_mismatch";
+      readonly operationId: string;
     };
 
 export interface ArmRequest {
@@ -135,6 +143,12 @@ export interface ArmOperationState {
   getState(operationId: string): Promise<string | null>;
   getAssignedWallet(operationId: string): Promise<string | null>;
   getT0(operationId: string): Promise<T0Projection | null>;
+  /**
+   * Frozen admission-time verification_mode. Optional for legacy unit fixtures —
+   * absent/`undefined` is treated as INDEPENDENT (arm admitted). Live SQL ports MUST
+   * return the durable column so NODE_VERIFIED arms 409 without mutation (ZTR-1302).
+   */
+  getVerificationMode?(operationId: string): Promise<"INDEPENDENT" | "NODE_VERIFIED" | null>;
   /**
    * Under the commit session: lock the operation (+ code) row and return the arm gate
    * snapshot. null when the operation is absent.
@@ -345,6 +359,17 @@ export function createArmMutationService(deps: {
   return {
     async arm(request: ArmRequest): Promise<ArmOutcome> {
       const { operationId, walletId } = request;
+
+      // NODE_VERIFIED refuses arm before any mutation (ZTR-1302 AC3). Idempotent: no
+      // arm row, no code status flip, no attention. Checked before already_armed so a
+      // NODE_VERIFIED op never serves code via the arm surface even if a stale arm row
+      // somehow exists (should not — ready-commit auto-releases without arming).
+      if (operationState.getVerificationMode !== undefined) {
+        const mode = await operationState.getVerificationMode(operationId);
+        if (mode === "NODE_VERIFIED") {
+          return { status: "verification_mode_mismatch", operationId };
+        }
+      }
 
       // Idempotent pre-check (outside lock). Under lock we re-tryInsert and re-load.
       const existing = await armStore.findByOperation(operationId);

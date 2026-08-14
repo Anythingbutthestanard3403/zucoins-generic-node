@@ -154,6 +154,31 @@ describe("the named concern RECEIVE_EXTERNAL strict schemas", () => {
     expect(ReceiveExternalResponseSchema.safeParse(RECEIVE_QUEUED_RESPONSE).success).toBe(true);
   });
 
+  it("accepts NODE_VERIFIED / post-arm READY with RELEASED + transfer_code (ZTR-1302)", () => {
+    const released = {
+      ...RECEIVE_READY_RESPONSE,
+      code_status: "RELEASED" as const,
+      transfer_code: "tc_node_verified_auto_released",
+    };
+    expect(ReceiveExternalReadyResponseSchema.safeParse(released).success).toBe(true);
+    expect(ReceiveExternalResponseSchema.safeParse(released).success).toBe(true);
+    // Mismatched pairing: RELEASED without plaintext, or AWAITING_ARM with plaintext.
+    expect(
+      ReceiveExternalReadyResponseSchema.safeParse({
+        ...RECEIVE_READY_RESPONSE,
+        code_status: "RELEASED",
+        transfer_code: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      ReceiveExternalReadyResponseSchema.safeParse({
+        ...RECEIVE_READY_RESPONSE,
+        code_status: "AWAITING_ARM",
+        transfer_code: "should-not-leak",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects callback_url and every other unknown request field (the no-callback rule)", () => {
     const result = ReceiveExternalRequestSchema.safeParse({
       ...RECEIVE_REQUEST,

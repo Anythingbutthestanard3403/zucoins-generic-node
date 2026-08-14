@@ -199,7 +199,7 @@ export {
   type ReceiveCodePhase,
 } from "./code-formation.js";
 
-// CREATED→READY commit with withheld code + 201 body.
+// CREATED→READY commit with withheld (INDEPENDENT) or auto-released (NODE_VERIFIED) code.
 export {
   RECEIVE_READY_STATEMENTS,
   assertWithheldTransferCode,
@@ -208,6 +208,8 @@ export {
   commitReceiveReady,
   completeReadyFromDurableCode,
   isNonEmptySubscriptionHandle,
+  readyCommitCodeStatus,
+  type CommitReceiveReadyCodeStatus,
   type CommitReceiveReadyInput,
   type CommitReceiveReadyRejectionReason,
   type CommitReceiveReadyResult,

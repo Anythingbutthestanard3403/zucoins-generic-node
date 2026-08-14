@@ -857,7 +857,22 @@ export interface ImplementerListing {
   readonly name: string;
   readonly created_at: string;
   readonly retired_at: string | null;
+  /**
+   * Explicit funding wallet pin (reserve/proof — not send/source).
+   * Null ⇒ integration uses the node-wide default funding wallet when set.
+   */
+  readonly funding_wallet_id: string | null;
+  readonly funding_wallet_public_key: string | null;
 }
+
+/** Node-wide default funding wallet (reserve/proof pin; ZTR-1287). */
+export interface DefaultFundingWalletSnapshot {
+  readonly wallet_id: string | null;
+  readonly public_key: string | null;
+  readonly row_version: number;
+}
+
+export type FundingWalletSetMode = "DEFAULT" | "WALLET_ID" | "CREATE";
 
 /** Key inventory is empty only after a successful GET; unavailable stays explicit. */
 export async function listApiKeys(opts?: {
@@ -945,6 +960,48 @@ export async function postRetireImplementer(
       idempotencyKey: newIdempotencyKey(),
     },
   );
+}
+
+/**
+ * Pin an integration's funding wallet (reserve/proof pubkey for SplitChain checks).
+ * Not a send/source pin — external sends stay omit-source / worker-pool.
+ *
+ * - DEFAULT: clear explicit pin → use node default
+ * - WALLET_ID: attach existing wallet_id
+ * - CREATE: mint new wallet then attach (server mintFundingWallet)
+ */
+export async function postSetImplementerFundingWallet(
+  implementerId: string,
+  body: { readonly mode: FundingWalletSetMode; readonly wallet_id?: string },
+  totp: string,
+): Promise<ImplementerListing> {
+  const payload: { mode: FundingWalletSetMode; wallet_id?: string } = { mode: body.mode };
+  if (body.wallet_id !== undefined) payload.wallet_id = body.wallet_id;
+  return api<ImplementerListing>(
+    `/implementers/${encodeURIComponent(implementerId)}/funding-wallet`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+      totp,
+      idempotencyKey: newIdempotencyKey(),
+    },
+  );
+}
+
+export async function fetchDefaultFundingWallet(): Promise<DefaultFundingWalletSnapshot> {
+  return api<DefaultFundingWalletSnapshot>("/default-funding-wallet");
+}
+
+export async function putDefaultFundingWallet(
+  body: { readonly wallet_id: string | null; readonly expected_row_version: number },
+  totp: string,
+): Promise<DefaultFundingWalletSnapshot> {
+  return api<DefaultFundingWalletSnapshot>("/default-funding-wallet", {
+    method: "PUT",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
 }
 
 // Reporting credential management. Issue node-mints the

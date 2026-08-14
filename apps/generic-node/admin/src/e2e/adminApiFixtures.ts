@@ -274,8 +274,16 @@ const IMPLEMENTERS_LIST = {
       name: "genesis",
       created_at: "2026-01-01T00:00:00Z",
       retired_at: null,
+      funding_wallet_id: null,
+      funding_wallet_public_key: null,
     },
   ],
+};
+
+const DEFAULT_FUNDING_WALLET = {
+  wallet_id: null,
+  public_key: null,
+  row_version: 0,
 };
 
 const HALT_STATE = { engaged: false, reason: null, updated_at: null, updated_by: null };
@@ -430,6 +438,7 @@ export async function registerAdminApiRoutes(
     if (key === "GET /admin/v1/audit") return json(AUDIT_LIST);
     if (key === "GET /admin/v1/api-keys") return json(API_KEYS_LIST);
     if (key === "GET /admin/v1/implementers") return json(IMPLEMENTERS_LIST);
+    if (key === "GET /admin/v1/default-funding-wallet") return json(DEFAULT_FUNDING_WALLET);
     if (key === "GET /admin/v1/halt") return json(HALT_STATE);
     if (key === "GET /admin/v1/settings")
       return json({

@@ -223,6 +223,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1268: replace custody_reject_ineligible_lease body so lease claim re-checks
   // allow_* flags in-TX. Requires wallet-money-capability columns. Appended only.
   "wallet-money-capability-lease-guard",
+  // ZTR-1287: implementers.funding_wallet_id nullable FK → wallets (reserve/proof pin).
+  // Pure ALTER on implementers (reporting/registry owner); ON DELETE RESTRICT. Appended only.
+  "implementer-funding-wallet",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

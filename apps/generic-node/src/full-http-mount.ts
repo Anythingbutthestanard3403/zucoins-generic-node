@@ -22,7 +22,7 @@
 //
 // SSE subscribe uses durable subscription_handles.
 
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Pool } from "pg";
 
@@ -47,6 +47,7 @@ import {
   LIVE_AUTO_APPROVE_POLICY_ROUTES,
   LIVE_INTEGRATION_REQUEST_ROUTES,
   createSqlImplementerRegistry,
+  createSqlDefaultFundingWallet,
   createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
@@ -108,11 +109,16 @@ import {
   createSqlWalletMoneyCapabilityStore,
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
+  toBase64UrlPadded,
   type DualControlMode,
   type DualControlPolicyPort,
   type AutoApprovePolicyPort,
   type DeviceSignaturePolicyPort,
   type WalletMoneyCapabilityStore,
+  type DefaultFundingWalletPort,
+  type EncryptedWalletKeyStore,
+  type Uuid,
+  type WalletPublicKey,
 } from "@zucoins/node-core";
 
 import { createLiveArmRouteHandler, LIVE_ARM_ENGINE } from "./operations/arm-live.js";
@@ -391,6 +397,11 @@ export interface ProductionSurfaceConfig {
    * (pre-mutation). After a guarded POST the DB row is source of truth (ZTR-1214).
    */
   readonly dualControlMode: DualControlMode;
+  /**
+   * Vault key store for CREATE-mode funding wallet mint (ZTR-1287). When omitted,
+   * mintFundingWallet is not wired and CREATE requires a pre-minted wallet_id.
+   */
+  readonly walletVault?: EncryptedWalletKeyStore;
   /**
    * Dual-control policy port. Production wires SQL over node_settings; tests may
    * inject InMemoryDualControlPolicy. When omitted, mount builds a SQL port from
@@ -718,6 +729,64 @@ export function createProductionRouteSurface(
       return { rows: result.rows as R[] };
     },
   });
+  // Node-wide default funding wallet (ZTR-1287). Pool-scoped for reads; TX-scoped
+  // clone is rebound inside atomicAdminMutation.portsFor.
+  const defaultFundingWallet: DefaultFundingWalletPort = createSqlDefaultFundingWallet({
+    query: async <R>(text: string, params?: readonly unknown[]) => {
+      const result = await config.pool.query(text, params as never);
+      return { rows: result.rows as R[] };
+    },
+  });
+  // CREATE-mode mint: node_generated wallet + vault seal. Uses pool (not admin TX)
+  // so vault.seal's separate connection can see the wallets row FK.
+  const mintFundingWallet =
+    config.walletVault === undefined
+      ? undefined
+      : async (): Promise<{ readonly walletId: string; readonly publicKey: string }> => {
+          const vault = config.walletVault!;
+          const { privateKey, publicKey: pubObj } = generateKeyPairSync("ed25519");
+          const spki = pubObj.export({ format: "der", type: "spki" });
+          const publicKey = toBase64UrlPadded(
+            Buffer.from(spki).subarray(-32),
+          ) as WalletPublicKey;
+          const jwk = privateKey.export({ format: "jwk" });
+          const d = typeof jwk.d === "string" ? jwk.d : "";
+          const seed = Buffer.from(d, "base64url");
+          const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
+          const walletId = randomUUID() as Uuid;
+          try {
+            await config.pool.query(
+              `INSERT INTO wallets (
+                 id, node_id, public_key, key_origin, state,
+                 allow_external_receive, allow_external_send, allow_internal_move, money_mode
+               ) VALUES (
+                 $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
+                 true, true, true, 'FULL'
+               )`,
+              [walletId, config.nodeId, publicKey],
+            );
+            await vault.seal(
+              {
+                nodeId: config.nodeId as Uuid,
+                walletId,
+                keyVersion: 1,
+                publicKey,
+                keyOrigin: "node_generated",
+              },
+              secret64,
+            );
+            return { walletId, publicKey };
+          } catch (err) {
+            try {
+              await config.pool.query(`DELETE FROM wallets WHERE id = $1::uuid`, [walletId]);
+            } catch {
+              /* best-effort */
+            }
+            throw err;
+          } finally {
+            secret64.fill(0);
+          }
+        };
   // Integration-request operator store (list/approve/decline). Pool-scoped for
   // reads; TX-scoped clone is rebound inside atomicAdminMutation.portsFor.
   const adminIntegrationRequestStore = createSqlIntegrationRequestStore({
@@ -837,6 +906,8 @@ export function createProductionRouteSurface(
     credentialService,
     resolveImplementerId,
     implementerRegistry,
+    defaultFundingWallet,
+    mintFundingWallet,
     integrationRequestStore: adminIntegrationRequestStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
@@ -944,6 +1015,12 @@ export function createProductionRouteSurface(
       });
       const txWalletMoneyCapability: WalletMoneyCapabilityStore =
         createSqlWalletMoneyCapabilityStore(client);
+      const txDefaultFundingWallet: DefaultFundingWalletPort = createSqlDefaultFundingWallet({
+        query: async <R>(text: string, params?: readonly unknown[]) => {
+          const result = await client.query(text, params as never);
+          return { rows: result.rows as R[] };
+        },
+      });
       return {
         challengeStore: createSqlApprovalChallengeStore(client),
         sendDecisionStore: new SqlSendDecisionStore(client),
@@ -960,6 +1037,7 @@ export function createProductionRouteSurface(
             return { rows: result.rows as R[] };
           },
         }),
+        defaultFundingWallet: txDefaultFundingWallet,
         integrationRequestStore: createSqlIntegrationRequestStore({
           query: async <R extends Record<string, unknown>>(
             text: string,

@@ -19,12 +19,14 @@ import {
   IMPLEMENTER_SCOPES,
   InMemoryAdminSessionStore,
   InMemoryAdminUserStore,
+  InMemoryDefaultFundingWallet,
   InMemoryImplementerRegistry,
   RUNNING,
   TotpConsumptionLog,
   type AdminUser,
   type CredentialAuditEntry,
   type CredentialStore,
+  type DefaultFundingWalletPort,
   type StoredCredential,
 } from "@zucoins/node-core";
 
@@ -127,6 +129,8 @@ function makeRouter(opts: {
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
   readonly implementerRegistry?: InMemoryImplementerRegistry;
+  readonly defaultFundingWallet?: DefaultFundingWalletPort;
+  readonly mintFundingWallet?: () => Promise<{ walletId: string; publicKey: string }>;
   readonly nowMs?: () => number;
   readonly userStore?: InMemoryAdminUserStore;
 }) {
@@ -137,9 +141,12 @@ function makeRouter(opts: {
     userStore,
   );
   const registry = opts.implementerRegistry ?? new InMemoryImplementerRegistry();
+  const defaultFunding =
+    opts.defaultFundingWallet ?? new InMemoryDefaultFundingWallet();
   const atomic = createTestAdminAtomicDeps({
     credentialService: opts.credentialService as CredentialService,
     implementerRegistry: registry,
+    defaultFundingWallet: defaultFunding,
   });
   const router = createAdminRouter({
     sessions,
@@ -192,10 +199,12 @@ function makeRouter(opts: {
     credentialService: opts.credentialService,
     resolveImplementerId: opts.resolveImplementerId ?? (async () => registry.resolveGenesisId()),
     implementerRegistry: registry,
+    defaultFundingWallet: defaultFunding,
+    mintFundingWallet: opts.mintFundingWallet,
     adminIdempotencyStore: atomic.adminIdempotencyStore,
     atomicAdminMutation: atomic.atomicAdminMutation,
   });
-  return { router, userStore, registry };
+  return { router, userStore, registry, defaultFunding };
 }
 
 async function login(
@@ -677,5 +686,119 @@ describe("admin /admin/v1/implementers", () => {
   it("CredentialError collapse remains CREDENTIAL_NOT_FOUND", () => {
     const err = new CredentialError("credential not found", "CREDENTIAL_NOT_FOUND");
     expect(err.code).toBe("CREDENTIAL_NOT_FOUND");
+  });
+
+  it("set funding wallet DEFAULT / WALLET_ID and default funding setting (ZTR-1287)", async () => {
+    let nowMs = 1_700_000_030_000;
+    const registry = new InMemoryImplementerRegistry(() => new Date(nowMs));
+    const WALLET = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const PUB = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    registry.seedWallet({ id: WALLET, public_key: PUB });
+    registry.seed({
+      id: GENESIS_ID,
+      name: "genesis",
+      created_at: "2026-01-01T00:00:00.000Z",
+      retired_at: null,
+    });
+    const defaultFunding = new InMemoryDefaultFundingWallet();
+    defaultFunding.seedWallet(WALLET, PUB);
+    const userStore = new InMemoryAdminUserStore();
+    const { router } = makeRouter({
+      implementerRegistry: registry,
+      defaultFundingWallet: defaultFunding,
+      userStore,
+      nowMs: () => nowMs,
+    });
+    await enrolAdmin(userStore, "p");
+    const { cookie, csrf } = await login(router, userStore, "p");
+
+    const list0 = await router("GET", "/admin/v1/implementers", new Uint8Array(), {
+      cookie,
+      origin: ORIGIN,
+      "x-csrf-token": csrf,
+    });
+    expect(list0.status).toBe(200);
+    const listed0 = JSON.parse(list0.body) as {
+      implementers: { funding_wallet_id: string | null }[];
+    };
+    expect(listed0.implementers[0]!.funding_wallet_id).toBeNull();
+
+    const setKey = "idem-funding-set-" + "x".repeat(8);
+    const setRes = await router(
+      "POST",
+      `/admin/v1/implementers/${GENESIS_ID}/funding-wallet`,
+      Buffer.from(JSON.stringify({ mode: "WALLET_ID", wallet_id: WALLET })),
+      {
+        cookie,
+        origin: ORIGIN,
+        "x-csrf-token": csrf,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "content-type": "application/json",
+        "idempotency-key": setKey,
+      },
+    );
+    expect(setRes.status).toBe(200);
+    const setBody = JSON.parse(setRes.body) as {
+      funding_wallet_id: string | null;
+      funding_wallet_public_key: string | null;
+    };
+    expect(setBody.funding_wallet_id).toBe(WALLET);
+    expect(setBody.funding_wallet_public_key).toBe(PUB);
+
+    nowMs += 60_000;
+    const clearKey = "idem-funding-clr-" + "y".repeat(8);
+    const clearRes = await router(
+      "POST",
+      `/admin/v1/implementers/${GENESIS_ID}/funding-wallet`,
+      Buffer.from(JSON.stringify({ mode: "DEFAULT" })),
+      {
+        cookie,
+        origin: ORIGIN,
+        "x-csrf-token": csrf,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "content-type": "application/json",
+        "idempotency-key": clearKey,
+      },
+    );
+    expect(clearRes.status).toBe(200);
+    expect(JSON.parse(clearRes.body).funding_wallet_id).toBeNull();
+
+    const getDefault = await router(
+      "GET",
+      "/admin/v1/default-funding-wallet",
+      new Uint8Array(),
+      { cookie, origin: ORIGIN, "x-csrf-token": csrf },
+    );
+    expect(getDefault.status).toBe(200);
+    expect(JSON.parse(getDefault.body)).toEqual({
+      wallet_id: null,
+      public_key: null,
+      row_version: 0,
+    });
+
+    nowMs += 60_000;
+    const putKey = "idem-default-fw-" + "z".repeat(8);
+    const putRes = await router(
+      "PUT",
+      "/admin/v1/default-funding-wallet",
+      Buffer.from(JSON.stringify({ wallet_id: WALLET, expected_row_version: 0 })),
+      {
+        cookie,
+        origin: ORIGIN,
+        "x-csrf-token": csrf,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "content-type": "application/json",
+        "idempotency-key": putKey,
+      },
+    );
+    expect(putRes.status).toBe(200);
+    const putBody = JSON.parse(putRes.body) as {
+      wallet_id: string | null;
+      public_key: string | null;
+      row_version: number;
+    };
+    expect(putBody.wallet_id).toBe(WALLET);
+    expect(putBody.public_key).toBe(PUB);
+    expect(putBody.row_version).toBe(1);
   });
 });

@@ -407,6 +407,12 @@ export interface ProductionSurfaceConfig {
    */
   readonly walletVault?: EncryptedWalletKeyStore;
   /**
+   * ZTR-1307 — post-commit push provision for every mint path that lands in this mount
+   * (funding CREATE). Destination register uses the same holder via the key generator
+   * in main.ts; pool scale-up uses money-workers `onWalletsMinted`.
+   */
+  readonly onWalletsMinted?: (walletIds: readonly string[]) => void;
+  /**
    * Dual-control policy port. Production wires SQL over node_settings; tests may
    * inject InMemoryDualControlPolicy. When omitted, mount builds a SQL port from
    * config.pool with defaultMode = dualControlMode.
@@ -787,6 +793,9 @@ export function createProductionRouteSurface(
               },
               secret64,
             );
+            // Post-commit push provision (ZTR-1307). Fire-and-forget at the holder;
+            // EXTERNAL gates still refuse until ACTIVE.
+            config.onWalletsMinted?.([walletId]);
             return { walletId, publicKey };
           } catch (err) {
             try {

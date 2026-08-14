@@ -165,6 +165,32 @@ terminal release status is `RELEASED_T0_UNCHANGED` — releasing on a *changed* 
 the evidence that something happened. Do not offer or press `RETRY_OBSERVATION` on these
 rows; it burns TOTP/nonce with no re-evaluate.
 
+### Legacy / held-episode `attention_detail` (ZTR-1279 / ZTR-1285)
+
+**What operators see.** The SPA Evidence-gap card reads durable
+`operations.attention_detail` from recovery inspection. New parks write the ZTR-1279 JSON
+shape (`failed_predicates`, `predicate_causes`, `fresh_read`) via
+`buildReceiveExpiryAttentionDetail`. Free-form older notes still render as raw text.
+
+**Held episode does not rewrite the column.** When a receive is already
+`attention_required=true`, later expiry ticks re-evaluate predicates in-process and return
+fresh detail on the service result, but they do **not** `UPDATE operations.attention_detail`
+unless severity escalates to `POST_EXPIRY_RECONCILING` (the only held-path writer).
+`LOAD_ATTENTION` still selects the column for the CAS/hold branch; the durable value is
+whatever was stamped when the episode opened (or last escalated).
+
+**Why no automatic backfill.** Post ZTR-1277 the automatic expiry sweep excludes
+attention-parked receives, so those rows are not re-parked with enriched JSON. Rewriting
+detail on every held tick would churn `row_version` without changing custody state. Rows
+parked before ZTR-1279 may therefore keep bare / free-form detail until an operator
+recovery action or escalation path writes a new value.
+
+**Operator expectation.** Treat missing Evidence-gap structure on a long-held
+`T0_RELEASE_MISMATCH` / `EXPIRED` row as “parked before structured detail,” not as proof
+the confirm-read was never attempted. Use recovery classification, permitted actions, and
+fresh break-glass confirm-read under `RELEASE_EXPIRED_RECEIVE` when re-evaluating release
+eligibility — do not wait for a background rewrite of `attention_detail`.
+
 ## VERIFICATION_REJECTED
 
 **Caused by.** Proof intake rejected the supplied material — it did not verify.

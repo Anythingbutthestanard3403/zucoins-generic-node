@@ -50,6 +50,64 @@ export default defineConfig({
       "/readyz": "http://localhost:3000",
     },
   },
+  // ZTR-1285: point workspace contract subpaths at src so admin vitest does not
+  // require a prior `pnpm build` / contracts dist. Subpaths must precede the
+  // package-root entry (prefix match). Keep in lockstep with imports under src/.
+  resolve: {
+    alias: [
+      {
+        find: "@zucoins/generic-node-contracts/operations/events",
+        replacement: fileURLToPath(
+          new URL(
+            "../../../packages/generic-node-contracts/src/operations/events.contract.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "@zucoins/generic-node-contracts/operations",
+        replacement: fileURLToPath(
+          new URL(
+            "../../../packages/generic-node-contracts/src/operations/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "@zucoins/generic-node-contracts/admin-inventory",
+        replacement: fileURLToPath(
+          new URL(
+            "../../../packages/generic-node-contracts/src/admin-inventory/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "@zucoins/generic-node-contracts/operator-halt",
+        replacement: fileURLToPath(
+          new URL(
+            "../../../packages/generic-node-contracts/src/operator-halt/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "@zucoins/generic-node-contracts/custody",
+        replacement: fileURLToPath(
+          new URL(
+            "../../../packages/generic-node-contracts/src/custody/index.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "@zucoins/generic-node-contracts",
+        replacement: fileURLToPath(
+          new URL("../../../packages/generic-node-contracts/src/index.ts", import.meta.url),
+        ),
+      },
+    ],
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

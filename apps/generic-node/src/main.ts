@@ -809,6 +809,8 @@ async function main(): Promise<void> {
     backupMasterKey: config.BACKUP_MASTER_KEY ?? null,
     // Same root buffer EncryptedWalletKeyStore holds; unlock may rederive in place.
     vaultRootKey: rootKey,
+    // Funding wallet CREATE mint (ZTR-1287) seals into the same vault as pool mint.
+    walletVault: vaultKeyStore,
     newRequestId: (): string => randomUUID(),
     metricsScrapeToken: config.METRICS_SCRAPE_TOKEN,
     destinationService,

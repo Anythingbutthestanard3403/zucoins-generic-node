@@ -97,6 +97,22 @@ export const LIVE_IMPLEMENTER_ROUTES = Object.freeze([
     path: "/admin/v1/implementers/:id/retire",
     authMode: "operator_session_totp" as const,
   },
+  // ZTR-1287: funding wallet pin (reserve/proof — not send/source).
+  {
+    method: "POST" as const,
+    path: "/admin/v1/implementers/:id/funding-wallet",
+    authMode: "operator_session_totp" as const,
+  },
+  {
+    method: "GET" as const,
+    path: "/admin/v1/default-funding-wallet",
+    authMode: "operator_session" as const,
+  },
+  {
+    method: "PUT" as const,
+    path: "/admin/v1/default-funding-wallet",
+    authMode: "operator_session_totp" as const,
+  },
   {
     method: "GET" as const,
     path: "/admin/v1/api-keys",

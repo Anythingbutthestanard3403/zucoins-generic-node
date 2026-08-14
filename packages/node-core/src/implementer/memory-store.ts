@@ -1,17 +1,20 @@
 // In-process ImplementerRegistry for unit tests. Mirrors the SQL store's
-// audit actions and retire semantics without a database.
+// audit actions and retire / funding-wallet semantics without a database.
 
 import { createHash, randomUUID } from "node:crypto";
 
 import type { AuditLogRow } from "../core/audit-writer.js";
 import {
   IMPLEMENTER_AUDIT_CREATED,
+  IMPLEMENTER_AUDIT_FUNDING_WALLET_CHANGED,
   IMPLEMENTER_AUDIT_RETIRED,
   ImplementerRegistryError,
   type ImplementerCreateInput,
   type ImplementerRecord,
   type ImplementerRegistry,
   type ImplementerRetireInput,
+  type ImplementerSetFundingWalletInput,
+  type ImplementerSetFundingWalletOutcome,
 } from "./types.js";
 
 function detailsSha256(text: string): string {
@@ -29,18 +32,42 @@ function normalizeName(raw: string): string {
   return name;
 }
 
+export interface MemoryFundingWalletSeed {
+  readonly id: string;
+  readonly public_key: string;
+  readonly retired?: boolean;
+}
+
 export class InMemoryImplementerRegistry implements ImplementerRegistry {
   readonly rows = new Map<string, ImplementerRecord>();
   readonly audit: AuditLogRow[] = [];
+  /** Optional wallet catalog for setFundingWallet WALLET_ID / CREATE attach. */
+  readonly wallets = new Map<string, MemoryFundingWalletSeed>();
   private readonly now: () => Date;
 
   constructor(now: () => Date = () => new Date()) {
     this.now = now;
   }
 
-  /** Seed a row without audit (tests / fixtures). */
-  seed(row: ImplementerRecord): void {
-    this.rows.set(row.id, row);
+  /** Seed a row without audit (tests / fixtures). Funding fields default null. */
+  seed(
+    row: Omit<ImplementerRecord, "funding_wallet_id" | "funding_wallet_public_key"> & {
+      readonly funding_wallet_id?: string | null;
+      readonly funding_wallet_public_key?: string | null;
+    },
+  ): void {
+    this.rows.set(row.id, {
+      id: row.id,
+      name: row.name,
+      created_at: row.created_at,
+      retired_at: row.retired_at,
+      funding_wallet_id: row.funding_wallet_id ?? null,
+      funding_wallet_public_key: row.funding_wallet_public_key ?? null,
+    });
+  }
+
+  seedWallet(wallet: MemoryFundingWalletSeed): void {
+    this.wallets.set(wallet.id, wallet);
   }
 
   async list(): Promise<readonly ImplementerRecord[]> {
@@ -73,6 +100,8 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       name,
       created_at: createdAt,
       retired_at: null,
+      funding_wallet_id: null,
+      funding_wallet_public_key: null,
     };
     this.rows.set(row.id, row);
     const detailsText = JSON.stringify({ id: row.id, name: row.name });
@@ -119,5 +148,74 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       createdAt: retiredAt,
     });
     return row;
+  }
+
+  async setFundingWallet(
+    input: ImplementerSetFundingWalletInput,
+  ): Promise<ImplementerSetFundingWalletOutcome> {
+    const mode = input.mode;
+    if (mode !== "DEFAULT" && mode !== "WALLET_ID" && mode !== "CREATE") {
+      return { ok: false, reason: "invalid_mode" };
+    }
+    const existing = this.rows.get(input.implementerId);
+    if (existing === undefined) {
+      return { ok: false, reason: "implementer_not_found" };
+    }
+    if (existing.retired_at !== null) {
+      return { ok: false, reason: "implementer_retired" };
+    }
+
+    let nextWalletId: string | null = null;
+    let nextPublicKey: string | null = null;
+
+    if (mode === "DEFAULT") {
+      nextWalletId = null;
+      nextPublicKey = null;
+    } else {
+      const walletId = input.walletId?.trim() ?? "";
+      if (walletId.length === 0) {
+        return {
+          ok: false,
+          reason: mode === "CREATE" ? "create_not_supported" : "wallet_id_required",
+        };
+      }
+      const wallet = this.wallets.get(walletId);
+      if (wallet === undefined) {
+        return { ok: false, reason: "wallet_not_found" };
+      }
+      if (wallet.retired === true) {
+        return { ok: false, reason: "wallet_retired" };
+      }
+      nextWalletId = wallet.id;
+      nextPublicKey = wallet.public_key;
+    }
+
+    const previousId = existing.funding_wallet_id;
+    const row: ImplementerRecord = {
+      ...existing,
+      funding_wallet_id: nextWalletId,
+      funding_wallet_public_key: nextPublicKey,
+    };
+    this.rows.set(row.id, row);
+    const createdAt = this.now().toISOString();
+    const detailsText = JSON.stringify({
+      implementer_id: row.id,
+      mode,
+      previous_funding_wallet_id: previousId,
+      next_funding_wallet_id: nextWalletId,
+    });
+    this.audit.push({
+      id: randomUUID(),
+      nodeId: input.nodeId,
+      actorKind: "OPERATOR_SESSION",
+      actorId: input.actorId,
+      action: IMPLEMENTER_AUDIT_FUNDING_WALLET_CHANGED,
+      operationId: null,
+      walletId: nextWalletId,
+      detailsText,
+      detailsSha256: detailsSha256(detailsText),
+      createdAt,
+    });
+    return { ok: true, implementer: row };
   }
 }

@@ -120,6 +120,9 @@ import {
   type OperatorPushSubscription,
   type OperatorPushSender,
   type WalletMoneyCapabilityStore,
+  type DefaultFundingWalletPort,
+  type DefaultFundingWalletSnapshot,
+  type FundingWalletSetMode,
 } from "@zucoins/node-core";
 import {
   isWalletMoneyMode,
@@ -952,12 +955,129 @@ function toImplementerListing(row: ImplementerRecord): {
   readonly name: string;
   readonly created_at: string;
   readonly retired_at: string | null;
+  readonly funding_wallet_id: string | null;
+  readonly funding_wallet_public_key: string | null;
 } {
   return {
     id: row.id,
     name: row.name,
     created_at: row.created_at,
     retired_at: row.retired_at,
+    funding_wallet_id: row.funding_wallet_id ?? null,
+    funding_wallet_public_key: row.funding_wallet_public_key ?? null,
+  };
+}
+
+function toDefaultFundingWalletBody(snap: DefaultFundingWalletSnapshot): {
+  readonly wallet_id: string | null;
+  readonly public_key: string | null;
+  readonly row_version: number;
+} {
+  return {
+    wallet_id: snap.wallet_id,
+    public_key: snap.public_key,
+    row_version: snap.row_version,
+  };
+}
+
+/** POST /admin/v1/implementers/:id/funding-wallet — set reserve/proof pin (not send source). */
+function parseSetFundingWalletBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly mode: FundingWalletSetMode;
+      readonly wallet_id: string | null;
+    }>
+  | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (typeof raw.mode !== "string") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "mode is required" };
+  }
+  if (raw.mode !== "DEFAULT" && raw.mode !== "WALLET_ID" && raw.mode !== "CREATE") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "mode must be DEFAULT, WALLET_ID, or CREATE",
+    };
+  }
+  let walletId: string | null = null;
+  if (raw.wallet_id !== undefined && raw.wallet_id !== null) {
+    if (typeof raw.wallet_id !== "string" || !LOWER_UUID_RE.test(raw.wallet_id)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_scalar",
+        message: "wallet_id must be a canonical uuid",
+      };
+    }
+    walletId = raw.wallet_id;
+  }
+  if (raw.mode === "WALLET_ID" && walletId === null) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "wallet_id is required when mode is WALLET_ID",
+    };
+  }
+  const known = new Set(["mode", "wallet_id"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { mode: raw.mode, wallet_id: walletId } };
+}
+
+/** PUT /admin/v1/default-funding-wallet — node-wide default reserve/proof wallet. */
+function parseDefaultFundingWalletBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly wallet_id: string | null;
+      readonly expected_row_version: number;
+    }>
+  | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  let walletId: string | null;
+  if (raw.wallet_id === null) {
+    walletId = null;
+  } else if (typeof raw.wallet_id === "string" && LOWER_UUID_RE.test(raw.wallet_id)) {
+    walletId = raw.wallet_id;
+  } else {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "wallet_id must be a canonical uuid or null",
+    };
+  }
+  if (
+    typeof raw.expected_row_version !== "number" ||
+    !Number.isInteger(raw.expected_row_version) ||
+    raw.expected_row_version < 0
+  ) {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "expected_row_version must be a non-negative integer",
+    };
+  }
+  const known = new Set(["wallet_id", "expected_row_version"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return {
+    ok: true,
+    body: { wallet_id: walletId, expected_row_version: raw.expected_row_version },
   };
 }
 
@@ -1483,10 +1603,24 @@ export interface AdminRouteDeps {
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
   /**
-   * Named integration identity registry (create/list/retire). When omitted,
-   * /admin/v1/implementers routes fail closed (503).
+   * Named integration identity registry (create/list/retire + funding wallet).
+   * When omitted, /admin/v1/implementers routes fail closed (503).
    */
   readonly implementerRegistry?: ImplementerRegistry;
+  /**
+   * Node-wide default funding wallet (ZTR-1287). node_settings key
+   * integration.default_funding_wallet_id. When omitted, GET/PUT fail closed (503).
+   */
+  readonly defaultFundingWallet?: DefaultFundingWalletPort;
+  /**
+   * Mint a fresh node_generated wallet + vault seal for CREATE funding mode.
+   * When omitted, mode CREATE fails closed (503) — operator may mint elsewhere
+   * then attach via WALLET_ID.
+   */
+  readonly mintFundingWallet?: () => Promise<{
+    readonly walletId: string;
+    readonly publicKey: string;
+  }>;
   /**
    * Platform integration-request inbox (ZTR-1240). When omitted, list/approve/
    * decline fail closed (503).
@@ -1605,10 +1739,15 @@ export interface AdminMutationTxPorts {
   readonly halt?: AdminRouteDeps["halt"];
   readonly credentialService: CredentialService;
   /**
-   * TX-scoped implementer registry (create/retire + audit). Mutation writes MUST
+   * TX-scoped implementer registry (create/retire/funding + audit). Mutation writes MUST
    * use this port so implementers + audit_log commit/roll back with the admin TX.
    */
   readonly implementerRegistry?: ImplementerRegistry;
+  /**
+   * TX-scoped default funding wallet setting (ZTR-1287). Mutation writes MUST use
+   * this port so node_settings + audit_log commit/roll back with the admin TX.
+   */
+  readonly defaultFundingWallet?: DefaultFundingWalletPort;
   /**
    * TX-scoped integration-request store (ZTR-1240). Approve/decline CAS + audit
    * MUST use this port so request row + implementer + policy share one TX.
@@ -2818,6 +2957,26 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+    // GET /admin/v1/default-funding-wallet — node-wide reserve/proof default (ZTR-1287).
+    // Not a send/source pin. Session+CSRF; no TOTP on reads.
+    if (verb === "GET" && pathname === "/admin/v1/default-funding-wallet") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      if (deps.defaultFundingWallet === undefined) {
+        return fail(503, "service_unavailable", "default funding wallet not wired", requestId);
+      }
+      try {
+        const snap = await deps.defaultFundingWallet.get();
+        return ok(200, toDefaultFundingWalletBody(snap));
+      } catch {
+        return fail(503, "service_unavailable", "default funding wallet unavailable", requestId);
+      }
+    }
+
     // GET /admin/v1/integration-requests — operator inbox feed (ZTR-1240).
     // Default status=PENDING; optional ?status= filter. Session+CSRF; no TOTP.
     if (verb === "GET" && pathname === "/admin/v1/integration-requests") {
@@ -3321,6 +3480,108 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+
+    // PUT /admin/v1/default-funding-wallet — set/clear node-wide default reserve/proof
+    // wallet (ZTR-1287). row_version CAS. Not a send/source pin.
+    // Lives above the POST-only mutation zone (peer of money-capability PATCH).
+    if (verb === "PUT" && pathname === "/admin/v1/default-funding-wallet") {
+      let defaultFundingBody: unknown;
+      try {
+        defaultFundingBody = decodeBody(rawBody);
+      } catch {
+        return fail(400, "validation_error", "invalid JSON body", requestId);
+      }
+      if (deps.defaultFundingWallet === undefined) {
+        return fail(503, "service_unavailable", "default funding wallet not wired", requestId);
+      }
+      const routeId = "admin_default_funding_wallet";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const port = ports.defaultFundingWallet ?? deps.defaultFundingWallet;
+          if (port === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(503, "service_unavailable", "default funding wallet not wired", requestId),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: defaultFundingBody,
+            validateBody: parseDefaultFundingWalletBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              const outcome = await port.set({
+                walletId: body.wallet_id,
+                expectedRowVersion: body.expected_row_version,
+                actorId: user.id,
+                nodeId,
+              });
+              if (!outcome.ok) {
+                const status =
+                  outcome.reason === "wallet_not_found"
+                    ? 404
+                    : outcome.reason === "conflict" || outcome.reason === "wallet_retired"
+                      ? 409
+                      : 400;
+                throw Object.assign(new Error(outcome.reason), {
+                  code: outcome.reason,
+                  status,
+                });
+              }
+              return toDefaultFundingWalletBody(outcome.result);
+            },
+          });
+          if (!guarded.ok) {
+            const nestedStatus =
+              guarded.reason === "mutation_threw" &&
+              guarded.error !== undefined &&
+              typeof guarded.error === "object" &&
+              guarded.error !== null &&
+              "status" in guarded.error &&
+              typeof (guarded.error as { status: unknown }).status === "number"
+                ? (guarded.error as { status: number }).status
+                : guarded.status;
+            const nestedCode =
+              guarded.reason === "mutation_threw" &&
+              guarded.error !== undefined &&
+              typeof guarded.error === "object" &&
+              guarded.error !== null &&
+              "code" in guarded.error &&
+              typeof (guarded.error as { code: unknown }).code === "string"
+                ? (guarded.error as { code: string }).code
+                : guarded.code;
+            return {
+              outcome: "abort" as const,
+              response: fail(nestedStatus, nestedCode, guarded.message, requestId),
+            };
+          }
+          return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+        },
+      });
+    }
 
     if (verb !== "POST") {
       return fail(404, "not_found", "admin route not found", requestId);
@@ -5078,6 +5339,146 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+    // POST /admin/v1/implementers/:id/funding-wallet — pin reserve/proof funding wallet
+    // (ZTR-1287). Modes: DEFAULT (clear → node default), WALLET_ID (existing), CREATE
+    // (mint via mintFundingWallet then attach). Not a send/source pin.
+    {
+      const m = pathname.match(/^\/admin\/v1\/implementers\/([^/]+)\/funding-wallet$/);
+      if (verb === "POST" && m) {
+        if (deps.implementerRegistry === undefined) {
+          return fail(503, "service_unavailable", "implementer registry not wired", requestId);
+        }
+        const implementerId = m[1]!;
+        if (!LOWER_UUID_RE.test(implementerId)) {
+          return fail(400, "validation_error", "implementer id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_implementers_funding_wallet";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        const mintFundingWallet = deps.mintFundingWallet;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+            if (registry === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "implementer registry not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseSetFundingWalletBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, session }) => {
+                let walletId = body.wallet_id ?? undefined;
+                if (body.mode === "CREATE") {
+                  if (walletId === undefined) {
+                    if (mintFundingWallet === undefined) {
+                      throw Object.assign(
+                        new Error("funding wallet mint not wired"),
+                        { code: "service_unavailable", status: 503 },
+                      );
+                    }
+                    // Mint commits wallet+vault outside this TX (vault seal uses its own
+                    // connection). Attach rides the admin mutation TX.
+                    const minted = await mintFundingWallet();
+                    walletId = minted.walletId;
+                  }
+                }
+                const outcome = await registry.setFundingWallet({
+                  implementerId,
+                  mode: body.mode,
+                  walletId,
+                  actorId: session.sessionId,
+                  nodeId,
+                });
+                if (!outcome.ok) {
+                  const status =
+                    outcome.reason === "implementer_not_found" || outcome.reason === "wallet_not_found"
+                      ? 404
+                      : outcome.reason === "implementer_retired" || outcome.reason === "wallet_retired"
+                        ? 409
+                        : outcome.reason === "create_not_supported"
+                          ? 503
+                          : 400;
+                  const code =
+                    status === 404
+                      ? "not_found"
+                      : status === 409
+                        ? "conflict"
+                        : status === 503
+                          ? "service_unavailable"
+                          : "validation_error";
+                  throw Object.assign(new Error(outcome.reason), {
+                    code,
+                    status,
+                    reason: outcome.reason,
+                  });
+                }
+                return toImplementerListing(outcome.implementer);
+              },
+            });
+            if (!guarded.ok) {
+              const nestedStatus =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "status" in guarded.error &&
+                typeof (guarded.error as { status: unknown }).status === "number"
+                  ? (guarded.error as { status: number }).status
+                  : guarded.status;
+              const nestedCode =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "code" in guarded.error &&
+                typeof (guarded.error as { code: unknown }).code === "string"
+                  ? (guarded.error as { code: string }).code
+                  : guarded.code;
+              const nestedMessage =
+                guarded.reason === "mutation_threw" &&
+                guarded.error !== undefined &&
+                typeof guarded.error === "object" &&
+                guarded.error !== null &&
+                "reason" in guarded.error &&
+                typeof (guarded.error as { reason: unknown }).reason === "string"
+                  ? (guarded.error as { reason: string }).reason
+                  : guarded.message;
+              return {
+                outcome: "abort" as const,
+                response: fail(nestedStatus, nestedCode, nestedMessage, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
     // POST /admin/v1/api-keys — issue a new implementer bearer key.
     // Session+CSRF+fresh TOTP via runGuardedAdminMutation (parity with halt). The full
     // raw key is returned exactly once in the response body; it is never persisted in
@@ -6037,6 +6438,8 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly credentialService?: CredentialService;
   readonly resolveImplementerId?: () => Promise<string | null>;
   readonly implementerRegistry?: ImplementerRegistry;
+  readonly defaultFundingWallet?: DefaultFundingWalletPort;
+  readonly mintFundingWallet?: AdminRouteDeps["mintFundingWallet"];
   readonly integrationRequestStore?: IntegrationRequestStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
@@ -6132,6 +6535,8 @@ export function createFailClosedAdminRouteDeps(base: {
     credentialService: base.credentialService,
     resolveImplementerId: base.resolveImplementerId,
     implementerRegistry: base.implementerRegistry,
+    defaultFundingWallet: base.defaultFundingWallet,
+    mintFundingWallet: base.mintFundingWallet,
     integrationRequestStore: base.integrationRequestStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
@@ -6170,6 +6575,8 @@ export function createLiveAdminRouteDeps(
     readonly credentialService?: CredentialService;
     readonly resolveImplementerId?: () => Promise<string | null>;
     readonly implementerRegistry?: ImplementerRegistry;
+    readonly defaultFundingWallet?: DefaultFundingWalletPort;
+    readonly mintFundingWallet?: AdminRouteDeps["mintFundingWallet"];
     readonly integrationRequestStore?: IntegrationRequestStore;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;

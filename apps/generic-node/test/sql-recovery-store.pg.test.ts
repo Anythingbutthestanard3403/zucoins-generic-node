@@ -28,6 +28,7 @@ import {
   migrateLeaseFoundation,
   createLeaseGroup,
   acquireLeases,
+  parseGatewayEnvelope,
   type RecoveryActionEffect,
   type RecoveryActionCommitInput,
   type RecoveryClassification,
@@ -61,9 +62,11 @@ const PACK_SLICES = [
   "signer-support",
   "operations",
   // The SEND non-landing exclusion oracle reads its wallet/Ts0/step-1 material off
-  // send_operations (SQL_SEND_NON_LANDING_MATERIAL); the freeze-tripwire drill below is the
-  // only test here that touches it. Depends on wallets only (custody-eligibility, above).
+  // send_operations (SQL_SEND_NON_LANDING_MATERIAL). CLOSE drills seed the sibling row
+  // and the proven-not-landed send CAS clears attention_reason (send-external-expiry
+  // co-presence CHECK). Depends on wallets only (custody-eligibility, above).
   "send-external-create",
+  "send-external-expiry",
   "transaction-material",
   "submit-attempts",
   "audit-log",
@@ -603,6 +606,12 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     await pool.query(FK_TARGET_STUBS);
     await applySchema(pool, packSql());
     await pool.query(ACK_TABLE_STUBS);
+    // Store SELECTs operations.verification_mode (ZTR-1300). Full verification-mode.sql
+    // requires receive_operations + node_settings; the column default is enough here.
+    await pool.query(
+      `ALTER TABLE operations
+         ADD COLUMN IF NOT EXISTS verification_mode text NOT NULL DEFAULT 'INDEPENDENT'`,
+    );
     await migrateLeaseFoundation(pool);
     // nodes/implementers are now the real reporting-persistence.sql tables (not the
     // old bare id-only stubs), so their NOT NULL columns need placeholder values.
@@ -850,6 +859,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       formationState: "APPROVED_UNSIGNED",
       sourceWalletId,
     });
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+    });
     const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
     const timestep = nextTimestep();
 
@@ -868,11 +881,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     );
 
     expect(result).toMatchObject({ ok: true, status: "REJECTED" });
-    const op = await pool.query(
-      `SELECT status::text AS status FROM operations WHERE id = $1::uuid`,
-      [operationId],
-    );
-    expect((op.rows[0] as { status: string }).status).toBe("REJECTED");
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "REJECTED",
+      send_operations: "REJECTED",
+    });
   });
 
   it("commits REBUILD_INTERNAL_MOVE: NEEDS_ATTENTION→CREATED, attention cleared, no submit", async () => {
@@ -929,6 +941,7 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       attentionReason: "UNEXPECTED_HEAD_CHANGE",
       sourceWalletId,
     });
+    await seedSendOperationsRow(operationId, sourceWalletId);
     await seedApprovalAndPartial(operationId, { delivered: true });
     const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
     const timestep = nextTimestep();
@@ -949,11 +962,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     );
 
     expect(result).toMatchObject({ ok: true, status: "REJECTED" });
-    const op = await pool.query(
-      `SELECT status::text AS status FROM operations WHERE id = $1::uuid`,
-      [operationId],
-    );
-    expect((op.rows[0] as { status: string }).status).toBe("REJECTED");
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "REJECTED",
+      send_operations: "REJECTED",
+    });
   });
 
   it("closing a send releases the source lease ONLY through a consumed lease_release_proofs row, and the wallet is re-leasable", async () => {
@@ -965,6 +977,7 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       sourceWalletId,
     });
     await seedApprovalAndPartial(operationId, { delivered: true });
+    await seedSendOperationsRow(operationId, sourceWalletId);
     const lease = await insertLease(sourceWalletId, operationId, "SEND_SOURCE");
     const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
 
@@ -1014,9 +1027,10 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     expect(proofRow.consumed_at).not.toBeNull();
     expect(proofRow.proof_digest).toMatch(/^[0-9a-f]{64}$/);
 
-    // AC6 — the wallet is back in the pool and a fresh lease may be taken on it. That is the
-    // whole point: a parked send used to hold this slot against the cap forever.
+    // AC6 — lease-free is not enough: the unique index must also release the wallet.
+    // A second send_operations INSERT on the same source_wallet_id must succeed (no 23505).
     expect(await walletState(sourceWalletId)).toBe("AVAILABLE");
+    const nextSendId = await insertSecondSendOperations(sourceWalletId);
     const nextOperationId = await seedSendOperation({
       status: "APPROVED",
       formationState: "APPROVED_UNSIGNED",
@@ -1029,6 +1043,11 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       [sourceWalletId],
     );
     expect(heldAgain.rowCount).toBe(1);
+    const nextSend = await pool.query(
+      `SELECT status::text AS status FROM send_operations WHERE operation_id = $1::uuid`,
+      [nextSendId],
+    );
+    expect((nextSend.rows[0] as { status: string }).status).toBe("CREATED");
   });
 
   // ── ZTR-1129 freeze tripwire ────────────────────────────────────────────────────────────
@@ -1036,19 +1055,264 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
   // The exclusion oracle reads its wallet / Ts0 / step-1 material off send_operations, not
   // off the operations mirror seedSendOperation writes, so a drill that wants the oracle to
   // actually run needs this row too. Without it the oracle short-circuits before the gateway.
-  async function seedSendOperationsRow(operationId: string, sourceWalletId: string): Promise<void> {
+  // CLOSE drills also seed this sibling so the send-side CAS has a row to terminalize.
+  async function seedSendOperationsRow(
+    operationId: string,
+    sourceWalletId: string,
+    opts: {
+      status?: string;
+      formationState?: string;
+      attentionReason?: string | null;
+    } = {},
+  ): Promise<void> {
+    const status = opts.status ?? "NEEDS_ATTENTION";
+    const formationState = opts.formationState ?? "PARTIAL_DELIVERED";
+    const attentionReason =
+      opts.attentionReason !== undefined
+        ? opts.attentionReason
+        : status === "NEEDS_ATTENTION"
+          ? "UNEXPECTED_HEAD_CHANGE"
+          : null;
+    await pool.query(
+      `INSERT INTO send_operations
+         (operation_id, implementer_id, node_id, kind, status, attention_required,
+          attention_reason, formation_state, http_method, route, idempotency_key,
+          request_sha256, source_wallet_id, destination_address, amount_zkz)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', $4, $5, $6,
+               $7, 'POST', '/v1/external-sends', $8, $9,
+               $10::uuid, $11, '0.01')`,
+      [
+        operationId, IMPLEMENTER_ID, NODE_ID, status,
+        attentionReason !== null, attentionReason, formationState,
+        `idem-${operationId}`, sha256(randomUUID()),
+        sourceWalletId, `${"B".repeat(43)}=`,
+      ],
+    );
+  }
+
+  async function sendPairStatuses(
+    operationId: string,
+  ): Promise<{ operations: string | null; send_operations: string | null }> {
+    const op = await pool.query(
+      `SELECT status::text AS status FROM operations WHERE id = $1::uuid`,
+      [operationId],
+    );
+    const send = await pool.query(
+      `SELECT status::text AS status FROM send_operations WHERE operation_id = $1::uuid`,
+      [operationId],
+    );
+    return {
+      operations: (op.rows[0] as { status: string } | undefined)?.status ?? null,
+      send_operations: (send.rows[0] as { status: string } | undefined)?.status ?? null,
+    };
+  }
+
+  // Hits send_operations_one_unsettled_per_source_wallet. Success (no 23505) is AC6.
+  async function insertSecondSendOperations(sourceWalletId: string): Promise<string> {
+    const operationId = randomUUID();
     await pool.query(
       `INSERT INTO send_operations
          (operation_id, implementer_id, node_id, kind, status, attention_required,
           formation_state, http_method, route, idempotency_key, request_sha256,
           source_wallet_id, destination_address, amount_zkz)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', 'NEEDS_ATTENTION', true,
-               'PARTIAL_DELIVERED', 'POST', '/v1/external-sends', $4, $5,
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL', 'CREATED', false,
+               'APPROVAL_PENDING', 'POST', '/v1/external-sends', $4, $5,
                $6::uuid, $7, '0.01')`,
-      [operationId, IMPLEMENTER_ID, NODE_ID, `idem-${operationId}`, sha256(randomUUID()),
-        sourceWalletId, `${"B".repeat(43)}=`],
+      [
+        operationId, IMPLEMENTER_ID, NODE_ID,
+        `idem-next-${operationId}`, sha256(randomUUID()),
+        sourceWalletId, `${"B".repeat(43)}=`,
+      ],
     );
+    return operationId;
   }
+
+  it("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED then second send_operations INSERT on same source succeeds (AC6)", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "NEEDS_ATTENTION",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "UNEXPECTED_HEAD_CHANGE",
+      sourceWalletId,
+    });
+    await seedSendOperationsRow(operationId, sourceWalletId);
+    await seedApprovalAndPartial(operationId, { delivered: true });
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+          nextStatus: "REJECTED",
+          releaseSourceLease: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+        classification: "PROVEN_NOT_LANDED",
+      }),
+    );
+    expect(result).toMatchObject({ ok: true, status: "REJECTED" });
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "REJECTED",
+      send_operations: "REJECTED",
+    });
+    await expect(insertSecondSendOperations(sourceWalletId)).resolves.toMatch(
+      /^[0-9a-f-]{36}$/i,
+    );
+  });
+
+  it("CLOSE_NEVER_STARTED_EXTERNAL_SEND then second send_operations INSERT on same source succeeds", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+      sourceWalletId,
+    });
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+    });
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+          nextStatus: "REJECTED",
+          releaseSourceLease: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+      }),
+    );
+    expect(result).toMatchObject({ ok: true, status: "REJECTED" });
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "REJECTED",
+      send_operations: "REJECTED",
+    });
+    await expect(insertSecondSendOperations(sourceWalletId)).resolves.toMatch(
+      /^[0-9a-f-]{36}$/i,
+    );
+  });
+
+  it("STEP_1-present never-started is refused and both rows stay APPROVED", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+      sourceWalletId,
+    });
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      status: "APPROVED",
+      formationState: "APPROVED_UNSIGNED",
+    });
+    await pool.query(
+      `INSERT INTO signer_audit
+         (id, node_id, operation_id, preimage_sha256, called_at, outcome, purpose)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, now(), 'SUCCEEDED', 'STEP_1')`,
+      [randomUUID(), NODE_ID, operationId, sha256(`step1-${operationId}`)],
+    );
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
+          nextStatus: "REJECTED",
+          releaseSourceLease: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "predicate_failed",
+      detail: "close_never_started_cas_miss",
+    });
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "APPROVED",
+      send_operations: "APPROVED",
+    });
+  });
+
+  it("moved head classifies INDETERMINATE and CLOSE_PROVEN_NOT_LANDED writes nothing", async () => {
+    const sourceWalletId = await insertWallet();
+    const publicKey = await walletPublicKey(sourceWalletId);
+    const operationId = await seedSendOperation({
+      status: "NEEDS_ATTENTION",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: "POST_EXPIRY_RECONCILING",
+      sourceWalletId,
+    });
+    await seedApprovalAndPartial(operationId, { delivered: true });
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      attentionReason: "POST_EXPIRY_RECONCILING",
+    });
+
+    const sourceT0ObservationId = randomUUID();
+    await pool.query(
+      `INSERT INTO gateway_observations (
+         id, observer_id, endpoint_fingerprint, wallet_public_key, wallet_seq,
+         observed_at, http_status, raw_response_bytes, raw_response_sha256,
+         parse_result, relationship, semantic_fingerprint, state_changed,
+         wallet_role, s_signature, p_signature, b_amount
+       ) VALUES (
+         $1::uuid, $2::uuid, $3, $4, 1,
+         now(), 200, $5::bytea, $6,
+         'VERIFIED_GENESIS', 'FIRST', $7, false,
+         'genesis', '', '', '0'
+       )`,
+      [
+        sourceT0ObservationId, nodeObserverId, sha256("fixture-endpoint"), publicKey,
+        Buffer.from(`{"status":true,"code":"success","message":"","data":[]}`, "utf8"),
+        sha256(`genesis-raw-${operationId}`), sha256(`genesis-sem-${operationId}`),
+      ],
+    );
+    const intentApprovalId = randomUUID();
+    await pool.query(`INSERT INTO operation_approvals (id) VALUES ($1::uuid)`, [intentApprovalId]);
+    await pool.query(
+      `INSERT INTO external_send_sign_intents
+         (operation_id, approval_id, source_wallet_id, source_t0_observation_id,
+          destination_t0_observation_id, lease_group_id, lease_epoch,
+          inner_preimage_text, inner_sha256, redemption_expiry_at, prepared_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, 1,
+               $7, $8, now() - interval '3 hours', now() - interval '4 hours')`,
+      [operationId, intentApprovalId, sourceWalletId, sourceT0ObservationId, randomUUID(),
+        randomUUID(), `inner-${operationId}`, sha256(`inner-${operationId}`)],
+    );
+
+    const movedHeadJson =
+      `{"status":true,"code":"success","message":"","data":[{"moved":"${operationId}"}]}`;
+    const movedHead: ReadFreshHead = async () => ({
+      observationId: randomUUID(),
+      envelope: parseGatewayEnvelope(new TextEncoder().encode(movedHeadJson)),
+    });
+
+    const movedStore = createSqlRecoveryActionStore(pool, movedHead);
+    const facts = await movedStore.loadRecoveryFactsLocked(operationId);
+    expect(facts).not.toBeNull();
+    expect(facts!.send!.protocolExpiredPlusMargin).toBe(true);
+    expect(facts!.send!.hasDurablePartial).toBe(true);
+    expect(facts!.send!.freshHeadEqualsSourceT0).toBe(false);
+    expect(facts!.send!.completePathExclusionProved).toBe(false);
+    expect(classifyRecovery(facts!)).toMatchObject({
+      classification: "INDETERMINATE",
+    });
+    expect(derivePermittedActions(facts!).permittedActions).not.toContain(
+      "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+    );
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "NEEDS_ATTENTION",
+      send_operations: "NEEDS_ATTENTION",
+    });
+  });
   //
   // SEND_NON_LANDING_CLOSE_ACTIVATED is compile-time `true` (ZTR-1226 option b). The pure
   // predicate drill (node-core/test/recovery-actions.test.ts) proves derivePermittedActions

@@ -601,7 +601,7 @@ export function redeliverFromInMemoryPartial(
   };
 }
 
-/** SQL catalogue — read-only selects + the one status-restore CAS. */
+/** SQL catalogue — read-only selects + status-restore / close CASes. */
 export const SEND_CRASH_RECOVERY_SQL = {
   /**
    * Exact partial bytes for redelivery. SELECT-only — no write path to
@@ -650,6 +650,19 @@ export const SEND_CRASH_RECOVERY_SQL = {
     "AND NOT EXISTS (SELECT 1 FROM external_send_sign_intents s WHERE s.operation_id = $1) " +
     "AND NOT EXISTS (SELECT 1 FROM external_send_partials p WHERE p.operation_id = $1) " +
     "AND NOT EXISTS (SELECT 1 FROM signer_audit a WHERE a.operation_id = $1) " +
+    "RETURNING operation_id, status, row_version",
+
+  /**
+   * CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED — NEEDS_ATTENTION→REJECTED + attention clear.
+   * Planner already re-proved the bounded oracle; this statement does not re-encode it
+   * and does not touch partial / approval / audit rows. row_version is independent of
+   * the operations mirror (do not bind operations.row_version here).
+   */
+  CLOSE_PROVEN_NOT_LANDED_CAS:
+    "UPDATE send_operations SET status = 'REJECTED', " +
+    "attention_required = false, attention_reason = NULL, " +
+    "row_version = row_version + 1 " +
+    "WHERE operation_id = $1 AND status = 'NEEDS_ATTENTION' " +
     "RETURNING operation_id, status, row_version",
 } as const;
 

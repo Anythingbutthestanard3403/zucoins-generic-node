@@ -76,3 +76,30 @@ export async function assertOk(response: Response): Promise<void> {
   if (response.ok) return;
   throw await readNodeApiError(response);
 }
+
+/** Assign/capacity reasons carried on 503 `service_unavailable` (ZTR-1309). */
+export const ASSIGN_CAPACITY_REASONS = [
+  "no_free_send_worker",
+  "no_hub_liquidity",
+  "worker_destination_missing",
+  "halted",
+  "assign_not_wired",
+  "move_rejected",
+] as const;
+
+export type AssignCapacityReason = (typeof ASSIGN_CAPACITY_REASONS)[number];
+
+/**
+ * Zukaz maps `no_free_send_worker` to `GENERIC_NODE_NO_SEND_WALLET`. Other assign
+ * capacity reasons stay a distinct 503 (not a generic outage, not a 200).
+ */
+export function assignCapacityReason(
+  err: NodeApiError,
+): AssignCapacityReason | undefined {
+  if (err.status !== 503 || err.code !== "service_unavailable") return undefined;
+  const reason = err.details.reason;
+  if (typeof reason !== "string") return undefined;
+  return (ASSIGN_CAPACITY_REASONS as readonly string[]).includes(reason)
+    ? (reason as AssignCapacityReason)
+    : undefined;
+}

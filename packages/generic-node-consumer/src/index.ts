@@ -135,7 +135,15 @@ export {
 // HTTP transport
 // ---------------------------------------------------------------------------
 
-export { NodeApiError, readNodeApiError, assertOk, type NodeApiErrorBody } from "./http/errors.js";
+export {
+  NodeApiError,
+  readNodeApiError,
+  assertOk,
+  assignCapacityReason,
+  ASSIGN_CAPACITY_REASONS,
+  type NodeApiErrorBody,
+  type AssignCapacityReason,
+} from "./http/errors.js";
 export {
   resolveFetch,
   resolveUrl,

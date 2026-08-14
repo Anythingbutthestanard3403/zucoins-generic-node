@@ -23,15 +23,20 @@ export {
 
 export {
   API_ERROR_CODES,
+  ASSIGN_CAPACITY_REASONS,
+  isAssignCapacityReason,
   ApiErrorCodeSchema,
+  ApiErrorDetailsSchema,
   ApiErrorEnvelopeSchema,
   HTTP_STATUS_BY_CODE,
   buildApiErrorBody,
   apiErrorResponse,
   scopeDenialResponse,
   type ApiErrorCode,
+  type ApiErrorDetails,
   type ApiErrorResponse,
   type ApiErrorEnvelope,
+  type AssignCapacityReason,
 } from "./error-envelope.js";
 
 export {

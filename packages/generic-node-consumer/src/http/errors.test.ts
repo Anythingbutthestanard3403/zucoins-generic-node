@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { assertOk, NodeApiError, readNodeApiError } from "./errors.js";
+import {
+  assertOk,
+  assignCapacityReason,
+  NodeApiError,
+  readNodeApiError,
+} from "./errors.js";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -51,5 +56,59 @@ describe("assertOk", () => {
       error: { code: "impossible_shape", message: "nope", request_id: "r1", details: {} },
     });
     await expect(assertOk(response)).rejects.toMatchObject({ code: "impossible_shape" });
+  });
+});
+
+describe("assignCapacityReason (ZTR-1309)", () => {
+  it("maps 503 service_unavailable + details.reason=no_free_send_worker", async () => {
+    const err = await readNodeApiError(
+      jsonResponse(503, {
+        error: {
+          code: "service_unavailable",
+          message: "The service is temporarily unavailable.",
+          request_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+          details: { reason: "no_free_send_worker" },
+        },
+      }),
+    );
+    expect(err.status).toBe(503);
+    expect(err.code).toBe("service_unavailable");
+    expect(assignCapacityReason(err)).toBe("no_free_send_worker");
+  });
+
+  it("maps sibling assign-capacity reasons", async () => {
+    for (const reason of [
+      "no_hub_liquidity",
+      "halted",
+      "assign_not_wired",
+      "worker_destination_missing",
+      "move_rejected",
+    ] as const) {
+      const err = await readNodeApiError(
+        jsonResponse(503, {
+          error: {
+            code: "service_unavailable",
+            message: "The service is temporarily unavailable.",
+            request_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+            details: { reason },
+          },
+        }),
+      );
+      expect(assignCapacityReason(err), reason).toBe(reason);
+    }
+  });
+
+  it("does not treat a bare 503 outage as an assign-capacity reason", async () => {
+    const err = await readNodeApiError(
+      jsonResponse(503, {
+        error: {
+          code: "service_unavailable",
+          message: "The service is temporarily unavailable.",
+          request_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+          details: {},
+        },
+      }),
+    );
+    expect(assignCapacityReason(err)).toBeUndefined();
   });
 });

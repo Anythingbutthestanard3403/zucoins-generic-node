@@ -4,7 +4,11 @@
 import type { OperationKind, VerificationMode } from "@zucoins/generic-node-contracts/operations";
 import type { ExecutionPhase } from "../../core/execution-phase.js";
 import type { PipelineContext } from "../pipeline.js";
-import { apiErrorResponse, type ApiErrorResponse } from "../error-envelope.js";
+import {
+  apiErrorResponse,
+  type ApiErrorResponse,
+  type AssignCapacityReason,
+} from "../error-envelope.js";
 import { MoveAdmissionError } from "../../move/create.js";
 import { PushSubscriptionRequiredError } from "../../push/subscription-service.js";
 
@@ -363,6 +367,18 @@ function mapIdempotencyInProgress(
   return mapWithRetryAfter("idempotency_in_progress", requestId, retryAfterSeconds ?? 1);
 }
 
+function mapAssignCapacityUnavailable(
+  requestId: string,
+  reason: AssignCapacityReason,
+): RouteHandlerResult {
+  return {
+    ok: false,
+    error: apiErrorResponse("service_unavailable", requestId, undefined, undefined, {
+      reason,
+    }),
+  };
+}
+
 function mapReceiveQueueFull(
   requestId: string,
   retryAfterSeconds: number | undefined,
@@ -492,7 +508,9 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "halted":
       case "assign_not_wired":
       case "move_rejected":
-        return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
+        // ZTR-1309: keep 503 service_unavailable; put the assign rejection in details.reason
+        // so integrators can map no_free_send_worker → GENERIC_NODE_NO_SEND_WALLET.
+        return mapAssignCapacityUnavailable(requestId, err.code as AssignCapacityReason);
       case "send_rejected": {
         // Nested create codes may appear in detail / as code suffix.
         const nested = err.detail ?? "";

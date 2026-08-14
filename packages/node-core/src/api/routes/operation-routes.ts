@@ -455,8 +455,14 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       // ZTR-1271 assign / top-up composition codes (SendAssignRejectionCode).
       // Documented HTTP map: busy → 409; liquidity/worker absence → 503; predicates → 422;
       // halt / wiring → 503; nested validation → 400 / 422 via cause when present.
+      // ZTR-1289: dry / ineligible funding wallet W → insufficient_funding_wallet (422).
       case "hub_busy":
         return { ok: false, error: apiErrorResponse("wallet_busy", requestId) };
+      case "insufficient_funding_wallet":
+        return {
+          ok: false,
+          error: apiErrorResponse("insufficient_funding_wallet", requestId),
+        };
       case "no_free_send_worker":
       case "no_hub_liquidity":
       case "worker_destination_missing":

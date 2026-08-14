@@ -148,6 +148,24 @@ export const ACCEPTANCE_SCENARIOS = [
     action: "MOVE/SEND first formation via composition",
     expect: "Blocked per halt contract (halted)",
   },
+  {
+    id: "S12_funding_wallet_hop_w_to_sender",
+    setup: "Funding W funded; worker empty; multi-hub also present",
+    action: "External send omit source with fundingWalletId=W",
+    expect: "MOVE W→worker; source_wallet_id=worker; not hub",
+  },
+  {
+    id: "S13_funding_wallet_dry_insufficient",
+    setup: "Funding W dry; worker underfunded; hubs would cover",
+    action: "External send with fundingWalletId=W",
+    expect: "insufficient_funding_wallet; no silent hub substitute",
+  },
+  {
+    id: "S14_funding_wallet_idempotent_no_double_hop",
+    setup: "Funding W hop already created once",
+    action: "Replay same idempotency key",
+    expect: "IDEMPOTENT_REPLAY; single MOVE only",
+  },
 ] as const;
 
 /* ─── store doubles (frozen constraints only) ─────────────────────────── */
@@ -458,6 +476,32 @@ class ScenarioWorld {
           };
         }
 
+        // Funding wallet W lock (ZTR-1289) — by id, not INTERNAL_ONLY filter
+        if (
+          sql.includes("w.id = $1::uuid") &&
+          sql.includes("w.node_id = $2::uuid") &&
+          sql.includes("allow_internal_move") &&
+          sql.includes("has_active_lease")
+        ) {
+          const walletId = String(params[0]);
+          const w = wallets.find((x) => x.id === walletId);
+          if (w === undefined) return { rows: [] };
+          const f = modeFlags(w.mode);
+          return {
+            rows: [
+              {
+                wallet_id: w.id,
+                observed_balance_zkz: w.balance,
+                allow_internal_move: f.allow_internal_move,
+                state: w.state,
+                key_origin: "node_generated",
+                is_retired: false,
+                has_active_lease: moveStore.activeLeases.has(w.id),
+              } as R,
+            ],
+          };
+        }
+
         // Hub select
         if (sql.includes("money_mode = 'INTERNAL_ONLY'") && sql.includes("FOR UPDATE OF w")) {
           const shortfall = Number(params[1] ?? "0");
@@ -532,6 +576,7 @@ function compose(
     sourceWalletId?: string | null;
     idempotencyKey?: string;
     halt?: boolean;
+    fundingWalletId?: string | null;
   } = {},
 ) {
   const halt = opts.halt === true;
@@ -557,6 +602,8 @@ function compose(
       amountZkz: opts.amountZkz ?? "2",
       clientReference: null,
       description: null,
+      fundingWalletId:
+        opts.fundingWalletId === undefined ? null : opts.fundingWalletId,
       idempotencyKey: opts.idempotencyKey ?? `idem-accept-${Date.now()}-${Math.random()}`.slice(0, 40),
       referencesOperationId: null,
     },
@@ -566,10 +613,10 @@ function compose(
 /* ─── matrix catalogue presence ───────────────────────────────────────── */
 
 describe("ZTR-1273 acceptance scenario catalogue", () => {
-  it("freezes exactly eleven epic-exit cells", () => {
-    expect(ACCEPTANCE_SCENARIOS).toHaveLength(11);
+  it("freezes fourteen epic-exit cells (11 + ZTR-1289 funding hop)", () => {
+    expect(ACCEPTANCE_SCENARIOS).toHaveLength(14);
     const ids = new Set(ACCEPTANCE_SCENARIOS.map((s) => s.id));
-    expect(ids.size).toBe(11);
+    expect(ids.size).toBe(14);
   });
 
   it("frozen worker SQL never selects INTERNAL_ONLY by money_mode (capability gate is allow_external_send)", () => {
@@ -765,6 +812,120 @@ describe("ZTR-1273 composition scenarios (assign + top-up)", () => {
     expect(out).toMatchObject({ outcome: "REJECTED", code: "halted" });
     expect(world.sendStore.operations.size).toBe(0);
     expect(world.moveStore.operations.size).toBe(0);
+  });
+
+  it("S12: funding W hop preferred over multi-hub; source_wallet_id = sender", async () => {
+    const world = new ScenarioWorld();
+    const worker = world.addWallet("SEND_ONLY", {
+      balance: "0",
+      blessed: true,
+      id: "c0000000-0000-4000-8000-0000000000c0",
+      publicKey: WORKER_PUB,
+    });
+    const fundingW = world.addWallet("INTERNAL_ONLY", {
+      balance: "50",
+      id: "c0000000-0000-4000-8000-0000000000f1",
+      publicKey: HUB_PUB,
+    });
+    // Competing hub that would win ASC multi-hub if W were ignored
+    world.addWallet("INTERNAL_ONLY", {
+      balance: "100",
+      id: "c0000000-0000-4000-8000-0000000000a0",
+      publicKey: OTHER_PUB,
+    });
+
+    const out = await compose(world, {
+      amountZkz: "10",
+      fundingWalletId: fundingW.id,
+      idempotencyKey: "idem-s12-funding-hop-000001",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.funding).toBe("top_up");
+    expect(out.hubWalletId).toBe(fundingW.id);
+    expect(out.fundingWalletId).toBe(fundingW.id);
+    expect(out.workerWalletId).toBe(worker.id);
+    expect(out.send.sourceWalletId).toBe(worker.id);
+    expect(out.move!.sourceWalletId).toBe(fundingW.id);
+    expect(out.move!.destinationWalletId).toBe(worker.id);
+  });
+
+  it("S13: dry W → insufficient_funding_wallet; no silent hub substitute", async () => {
+    const world = new ScenarioWorld();
+    world.addWallet("SEND_ONLY", {
+      balance: "1",
+      blessed: true,
+      id: "c0000000-0000-4000-8000-0000000000c1",
+      publicKey: WORKER_PUB,
+    });
+    const fundingW = world.addWallet("INTERNAL_ONLY", {
+      balance: "0",
+      id: "c0000000-0000-4000-8000-0000000000f2",
+      publicKey: HUB_PUB,
+    });
+    // Hub would cover shortfall if multi-hub ran — must NOT be used
+    world.addWallet("INTERNAL_ONLY", {
+      balance: "100",
+      id: "c0000000-0000-4000-8000-0000000000a9",
+      publicKey: OTHER_PUB,
+    });
+
+    const out = await compose(world, {
+      amountZkz: "10",
+      fundingWalletId: fundingW.id,
+      idempotencyKey: "idem-s13-funding-dry-000001",
+    });
+    expect(out).toMatchObject({
+      outcome: "REJECTED",
+      code: "insufficient_funding_wallet",
+    });
+    expect(world.moveStore.operations.size).toBe(0);
+    expect(world.sendStore.operations.size).toBe(0);
+  });
+
+  it("S14: idempotent replay does not double-hop", async () => {
+    const world = new ScenarioWorld();
+    const worker = world.addWallet("SEND_ONLY", {
+      balance: "0",
+      blessed: true,
+      id: "c0000000-0000-4000-8000-0000000000c2",
+      publicKey: WORKER_PUB,
+    });
+    const fundingW = world.addWallet("INTERNAL_ONLY", {
+      balance: "50",
+      id: "c0000000-0000-4000-8000-0000000000f3",
+      publicKey: HUB_PUB,
+    });
+    const key = "idem-s14-no-double-hop-0001";
+
+    const first = await compose(world, {
+      amountZkz: "10",
+      fundingWalletId: fundingW.id,
+      idempotencyKey: key,
+    });
+    expect(first.outcome).toBe("CREATED");
+    if (first.outcome !== "CREATED") return;
+    // Persist create response so early findByIdempotency can replay
+    await world.sendStore.completeOperation(
+      first.send.operationId,
+      201,
+      JSON.stringify({
+        operation_id: first.send.operationId,
+        source_wallet_id: first.send.sourceWalletId,
+      }),
+    );
+    const moveCountAfterFirst = world.moveStore.operations.size;
+    expect(moveCountAfterFirst).toBe(1);
+
+    const second = await compose(world, {
+      amountZkz: "10",
+      fundingWalletId: fundingW.id,
+      idempotencyKey: key,
+    });
+    expect(second.outcome).toBe("IDEMPOTENT_REPLAY");
+    expect(world.moveStore.operations.size).toBe(moveCountAfterFirst);
+    expect(world.sendStore.operations.size).toBe(1);
+    expect(first.send.sourceWalletId).toBe(worker.id);
   });
 });
 

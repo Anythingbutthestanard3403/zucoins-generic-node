@@ -13,8 +13,8 @@
 // made. `advanceAttemptPhase` is itself one-way (its WHERE requires the prior phase and NULL
 // target columns), so it cannot overwrite a persisted value even if it were reached twice.
 //
-// No statement here DELETEs, UPDATEs or re-INSERTs wallet_active_leases: the receiver lease is
-// byte-identical across the transition. Release belongs to the release/expiry flows.
+// Lease mutation is owned by node-core's SqlReceiveLandingStore: INDEPENDENT keeps the
+// receiver lease byte-identical; NODE_VERIFIED + HOLD releases inside the same TX (ZTR-1303).
 
 import type { Pool } from "pg";
 
@@ -88,11 +88,13 @@ export function createSqlReceiveLandingStore(
           {
             // Pass-through: node-core's statements run on the transaction opened above, so its
             // "one transaction" contract is satisfied by this client, not by a nested BEGIN.
+            // rowCount is required: releaseLease (NODE_VERIFIED same-TX release) fails closed
+            // without exact-one-row close/consume/DELETE counts.
             withTransaction: async (fn) =>
               fn({
                 query: async <R>(text: string, params: readonly unknown[]) => {
                   const result = await client.query(text, params as never[]);
-                  return { rows: result.rows as R[] };
+                  return { rows: result.rows as R[], rowCount: result.rowCount };
                 },
               }),
           },

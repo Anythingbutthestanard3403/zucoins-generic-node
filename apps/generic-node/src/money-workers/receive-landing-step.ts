@@ -14,9 +14,10 @@
 //   4. The landing DB-TX (sql-landing-store.ts).
 //
 // Closing rule: nothing here mints a landing from a bare head match, and no
-// outcome — fault, conflict or crash — rebuilds, resubmits, or releases the receiver lease.
-// Every non-APPLIED result is INDETERMINATE: the row stays exactly as it was found, so the
-// next tick retries the OBSERVATION, never the transaction.
+// non-APPLIED outcome rebuilds or resubmits. Lease release is store-owned: NODE_VERIFIED +
+// HOLD releases inside the landing TX (ZTR-1303); INDEPENDENT and child-handoff keep the
+// lease held. Every non-APPLIED result is INDETERMINATE: the row stays exactly as found, so
+// the next tick retries the OBSERVATION, never the transaction.
 //
 // Crash resume is a property of the shape, not of a recovery routine: the candidate query is
 // the resume point (a landed operation no longer matches it), and the DB-TX is the only

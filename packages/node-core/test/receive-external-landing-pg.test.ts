@@ -639,15 +639,18 @@ describe("receive-external landing PG drills", () => {
     expect(countRows(db!, "receive_landing_events", OP_A)).toBe("1");
   });
 
-  it("11. the landing SQL store never mutates wallet_active_leases", () => {
+  it("11. the landing SQL store never inlines wallet_active_leases mutators (release via lease repo only)", () => {
     if (skip()) return;
     drillsRun += 1;
+    // ZTR-1303: NODE_VERIFIED + HOLD may release via mintReleaseProof/releaseLease, but this
+    // file must not embed raw DELETE/UPDATE/INSERT against wallet_active_leases.
     const storeSrc = readFileSync(join(HERE, "../src/receive/landing-sql-store.ts"), "utf8");
     expect(storeSrc).not.toMatch(/DELETE\s+FROM\s+wallet_active_leases/i);
     expect(storeSrc).not.toMatch(/UPDATE\s+wallet_active_leases/i);
     expect(storeSrc).not.toMatch(/INSERT\s+INTO\s+wallet_active_leases/i);
     expect(storeSrc).toMatch(/SELECT_LEASE/);
-    // Comment-stripped: the slice header names the relation to say it never touches it.
+    expect(storeSrc).toMatch(/releaseLease/);
+    // Comment-stripped: landing DDL still never owns the lease relation.
     const ddl = readFileSync(join(SCHEMA_DIR, "receive-external-landing.sql"), "utf8").replace(
       /--.*$/gm,
       "",

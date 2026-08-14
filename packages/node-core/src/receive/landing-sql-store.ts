@@ -1,15 +1,18 @@
 // PostgreSQL-backed ReceiveLandingStore.
 //
-// One DB-TX for the landing; the receiver lease stays held.
+// One DB-TX for the landing. INDEPENDENT keeps the receiver lease held; NODE_VERIFIED + HOLD
+// mints a terminal-positive release proof and releases the lease in the same TX (ZTR-1303);
+// NODE_VERIFIED + INTERNAL_MOVE keeps the lease held for child handoff.
 // Schema: src/schema/receive-external-landing.sql.
 //
 // DRIVER-AGNOSTIC: never imports `pg`. The composition root injects an executor that can run
 // multi-statement transactions (PoolClient or a test double).
 //
 // Atomicity: BEGIN → guarded status CAS → proof-header INSERT → ordered path INSERTs →
-// event INSERT → lease presence check → signed dual-chain append → COMMIT. Any failure rolls
-// back. The deferred path-completeness constraint fires at COMMIT, so a short or broken path
-// aborts the whole transaction rather than leaving a landing without its evidence.
+// event INSERT → lease presence check → (optional NODE_VERIFIED release) → signed dual-chain
+// append → COMMIT. Any failure rolls back. The deferred path-completeness constraint fires at
+// COMMIT, so a short or broken path aborts the whole transaction rather than leaving a landing
+// without its evidence.
 //
 // the slice-local `receive_landing_events` row is NOT the authoritative event. The
 // node-global `node_events` chain and the tenant `implementer_events` chain are what signed
@@ -21,15 +24,21 @@
 // node-global seq counter row lock, which serializes every concurrent append on this node, so
 // it is held for the shortest possible slice of the transaction. Same transaction is what
 // makes it atomic; last position is only what makes it cheap.
-//
-// There is no code path here that DELETEs, UPDATEs or re-INSERTs wallet_active_leases: the
-// receiver lease row is byte-identical across the transition.
+
+import { createHash, randomUUID } from "node:crypto";
+
+import { RELEASED_NODE_VERIFIED } from "@zucoins/generic-node-contracts/operations";
 
 import {
   appendTerminalLandedEvent,
   type DualChainEventQuota,
   type NodeEventSigner,
 } from "../event-log/dual-chain-appender.js";
+import {
+  completeGroupOperation,
+  mintReleaseProof,
+  releaseLease,
+} from "../leases/repository.js";
 
 import {
   RECEIVE_LANDED_EVENT,
@@ -42,6 +51,9 @@ import {
   type ReceiveLandingStore,
 } from "./landing-commit.js";
 import type { SqlExecutor, SqlTxFactory } from "./sql-store.js";
+
+/** Forensic release_reason on wallet_lease_memberships for NODE_VERIFIED landing close. */
+export const NODE_VERIFIED_LANDING_RELEASE_REASON = "NODE_VERIFIED_LANDING" as const;
 
 /** Raised by the deferred completeness trigger in receive-external-landing.sql. */
 export const PATH_INCOMPLETE_MESSAGES = [
@@ -110,12 +122,36 @@ export const RECEIVE_LANDING_STATEMENTS = {
     ") VALUES ($1::uuid, $2, $3::uuid, to_timestamp($4 / 1000.0), $5) " +
     "RETURNING operation_id",
 
-  // Presence check only — never DELETE / UPDATE / re-INSERT the lease.
+  // Presence check only — never DELETE / UPDATE / re-INSERT the lease (INDEPENDENT /
+  // child-handoff). NODE_VERIFIED + HOLD release follows via mintReleaseProof + releaseLease.
   SELECT_LEASE:
     "SELECT wallet_id FROM wallet_active_leases WHERE wallet_id = " +
     "(SELECT receiver_wallet_id FROM operations WHERE id = $1::uuid)",
 
   SELECT_CURRENT_STATUS: "SELECT status FROM operations WHERE id = $1::uuid",
+
+  // Mode + after_landing + lease-group identity for the ZTR-1303 release branch.
+  // Read after CAS so we observe the same row the status transition locked.
+  LOAD_RELEASE_CONTEXT:
+    "SELECT o.verification_mode::text AS verification_mode, " +
+    "o.after_landing::text AS after_landing, " +
+    "o.receiver_wallet_id::text AS receiver_wallet_id, " +
+    "l.membership_id::text AS membership_id, " +
+    "l.lease_group_id::text AS lease_group_id, " +
+    "l.lease_epoch::text AS lease_epoch, " +
+    "l.owner_instance_id::text AS owner_instance_id " +
+    "FROM operations o " +
+    "JOIN wallet_active_leases l " +
+    "  ON l.wallet_id = o.receiver_wallet_id AND l.operation_id = o.id " +
+    "WHERE o.id = $1::uuid",
+
+  SET_RELEASE_STATUS_NODE_VERIFIED:
+    "UPDATE operations SET receive_release_status = $2, " +
+    "row_version = row_version + 1, updated_at = now() " +
+    "WHERE id = $1::uuid " +
+    "AND status = 'RECEIVE_LANDED' " +
+    "AND receive_release_status IS NULL " +
+    "RETURNING receive_release_status",
 
   // keep admission-table status in lockstep with operations on land so
   // receive_operations is not left READY after RECEIVE_LANDED (GET join + diagnostics).
@@ -123,6 +159,43 @@ export const RECEIVE_LANDING_STATEMENTS = {
     "UPDATE receive_operations SET status = 'RECEIVE_LANDED' " +
     "WHERE operation_id = $1::uuid AND status = 'READY'",
 } as const;
+
+/**
+ * Byte-stable proof digest for NODE_VERIFIED landing release (same injection-safe
+ * length-prefixed shape as verification-complete's computeReleaseProofDigest). Binds the
+ * proof to the landing observation anchors so a digest cannot be lifted across ops.
+ */
+export function computeNodeVerifiedLandingReleaseDigest(fields: {
+  readonly operationId: string;
+  readonly walletId: string;
+  readonly membershipId: string;
+  readonly leaseGroupId: string;
+  readonly leaseEpoch: bigint;
+  readonly freshHeadObservationId: string;
+  readonly terminalObservationId: string;
+}): string {
+  const field = (value: string): string =>
+    `${new TextEncoder().encode(value).length}:${value}`;
+  const text =
+    field(fields.operationId) +
+    field(fields.walletId) +
+    field(fields.membershipId) +
+    field(fields.leaseGroupId) +
+    field(fields.leaseEpoch.toString()) +
+    field(fields.freshHeadObservationId) +
+    field(fields.terminalObservationId);
+  return createHash("sha256").update(`nvland1:${text}`, "utf8").digest("hex");
+}
+
+interface ReleaseContextRow {
+  readonly verification_mode: string;
+  readonly after_landing: string | null;
+  readonly receiver_wallet_id: string;
+  readonly membership_id: string;
+  readonly lease_group_id: string;
+  readonly lease_epoch: string;
+  readonly owner_instance_id: string;
+}
 
 interface StatusRow {
   readonly id: string;
@@ -249,7 +322,7 @@ export class SqlReceiveLandingStore implements ReceiveLandingStore {
           event.dataText,
         ]);
 
-        // 5. The receiver lease must still be present — never released by this path.
+        // 5. The receiver lease must still be present at land time.
         const lease = await tx.query<{ wallet_id: string }>(
           RECEIVE_LANDING_STATEMENTS.SELECT_LEASE,
           [command.operationId],
@@ -263,6 +336,72 @@ export class SqlReceiveLandingStore implements ReceiveLandingStore {
         await tx.query(RECEIVE_LANDING_STATEMENTS.SYNC_RECEIVE_OPERATIONS_LANDED, [
           command.operationId,
         ]);
+
+        // 5c. NODE_VERIFIED + HOLD → same-TX custody release (ZTR-1303).
+        // Branch priority: after_landing=INTERNAL_MOVE wins — handoff keeps the lease held
+        // (RECEIVE_WINDOW → MOVE_SOURCE) and release fires only at the child MOVE land.
+        // INDEPENDENT never releases here. Park paths never reach this store.
+        let receiverLeaseStillHeld = true;
+        const ctx = await tx.query<ReleaseContextRow>(
+          RECEIVE_LANDING_STATEMENTS.LOAD_RELEASE_CONTEXT,
+          [command.operationId],
+        );
+        const releaseCtx = ctx.rows[0];
+        if (
+          releaseCtx !== undefined &&
+          releaseCtx.verification_mode === "NODE_VERIFIED" &&
+          releaseCtx.after_landing !== "INTERNAL_MOVE"
+        ) {
+          const leaseEpoch = BigInt(releaseCtx.lease_epoch);
+          const proofId = randomUUID();
+          const proofDigest = computeNodeVerifiedLandingReleaseDigest({
+            operationId: command.operationId,
+            walletId: releaseCtx.receiver_wallet_id,
+            membershipId: releaseCtx.membership_id,
+            leaseGroupId: releaseCtx.lease_group_id,
+            leaseEpoch,
+            freshHeadObservationId: proof.freshHeadObservationId,
+            terminalObservationId: proof.terminalObservationId,
+          });
+          // Mark the receive group-op complete so releaseLease's collective terminal
+          // predicate admits the HOLD/NONE root (child_disposition stays NONE).
+          await completeGroupOperation(tx, {
+            leaseGroupId: releaseCtx.lease_group_id,
+            operationId: command.operationId,
+          });
+          await mintReleaseProof(tx, {
+            proofId,
+            walletId: releaseCtx.receiver_wallet_id,
+            operationId: command.operationId,
+            membershipId: releaseCtx.membership_id,
+            leaseGroupId: releaseCtx.lease_group_id,
+            leaseEpoch,
+            proofKind: "RECEIVE_LANDED",
+            proofDigest,
+          });
+          // Same tx: closes membership, consumes proof, DELETEs active row, PINNED→AVAILABLE.
+          // A throw rolls the mint + landing CAS back together.
+          await releaseLease(tx, {
+            walletId: releaseCtx.receiver_wallet_id,
+            ownerInstanceId: releaseCtx.owner_instance_id,
+            operationId: command.operationId,
+            membershipId: releaseCtx.membership_id,
+            leaseGroupId: releaseCtx.lease_group_id,
+            leaseEpoch,
+            releaseProofId: proofId,
+            releaseReason: NODE_VERIFIED_LANDING_RELEASE_REASON,
+          });
+          const stamped = await tx.query<{ receive_release_status: string }>(
+            RECEIVE_LANDING_STATEMENTS.SET_RELEASE_STATUS_NODE_VERIFIED,
+            [command.operationId, RELEASED_NODE_VERIFIED],
+          );
+          if (stamped.rows.length !== 1) {
+            throw new Error(
+              `NODE_VERIFIED receive_release_status CAS failed: ${command.operationId}`,
+            );
+          }
+          receiverLeaseStillHeld = false;
+        }
 
         // 6. The authoritative terminal event, on both signed chains, on THIS transaction.
         // `event.dataText` is the payload the caller already built and the
@@ -284,7 +423,7 @@ export class SqlReceiveLandingStore implements ReceiveLandingStore {
           },
         );
 
-        return { applied: true, receiverLeaseStillHeld: true };
+        return { applied: true, receiverLeaseStillHeld };
       })
       .catch((err: unknown) => {
         if (err instanceof LeaseMissingError) {
@@ -309,13 +448,20 @@ export class InMemoryReceiveLandingStore implements ReceiveLandingStore {
       receiverWalletId: string;
       terminalObservationId: string | null;
       verificationMaterialAvailableUntilMs: number | null;
+      verificationMode: "INDEPENDENT" | "NODE_VERIFIED";
+      afterLanding: "HOLD" | "INTERNAL_MOVE";
+      receiveReleaseStatus: string | null;
     }
   >();
   readonly leases = new Set<string>();
   readonly proofs: CommitReceiveLandingCommand["proof"][] = [];
   readonly pathBodies: CommitReceiveLandingCommand["path"][] = [];
   readonly events: CommitReceiveLandingCommand["event"][] = [];
-  /** When true, commitLanding simulates a store that illegally drops the receiver lease. */
+  /**
+   * When true, commitLanding simulates an illegal mid-commit lease drop that the
+   * production store would never report as applied:true. Kept for negative unit coverage
+   * of the APPLIED + still-held contract on the INDEPENDENT path.
+   */
   releaseLeaseOnLand = false;
 
   seed(
@@ -324,6 +470,10 @@ export class InMemoryReceiveLandingStore implements ReceiveLandingStore {
     receiverWalletId: string,
     rowVersion = 1,
     leaseHeld = true,
+    opts: {
+      readonly verificationMode?: "INDEPENDENT" | "NODE_VERIFIED";
+      readonly afterLanding?: "HOLD" | "INTERNAL_MOVE";
+    } = {},
   ): void {
     this.operations.set(operationId, {
       status,
@@ -331,6 +481,9 @@ export class InMemoryReceiveLandingStore implements ReceiveLandingStore {
       receiverWalletId,
       terminalObservationId: null,
       verificationMaterialAvailableUntilMs: null,
+      verificationMode: opts.verificationMode ?? "INDEPENDENT",
+      afterLanding: opts.afterLanding ?? "HOLD",
+      receiveReleaseStatus: null,
     });
     if (leaseHeld) this.leases.add(receiverWalletId);
   }
@@ -368,8 +521,16 @@ export class InMemoryReceiveLandingStore implements ReceiveLandingStore {
     this.pathBodies.push(command.path);
     this.events.push(command.event);
 
+    // Illegal drop wins for the negative unit path (simulates a broken store).
     if (this.releaseLeaseOnLand) {
       this.leases.delete(op.receiverWalletId);
+      return { applied: true, receiverLeaseStillHeld: false };
+    }
+
+    // ZTR-1303: NODE_VERIFIED + HOLD releases in the same commit; handoff holds.
+    if (op.verificationMode === "NODE_VERIFIED" && op.afterLanding !== "INTERNAL_MOVE") {
+      this.leases.delete(op.receiverWalletId);
+      op.receiveReleaseStatus = RELEASED_NODE_VERIFIED;
       return { applied: true, receiverLeaseStillHeld: false };
     }
     return { applied: true, receiverLeaseStillHeld: true };

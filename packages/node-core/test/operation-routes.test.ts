@@ -388,18 +388,51 @@ describe("handleCreateExternalSend", () => {
     expect(result.error.headers["Retry-After"]).toBe("1");
   });
 
-  it("maps assign/top-up failures to documented HTTP codes (ZTR-1271)", async () => {
-    const cases: Array<{ code: string; detail?: string; status: number; wire: string }> = [
-      { code: "no_free_send_worker", status: 503, wire: "service_unavailable" },
-      { code: "no_hub_liquidity", status: 503, wire: "service_unavailable" },
+  it("maps assign/top-up failures to documented HTTP codes (ZTR-1271 / ZTR-1309)", async () => {
+    const cases: Array<{
+      code: string;
+      detail?: string;
+      status: number;
+      wire: string;
+      reason?: string;
+    }> = [
+      {
+        code: "no_free_send_worker",
+        status: 503,
+        wire: "service_unavailable",
+        reason: "no_free_send_worker",
+      },
+      {
+        code: "no_hub_liquidity",
+        status: 503,
+        wire: "service_unavailable",
+        reason: "no_hub_liquidity",
+      },
       {
         code: "insufficient_funding_wallet",
         status: 422,
         wire: "insufficient_funding_wallet",
       },
       { code: "hub_busy", status: 409, wire: "wallet_busy" },
-      { code: "halted", status: 503, wire: "service_unavailable" },
-      { code: "worker_destination_missing", status: 503, wire: "service_unavailable" },
+      { code: "halted", status: 503, wire: "service_unavailable", reason: "halted" },
+      {
+        code: "worker_destination_missing",
+        status: 503,
+        wire: "service_unavailable",
+        reason: "worker_destination_missing",
+      },
+      {
+        code: "assign_not_wired",
+        status: 503,
+        wire: "service_unavailable",
+        reason: "assign_not_wired",
+      },
+      {
+        code: "move_rejected",
+        status: 503,
+        wire: "service_unavailable",
+        reason: "move_rejected",
+      },
       {
         code: "send_rejected",
         detail: "allow_external_send=false",
@@ -423,7 +456,13 @@ describe("handleCreateExternalSend", () => {
       expect(result.ok, c.code).toBe(false);
       if (result.ok) return;
       expect(result.error.status, c.code).toBe(c.status);
-      expect(JSON.parse(result.error.body).error.code, c.code).toBe(c.wire);
+      const body = JSON.parse(result.error.body);
+      expect(body.error.code, c.code).toBe(c.wire);
+      if (c.reason !== undefined) {
+        expect(body.error.details, c.code).toEqual({ reason: c.reason });
+      } else {
+        expect(body.error.details, c.code).toEqual({});
+      }
     }
   });
 

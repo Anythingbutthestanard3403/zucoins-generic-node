@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createExternalSend } from "./sends.js";
 import type { FetchLike } from "./client-types.js";
+import { assignCapacityReason, NodeApiError } from "./errors.js";
 
 describe("createExternalSend", () => {
   it("POSTs /v1/external-sends with bearer auth", async () => {
@@ -88,5 +89,38 @@ describe("createExternalSend", () => {
     expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).not.toHaveProperty(
       "source_wallet_id",
     );
+  });
+
+  it("surfaces 503 no_free_send_worker as assign-capacity (ZTR-1309)", async () => {
+    const fetchImpl = vi.fn<FetchLike>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "service_unavailable",
+              message: "The service is temporarily unavailable.",
+              request_id: "7b8bb326-0f2b-4dad-a8e7-40115b375ec4",
+              details: { reason: "no_free_send_worker" },
+            },
+          }),
+          { status: 503, headers: { "content-type": "application/json" } },
+        ),
+    );
+    try {
+      await createExternalSend({
+        config: { baseUrl: "https://node.example.com", fetchImpl },
+        bearerKey: "ik_test",
+        request: {
+          destination_address: "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q=",
+          amount_zkz: "1.0",
+        },
+        idempotencyKey: "idem-send-503-1",
+      });
+      throw new Error("expected NodeApiError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(NodeApiError);
+      expect(err).toMatchObject({ status: 503, code: "service_unavailable" });
+      expect(assignCapacityReason(err as NodeApiError)).toBe("no_free_send_worker");
+    }
   });
 });

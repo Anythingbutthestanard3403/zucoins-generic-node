@@ -5,6 +5,7 @@ import {
   ApiErrorEnvelopeSchema,
   ApiErrorCodeSchema,
   API_ERROR_CODES,
+  ASSIGN_CAPACITY_REASONS,
   apiErrorResponse,
   buildApiErrorBody,
   HTTP_STATUS_BY_CODE,
@@ -102,13 +103,37 @@ describe("ApiErrorEnvelopeSchema", () => {
     expect(ApiErrorEnvelopeSchema.safeParse(envelope).success).toBe(false);
   });
 
-  it("rejects envelope with non-empty details", () => {
+  it("rejects envelope with unknown details keys", () => {
     const envelope = {
       error: {
         code: "not_found",
         message: "msg",
         request_id: TEST_REQUEST_ID,
         details: { leaked: "data" },
+      },
+    };
+    expect(ApiErrorEnvelopeSchema.safeParse(envelope).success).toBe(false);
+  });
+
+  it("accepts service_unavailable with a closed assign-capacity reason (ZTR-1309)", () => {
+    const envelope = {
+      error: {
+        code: "service_unavailable",
+        message: "The service is temporarily unavailable.",
+        request_id: TEST_REQUEST_ID,
+        details: { reason: "no_free_send_worker" },
+      },
+    };
+    expect(ApiErrorEnvelopeSchema.safeParse(envelope).success).toBe(true);
+  });
+
+  it("rejects an unknown details.reason", () => {
+    const envelope = {
+      error: {
+        code: "service_unavailable",
+        message: "The service is temporarily unavailable.",
+        request_id: TEST_REQUEST_ID,
+        details: { reason: "not_a_capacity_reason" },
       },
     };
     expect(ApiErrorEnvelopeSchema.safeParse(envelope).success).toBe(false);
@@ -147,6 +172,40 @@ describe("buildApiErrorBody round-trips through schema", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.error.message).toBe("Custom limit hit.");
+    }
+  });
+
+  it("optional details.reason is preserved for service_unavailable (ZTR-1309)", () => {
+    const body = buildApiErrorBody("service_unavailable", TEST_REQUEST_ID, undefined, {
+      reason: "no_free_send_worker",
+    });
+    const parsed = JSON.parse(body);
+    const result = ApiErrorEnvelopeSchema.safeParse(parsed);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.error.details).toEqual({ reason: "no_free_send_worker" });
+    }
+  });
+});
+
+describe("ASSIGN_CAPACITY_REASONS (ZTR-1309)", () => {
+  it("every listed reason produces a schema-valid 503 service_unavailable envelope", () => {
+    for (const reason of ASSIGN_CAPACITY_REASONS) {
+      const response = apiErrorResponse(
+        "service_unavailable",
+        TEST_REQUEST_ID,
+        undefined,
+        undefined,
+        { reason },
+      );
+      expect(response.status).toBe(503);
+      const parsed = JSON.parse(response.body);
+      const result = ApiErrorEnvelopeSchema.safeParse(parsed);
+      expect(result.success, reason).toBe(true);
+      if (result.success) {
+        expect(result.data.error.code).toBe("service_unavailable");
+        expect(result.data.error.details).toEqual({ reason });
+      }
     }
   });
 });

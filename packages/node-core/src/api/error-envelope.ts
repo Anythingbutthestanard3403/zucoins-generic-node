@@ -69,6 +69,30 @@ export const API_ERROR_CODES = [
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]["code"];
 
+/** Assign/capacity rejections that stay HTTP 503 `service_unavailable` (ZTR-1309). */
+export const ASSIGN_CAPACITY_REASONS = [
+  "no_free_send_worker",
+  "no_hub_liquidity",
+  "worker_destination_missing",
+  "halted",
+  "assign_not_wired",
+  "move_rejected",
+] as const;
+
+export type AssignCapacityReason = (typeof ASSIGN_CAPACITY_REASONS)[number];
+
+export function isAssignCapacityReason(code: string): code is AssignCapacityReason {
+  return (ASSIGN_CAPACITY_REASONS as readonly string[]).includes(code);
+}
+
+export const ApiErrorDetailsSchema = z
+  .object({
+    reason: z.enum(ASSIGN_CAPACITY_REASONS).optional(),
+  })
+  .strict();
+
+export type ApiErrorDetails = z.infer<typeof ApiErrorDetailsSchema>;
+
 export const HTTP_STATUS_BY_CODE: Readonly<Record<ApiErrorCode, number>> = Object.freeze(
   Object.fromEntries(API_ERROR_CODES.map((entry) => [entry.code, entry.http])) as Record<
     ApiErrorCode,
@@ -127,7 +151,7 @@ export const ApiErrorEnvelopeSchema = z.object({
     code: ApiErrorCodeSchema,
     message: z.string(),
     request_id: z.string().uuid(),
-    details: z.record(z.never()).default({}),
+    details: ApiErrorDetailsSchema.default({}),
   }).strict(),
 }).strict();
 
@@ -140,7 +164,9 @@ export function buildApiErrorBody(
   code: ApiErrorCode,
   requestId: string,
   message?: string,
+  details: ApiErrorDetails = {},
 ): string {
+  // Frozen 401/404 pins require empty details — never an existence/scope oracle.
   if (code === CANONICAL_AUTH_FAILURE_CODE) {
     return buildAuthErrorBody(CANONICAL_AUTH_FAILURE_CODE, CANONICAL_AUTH_FAILURE_MESSAGE, requestId);
   }
@@ -152,7 +178,7 @@ export function buildApiErrorBody(
       code,
       message: message ?? DIAGNOSTIC_MESSAGES[code],
       request_id: requestId,
-      details: {},
+      details,
     },
   });
 }
@@ -162,6 +188,7 @@ export function apiErrorResponse(
   requestId: string,
   message?: string,
   retryAfterSeconds?: number,
+  details?: ApiErrorDetails,
 ): ApiErrorResponse {
   const headers: Record<string, string> = { ...CANONICAL_AUTH_ERROR_HEADERS };
   if (retryAfterSeconds !== undefined) {
@@ -170,7 +197,7 @@ export function apiErrorResponse(
   return {
     status: HTTP_STATUS_BY_CODE[code],
     headers,
-    body: buildApiErrorBody(code, requestId, message),
+    body: buildApiErrorBody(code, requestId, message, details),
   };
 }
 

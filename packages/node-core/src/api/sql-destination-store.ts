@@ -68,9 +68,20 @@ export function createSqlDestinationStore(sql: DestinationSqlExecutor): Destinat
     },
 
     async insert(record: NewDestination) {
-      await sql.query(
+      // wallet_id is UNIQUE. Mint composition already inserts PENDING; register
+      // must adopt that row (and apply the operator label) rather than fail or
+      // create a second dest. CASE keeps a BLESSED/RETIRED label unchanged.
+      const result = await sql.query(
         `INSERT INTO destinations (id, node_id, wallet_id, label, state, created_at)
-         VALUES ($1, $2, $3, $4, 'PENDING', $5::timestamptz)`,
+         VALUES ($1, $2, $3, $4, 'PENDING', $5::timestamptz)
+         ON CONFLICT (wallet_id) DO UPDATE
+            SET label = CASE
+                          WHEN destinations.state = 'PENDING' THEN EXCLUDED.label
+                          ELSE destinations.label
+                        END
+         RETURNING id, node_id, wallet_id, label, state, created_at,
+                   blessed_at, blessed_by_device_key_id, blessing_artifact_id,
+                   retired_at`,
         [
           record.destinationId,
           record.nodeId,
@@ -79,13 +90,35 @@ export function createSqlDestinationStore(sql: DestinationSqlExecutor): Destinat
           record.createdAt,
         ],
       );
+      const row = result.rows[0];
+      if (row === undefined) {
+        throw new Error("destination insert missed row");
+      }
       return {
-        ...record,
-        state: "PENDING",
-        blessedAt: null,
-        blessedByDeviceKeyId: null,
-        blessingArtifactId: null,
-        retiredAt: null,
+        destinationId: String(row.id) as Uuid,
+        nodeId: String(row.node_id) as Uuid,
+        walletId: String(row.wallet_id) as Uuid,
+        walletPublicKey: record.walletPublicKey,
+        state: row.state as DestinationRecord["state"],
+        label: row.label === null || row.label === undefined ? "" : String(row.label),
+        blessedAt:
+          row.blessed_at === null || row.blessed_at === undefined
+            ? null
+            : String(row.blessed_at),
+        blessedByDeviceKeyId:
+          row.blessed_by_device_key_id === null ||
+          row.blessed_by_device_key_id === undefined
+            ? null
+            : (String(row.blessed_by_device_key_id) as Uuid),
+        blessingArtifactId:
+          row.blessing_artifact_id === null || row.blessing_artifact_id === undefined
+            ? null
+            : (String(row.blessing_artifact_id) as Uuid),
+        retiredAt:
+          row.retired_at === null || row.retired_at === undefined
+            ? null
+            : String(row.retired_at),
+        createdAt: String(row.created_at),
       };
     },
 

@@ -226,6 +226,8 @@ const SCHEMA_FILES = [
   // ZTR-1300: verification_mode columns + RELEASED_NODE_VERIFIED + policy home.
   // ALTER/DO/trigger only (no CREATE TABLE).
   "verification-mode.sql",
+  // ZTR-1306: PENDING dest backfill for node_generated wallets missing a row.
+  "destinations-pending-backfill.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -257,6 +259,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "implementer-funding-wallet.sql",
   "operator-accepted-risk-release.sql",
   "verification-mode.sql",
+  "destinations-pending-backfill.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -591,6 +594,10 @@ const GREENFIELD: Record<
   "verification-mode.sql": {
     applies: false,
     missingFragment: "verification-mode requires operations",
+  },
+  "destinations-pending-backfill.sql": {
+    applies: false,
+    missingFragment: "destinations-pending-backfill requires wallets",
   },
 };
 

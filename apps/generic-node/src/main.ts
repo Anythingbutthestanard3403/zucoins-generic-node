@@ -47,6 +47,8 @@ import {
   DEFAULT_DB_PING_TTL_MS,
   createDestinationService,
   createDeviceBlessingAuthorizer,
+  insertNodeGeneratedWalletWithPendingDestination,
+  deleteNodeGeneratedWalletMint,
   createHostEvidenceRuntimeMetricsCollector,
   createImplementerBearerAuthFromService,
   createMoneyPathAdmissionPortsFromRuntime,
@@ -277,17 +279,14 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
       const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
       const walletId = randomUUID() as Uuid;
       try {
-        // Commit wallet on the pool so vault.seal (separate connection) can see FK target.
-        await deps.pool.query(
-          `INSERT INTO wallets (
-             id, node_id, public_key, key_origin, state,
-             allow_external_receive, allow_external_send, allow_internal_move, money_mode
-           ) VALUES (
-             $1::uuid, $2::uuid, $3, 'node_generated', 'AVAILABLE',
-             true, true, true, 'FULL'
-           )`,
-          [walletId, nodeId, publicKey],
-        );
+        // Commit wallet + PENDING dest on the pool so vault.seal (separate
+        // connection) can see the wallets FK target. Register later adopts
+        // the dest row via ON CONFLICT (wallet_id).
+        await insertNodeGeneratedWalletWithPendingDestination(deps.pool, {
+          walletId,
+          nodeId,
+          publicKey,
+        });
         await deps.vault.seal(
           {
             nodeId,
@@ -303,7 +302,7 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
         return { walletId, publicKey };
       } catch (err) {
         try {
-          await deps.pool.query(`DELETE FROM wallets WHERE id = $1::uuid`, [walletId]);
+          await deleteNodeGeneratedWalletMint(deps.pool, walletId);
         } catch {
           // best-effort compensate
         }

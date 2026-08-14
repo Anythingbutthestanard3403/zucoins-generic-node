@@ -624,6 +624,15 @@ export {
   type ReceiveExpiryReleaseInvariant,
 } from "./schema/receive-expiry-release.contract.js";
 
+// ZTR-1306: PENDING dest backfill for node_generated wallets minted without one.
+export {
+  DESTINATIONS_PENDING_BACKFILL_EXECUTION_OBLIGATIONS,
+  DESTINATIONS_PENDING_BACKFILL_INVARIANTS,
+  DESTINATIONS_PENDING_BACKFILL_SCHEMA_FILE,
+  DESTINATIONS_PENDING_BACKFILL_SOURCE,
+  type DestinationsPendingBackfillInvariant,
+} from "./schema/destinations-pending-backfill.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

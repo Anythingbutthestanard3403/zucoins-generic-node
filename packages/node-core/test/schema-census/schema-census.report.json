@@ -14,6 +14,7 @@
     "base-enums-domains.sql",
     "custody-eligibility.sql",
     "destinations-label.sql",
+    "destinations-pending-backfill.sql",
     "device-enrollment-challenges.sql",
     "device-keys.sql",
     "dual-control-policy.sql",

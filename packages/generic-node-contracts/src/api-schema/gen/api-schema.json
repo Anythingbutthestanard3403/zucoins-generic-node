@@ -1,7 +1,7 @@
 {
   "concern": "api-schema",
   "ticket": "crypto-goldens.2",
-  "version": 2,
+  "version": 3,
   "governing": {
     "spec": "api-contract; data-model enum vocabulary; state-event reference",
     "decisions": [
@@ -37,7 +37,9 @@
       "operation_not_armable",
       "verification_material_not_ready",
       "verification_material_expired",
-      "cursor_mismatch"
+      "cursor_mismatch",
+      "verification_mode_mismatch",
+      "verification_mode_not_allowed"
     ]
   },
   "authScopes": {
@@ -257,7 +259,8 @@
           "amount_zkz",
           "anchor",
           "expires_in_seconds",
-          "after_landing"
+          "after_landing",
+          "verification_mode"
         ],
         "responseStatuses": [
           201,
@@ -286,7 +289,8 @@
           "source_wallet_id",
           "destination_id",
           "amount_zkz",
-          "client_reference"
+          "client_reference",
+          "verification_mode"
         ],
         "responseStatuses": [
           201
@@ -312,7 +316,8 @@
           "amount_zkz",
           "references_operation_id",
           "client_reference",
-          "description"
+          "description",
+          "verification_mode"
         ],
         "responseStatuses": [
           201

@@ -594,31 +594,33 @@ export function OperationDetailPage() {
                 : "No permitted recovery actions right now."}
             </p>
           ) : (
-            {recovery.permitted_actions.includes(
-              "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
-            ) ? (
-              <p
-                className="muted"
-                style={{ fontSize: 12.5, marginTop: 8 }}
-                data-testid="operator-risk-release-notice"
-              >
-                Operator-risk release is available: this path records{" "}
-                <strong>OPERATOR_ACCEPTED_RISK</strong> with the failing predicates —
-                T0-unchanged is <strong>not</strong> proven. Prefer canonical{" "}
-                <code className="mono">RELEASE_EXPIRED_RECEIVE</code> when the five
-                predicates hold. See Evidence-gap for recorded predicate failures.
-              </p>
-            ) : null}
-            <RecoveryActions
-              permittedActions={recovery.permitted_actions}
-              disabled={act.isPending}
-              liveClassName="mini-btn primary"
-              onAction={(action) => {
-                setErr(null);
-                setMsg(null);
-                act.mutate(action);
-              }}
-            />
+            <>
+              {recovery.permitted_actions.includes(
+                "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
+              ) ? (
+                <p
+                  className="muted"
+                  style={{ fontSize: 12.5, marginTop: 8 }}
+                  data-testid="operator-risk-release-notice"
+                >
+                  Operator-risk release is available: this path records{" "}
+                  <strong>OPERATOR_ACCEPTED_RISK</strong> with the failing predicates —
+                  T0-unchanged is <strong>not</strong> proven. Prefer canonical{" "}
+                  <code className="mono">RELEASE_EXPIRED_RECEIVE</code> when the five
+                  predicates hold. See Evidence-gap for recorded predicate failures.
+                </p>
+              ) : null}
+              <RecoveryActions
+                permittedActions={recovery.permitted_actions}
+                disabled={act.isPending}
+                liveClassName="mini-btn primary"
+                onAction={(action) => {
+                  setErr(null);
+                  setMsg(null);
+                  act.mutate(action);
+                }}
+              />
+            </>
           )}
         </div>
       ) : (

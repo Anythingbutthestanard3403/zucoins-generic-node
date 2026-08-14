@@ -22,6 +22,7 @@ import * as states from "../src/operations/states.contract.ts";
 import * as events from "../src/operations/events.contract.ts";
 import * as routes from "../src/operations/routes.contract.ts";
 import * as capabilities from "../src/operations/capabilities.contract.ts";
+import * as verificationMode from "../src/operations/verification-mode.contract.ts";
 import * as halt from "../src/operator-halt/halt.contract.ts";
 import * as gating from "../src/operator-halt/gating.contract.ts";
 import * as races from "../src/operator-halt/races.contract.ts";
@@ -90,6 +91,7 @@ const entries: readonly GenSnapshot[] = [
   { file: "events.json", value: events, recipe: "sorted-nl" },
   { file: "routes.json", value: routes, recipe: "sorted-nl" },
   { file: "capabilities.json", value: capabilities, recipe: "sorted-nl" },
+  { file: "verification-mode.json", value: verificationMode, recipe: "sorted-nl" },
   { file: "halt.json", value: halt, recipe: "sorted-nl" },
   { file: "gating.json", value: gating, recipe: "sorted-nl" },
   { file: "races.json", value: races, recipe: "sorted-nl" },

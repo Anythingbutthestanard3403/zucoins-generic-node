@@ -27,7 +27,7 @@ import {
 
 describe("the crypto-goldens concern.2 API schema version metadata", () => {
   it("freezes the schema version for drift detection", () => {
-    expect(API_SCHEMA_VERSION).toBe(2);
+    expect(API_SCHEMA_VERSION).toBe(3);
   });
 });
 
@@ -54,8 +54,21 @@ describe("the crypto-goldens concern.2 error vocabulary census", () => {
   });
 
   it("freezes the cited error codes", () => {
-    expect(CITED_ERROR_CODES).toHaveLength(9);
+    expect(CITED_ERROR_CODES).toHaveLength(11);
     expect(new Set(CITED_ERROR_CODES).size).toBe(CITED_ERROR_CODES.length);
+    assertFieldOrder(CITED_ERROR_CODES, [
+      "wallet_busy",
+      "unknown_field",
+      "receive_queue_full",
+      "t0_mismatch",
+      "operation_version_conflict",
+      "operation_not_armable",
+      "verification_material_not_ready",
+      "verification_material_expired",
+      "cursor_mismatch",
+      "verification_mode_mismatch",
+      "verification_mode_not_allowed",
+    ]);
   });
 
   it("rejects an added HTTP status (negative path)", () => {

@@ -47,6 +47,8 @@ export const CITED_ERROR_CODES = [
   "verification_material_not_ready",
   "verification_material_expired",
   "cursor_mismatch",
+  "verification_mode_mismatch",
+  "verification_mode_not_allowed",
 ] as const;
 
 export type CitedErrorCode = (typeof CITED_ERROR_CODES)[number];

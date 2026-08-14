@@ -31,7 +31,7 @@ export const PUBLIC_OPERATION_SCHEMA_SURFACE = [
     path: receiveRoute.path,
     requestSchema: "ReceiveExternalRequestSchema",
     responseSchema: "ReceiveExternalResponseSchema",
-    requestFields: ["amount_zkz", "anchor", "expires_in_seconds", "after_landing"],
+    requestFields: ["amount_zkz", "anchor", "expires_in_seconds", "after_landing", "verification_mode"],
     responseStatuses: [201, 202],
     responseFields: [
       "operation",
@@ -52,7 +52,7 @@ export const PUBLIC_OPERATION_SCHEMA_SURFACE = [
     path: moveRoute.path,
     requestSchema: "MoveInternalRequestSchema",
     responseSchema: "MoveInternalResponseSchema",
-    requestFields: ["source_wallet_id", "destination_id", "amount_zkz", "client_reference"],
+    requestFields: ["source_wallet_id", "destination_id", "amount_zkz", "client_reference", "verification_mode"],
     responseStatuses: [201],
     responseFields: [
       "operation",
@@ -79,6 +79,7 @@ export const PUBLIC_OPERATION_SCHEMA_SURFACE = [
       "references_operation_id",
       "client_reference",
       "description",
+      "verification_mode",
     ],
     responseStatuses: [201],
     responseFields: [

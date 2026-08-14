@@ -47,3 +47,18 @@ export {
   attentionReasonCoverage,
   assertAttentionReasonCensusComplete,
 } from "./attention-reason-setters.ts";
+
+export {
+  VERIFICATION_MODES,
+  DEFAULT_VERIFICATION_MODE,
+  RELEASED_NODE_VERIFIED,
+  ALLOW_NODE_VERIFIED_SETTING_KEY,
+  ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,
+  VERIFICATION_MODE_ERROR_CODES,
+  SOURCE as VERIFICATION_MODE_SOURCE,
+} from "./verification-mode.contract.ts";
+export type {
+  VerificationMode,
+  VerificationModeErrorCode,
+} from "./verification-mode.contract.ts";
+

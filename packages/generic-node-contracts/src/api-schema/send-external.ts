@@ -11,6 +11,10 @@ import {
   UuidSchema,
   WalletPublicKeySchema,
 } from "./scalars.ts";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+} from "../operations/verification-mode.contract.ts";
 
 export const SendExternalRequestSchema = z
   .object({
@@ -25,6 +29,8 @@ export const SendExternalRequestSchema = z
     references_operation_id: UuidSchema.optional(),
     client_reference: ClientReferenceSchema.optional(),
     description: DescriptionSchema.optional(),
+    /** Optional; defaults to INDEPENDENT when omitted. */
+    verification_mode: z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE),
   })
   .strict();
 

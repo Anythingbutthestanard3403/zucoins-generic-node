@@ -16,9 +16,15 @@
 //
 // Usage:
 //   DATABASE_URL=postgres://… STAGING_CONFIRM=ZTR-1281 \
-//     node docs/operations/annotate-forged-expired-t0-releases.mjs
+//     node docs/operations/annotate-forged-expired-t0-releases.mjs \
+//       --expect-host <staging-db-hostname>
 //   DATABASE_URL=postgres://… STAGING_CONFIRM=ZTR-1281 \
-//     node docs/operations/annotate-forged-expired-t0-releases.mjs --execute
+//     node docs/operations/annotate-forged-expired-t0-releases.mjs \
+//       --expect-host <staging-db-hostname> --execute
+//
+// --expect-host is required (ZTR-1296). The gate compares it to the host
+// resolved from DATABASE_URL so a production DSN cannot slip through a
+// staging-looking shell env.
 //
 // Incident note: docs/operations/incidents.md
 //   § "Historical incident — forged EXPIRED_T0_UNCHANGED releases"
@@ -60,7 +66,118 @@ function detailsSha256(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-function assertStagingGate(env) {
+/**
+ * Read `--expect-host <value>` (or `--expect-host=<value>`) from argv.
+ * @param {readonly string[]} argv
+ * @returns {string | null} trimmed host, empty string when flag present without value, null when absent
+ */
+export function parseExpectHost(argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--expect-host") {
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith("--")) return "";
+      return String(next).trim();
+    }
+    if (arg.startsWith("--expect-host=")) {
+      return String(arg.slice("--expect-host=".length)).trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolve the connection target host from a postgres DATABASE_URL without
+ * printing credentials. Prefers URL hostname; falls back to libpq `host=`
+ * query (unix-socket / empty-host forms).
+ *
+ * @param {string} databaseUrl
+ * @returns {{ ok: true, host: string } | { ok: false, reason: string }}
+ */
+export function resolveDatabaseHost(databaseUrl) {
+  if (typeof databaseUrl !== "string" || databaseUrl.trim() === "") {
+    return { ok: false, reason: "DATABASE_URL is not set" };
+  }
+  const raw = databaseUrl.trim();
+
+  // Libpq empty-host + host=/socket form is not always WhatWG-parseable when
+  // userinfo is present (`postgres://user@/db?host=/tmp`). Peel query first.
+  const qIndex = raw.indexOf("?");
+  if (qIndex !== -1) {
+    const query = raw.slice(qIndex + 1).split("#", 1)[0];
+    const params = new URLSearchParams(query);
+    const hostParam = params.get("host");
+    if (hostParam !== null && hostParam !== "") {
+      // When host= is an absolute socket path, that is the target identity.
+      if (hostParam.startsWith("/")) {
+        return { ok: true, host: hostParam };
+      }
+    }
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // Retry after a minimal empty-host rewrite for `scheme://user@/db?host=…`.
+    const rewritten = raw.replace(
+      /^((?:postgres|postgresql):\/\/[^/?#]*@)(\/[^?]*)/i,
+      "$1localhost$2",
+    );
+    try {
+      parsed = new URL(rewritten);
+    } catch {
+      return {
+        ok: false,
+        reason: "refused: DATABASE_URL is not a parseable postgres URL",
+      };
+    }
+  }
+
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (scheme !== "postgres" && scheme !== "postgresql") {
+    return {
+      ok: false,
+      reason: `refused: DATABASE_URL scheme must be postgres/postgresql (got ${scheme})`,
+    };
+  }
+
+  const hostQuery = parsed.searchParams.get("host");
+  if (hostQuery !== null && hostQuery.startsWith("/")) {
+    return { ok: true, host: hostQuery };
+  }
+
+  // pg percent-encoded unix-socket shorthand in host position.
+  if (parsed.hostname.startsWith("%2F") || parsed.hostname.startsWith("%2f")) {
+    try {
+      return { ok: true, host: decodeURIComponent(parsed.hostname) };
+    } catch {
+      return { ok: true, host: parsed.hostname };
+    }
+  }
+
+  if (parsed.hostname !== "") {
+    return { ok: true, host: parsed.hostname };
+  }
+
+  if (hostQuery !== null && hostQuery !== "") {
+    return { ok: true, host: hostQuery };
+  }
+
+  return {
+    ok: false,
+    reason: "refused: DATABASE_URL has no resolvable host",
+  };
+}
+
+/**
+ * Staging gate: STAGING_CONFIRM, ambient env markers, and DATABASE_URL host
+ * must match the operator-supplied `--expect-host` (ZTR-1296).
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
+ * @param {{ expectHost?: string | null, databaseUrl?: string | null }} [opts]
+ */
+export function assertStagingGate(env, opts = {}) {
   if (env.STAGING_CONFIRM !== INCIDENT_ID) {
     return {
       ok: false,
@@ -102,7 +219,57 @@ function assertStagingGate(env) {
       }
     }
   }
-  return { ok: true };
+
+  const expectHost =
+    opts.expectHost === undefined ? null : opts.expectHost === null ? null : String(opts.expectHost).trim();
+  if (expectHost === null) {
+    return {
+      ok: false,
+      reason:
+        "refused: --expect-host <hostname> is required. " +
+        "Pass the staging DATABASE_URL host explicitly so a production DSN cannot slip through.",
+    };
+  }
+  if (expectHost === "") {
+    return {
+      ok: false,
+      reason: "refused: --expect-host requires a non-empty hostname",
+    };
+  }
+
+  const databaseUrl =
+    opts.databaseUrl === undefined || opts.databaseUrl === null
+      ? env.DATABASE_URL
+      : opts.databaseUrl;
+  const resolved = resolveDatabaseHost(
+    typeof databaseUrl === "string" ? databaseUrl : "",
+  );
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason };
+  }
+
+  // DNS hostnames are case-insensitive; socket paths compare as given after
+  // normalizing only the TCP hostname form.
+  const actual = resolved.host;
+  const expectIsSocket = expectHost.startsWith("/");
+  const actualIsSocket = actual.startsWith("/");
+  const hostsMatch =
+    expectIsSocket || actualIsSocket
+      ? expectHost === actual
+      : expectHost.toLowerCase() === actual.toLowerCase();
+
+  if (!hostsMatch) {
+    return {
+      ok: false,
+      reason:
+        `refused: DATABASE_URL host ${JSON.stringify(actual)} does not match ` +
+        `--expect-host ${JSON.stringify(expectHost)}. Will not annotate.`,
+      databaseHost: actual,
+      expectHost,
+    };
+  }
+
+  return { ok: true, databaseHost: actual, expectHost };
 }
 
 function buildDetails({ operationId, membershipId, walletId, releasedAt, releaseProofId }) {
@@ -259,19 +426,19 @@ export async function planOne(client, operationId) {
 
 export async function main({ argv = process.argv, env = process.env } = {}) {
   const execute = argv.includes("--execute");
-  const gate = assertStagingGate(env);
+  const expectHost = parseExpectHost(argv);
+  const gate = assertStagingGate(env, {
+    expectHost,
+    databaseUrl: env.DATABASE_URL,
+  });
   if (!gate.ok) {
-    console.error(JSON.stringify({ outcome: "refused_gate", reason: gate.reason }, null, 2));
-    return 2;
-  }
-
-  const connectionString = env.DATABASE_URL;
-  if (!connectionString) {
     console.error(
       JSON.stringify(
         {
           outcome: "refused_gate",
-          reason: "DATABASE_URL is not set",
+          reason: gate.reason,
+          ...(gate.databaseHost !== undefined ? { databaseHost: gate.databaseHost } : {}),
+          ...(gate.expectHost !== undefined ? { expectHost: gate.expectHost } : {}),
         },
         null,
         2,
@@ -279,6 +446,10 @@ export async function main({ argv = process.argv, env = process.env } = {}) {
     );
     return 2;
   }
+
+  const connectionString = env.DATABASE_URL;
+  // assertStagingGate already required a resolvable DATABASE_URL host.
+  const databaseHost = gate.databaseHost;
 
   const { Client } = await loadPg();
   const client = new Client({ connectionString });
@@ -294,6 +465,8 @@ export async function main({ argv = process.argv, env = process.env } = {}) {
     const summary = {
       incident: INCIDENT_ID,
       mode: execute ? "execute" : "dry-run",
+      databaseHost,
+      expectHost: gate.expectHost,
       results,
       annotated: results.filter((r) => r.outcome === "annotated").length,
       already_annotated: results.filter((r) => r.outcome === "already_annotated").length,

@@ -15,7 +15,6 @@ import {
   isSendOperationType,
   pollSendState,
   postApprove,
-  postRecoveryAction,
   postReject,
   type ApprovalChallenge,
   type OperationInventoryDetail,

@@ -17,7 +17,6 @@ import {
   isCancelled,
   isSendOperationType,
   postAttentionRetraction,
-  postRecoveryAction,
   type EvidenceManifestItem,
   type OperationInventoryDetail,
   type RecoveryDetail,

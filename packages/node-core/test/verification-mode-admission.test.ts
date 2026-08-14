@@ -5,9 +5,6 @@ import {
   admitReceiveExternal,
   canonicalRequestSha256 as canonicalReceiveRequestSha256,
   type ReceiveAdmissionStore,
-  type ReceiveInsertOutcome,
-  type ReceiveOperation,
-  type ReceiveQueuedInsertOutcome,
   type StoredReceiveOperation,
 } from "../src/receive/admission.js";
 import {

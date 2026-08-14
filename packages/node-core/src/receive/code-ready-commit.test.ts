@@ -16,6 +16,7 @@ import {
   commitReceiveReady,
   completeReadyFromDurableCode,
   isNonEmptySubscriptionHandle,
+  readyCommitCodeStatus,
   type SqlExecutor,
 } from "./code-ready-commit.js";
 
@@ -143,6 +144,11 @@ class FakeSql implements SqlExecutor {
   codeInserted = false;
   destinationEligible = true;
   leaseHeld = true;
+  /** Durable operations.verification_mode returned by RECHECK (ZTR-1302). */
+  verificationMode: "INDEPENDENT" | "NODE_VERIFIED" = "INDEPENDENT";
+  lastInsertCodeStatus: string | null = null;
+  lastInsertReleasedAt: unknown = null;
+  ensureReleasedCalls = 0;
 
   async query<R>(text: string, params: readonly unknown[] = []): Promise<{ rows: R[] }> {
     this.calls.push({ text, params });
@@ -158,6 +164,7 @@ class FakeSql implements SqlExecutor {
             amount_zkz: "2.25",
             created_at: CREATED_AT,
             updated_at: CREATED_AT,
+            verification_mode: this.verificationMode,
           } as R,
         ],
       };
@@ -176,7 +183,15 @@ class FakeSql implements SqlExecutor {
         throw err;
       }
       this.codeInserted = true;
+      // $10 code_status, $11 ready_at, $12 released_at
+      this.lastInsertCodeStatus = String(params[9]);
+      this.lastInsertReleasedAt = params[11];
       return { rows: [] };
+    }
+    if (normalized === RECEIVE_READY_STATEMENTS.ENSURE_CODE_RELEASED) {
+      this.ensureReleasedCalls += 1;
+      this.lastInsertCodeStatus = "RELEASED";
+      return { rows: [{ operation_id: OPERATION_ID } as R] };
     }
     if (normalized === RECEIVE_READY_STATEMENTS.CAS_CREATED_TO_READY) {
       if (this.status !== "CREATED" || params[1] !== this.rowVersion) {
@@ -304,6 +319,8 @@ describe("commitReceiveReady", () => {
     expect(sql.codeInserted).toBe(true);
     expect(sql.status).toBe("READY");
     expect(sql.responseBody).toBe(result.responseBody);
+    expect(sql.lastInsertCodeStatus).toBe("AWAITING_ARM");
+    expect(sql.lastInsertReleasedAt).toBeNull();
     expect(events).toHaveLength(1);
     const body = JSON.parse(result.responseBody) as {
       transfer_code: unknown;
@@ -323,7 +340,49 @@ describe("commitReceiveReady", () => {
     expect(insert).toBeDefined();
     expect(insert!.params).toContain(formed.transferCode.transferCodeText);
     expect(insert!.params).toContain(formed.transferCode.transferCodeSha256);
-    expect(insert!.text).toMatch(/AWAITING_ARM/);
+    expect(insert!.params).toContain("AWAITING_ARM");
+  });
+
+  it("NODE_VERIFIED: inserts RELEASED + readyAt released_at; 201 body carries transfer_code; event still withholds (AC1/AC4)", async () => {
+    const formed = await formFixture();
+    const sql = new FakeSql();
+    sql.verificationMode = "NODE_VERIFIED";
+    const events: { dataText: string }[] = [];
+    const result = await commitReceiveReady({
+      formed,
+      receiverWalletId: WALLET_ID,
+      leaseEpoch: 1n,
+      readyAt: READY_AT,
+      destinationId: null,
+      createdAt: CREATED_AT,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
+      sql,
+      events: {
+        async appendReceiveReady(input) {
+          events.push({ dataText: input.dataText });
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.codeStatus).toBe("RELEASED");
+    expect(sql.lastInsertCodeStatus).toBe("RELEASED");
+    expect(sql.lastInsertReleasedAt).toBe(READY_AT);
+    const body = JSON.parse(result.responseBody) as {
+      transfer_code: unknown;
+      code_status: string;
+    };
+    expect(body.code_status).toBe("RELEASED");
+    expect(body.transfer_code).toBe(formed.transferCode.transferCodeText);
+    // Event shape is mode-invariant (AC4) — still withholds plaintext.
+    expect(events).toHaveLength(1);
+    const event = JSON.parse(events[0]!.dataText) as {
+      transfer_code: unknown;
+      code_status: string;
+    };
+    expect(event.transfer_code).toBeNull();
+    expect(event.code_status).toBe("AWAITING_ARM");
+    assertWithheldTransferCode(events[0]!.dataText, formed.transferCode.transferCodeText);
   });
 
   it("rejects when subscription_handle is missing/empty before any durable write (ZTR-1142)", async () => {
@@ -426,12 +485,49 @@ describe("completeReadyFromDurableCode", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.responseStatus).toBe(201);
+    expect(result.codeStatus).toBe("AWAITING_ARM");
+    expect(sql.ensureReleasedCalls).toBe(0);
     // No second INSERT attempted (would unique-violate).
     const inserts = sql.calls.filter((c) =>
       c.text.replace(/\s+/g, " ").trim().startsWith("INSERT INTO receive_codes"),
     );
     expect(inserts).toHaveLength(0);
     expect(sql.status).toBe("READY");
+  });
+
+  it("NODE_VERIFIED: promotes durable AWAITING_ARM code to RELEASED without re-insert", async () => {
+    const formed = await formFixture();
+    const sql = new FakeSql();
+    sql.codeInserted = true;
+    sql.verificationMode = "NODE_VERIFIED";
+    const result = await completeReadyFromDurableCode({
+      formed,
+      receiverWalletId: WALLET_ID,
+      leaseEpoch: 1n,
+      readyAt: READY_AT,
+      destinationId: null,
+      createdAt: CREATED_AT,
+      subscriptionHandle: SUBSCRIPTION_HANDLE,
+      sql,
+      events: { async appendReceiveReady() {} },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.codeStatus).toBe("RELEASED");
+    expect(sql.ensureReleasedCalls).toBe(1);
+    const body = JSON.parse(result.responseBody) as {
+      code_status: string;
+      transfer_code: unknown;
+    };
+    expect(body.code_status).toBe("RELEASED");
+    expect(body.transfer_code).toBe(formed.transferCode.transferCodeText);
+  });
+});
+
+describe("readyCommitCodeStatus", () => {
+  it("maps modes to durable code_status", () => {
+    expect(readyCommitCodeStatus("INDEPENDENT")).toBe("AWAITING_ARM");
+    expect(readyCommitCodeStatus("NODE_VERIFIED")).toBe("RELEASED");
   });
 });
 
@@ -458,9 +554,14 @@ describe("assertWithheldTransferCode", () => {
 });
 
 describe("INSERT_RECEIVE_CODE statement catalogue", () => {
-  it("pins AWAITING_ARM and the withheld text column", () => {
-    expect(RECEIVE_READY_STATEMENTS.INSERT_RECEIVE_CODE).toMatch(/AWAITING_ARM/);
+  it("pins parameterized code_status + withheld text column + NODE_VERIFIED promote", () => {
+    // code_status is $10 (mode-branched at ready-commit), not a hard-coded AWAITING_ARM.
+    expect(RECEIVE_READY_STATEMENTS.INSERT_RECEIVE_CODE).toMatch(/\$10/);
     expect(RECEIVE_READY_STATEMENTS.INSERT_RECEIVE_CODE).toMatch(/transfer_code_text/);
+    expect(RECEIVE_READY_STATEMENTS.INSERT_RECEIVE_CODE).toMatch(/released_at/);
+    expect(RECEIVE_READY_STATEMENTS.RECHECK_CREATED_AND_LEASE).toMatch(/verification_mode/);
+    expect(RECEIVE_READY_STATEMENTS.ENSURE_CODE_RELEASED).toMatch(/code_status = 'RELEASED'/);
+    expect(RECEIVE_READY_STATEMENTS.ENSURE_CODE_RELEASED).toMatch(/AWAITING_ARM/);
     expect(RECEIVE_READY_STATEMENTS.CAS_CREATED_TO_READY).toMatch(/status = 'READY'/);
     expect(RECEIVE_READY_STATEMENTS.CAS_CREATED_TO_READY).toMatch(/status = 'CREATED'/);
   });

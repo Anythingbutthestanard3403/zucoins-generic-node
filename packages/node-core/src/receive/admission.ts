@@ -146,6 +146,14 @@ export interface StoredReceiveOperation extends ReceiveOperation {
   readonly liveVerificationMaterialAvailableUntil?: string | null;
   readonly liveAttentionRequired?: boolean;
   readonly liveAttentionReason?: string | null;
+  /**
+   * Live receive_codes facts when the admission row is joined for GET (ZTR-1302).
+   * When `liveCodeStatus === "RELEASED"`, GET surfaces `transfer_code` plaintext
+   * (NODE_VERIFIED auto-release at ready-commit, or post-arm INDEPENDENT).
+   * Absent on pure admission-table reads (create/idempotency).
+   */
+  readonly liveCodeStatus?: string | null;
+  readonly liveTransferCode?: string | null;
 }
 
 export type ReceiveRejectionCode =

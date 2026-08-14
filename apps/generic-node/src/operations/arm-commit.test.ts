@@ -89,9 +89,13 @@ class MemOps implements ArmOperationState {
   state = "READY";
   rowVersion = 2;
   codeStatus: "AWAITING_ARM" | "RELEASED" = "AWAITING_ARM";
+  verificationMode: "INDEPENDENT" | "NODE_VERIFIED" = "INDEPENDENT";
   transitions = 0;
   async getState() {
     return this.state;
+  }
+  async getVerificationMode() {
+    return this.verificationMode;
   }
   async getAssignedWallet() {
     return WALLET;
@@ -244,5 +248,36 @@ describe("createArmCommitHook", () => {
     expect(err.error.code).toBe("t0_mismatch");
     expect(store.records.length).toBe(0);
     expect(result.persistChild).toBeNull();
+  });
+
+  it("NODE_VERIFIED → 409 verification_mode_mismatch; no arm row; repeat identical (AC3)", async () => {
+    const store = new MemStore();
+    const ops = new MemOps();
+    ops.verificationMode = "NODE_VERIFIED";
+    ops.codeStatus = "RELEASED";
+    const hook = createArmCommitHook({
+      walletGate: new MemGate(),
+      armStore: store,
+      operationState: ops,
+      auditLog: audit,
+      clock,
+      nowMs: () => NOW_MS,
+      resolveReceiverWalletId: async () => WALLET,
+      newRequestId: () => "req-nv",
+    });
+    const first = await hook(makePreopen());
+    expect(first.response.status).toBe(409);
+    const err1 = JSON.parse(new TextDecoder().decode(first.response.bodyBytes));
+    expect(err1.error.code).toBe("verification_mode_mismatch");
+    expect(first.persistChild).toBeNull();
+    expect(store.records.length).toBe(0);
+    expect(ops.transitions).toBe(0);
+
+    const second = await hook(makePreopen());
+    expect(second.response.status).toBe(409);
+    const err2 = JSON.parse(new TextDecoder().decode(second.response.bodyBytes));
+    expect(err2.error.code).toBe("verification_mode_mismatch");
+    expect(store.records.length).toBe(0);
+    expect(ops.transitions).toBe(0);
   });
 });

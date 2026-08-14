@@ -117,4 +117,38 @@ describe("GET receive live row_version overlay", () => {
     expect(got!.operation.state).toBe("READY");
     expect(got!.operation.row_version).toBe(2);
   });
+
+  it("overlays RELEASED transfer_code from live receive_codes (ZTR-1302 NODE_VERIFIED / post-arm)", async () => {
+    const CODE = "nv-auto-released-transfer-code";
+    const ops = storeWithRow(
+      baseRow({
+        liveStatus: "READY",
+        liveRowVersion: 2,
+        liveUpdatedAt: "2026-01-01T00:00:01.000Z",
+        liveTerminalAt: null,
+        liveVerificationMaterialAvailableUntil: null,
+        liveAttentionRequired: false,
+        liveAttentionReason: null,
+        liveCodeStatus: "RELEASED",
+        liveTransferCode: CODE,
+      }),
+    );
+    const got = await ops.getReceive(OP_ID, IMPL);
+    expect(got!.code_status).toBe("RELEASED");
+    expect(got!.transfer_code).toBe(CODE);
+  });
+
+  it("keeps transfer_code null when live code_status is still AWAITING_ARM", async () => {
+    const ops = storeWithRow(
+      baseRow({
+        liveStatus: "READY",
+        liveRowVersion: 2,
+        liveCodeStatus: "AWAITING_ARM",
+        liveTransferCode: null,
+      }),
+    );
+    const got = await ops.getReceive(OP_ID, IMPL);
+    expect(got!.code_status).toBe("AWAITING_ARM");
+    expect(got!.transfer_code).toBeNull();
+  });
 });

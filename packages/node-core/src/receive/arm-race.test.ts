@@ -91,6 +91,7 @@ interface SeededOperation {
   codeStatus: "AWAITING_ARM" | "RELEASED" | "EXPIRED";
   transferCode: string;
   transferCodeSha256: string;
+  verificationMode: "INDEPENDENT" | "NODE_VERIFIED";
 }
 
 const DEFAULT_EXPIRY_SECS = "2000000000"; // far future
@@ -108,8 +109,27 @@ class MemoryOperationState implements ArmOperationState {
 
   seed(
     operationId: string,
-    op: Omit<SeededOperation, "attentionReasons" | "rowVersion" | "expiryUnixTimeSecs" | "codeStatus" | "transferCode" | "transferCodeSha256"> &
-      Partial<Pick<SeededOperation, "rowVersion" | "expiryUnixTimeSecs" | "codeStatus" | "transferCode" | "transferCodeSha256">>,
+    op: Omit<
+      SeededOperation,
+      | "attentionReasons"
+      | "rowVersion"
+      | "expiryUnixTimeSecs"
+      | "codeStatus"
+      | "transferCode"
+      | "transferCodeSha256"
+      | "verificationMode"
+    > &
+      Partial<
+        Pick<
+          SeededOperation,
+          | "rowVersion"
+          | "expiryUnixTimeSecs"
+          | "codeStatus"
+          | "transferCode"
+          | "transferCodeSha256"
+          | "verificationMode"
+        >
+      >,
   ): void {
     this.operations.set(operationId, {
       state: op.state,
@@ -121,10 +141,16 @@ class MemoryOperationState implements ArmOperationState {
       codeStatus: op.codeStatus ?? "AWAITING_ARM",
       transferCode: op.transferCode ?? DEFAULT_CODE,
       transferCodeSha256: op.transferCodeSha256 ?? DEFAULT_CODE_SHA,
+      verificationMode: op.verificationMode ?? "INDEPENDENT",
     });
   }
   async getState(operationId: string): Promise<string | null> {
     return this.operations.get(operationId)?.state ?? null;
+  }
+  async getVerificationMode(
+    operationId: string,
+  ): Promise<"INDEPENDENT" | "NODE_VERIFIED" | null> {
+    return this.operations.get(operationId)?.verificationMode ?? null;
   }
   async getAssignedWallet(operationId: string): Promise<string | null> {
     return this.operations.get(operationId)?.walletId ?? null;
@@ -790,6 +816,27 @@ describe("failed arms do not corrupt operation state", () => {
     await service.arm({ ...validArmRequest("op-aud"), acknowledgedS: "bad" });
     expect(auditLog.entries.some((e) => e.outcome === "REJECTED")).toBe(true);
     expect(await operationState.getState("op-aud")).toBe("READY");
+  });
+
+  it("NODE_VERIFIED arm → verification_mode_mismatch; repeat is idempotent; no arm row / attention (AC3)", async () => {
+    const { service, armStore, operationState, auditLog } = buildService();
+    operationState.seed("op-nv", {
+      state: "READY",
+      walletId: WALLET_ID,
+      t0: NODE_T0,
+      // Ready-commit already RELEASED the code; arm must still refuse.
+      codeStatus: "RELEASED",
+      verificationMode: "NODE_VERIFIED",
+    });
+    const first = await service.arm(validArmRequest("op-nv"));
+    expect(first.status).toBe("verification_mode_mismatch");
+    const second = await service.arm(validArmRequest("op-nv"));
+    expect(second.status).toBe("verification_mode_mismatch");
+    expect(armStore.records.length).toBe(0);
+    expect(operationState.transitions).toHaveLength(0);
+    expect(operationState.operations.get("op-nv")!.codeStatus).toBe("RELEASED");
+    expect(operationState.operations.get("op-nv")!.attentionReasons).toHaveLength(0);
+    expect(auditLog.entries).toHaveLength(0);
   });
 });
 

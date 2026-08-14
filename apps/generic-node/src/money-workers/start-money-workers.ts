@@ -756,7 +756,7 @@ async function advanceAssignedReceive(deps: {
   });
 
   deps.logger.info(
-    `money-workers: RECEIVE READY op=${deps.row.operationId} wallet=${deps.row.walletId} code_status=AWAITING_ARM`,
+    `money-workers: RECEIVE READY op=${deps.row.operationId} wallet=${deps.row.walletId} code_status=${commitResult.codeStatus}`,
   );
 }
 

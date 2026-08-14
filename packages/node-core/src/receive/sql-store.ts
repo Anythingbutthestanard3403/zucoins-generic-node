@@ -120,7 +120,9 @@ export const STATEMENTS = {
   // Tenant predicate in the WHERE — cross-tenant ids return zero rows.
   SELECT_BY_OPERATION_ID: `SELECT ${SELECT_COLUMNS} FROM receive_operations WHERE operation_id = $1 AND implementer_id = $2`,
   // join live operations so GET surfaces post-land status/row_version (CAS for
-  // verification-complete). Idempotency/create paths keep the admission-only SELECT.
+  // verification-complete) and receive_codes so RELEASED transfer_code is readable
+  // after NODE_VERIFIED ready-commit or INDEPENDENT arm (ZTR-1302). Idempotency/create
+  // paths keep the admission-only SELECT.
   SELECT_BY_OPERATION_ID_WITH_LIVE: `SELECT r.operation_id, r.implementer_id, r.node_id, r.kind, r.status,
     r.http_method, r.route, r.idempotency_key, r.request_sha256, r.amount_zkz, r.anchor, r.ttl_ms,
     r.after_landing_kind, r.destination_wallet_id, r.destination_id, r.wallet_id, r.created_at,
@@ -131,9 +133,12 @@ export const STATEMENTS = {
     o.terminal_at AS live_terminal_at,
     o.verification_material_available_until AS live_vm_until,
     o.attention_required AS live_attention_required,
-    o.attention_reason AS live_attention_reason
+    o.attention_reason AS live_attention_reason,
+    c.code_status::text AS live_code_status,
+    CASE WHEN c.code_status = 'RELEASED' THEN c.transfer_code_text ELSE NULL END AS live_transfer_code
   FROM receive_operations r
   JOIN operations o ON o.id = r.operation_id
+  LEFT JOIN receive_codes c ON c.operation_id = r.operation_id
   WHERE r.operation_id = $1 AND r.implementer_id = $2`,
   SELECT_DESTINATION: `SELECT d.id AS destination_id, d.state AS destination_state, w.id AS wallet_id, w.node_id, w.public_key, w.key_origin, w.state AS wallet_state, w.recovery_verified_at, w.allow_external_receive, w.allow_internal_move FROM destinations d JOIN wallets w ON w.id = d.wallet_id WHERE d.id = $1`,
   COMPLETE_OPERATION: `UPDATE receive_operations SET completed_at = now(), response_status = $2, response_body = $3 WHERE operation_id = $1 AND completed_at IS NULL RETURNING operation_id`,
@@ -177,6 +182,8 @@ interface OperationRow {
   readonly live_vm_until?: string | Date | null;
   readonly live_attention_required?: boolean | null;
   readonly live_attention_reason?: string | null;
+  readonly live_code_status?: string | null;
+  readonly live_transfer_code?: string | null;
 }
 
 interface DestinationRow {
@@ -262,6 +269,14 @@ function toStoredOperation(row: OperationRow): StoredReceiveOperation {
       row.live_attention_reason === null || row.live_attention_reason === undefined
         ? null
         : String(row.live_attention_reason),
+    liveCodeStatus:
+      row.live_code_status === null || row.live_code_status === undefined
+        ? null
+        : String(row.live_code_status),
+    liveTransferCode:
+      row.live_transfer_code === null || row.live_transfer_code === undefined
+        ? null
+        : String(row.live_transfer_code),
   };
 }
 

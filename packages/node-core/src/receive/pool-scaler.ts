@@ -42,6 +42,7 @@ import {
  * fails if any of the three copies drifts.
  */
 export const POOL_FLOOR = 5;
+export const SEND_POOL_FLOOR = 5;
 export const MINT_BATCH_LIMIT = 5;
 export const HEADROOM_NUMERATOR = 11;
 export const HEADROOM_DENOMINATOR = 10;
@@ -152,6 +153,29 @@ SELECT state::text AS state, count(*)::int AS wallets
    * excluded by the lease_role filter — a SEND_SOURCE or MOVE_SOURCE pin is not receive demand
    * and must not pull the provisioning target up.
    */
+  COUNT_SEND_OPEN_SESSIONS: `
+SELECT count(*)::int AS send_open
+  FROM send_operations
+ WHERE status NOT IN ('EXTERNAL_SEND_LANDED', 'REJECTED')`
+    .replace(/\s+/g, " ")
+    .trim(),
+
+  COUNT_SEND_WALLETS: `
+SELECT count(*)::int AS n
+  FROM wallets
+ WHERE allow_external_send IS TRUE
+   AND key_origin = 'node_generated'`
+    .replace(/\s+/g, " ")
+    .trim(),
+
+  COUNT_RECEIVE_WALLETS: `
+SELECT count(*)::int AS n
+  FROM wallets
+ WHERE allow_external_receive IS TRUE
+   AND key_origin = 'node_generated'`
+    .replace(/\s+/g, " ")
+    .trim(),
+
   COUNT_RECEIVE_WINDOW_LEASES: `
 SELECT count(*)::int AS leases,
        COALESCE(EXTRACT(EPOCH FROM (now() - min(acquired_at)))::int, 0) AS oldest_age_secs
@@ -290,7 +314,13 @@ export interface PoolScaleUpPlan {
  * (the key-custody rule). A newly minted wallet is born recovery-UNVERIFIED and therefore is NOT
  * receive-eligible until the ceremony stamps it (recovery_verified_at gate).
  */
-export type MintWallet = (db: SqlExecutor, batchIndex: number) => Promise<string>;
+export type PoolMintRole = "SEND_ONLY" | "RECEIVE_ONLY";
+
+export type MintWallet = (
+  db: SqlExecutor,
+  batchIndex: number,
+  role?: PoolMintRole,
+) => Promise<string>;
 
 function assertLimits(limits: PoolScalerLimits): void {
   if (!Number.isInteger(limits.poolCapTotal) || limits.poolCapTotal < POOL_FLOOR) {
@@ -382,6 +412,116 @@ export async function runPoolScaleUp(
       throw new PoolScalerError(
         "MINT_PORT_FAILED",
         `mint port returned no wallet id at batch index ${i}`,
+      );
+    }
+    mintedWalletIds.push(walletId);
+  }
+
+  return { plan, mintedWalletIds };
+}
+
+export interface SharedPoolScaleUpPlan {
+  readonly receiveOpenSessions: number;
+  readonly sendOpenSessions: number;
+  readonly receiveWalletCount: number;
+  readonly sendWalletCount: number;
+  readonly capCount: number;
+  readonly sendMint: number;
+  readonly receiveMint: number;
+  readonly poolCapTotal: number;
+}
+
+export interface SharedPoolScaleUpResult {
+  readonly plan: SharedPoolScaleUpPlan;
+  readonly mintedWalletIds: readonly string[];
+}
+
+function computeProvisioningTargetWithFloor(
+  openSessions: number,
+  poolCap: number,
+  floor: number,
+): number {
+  const needed = ceilDiv(openSessions * HEADROOM_NUMERATOR, HEADROOM_DENOMINATOR);
+  return Math.min(Math.max(needed, floor), poolCap);
+}
+
+export async function planSharedPoolScaleUp(
+  db: SqlExecutor,
+  limits: PoolScalerLimits,
+): Promise<SharedPoolScaleUpPlan> {
+  assertLimits(limits);
+  await db.query(POOL_SCALER_STATEMENTS.LOCK_SCALE_UP, [POOL_SCALE_UP_LOCK_KEY]);
+
+  const capCount = Number(
+    (await db.query<{ cap_count: number }>(POOL_SCALER_STATEMENTS.COUNT_CAP_UNDER_LOCK)).rows[0]
+      ?.cap_count ?? 0,
+  );
+  const receiveOpenSessions = await countOpenSessions(db);
+  const sendOpenSessions = Number(
+    (await db.query<{ send_open: number }>(POOL_SCALER_STATEMENTS.COUNT_SEND_OPEN_SESSIONS))
+      .rows[0]?.send_open ?? 0,
+  );
+  const sendWalletCount = Number(
+    (await db.query<{ n: number }>(POOL_SCALER_STATEMENTS.COUNT_SEND_WALLETS)).rows[0]?.n ?? 0,
+  );
+  const receiveWalletCount = Number(
+    (await db.query<{ n: number }>(POOL_SCALER_STATEMENTS.COUNT_RECEIVE_WALLETS)).rows[0]?.n ?? 0,
+  );
+
+  const recvTarget = computeProvisioningTargetWithFloor(
+    receiveOpenSessions,
+    limits.poolCapTotal,
+    POOL_FLOOR,
+  );
+  const sendTarget = computeProvisioningTargetWithFloor(
+    sendOpenSessions,
+    limits.poolCapTotal,
+    SEND_POOL_FLOOR,
+  );
+  const sendDeficit = Math.max(0, sendTarget - sendWalletCount);
+  const receiveDeficit = Math.max(0, recvTarget - receiveWalletCount);
+  const remainingCap = Math.max(0, limits.poolCapTotal - capCount);
+  const batchLimit = limits.mintBatchLimit ?? MINT_BATCH_LIMIT;
+  let budget = Math.min(remainingCap, batchLimit);
+  const sendMint = Math.min(budget, sendDeficit);
+  budget -= sendMint;
+  const receiveMint = Math.min(budget, receiveDeficit);
+
+  return {
+    receiveOpenSessions,
+    sendOpenSessions,
+    receiveWalletCount,
+    sendWalletCount,
+    capCount,
+    sendMint,
+    receiveMint,
+    poolCapTotal: limits.poolCapTotal,
+  };
+}
+
+export async function runSharedPoolScaleUp(
+  db: SqlExecutor,
+  params: { readonly limits: PoolScalerLimits; readonly mint: MintWallet },
+): Promise<SharedPoolScaleUpResult> {
+  const plan = await planSharedPoolScaleUp(db, params.limits);
+  const mintedWalletIds: string[] = [];
+
+  for (let i = 0; i < plan.sendMint; i += 1) {
+    const walletId = await params.mint(db, i, "SEND_ONLY");
+    if (typeof walletId !== "string" || walletId.length === 0) {
+      throw new PoolScalerError(
+        "MINT_PORT_FAILED",
+        `send mint port returned no wallet id at batch index ${i}`,
+      );
+    }
+    mintedWalletIds.push(walletId);
+  }
+  for (let i = 0; i < plan.receiveMint; i += 1) {
+    const walletId = await params.mint(db, plan.sendMint + i, "RECEIVE_ONLY");
+    if (typeof walletId !== "string" || walletId.length === 0) {
+      throw new PoolScalerError(
+        "MINT_PORT_FAILED",
+        `receive mint port returned no wallet id at batch index ${i}`,
       );
     }
     mintedWalletIds.push(walletId);

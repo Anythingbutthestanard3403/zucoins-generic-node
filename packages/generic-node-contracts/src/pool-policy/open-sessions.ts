@@ -40,3 +40,15 @@ export const OPEN_SESSIONS_DEFINITION = {
   excludes: OPEN_SESSIONS_EXCLUDED_COMPONENTS,
   sql: OPEN_SESSIONS_COUNT_SQL,
 } as const;
+
+/**
+ * Send-side demand (omit-source concurrency). Unsettled SEND_EXTERNAL rows, matching
+ * the one-unsettled-per-source unique index. Not a receive-pool open_sessions component.
+ */
+export const SEND_OPEN_SESSIONS_COMPONENTS = [
+  "unsettled SEND_EXTERNAL operations (not EXTERNAL_SEND_LANDED / REJECTED)",
+] as const;
+
+export const SEND_OPEN_SESSIONS_COUNT_SQL =
+  "SELECT count(*) AS send_open_sessions FROM send_operations " +
+  "WHERE status NOT IN ('EXTERNAL_SEND_LANDED', 'REJECTED')";

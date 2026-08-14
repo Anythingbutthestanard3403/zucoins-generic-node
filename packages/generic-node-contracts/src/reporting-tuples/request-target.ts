@@ -84,7 +84,8 @@ export function validateReportingRequestTarget(method: string, target: string): 
     return validateQuery(rawQuery, {
       after: (v) => LOWER_UUID.test(v),
       limit: (v) => canonicalIntegerInRange(v, 1, 100),
-      state: (v) => v === "PENDING" || v === "BLESSED" || v === "RETIRED",
+      state: (v) =>
+        v === "PENDING" || v === "BLESSED" || v === "RETIRED" || v === "WORKER",
     });
   }
   if (method === "GET" && path === "/v1/events") {

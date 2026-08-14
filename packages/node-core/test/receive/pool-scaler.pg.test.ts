@@ -30,11 +30,13 @@ import {
   POOL_FLOOR as CONTRACT_POOL_FLOOR,
   HEADROOM_DENOMINATOR as CONTRACT_HEADROOM_DENOMINATOR,
   HEADROOM_NUMERATOR as CONTRACT_HEADROOM_NUMERATOR,
+  SEND_POOL_FLOOR as CONTRACT_SEND_POOL_FLOOR,
   RECEIVE_QUEUE_MAX_WAIT_MS as CONTRACT_RECEIVE_QUEUE_MAX_WAIT_MS,
 } from "../../../generic-node-contracts/src/pool-policy/constants.ts";
 import {
   computeMintBatch,
   computeProvisioningTarget,
+  planSharedCapMint,
 } from "../../../generic-node-contracts/src/pool-policy/sizing.ts";
 import { isReceiveExpired } from "../../../generic-node-contracts/src/pool-policy/queue.ts";
 
@@ -52,6 +54,7 @@ import {
   HEADROOM_NUMERATOR,
   MINT_BATCH_LIMIT,
   POOL_FLOOR,
+  SEND_POOL_FLOOR,
   POOL_SCALER_STATEMENTS,
   PoolScalerError,
   collectPoolPressureMetrics,
@@ -165,6 +168,7 @@ describe("receive-pool scale-up and pressure policy (real PG / separate processe
 
   it("the node-core constants equal the frozen contract constants", () => {
     expect(POOL_FLOOR).toBe(CONTRACT_POOL_FLOOR);
+    expect(SEND_POOL_FLOOR).toBe(CONTRACT_SEND_POOL_FLOOR);
     expect(MINT_BATCH_LIMIT).toBe(CONTRACT_MINT_BATCH_LIMIT);
     expect(HEADROOM_NUMERATOR).toBe(CONTRACT_HEADROOM_NUMERATOR);
     expect(HEADROOM_DENOMINATOR).toBe(CONTRACT_HEADROOM_DENOMINATOR);
@@ -181,6 +185,39 @@ describe("receive-pool scale-up and pressure policy (real PG / separate processe
         expect(mine).toBeLessThanOrEqual(cap);
       }
     }
+  });
+
+  it("shared-cap planner mints send first then receive, never past remaining cap", () => {
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 0,
+        sendOpenSessions: 0,
+        receiveWalletCount: 0,
+        sendWalletCount: 0,
+        capCount: 0,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: SEND_POOL_FLOOR, receiveMint: 0 });
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 0,
+        sendOpenSessions: 0,
+        receiveWalletCount: 0,
+        sendWalletCount: SEND_POOL_FLOOR,
+        capCount: SEND_POOL_FLOOR,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 0, receiveMint: POOL_FLOOR });
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 20,
+        sendOpenSessions: 20,
+        receiveWalletCount: 0,
+        sendWalletCount: 0,
+        capCount: 48,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 2, receiveMint: 0 });
   });
 
   it("rule 3: computeMintCount agrees with the frozen computeMintBatch over the whole domain", () => {

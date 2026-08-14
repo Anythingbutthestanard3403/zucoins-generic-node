@@ -6,7 +6,7 @@
 export const WALLET_KEY_ORIGINS = ["node_generated", "imported"] as const;
 export type WalletKeyOrigin = (typeof WALLET_KEY_ORIGINS)[number];
 
-export const DESTINATION_STATES = ["PENDING", "BLESSED", "RETIRED"] as const;
+export const DESTINATION_STATES = ["PENDING", "BLESSED", "RETIRED", "WORKER"] as const;
 export type DestinationState = (typeof DESTINATION_STATES)[number];
 
 export const WALLET_STATES = ["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"] as const;
@@ -22,6 +22,17 @@ export const AUTOMATIC_SINK_CONJUNCTS = {
   requiresValidRecoveryVerifiedAt: true,
   allowedWalletStates: ["AVAILABLE", "PINNED"],
 } as const;
+
+/** Node-owned send-worker sink (scaler mint). Not internal custody; no blessing, no recovery. */
+export const WORKER_SINK_CONJUNCTS = {
+  keyOrigin: "node_generated",
+  destinationState: "WORKER",
+  requiresValidRecoveryVerifiedAt: false,
+  allowedWalletStates: ["AVAILABLE", "PINNED"],
+} as const;
+
+/** Composition top-up may land on an automatic sink or a worker sink. */
+export const COMPOSITION_SINK_STATES = ["BLESSED", "WORKER"] as const;
 
 /** Evidence requirements are facts that ceremonies must establish, not caller switches. */
 export const CUSTODY_EVIDENCE_REQUIREMENTS = {
@@ -47,6 +58,7 @@ export const CUSTODY_DENIAL_REASONS = [
   "KEY_ORIGIN_NOT_NODE_GENERATED",
   "INVALID_DESTINATION_STATE",
   "DESTINATION_NOT_BLESSED",
+  "DESTINATION_NOT_WORKER",
   "INVALID_RECOVERY_VERIFIED_AT",
   "INVALID_WALLET_STATE",
   "WALLET_STATE_NOT_AUTOMATIC_SINK_ELIGIBLE",

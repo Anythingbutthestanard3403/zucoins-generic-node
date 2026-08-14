@@ -239,6 +239,12 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // Pure data fix-forward on destinations; requires wallets + destinations
   // (custody-eligibility, far earlier). Appended only.
   "destinations-pending-backfill",
+  // destination_state += WORKER. Own slice so ADD VALUE commits before the
+  // CHECK rewrite / G2 overlay references the label. Appended only.
+  "destination-state-worker",
+  // Worker-sink CHECK + G2 overlay (BLESSED|WORKER). Requires the enum slice.
+  // Appended only; does not rewrite frozen custody / money-capability slices.
+  "destination-worker-sink",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

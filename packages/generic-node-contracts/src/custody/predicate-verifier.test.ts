@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { verifyAutomaticSinkEligibility, verifyInternalCustody } from "./predicate-verifier.ts";
+import {
+  verifyAutomaticSinkEligibility,
+  verifyCompositionSinkEligibility,
+  verifyInternalCustody,
+  verifyWorkerSinkEligibility,
+} from "./predicate-verifier.ts";
 
 const eligible = {
   keyOrigin: "node_generated",
@@ -33,5 +38,37 @@ describe("custody predicate verifier (the custody concern)", () => {
       eligible: false,
       denialReason: "KEY_ORIGIN_NOT_NODE_GENERATED",
     });
+  });
+  it("WORKER is not internal custody and not an automatic sink", () => {
+    expect(verifyInternalCustody({ ...eligible, destinationState: "WORKER" })).toEqual({
+      eligible: false,
+      denialReason: "DESTINATION_NOT_BLESSED",
+    });
+    expect(verifyAutomaticSinkEligibility({ ...eligible, destinationState: "WORKER" })).toEqual({
+      eligible: false,
+      denialReason: "DESTINATION_NOT_BLESSED",
+    });
+  });
+  it("accepts a worker sink without recovery evidence", () => {
+    expect(
+      verifyWorkerSinkEligibility({
+        ...eligible,
+        destinationState: "WORKER",
+        recoveryVerifiedAt: null,
+      }),
+    ).toEqual({ eligible: true, denialReason: null });
+  });
+  it("composition top-up accepts blessed automatic sinks and worker sinks", () => {
+    expect(verifyCompositionSinkEligibility(eligible).eligible).toBe(true);
+    expect(
+      verifyCompositionSinkEligibility({
+        ...eligible,
+        destinationState: "WORKER",
+        recoveryVerifiedAt: null,
+      }).eligible,
+    ).toBe(true);
+    expect(
+      verifyCompositionSinkEligibility({ ...eligible, destinationState: "PENDING" }).eligible,
+    ).toBe(false);
   });
 });

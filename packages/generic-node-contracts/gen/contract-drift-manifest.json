@@ -456,7 +456,7 @@
       "goldenRefs": [
         {
           "path": "gen/custody.json",
-          "sha256": "7e192a00a51b5e3e0f70a93ec917657998b796f408cd1d3cae0f91c130add5ba"
+          "sha256": "b74f25616ce033c3a950f314b7481d62701a6e2674ba821370494c4d9e8df6fe"
         }
       ]
     },
@@ -784,7 +784,7 @@
       "goldenRefs": [
         {
           "path": "gen/pool-policy.json",
-          "sha256": "ad4c771c9ad44a8c73a7c0bd218e25f276cb1023aa3d5e3bf42fbfbcbf22ff65"
+          "sha256": "ba9b29db5ef968bdd358306602be586732d06f07269b81e06cfcb48ef1f8f65f"
         }
       ]
     },
@@ -1032,7 +1032,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "data-model destinations DDL; api-contract destination endpoints",
-        "note": "DESTINATION_STATES (PENDING/BLESSED/RETIRED) agree across the data model's destination_state DDL and the api contract's state filter. The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes."
+        "note": "DESTINATION_STATES (PENDING/BLESSED/RETIRED/WORKER) agree across the data model's destination_state DDL and the api contract's state filter. WORKER is the node-owned send-worker sink (no blessing ceremony). The `label` property the api contract accepts and returns had no column in the destinations DDL — a genuine one-sided wire field, reconciled by adding `label text NOT NULL` to the DDL (same shape as operator_device_keys.label); no signed tuple carries it, so no golden changes."
       }
     },
     {

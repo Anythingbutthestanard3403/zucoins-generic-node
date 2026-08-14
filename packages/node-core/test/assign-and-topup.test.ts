@@ -8,6 +8,7 @@ import {
   evaluateTopUpReadiness,
   isTopUpHubEligible,
   SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
+  SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
   SELECT_SEND_WORKER_SQL,
   SELECT_TOPUP_HUB_SQL,
   SELECT_SEND_TOPUP_READY_SQL,
@@ -134,8 +135,14 @@ describe("frozen selection SQL", () => {
     expect(SELECT_SEND_WORKER_SQL).toContain("FOR UPDATE OF w SKIP LOCKED");
     expect(SELECT_SEND_WORKER_SQL).toContain("gateway_observations");
     expect(SELECT_SEND_WORKER_SQL).not.toContain("INTERNAL_ONLY");
+    expect(SELECT_SEND_WORKER_SQL).not.toContain("recovery_verified_at");
     // Funded tier before underfunded
     expect(SELECT_SEND_WORKER_SQL).toMatch(/CASE[\s\S]*THEN 0[\s\S]*ELSE 1/);
+  });
+
+  it("composition sink lookup admits BLESSED and WORKER", () => {
+    expect(SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL).toContain("d.state IN ('BLESSED', 'WORKER')");
+    expect(SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL).not.toContain("recovery_verified_at");
   });
 
   it("hub select pins INTERNAL_ONLY and never allow_external_send", () => {

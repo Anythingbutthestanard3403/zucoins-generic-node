@@ -360,6 +360,7 @@ class ScenarioWorld {
     opts: {
       balance?: string | null;
       blessed?: boolean;
+      workerSink?: boolean;
       publicKey?: string;
       id?: string;
     } = {},
@@ -369,7 +370,7 @@ class ScenarioWorld {
     const flags = modeFlags(mode);
     const publicKey = opts.publicKey ?? (mode === "INTERNAL_ONLY" ? HUB_PUB : WORKER_PUB);
     let destinationId: string | null = null;
-    if (opts.blessed === true) {
+    if (opts.blessed === true || opts.workerSink === true) {
       this.seq += 1;
       destinationId = uuid(this.seq);
     }
@@ -409,8 +410,9 @@ class ScenarioWorld {
         publicKey,
         keyOrigin: "node_generated",
         walletState: "AVAILABLE",
-        destinationState: "BLESSED",
-        recoveryVerifiedAt: "2026-07-01T00:00:00.000Z",
+        destinationState: opts.workerSink === true ? "WORKER" : "BLESSED",
+        recoveryVerifiedAt:
+          opts.workerSink === true ? null : "2026-07-01T00:00:00.000Z",
         allowInternalMove: flags.allow_internal_move,
       });
     }
@@ -548,8 +550,8 @@ class ScenarioWorld {
           return { rows: [{ n: String(n) } as R] };
         }
 
-        // Blessed destination for worker
-        if (sql.includes("d.state = 'BLESSED'") && sql.includes("d.wallet_id = $1::uuid")) {
+        // Composition sink destination for worker (BLESSED or WORKER)
+        if (sql.includes("d.state IN ('BLESSED', 'WORKER')") && sql.includes("d.wallet_id = $1::uuid")) {
           const walletId = String(params[0]);
           const w = wallets.find((x) => x.id === walletId);
           if (w === undefined || w.destinationId === null) return { rows: [] };
@@ -623,6 +625,7 @@ describe("ZTR-1273 acceptance scenario catalogue", () => {
   it("frozen worker SQL never selects INTERNAL_ONLY by money_mode (capability gate is allow_external_send)", () => {
     expect(SELECT_SEND_WORKER_SQL).toContain("allow_external_send IS TRUE");
     expect(SELECT_SEND_WORKER_SQL).not.toMatch(/money_mode\s*=\s*'INTERNAL_ONLY'/);
+    expect(SELECT_SEND_WORKER_SQL).not.toContain("recovery_verified_at");
   });
 
   it("frozen hub SQL pins INTERNAL_ONLY and never allow_external_send", () => {
@@ -665,6 +668,34 @@ describe("ZTR-1273 composition scenarios (assign + top-up)", () => {
     expect(out.send.referencesOperationId).toBe(out.move!.operationId);
     // Client omitted mode → send stays INDEPENDENT (implementer chooses SEND verification).
     expect(out.send.verificationMode).toBe("INDEPENDENT");
+  });
+
+  it("S1b: scaler WORKER sink without recovery still takes hub top-up", async () => {
+    const world = new ScenarioWorld();
+    const hub = world.addWallet("INTERNAL_ONLY", {
+      balance: "100",
+      id: "c0000000-0000-4000-8000-0000000000a9",
+      publicKey: HUB_PUB,
+    });
+    const worker = world.addWallet("SEND_ONLY", {
+      balance: null,
+      workerSink: true,
+      id: "c0000000-0000-4000-8000-0000000000b9",
+      publicKey: WORKER_PUB,
+    });
+
+    const out = await compose(world, {
+      amountZkz: "10",
+      idempotencyKey: "idem-s1b-worker-sink-0001",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.funding).toBe("top_up");
+    expect(out.workerWalletId).toBe(worker.id);
+    expect(out.hubWalletId).toBe(hub.id);
+    expect(out.move).not.toBeNull();
+    expect(out.move!.destinationWalletId).toBe(worker.id);
+    expect(out.send.sourceWalletId).toBe(worker.id);
   });
 
   it("S2: worker pre-funded SEND_ONLY → no MOVE", async () => {

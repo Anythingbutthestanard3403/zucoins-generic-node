@@ -153,11 +153,13 @@ CREATED / APPROVED / AWAITING_REDEMPTION / NEEDS_ATTENTION is refused with
 `wallet_in_flight`.
 
 This is intentional, not a defect. Under the **omit-source** happy path the node
-picks free send-capable workers for you; operators still size the **send-capable
-worker pool** (plus hub float) for peak concurrent unsettled sends. Legacy clients
-that pin an explicit `source_wallet_id` must only reuse that wallet after the prior
-send has fully settled (or been terminal-rejected). Size from peak concurrent
-unsettled sends, not from daily volume.
+picks free send-capable workers for you. The unified pool scaler mints
+`SEND_ONLY` workers (with a `WORKER` destination row, no blessing ceremony)
+against unsettled-send demand, sharing the node-wide key cap with receive.
+Operators still size **hub float** (and funding wallet W) — auto-scale grows
+workers, not liquidity. Legacy clients that pin an explicit `source_wallet_id`
+must only reuse that wallet after the prior send has fully settled (or been
+terminal-rejected).
 
 ## Monitoring checklist
 

@@ -61,7 +61,7 @@ SELECT d.id::text AS destination_id,
   FROM destinations d
   JOIN wallets w ON w.id = d.wallet_id
  WHERE d.node_id = $1::uuid
-   AND d.state IN ('PENDING', 'BLESSED', 'RETIRED')
+   AND d.state IN ('PENDING', 'BLESSED', 'RETIRED', 'WORKER')
  ORDER BY d.created_at ASC, d.id ASC -- contract-allow:order:frozen structural vocabulary
 `;
 
@@ -144,7 +144,12 @@ export function createPgSnapshotStateReader(
 
       const destinations: SnapshotDestination[] = destRows.map((row) => {
         const state = asString(row.state);
-        if (state !== "PENDING" && state !== "BLESSED" && state !== "RETIRED") {
+        if (
+          state !== "PENDING" &&
+          state !== "BLESSED" &&
+          state !== "RETIRED" &&
+          state !== "WORKER"
+        ) {
           throw new Error(`unexpected destination state: ${state}`);
         }
         const keyOrigin = asString(row.key_origin) as WalletKeyOrigin;

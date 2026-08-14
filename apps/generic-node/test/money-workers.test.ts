@@ -43,7 +43,7 @@ describe("money-workers composition", () => {
       join(here, "../src/money-workers/start-money-workers.ts"),
       "utf8",
     );
-    expect(workers).toMatch(/runPoolScaleUp/);
+    expect(workers).toMatch(/runSharedPoolScaleUp/);
     expect(workers).toMatch(/promoteQueuedReceives/);
     expect(workers).toMatch(/expireQueueAgedReceives/);
     expect(workers).toMatch(/formReceiveCodeAndArtifact/);
@@ -53,7 +53,8 @@ describe("money-workers composition", () => {
     expect(workers).toMatch(/create response_body not durable yet/);
     expect(workers).toMatch(/lacks non-empty subscription_handle/);
     expect(workers).toMatch(/NO_ELIGIBLE_WALLET/);
-    expect(workers).toMatch(/recovery_verified pending ceremony/);
+    expect(workers).toMatch(/recovery_verified not stamped here/);
+    expect(workers).toMatch(/recovery-verified ceremony/);
     expect(workers).toMatch(/runUnderLeadership/);
     expect(workers).toMatch(/trackSigningInflight/);
     expect(workers).not.toMatch(/SET\s+recovery_verified_at/);

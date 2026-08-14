@@ -377,7 +377,7 @@ function createDestinationEligibilityReader(pool: Pool): DestinationEligibilityR
       const result = await pool.query<{
         destination_state: string; wallet_state: string; recovery_verified_at: string | null;
       }>(
-        // destinations has state (PENDING|BLESSED|RETIRED), not a boolean `blessed` column.
+        // destinations has state (PENDING|BLESSED|RETIRED|WORKER), not a boolean `blessed` column.
         `SELECT d.state::text AS destination_state, w.state::text AS wallet_state,
                 w.recovery_verified_at::text AS recovery_verified_at
            FROM destinations d JOIN wallets w ON w.id = d.wallet_id
@@ -386,10 +386,12 @@ function createDestinationEligibilityReader(pool: Pool): DestinationEligibilityR
       );
       const r = result.rows[0];
       if (r === undefined) return { eligible: false, detail: "destination not found" };
-      if (r.destination_state !== "BLESSED") return { eligible: false, detail: "not blessed" };
+      if (r.destination_state !== "BLESSED" && r.destination_state !== "WORKER") {
+        return { eligible: false, detail: "not blessed" };
+      }
       if (r.wallet_state !== "AVAILABLE" && r.wallet_state !== "PINNED")
         return { eligible: false, detail: `wallet state: ${r.wallet_state}` };
-      if (r.recovery_verified_at === null)
+      if (r.destination_state === "BLESSED" && r.recovery_verified_at === null)
         return { eligible: false, detail: "recovery not verified" };
       return { eligible: true, detail: "eligible" };
     },

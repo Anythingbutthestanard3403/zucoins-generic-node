@@ -631,6 +631,33 @@ describe("destination blessing", () => {
       expect(outcome.from).toBe("RETIRED");
     }
   });
+
+  it("refuses to bless a WORKER sink (scaler-owned, no ceremony)", async () => {
+    const { service, store } = makeService();
+    const destinationId = uuid("worker1");
+    const walletId = uuid("workerw1");
+    store.rows.set(destinationId, {
+      destinationId,
+      nodeId: NODE_ID,
+      walletId,
+      walletPublicKey: pubkey("worker1"),
+      state: "WORKER",
+      label: "send-worker-deadbeef",
+      blessedAt: null,
+      blessedByDeviceKeyId: null,
+      blessingArtifactId: null,
+      retiredAt: null,
+      createdAt: ISSUED_AT,
+      idempotencyKey: "worker-1",
+    });
+    store.walletOrigins.set(walletId, "node_generated");
+
+    const outcome = await service.bless(blessRequest(destinationId));
+    expect(outcome.status).toBe("invalid_transition");
+    if (outcome.status === "invalid_transition") {
+      expect(outcome.from).toBe("WORKER");
+    }
+  });
 });
 
 describe("destination retirement (revocation)", () => {
@@ -667,6 +694,33 @@ describe("destination retirement (revocation)", () => {
     expect(outcome.status).toBe("invalid_transition");
     if (outcome.status === "invalid_transition") {
       expect(outcome.from).toBe("PENDING");
+    }
+  });
+
+  it("rejects retiring a WORKER sink", async () => {
+    const { service, store } = makeService();
+    const destinationId = uuid("worker2");
+    const walletId = uuid("workerw2");
+    store.rows.set(destinationId, {
+      destinationId,
+      nodeId: NODE_ID,
+      walletId,
+      walletPublicKey: pubkey("worker2"),
+      state: "WORKER",
+      label: "send-worker-cafebabe",
+      blessedAt: null,
+      blessedByDeviceKeyId: null,
+      blessingArtifactId: null,
+      retiredAt: null,
+      createdAt: ISSUED_AT,
+      idempotencyKey: "worker-2",
+    });
+    store.walletOrigins.set(walletId, "node_generated");
+
+    const outcome = await service.retire({ nodeId: NODE_ID, destinationId });
+    expect(outcome.status).toBe("invalid_transition");
+    if (outcome.status === "invalid_transition") {
+      expect(outcome.from).toBe("WORKER");
     }
   });
 

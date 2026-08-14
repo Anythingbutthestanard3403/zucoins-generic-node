@@ -1,6 +1,7 @@
 {
   "sizing": {
     "POOL_FLOOR": 5,
+    "SEND_POOL_FLOOR": 5,
     "POOL_CAP_DEFAULT": 50,
     "POOL_CAP_CEILING": 500,
     "MINT_BATCH_LIMIT": 5,

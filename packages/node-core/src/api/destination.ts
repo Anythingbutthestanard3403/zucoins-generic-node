@@ -5,9 +5,10 @@
 // (internal_custody vs automatic_sink_eligible).
 //
 // State machine (`destination_state`): PENDING -> BLESSED -> RETIRED.
+// WORKER is a node-owned send-worker sink (scaler mint), not this ceremony.
 // A destination registers PENDING; only a BLESSED destination is internal custody
 // (predicate 3: key_origin='node_generated' AND state='BLESSED') and may receive an
-// internal move or be selected for a send; RETIRED is terminal and is never reselected.
+// implementer-facing internal move; RETIRED is terminal and is never reselected.
 // Blessing is a device-key ceremony — TOTP alone cannot bless (predicate 6) — and the
 // blessed wallet must be node-generated (predicate 2: imported wallets never enter
 // destination history). Key custody: the node generates the keypair in its vault and

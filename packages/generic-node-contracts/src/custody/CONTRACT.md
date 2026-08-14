@@ -9,6 +9,12 @@ Recovery status never changes that classification. Automatic-sink eligibility ad
 present, parseable `recovery_verified_at` and wallet state `AVAILABLE` or `PINNED`. Imported, missing,
 unknown, malformed, quarantined, retired, and future values fail closed.
 
+`WORKER` is a node-owned send-worker sink, not internal custody. It is admitted by the send
+scaler, never by the blessing ceremony. Worker-sink eligibility is `key_origin = node_generated`
+plus destination state `WORKER` plus wallet state `AVAILABLE` or `PINNED` — no recovery stamp,
+no blessing artifact. Composition top-up may land on either an automatic sink or a worker sink.
+Client-facing `MOVE_INTERNAL` / `after_landing` stay automatic-sink only.
+
 `CUSTODY_EVIDENCE_REQUIREMENTS` freezes what origin, blessing, and audited-recovery evidence must prove.
 `CUSTODY_BINDING_OBLIGATIONS` separately freezes immutability, structural rejection, monotonic recovery,
 execution-time recheck, and fail-closed obligations. Neither is represented by caller-supplied booleans;

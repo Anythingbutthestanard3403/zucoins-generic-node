@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   AUTOMATIC_SINK_CONJUNCTS,
+  COMPOSITION_SINK_STATES,
   CUSTODY_BINDING_OBLIGATIONS,
   CUSTODY_EVIDENCE_REQUIREMENTS,
   DESTINATION_STATES,
   INTERNAL_CUSTODY_CONJUNCTS,
   WALLET_KEY_ORIGINS,
   WALLET_STATES,
+  WORKER_SINK_CONJUNCTS,
 } from "./predicates.contract.ts";
 
 describe("custody predicates are frozen (the custody concern; R-03)", () => {
@@ -22,7 +24,14 @@ describe("custody predicates are frozen (the custody concern; R-03)", () => {
   });
   it("freezes the complete known vocabularies", () => {
     expect(WALLET_KEY_ORIGINS).toEqual(["node_generated", "imported"]);
-    expect(DESTINATION_STATES).toEqual(["PENDING", "BLESSED", "RETIRED"]);
+    expect(DESTINATION_STATES).toEqual(["PENDING", "BLESSED", "RETIRED", "WORKER"]);
+    expect(WORKER_SINK_CONJUNCTS).toEqual({
+      keyOrigin: "node_generated",
+      destinationState: "WORKER",
+      requiresValidRecoveryVerifiedAt: false,
+      allowedWalletStates: ["AVAILABLE", "PINNED"],
+    });
+    expect(COMPOSITION_SINK_STATES).toEqual(["BLESSED", "WORKER"]);
     expect(WALLET_STATES).toEqual(["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"]);
   });
   it("keeps ceremony evidence separate from structural obligations", () => {

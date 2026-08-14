@@ -59,7 +59,7 @@ export interface AdminInventoryStore {
 
 const WALLET_STATES_LOCAL = ["AVAILABLE", "PINNED", "QUARANTINED", "RETIRED"] as const;
 const KEY_ORIGINS_LOCAL = ["node_generated", "imported"] as const;
-const DEST_STATES_LOCAL = ["PENDING", "BLESSED", "RETIRED"] as const;
+const DEST_STATES_LOCAL = ["PENDING", "BLESSED", "RETIRED", "WORKER"] as const;
 
 function clampLimit(raw: number | undefined): number {
   if (raw === undefined || !Number.isFinite(raw)) return DEFAULT_INVENTORY_LIMIT;

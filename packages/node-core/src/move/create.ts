@@ -46,7 +46,7 @@ export const MOVE_OPERATION_KIND = "MOVE_INTERNAL" as const;
 export const MOVE_IDEMPOTENCY_IN_PROGRESS_RETRY_AFTER_SECONDS = 1;
 
 export type MoveWalletState = "AVAILABLE" | "PINNED" | "QUARANTINED" | "RETIRED";
-export type MoveDestinationState = "PENDING" | "BLESSED" | "RETIRED";
+export type MoveDestinationState = "PENDING" | "BLESSED" | "RETIRED" | "WORKER";
 
 export interface MoveSourceWalletRecord {
   readonly walletId: string;
@@ -95,6 +95,11 @@ export interface MoveCreateRequest {
   readonly spawnedFromOperationId?: string | null;
   /** Required when spawnedFromOperationId is set — the parent's existing lease_groups.id. */
   readonly parentLeaseGroupId?: string | null;
+  /**
+   * Composition top-up only (assign-and-topup). Public POST /v1/internal-moves
+   * cannot set this. When true, a WORKER destination is an admissible sink.
+   */
+  readonly allowWorkerSink?: boolean;
 }
 
 export interface MoveOperation {
@@ -265,6 +270,7 @@ export function isMoveDestinationEligible(
   destination: MoveDestinationRecord,
   nodeId: string,
   sourceWalletId: string,
+  options: { readonly allowWorkerSink?: boolean } = {},
 ): { ok: true } | { ok: false; code: MoveRejectionCode; detail?: string } {
   if (destination.nodeId !== nodeId) {
     return { ok: false, code: "destination_not_eligible", detail: "foreign_node" };
@@ -279,14 +285,15 @@ export function isMoveDestinationEligible(
       detail: "key_origin_not_node_generated",
     };
   }
-  if (destination.destinationState !== "BLESSED") {
+  const workerOk = options.allowWorkerSink === true && destination.destinationState === "WORKER";
+  if (destination.destinationState !== "BLESSED" && !workerOk) {
     return {
       ok: false,
       code: "destination_not_eligible",
       detail: `destination_state=${destination.destinationState}`,
     };
   }
-  if (destination.recoveryVerifiedAt === null) {
+  if (destination.destinationState === "BLESSED" && destination.recoveryVerifiedAt === null) {
     return {
       ok: false,
       code: "destination_not_eligible",
@@ -528,7 +535,9 @@ export async function createInternalMove(
   if (destination.walletId === request.sourceWalletId) {
     return { outcome: "REJECTED", code: "same_wallet" };
   }
-  const destOk = isMoveDestinationEligible(destination, request.nodeId, request.sourceWalletId);
+  const destOk = isMoveDestinationEligible(destination, request.nodeId, request.sourceWalletId, {
+    allowWorkerSink: request.allowWorkerSink === true,
+  });
   if (!destOk.ok) {
     return { outcome: "REJECTED", code: destOk.code, detail: destOk.detail };
   }

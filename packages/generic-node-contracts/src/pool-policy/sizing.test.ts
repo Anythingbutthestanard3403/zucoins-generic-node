@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeProvisioningTarget, computeMintBatch } from "./sizing.js";
+import { computeProvisioningTarget, computeMintBatch, planSharedCapMint } from "./sizing.js";
 import { POOL_FLOOR, MINT_BATCH_LIMIT } from "./constants.js";
 
 describe("computeProvisioningTarget — exact-integer proportional headroom (the receive-queue backpressure rule 1)", () => {
@@ -51,5 +51,56 @@ describe("computeMintBatch — bounded, fail-closed at cap (the receive-queue ba
   });
   it("is bounded by remaining cap headroom", () => {
     expect(computeMintBatch(50, 48, 50)).toBe(2);
+  });
+});
+
+describe("planSharedCapMint — two demand signals, one lifetime cap", () => {
+  it("mints send first when both fleets are empty", () => {
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 0,
+        sendOpenSessions: 0,
+        receiveWalletCount: 0,
+        sendWalletCount: 0,
+        capCount: 0,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 5, receiveMint: 0 });
+  });
+  it("fills receive after send floor is met", () => {
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 0,
+        sendOpenSessions: 0,
+        receiveWalletCount: 0,
+        sendWalletCount: 5,
+        capCount: 5,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 0, receiveMint: 5 });
+  });
+  it("stops at remaining cap even when send is short", () => {
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 0,
+        sendOpenSessions: 10,
+        receiveWalletCount: 40,
+        sendWalletCount: 0,
+        capCount: 48,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 2, receiveMint: 0 });
+  });
+  it("mints nothing at cap", () => {
+    expect(
+      planSharedCapMint({
+        receiveOpenSessions: 20,
+        sendOpenSessions: 20,
+        receiveWalletCount: 0,
+        sendWalletCount: 0,
+        capCount: 50,
+        poolCap: 50,
+      }),
+    ).toEqual({ sendMint: 0, receiveMint: 0 });
   });
 });

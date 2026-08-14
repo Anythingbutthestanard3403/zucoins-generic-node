@@ -419,7 +419,7 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
         "FOUR CALLERS, each with its own cover (ZTR-1155 review D2 — the earlier text cited " +
         "pool-allocator.ts:221 LOCK_ADMISSION_QUEUE, which only admitReceive takes and which " +
         "no caller of THIS factory reaches). " +
-        "(1) runPoolScaleUp (:1020): `pg_advisory_xact_lock` LOCK_SCALE_UP " +
+        "(1) runSharedPoolScaleUp (:1020): `pg_advisory_xact_lock` LOCK_SCALE_UP " +
         "(receive/pool-scaler.ts:98), taken before every count it reads. " +
         "(2) assignReceiveWallet (:1045): `FOR UPDATE SKIP LOCKED` / `FOR UPDATE` on the " +
         "candidate wallet (receive/pool-allocator.ts:130,150). " +

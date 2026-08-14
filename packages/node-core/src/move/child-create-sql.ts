@@ -42,6 +42,7 @@ export const CHILD_MOVE_STATEMENTS = {
     `o.receiver_wallet_id, o.status::text AS status, ` +
     `o.after_landing::text AS after_landing, ` +
     `o.after_landing_destination_id, ` +
+    `o.verification_mode, ` +
     `lgo.lease_group_id ` +
     `FROM operations o ` +
     `JOIN lease_group_operations lgo ON lgo.operation_id = o.id ` +
@@ -56,12 +57,12 @@ export const CHILD_MOVE_STATEMENTS = {
     `INSERT INTO operations (` +
     `id, node_id, implementer_id, kind, status, amount_zkz, ` +
     `source_wallet_id, destination_id, spawned_from_operation_id, ` +
-    `idempotency_key, request_sha256, formation_state` +
+    `idempotency_key, request_sha256, formation_state, verification_mode` +
     `) VALUES (` +
     `$1::uuid, $2::uuid, $3::uuid, 'MOVE_INTERNAL'::operation_kind, ` +
     `'CREATED'::operation_status, $4, ` +
     `$5::uuid, $6::uuid, $7::uuid, ` +
-    `$8, $9, 'NOT_REQUIRED'::external_formation_state` +
+    `$8, $9, 'NOT_REQUIRED'::external_formation_state, $10` +
     `) ON CONFLICT (spawned_from_operation_id) WHERE spawned_from_operation_id IS NOT NULL ` +
     `DO NOTHING RETURNING id`,
 
@@ -69,7 +70,7 @@ export const CHILD_MOVE_STATEMENTS = {
     `SELECT o.id, o.implementer_id, o.node_id, o.status::text AS status, ` +
     `o.amount_zkz, o.source_wallet_id, o.destination_id, ` +
     `d.wallet_id AS destination_wallet_id, o.spawned_from_operation_id, ` +
-    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, ` +
+    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, o.verification_mode, ` +
     `EXTRACT(EPOCH FROM o.created_at) * 1000 AS created_at_ms ` +
     `FROM operations o ` +
     `JOIN destinations d ON d.id = o.destination_id ` +
@@ -96,6 +97,7 @@ interface ParentRow {
   readonly after_landing: string;
   readonly after_landing_destination_id: string | null;
   readonly lease_group_id: string;
+  readonly verification_mode?: string | null;
 }
 
 interface WalletRow {
@@ -132,6 +134,7 @@ interface ChildRow {
   readonly lease_group_id: string | null;
   readonly idempotency_key: string;
   readonly request_sha256: string;
+  readonly verification_mode?: string | null;
   readonly created_at_ms: string | number;
 }
 
@@ -164,6 +167,13 @@ function toDestination(row: DestinationRow): MoveDestinationRecord {
   };
 }
 
+function asVerificationMode(
+  value: string | null | undefined,
+): import("@zucoins/generic-node-contracts/operations").VerificationMode {
+  if (value === "NODE_VERIFIED" || value === "INDEPENDENT") return value;
+  return "INDEPENDENT";
+}
+
 function toChild(row: ChildRow): ChildMoveRecord {
   const parentId = row.spawned_from_operation_id;
   return {
@@ -182,6 +192,7 @@ function toChild(row: ChildRow): ChildMoveRecord {
     idempotencyKey: row.idempotency_key,
     requestSha256: row.request_sha256,
     createdAt: Number(row.created_at_ms),
+    verificationMode: asVerificationMode(row.verification_mode),
   };
 }
 
@@ -196,6 +207,7 @@ function toParent(row: ParentRow): LandedParentReceive {
     afterLanding: row.after_landing,
     afterLandingDestinationId: row.after_landing_destination_id,
     leaseGroupId: row.lease_group_id,
+    verificationMode: asVerificationMode(row.verification_mode),
   };
 }
 
@@ -240,6 +252,7 @@ function buildTx(sql: SqlExecutor, appender: MoveCreatedEventAppender): ChildMov
           input.spawnedFromOperationId,
           input.idempotencyKey,
           input.requestSha256,
+          input.verificationMode,
         ]);
         await sql.query(`RELEASE SAVEPOINT child_move_create_child_spawn`, []);
       } catch (err) {

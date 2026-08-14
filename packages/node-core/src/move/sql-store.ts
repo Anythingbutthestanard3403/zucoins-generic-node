@@ -32,6 +32,10 @@ import {
   type DualChainEventQuota,
   type NodeEventSigner,
 } from "../event-log/dual-chain-appender.js";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  type VerificationMode,
+} from "../verification/allow-node-verified-policy.js";
 
 export interface SqlQueryResult<R> {
   readonly rows: R[];
@@ -87,12 +91,14 @@ export const STATEMENTS = {
     `INSERT INTO operations (` +
     `id, node_id, implementer_id, kind, status, amount_zkz, ` +
     `source_wallet_id, destination_id, spawned_from_operation_id, ` +
-    `client_reference, idempotency_key, request_sha256, formation_state` +
+    `client_reference, idempotency_key, request_sha256, formation_state, ` +
+    `verification_mode` +
     `) VALUES (` +
     `$1::uuid, $2::uuid, $3::uuid, 'MOVE_INTERNAL'::operation_kind, ` +
     `'CREATED'::operation_status, $4, ` +
     `$5::uuid, $6::uuid, $7::uuid, ` +
-    `$8, $9, $10, 'NOT_REQUIRED'::external_formation_state` +
+    `$8, $9, $10, 'NOT_REQUIRED'::external_formation_state, ` +
+    `$11` +
     `) ON CONFLICT (implementer_id, kind, idempotency_key) DO NOTHING ` +
     `RETURNING id`,
 
@@ -123,7 +129,7 @@ export const STATEMENTS = {
     `SELECT o.id, o.implementer_id, o.node_id, o.kind::text AS kind, o.status::text AS status, ` +
     `o.row_version, o.attention_required, o.source_wallet_id, o.destination_id, ` +
     `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.client_reference, o.spawned_from_operation_id, ` +
-    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, ` +
+    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, o.verification_mode, ` +
     `EXTRACT(EPOCH FROM o.created_at) * 1000 AS created_at_ms, ` +
     `EXTRACT(EPOCH FROM o.updated_at) * 1000 AS updated_at_ms ` +
     `FROM operations o ` +
@@ -136,7 +142,7 @@ export const STATEMENTS = {
     `SELECT o.id, o.implementer_id, o.node_id, o.kind::text AS kind, o.status::text AS status, ` +
     `o.row_version, o.attention_required, o.source_wallet_id, o.destination_id, ` +
     `d.wallet_id AS destination_wallet_id, o.amount_zkz, o.client_reference, o.spawned_from_operation_id, ` +
-    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, ` +
+    `lgo.lease_group_id, o.idempotency_key, o.request_sha256, o.verification_mode, ` +
     `EXTRACT(EPOCH FROM o.created_at) * 1000 AS created_at_ms, ` +
     `EXTRACT(EPOCH FROM o.updated_at) * 1000 AS updated_at_ms ` +
     `FROM operations o ` +
@@ -223,6 +229,7 @@ interface OperationRow {
   readonly lease_group_id: string | null;
   readonly idempotency_key: string;
   readonly request_sha256: string;
+  readonly verification_mode?: string | null;
   readonly created_at_ms: string | number;
   readonly updated_at_ms: string | number;
 }
@@ -275,6 +282,11 @@ function toDestination(row: DestinationRow): MoveDestinationRecord {
   };
 }
 
+function asVerificationMode(value: string | null | undefined): VerificationMode {
+  if (value === "NODE_VERIFIED" || value === "INDEPENDENT") return value;
+  return DEFAULT_VERIFICATION_MODE;
+}
+
 function toStored(row: OperationRow): StoredMoveOperation {
   return {
     operationId: row.id,
@@ -296,6 +308,7 @@ function toStored(row: OperationRow): StoredMoveOperation {
     requestSha256: row.request_sha256,
     createdAt: Number(row.created_at_ms),
     updatedAt: Number(row.updated_at_ms),
+    verificationMode: asVerificationMode(row.verification_mode),
   };
 }
 
@@ -437,6 +450,7 @@ export class SqlMoveCreateStore implements MoveCreateStore {
         op.clientReference,
         op.idempotencyKey,
         op.requestSha256,
+        op.verificationMode,
       ]);
       if (inserted.rows[0] === undefined) {
         // ON CONFLICT DO NOTHING — another creator holds this idempotency scope.

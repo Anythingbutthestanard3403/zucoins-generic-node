@@ -56,6 +56,11 @@ import {
   type OperationRouteStore,
   type ReceiveResponse,
 } from "./api/routes/operation-routes.js";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  refuseAllNodeVerifiedPolicy,
+  type AllowNodeVerifiedPolicyPort,
+} from "./verification/allow-node-verified-policy.js";
 
 export interface SqlOperationRouteStoreConfig {
   readonly nodeId: string;
@@ -64,6 +69,11 @@ export interface SqlOperationRouteStoreConfig {
   readonly receive: ReceiveAdmissionStore;
   readonly move: MoveCreateStore;
   readonly send: SendCreateStore;
+  /**
+   * Operator policy gating NODE_VERIFIED at admission (ZTR-1301). When omitted,
+   * refuse-all (fail closed) — NODE_VERIFIED is never silently admitted.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   /**
    * Node-identity artifact signer for SEND_EXTERNAL create. The key-custody rule:
    * node-core never holds key material; the composition root injects this port.
@@ -146,6 +156,7 @@ function buildReceiveAcceptedBody(
       updated_at: createdAt,
       terminal_at: null,
       verification_material_available_until: null,
+      verification_mode: operation.verificationMode ?? DEFAULT_VERIFICATION_MODE,
     },
     receiver_pubkey: null,
     discriminator: operation.operationId,
@@ -184,14 +195,25 @@ function receiveFromStored(row: StoredReceiveOperation): ReceiveResponse {
     body = buildReceiveAcceptedBody(row, "");
   }
 
+  // Always echo durable verification_mode (immutable column) even when a pre-1301
+  // frozen response_body omitted the field.
+  const verificationMode = row.verificationMode ?? DEFAULT_VERIFICATION_MODE;
+  body = {
+    ...body,
+    operation: {
+      ...body.operation,
+      verification_mode: body.operation.verification_mode ?? verificationMode,
+    },
+  };
+
   // overlay live operations facts. Frozen READY response_body keeps
   // row_version/state from the READY commit; land bumps operations.row_version and
   // status to RECEIVE_LANDED. verification-complete CAS needs the live version.
   if (row.liveStatus !== undefined && row.liveRowVersion !== undefined) {
     return {
-...body,
+      ...body,
       operation: {
-...body.operation,
+        ...body.operation,
         state: row.liveStatus,
         row_version: row.liveRowVersion,
         updated_at: row.liveUpdatedAt ?? body.operation.updated_at,
@@ -200,12 +222,13 @@ function receiveFromStored(row: StoredReceiveOperation): ReceiveResponse {
         verification_material_available_until:
           row.liveVerificationMaterialAvailableUntil !== undefined
             ? row.liveVerificationMaterialAvailableUntil
-: body.operation.verification_material_available_until,
+            : body.operation.verification_material_available_until,
         attention_required: row.liveAttentionRequired ?? body.operation.attention_required,
         attention_reason:
           row.liveAttentionReason !== undefined
             ? row.liveAttentionReason
-: body.operation.attention_reason,
+            : body.operation.attention_reason,
+        verification_mode: verificationMode,
       },
     };
   }
@@ -280,6 +303,8 @@ export function createSqlOperationRouteStore(
   const now = config.now;
   const receiveTtlDefaultSecs =
     config.receiveTtlDefaultSecs ?? DEFAULT_EXPIRES_IN_SECONDS;
+  const allowNodeVerifiedPolicy =
+    config.allowNodeVerifiedPolicy ?? refuseAllNodeVerifiedPolicy();
 
   return {
     async createReceive(input: CreateReceiveInput) {
@@ -296,8 +321,16 @@ export function createSqlOperationRouteStore(
           ttlMs,
           afterLanding,
           idempotencyKey: input.idempotencyKey,
+          ...(input.verification_mode !== undefined
+            ? { verificationMode: input.verification_mode }
+            : {}),
         },
-        { queueCap: config.queueCap, generateId, now },
+        {
+          queueCap: config.queueCap,
+          generateId,
+          now,
+          allowNodeVerifiedPolicy,
+        },
       );
 
       if (admission.outcome === "IDEMPOTENT_REPLAY") {
@@ -368,8 +401,11 @@ export function createSqlOperationRouteStore(
           amountZkz: input.amount_zkz,
           clientReference: input.client_reference ?? null,
           idempotencyKey: input.idempotencyKey,
+          ...(input.verification_mode !== undefined
+            ? { verificationMode: input.verification_mode }
+            : {}),
         },
-        { generateId, now },
+        { generateId, now, allowNodeVerifiedPolicy },
       );
       // moveOutcomeToRouteResult throws MoveAdmissionError on rejection.
       const routed = moveOutcomeToRouteResult(outcome);
@@ -413,8 +449,16 @@ export function createSqlOperationRouteStore(
             clientReference: input.client_reference ?? null,
             description: input.description ?? null,
             idempotencyKey: input.idempotencyKey,
+            ...(input.verification_mode !== undefined
+              ? { verificationMode: input.verification_mode }
+              : {}),
           },
-          { generateId, now, requireActiveSubscription: config.requireActiveSubscription },
+          {
+            generateId,
+            now,
+            requireActiveSubscription: config.requireActiveSubscription,
+            allowNodeVerifiedPolicy,
+          },
         );
         const routed = sendOutcomeToRouteResult(outcome);
         if (outcome.outcome === "CREATED") {
@@ -434,6 +478,7 @@ export function createSqlOperationRouteStore(
           generateId,
           now,
           requireActiveSubscription: config.requireActiveSubscription,
+          allowNodeVerifiedPolicy,
         },
         assertHaltAdmitsKind: config.assertHaltAdmitsKind,
         generateId,
@@ -450,6 +495,9 @@ export function createSqlOperationRouteStore(
         description: input.description ?? null,
         idempotencyKey: input.idempotencyKey,
         referencesOperationId: input.references_operation_id ?? null,
+        ...(input.verification_mode !== undefined
+          ? { verificationMode: input.verification_mode }
+          : {}),
       });
 
       if (composed.outcome === "REJECTED") {

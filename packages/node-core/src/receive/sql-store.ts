@@ -23,6 +23,8 @@ import {
   mintSubscriptionHandlePlaintext,
 } from "../api/subscription-handle.js";
 import { INSERT_SUBSCRIPTION_HANDLE } from "../api/sql-subscription-handle-store.js";
+import { DEFAULT_VERIFICATION_MODE } from "../verification/allow-node-verified-policy.js";
+import type { VerificationMode } from "../verification/allow-node-verified-policy.js";
 import type {
   ReceiveAdmissionStore,
   ReceiveDestinationRecord,
@@ -97,6 +99,7 @@ export const OPERATION_COLUMNS = [
   "destination_id",
   "wallet_id",
   "created_at",
+  "verification_mode",
 ] as const;
 
 const SELECT_COLUMNS = [...OPERATION_COLUMNS, "completed_at", "response_status", "response_body"].join(
@@ -121,7 +124,7 @@ export const STATEMENTS = {
   SELECT_BY_OPERATION_ID_WITH_LIVE: `SELECT r.operation_id, r.implementer_id, r.node_id, r.kind, r.status,
     r.http_method, r.route, r.idempotency_key, r.request_sha256, r.amount_zkz, r.anchor, r.ttl_ms,
     r.after_landing_kind, r.destination_wallet_id, r.destination_id, r.wallet_id, r.created_at,
-    r.completed_at, r.response_status, r.response_body,
+    r.verification_mode, r.completed_at, r.response_status, r.response_body,
     o.status::text AS live_status,
     o.row_version::bigint AS live_row_version,
     o.updated_at AS live_updated_at,
@@ -163,6 +166,7 @@ interface OperationRow {
   readonly destination_id: string | null;
   readonly wallet_id: string | null;
   readonly created_at: string | Date;
+  readonly verification_mode?: string | null;
   readonly completed_at: string | Date | null;
   readonly response_status: number | null;
   readonly response_body: string | null;
@@ -205,6 +209,11 @@ function toIsoOrUndefined(value: string | Date | null | undefined): string | und
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+function asVerificationMode(value: string | null | undefined): VerificationMode {
+  if (value === "NODE_VERIFIED" || value === "INDEPENDENT") return value;
+  return DEFAULT_VERIFICATION_MODE;
+}
+
 function toStoredOperation(row: OperationRow): StoredReceiveOperation {
   const base: StoredReceiveOperation = {
     operationId: row.operation_id,
@@ -228,6 +237,7 @@ function toStoredOperation(row: OperationRow): StoredReceiveOperation {
     destinationWalletId: row.destination_wallet_id,
     walletId: row.wallet_id,
     createdAt: epochMs(row.created_at),
+    verificationMode: asVerificationMode(row.verification_mode),
     responseStatus: row.response_status === null ? null : Number(row.response_status),
     responseBody: row.response_body,
   };
@@ -331,6 +341,7 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
       destinationId,
       operation.walletId,
       operation.createdAt,
+      operation.verificationMode,
     ];
   }
 

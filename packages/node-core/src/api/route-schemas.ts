@@ -6,6 +6,10 @@
 // Canonical: phantom 403 collapsed to 401 (no 403), canonical ZKZ amount contract (PositiveZkzAmount < 100000000).
 
 import { z } from "zod";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+} from "@zucoins/generic-node-contracts/operations";
 import { SPLITCHAIN_FUTURE_TIME_CEILING_SECS } from "../protocol/receive-ttl.js";
 import {
   UuidSchema,
@@ -19,6 +23,9 @@ import {
 } from "./scalars.js";
 import { NeedsAttentionQuerySchema } from "./recovery-inspection.js";
 import { OPERATOR_RECOVERY_ACTIONS } from "../operator/recovery-inspection.js";
+
+/** Optional create-body field; omitted → INDEPENDENT (ZTR-1301 / contracts ZTR-1299). */
+const VerificationModeField = z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE);
 
 // --- RECEIVE_EXTERNAL --
 
@@ -51,6 +58,8 @@ export const CreateReceiveBody = z.object({
     .max(SPLITCHAIN_FUTURE_TIME_CEILING_SECS)
     .optional(),
   after_landing: AfterLanding,
+  /** Optional; defaults to INDEPENDENT. NODE_VERIFIED requires ops.allow_node_verified. */
+  verification_mode: VerificationModeField,
 }).strict();
 
 // --- MOVE_INTERNAL --
@@ -61,6 +70,8 @@ export const CreateInternalMoveBody = z.object({
   amount_zkz: PositiveZkzAmountSchema,
   // Advisory product correlation only — unsigned, same posture as SEND_EXTERNAL.client_reference.
   client_reference: z.string().max(256).optional(),
+  /** Optional; defaults to INDEPENDENT. NODE_VERIFIED requires ops.allow_node_verified. */
+  verification_mode: VerificationModeField,
 }).strict();
 
 // --- SEND_EXTERNAL --
@@ -73,6 +84,8 @@ export const CreateExternalSendBody = z.object({
   references_operation_id: UuidSchema.optional(),
   client_reference: z.string().max(256).optional(),
   description: z.string().max(512).optional(),
+  /** Optional; defaults to INDEPENDENT. NODE_VERIFIED requires ops.allow_node_verified. */
+  verification_mode: VerificationModeField,
 }).strict();
 
 // --- Destinations --

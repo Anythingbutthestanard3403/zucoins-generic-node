@@ -59,6 +59,8 @@ export interface LandedParentReceive {
   readonly afterLanding: string;
   readonly afterLandingDestinationId: string | null;
   readonly leaseGroupId: string;
+  /** Inherited onto the child MOVE (ZTR-1301). Defaults INDEPENDENT. */
+  readonly verificationMode: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
 export interface ChildMoveRecord {
@@ -78,6 +80,7 @@ export interface ChildMoveRecord {
   readonly idempotencyKey: string;
   readonly requestSha256: string;
   readonly createdAt: number;
+  readonly verificationMode: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
 export type ChildMoveCreationResult =
@@ -105,6 +108,7 @@ export interface ChildMoveInsertInput {
   readonly requestSha256: string;
   readonly createdAtIso: string;
   readonly leaseGroupId: string;
+  readonly verificationMode: import("@zucoins/generic-node-contracts/operations").VerificationMode;
 }
 
 /**
@@ -301,6 +305,7 @@ export async function createChildMoveAtomically(
       requestSha256,
       createdAtIso,
       leaseGroupId: parent.leaseGroupId,
+      verificationMode: parent.verificationMode,
     });
 
     if (insert.kind === "SPAWN_CONFLICT") {
@@ -326,6 +331,7 @@ export async function createChildMoveAtomically(
             idempotencyKey,
             requestSha256,
             createdAt,
+            verificationMode: parent.verificationMode,
           },
         };
       }
@@ -365,6 +371,7 @@ export async function createChildMoveAtomically(
       idempotencyKey,
       requestSha256,
       createdAt,
+      verificationMode: parent.verificationMode,
     };
 
     return { ok: true, outcome: "CREATED", child };

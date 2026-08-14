@@ -24,7 +24,16 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import type { VerificationMode } from "@zucoins/generic-node-contracts/operations";
+import { DEFAULT_VERIFICATION_MODE } from "@zucoins/generic-node-contracts/operations";
+
 import { parsePositiveZkzAmount } from "../protocol/amounts.js";
+import {
+  admitVerificationMode,
+  refuseAllNodeVerifiedPolicy,
+  resolveVerificationMode,
+  type AllowNodeVerifiedPolicyPort,
+} from "../verification/allow-node-verified-policy.js";
 
 // The idempotency scope includes the HTTP method and the canonical
 // route, never the key alone. This slice serves exactly one route.
@@ -86,6 +95,11 @@ export interface ReceiveRequest {
   readonly ttlMs: number;
   readonly afterLanding: AfterLanding;
   readonly idempotencyKey: string;
+  /**
+   * Optional admission-time verification mode (ZTR-1301). Omitted → INDEPENDENT.
+   * NODE_VERIFIED requires operator policy ops.allow_node_verified for the implementer.
+   */
+  readonly verificationMode?: VerificationMode;
 }
 
 // Full RECEIVE_EXTERNAL external-state vocabulary (parity-bound to RECEIVE_EXTERNAL_STATES).
@@ -109,6 +123,8 @@ export interface ReceiveOperation {
   readonly destinationWalletId: string | null;
   readonly walletId: string | null;
   readonly createdAt: number;
+  /** Immutable after admission (ZTR-1301 / schema ZTR-1300). */
+  readonly verificationMode: VerificationMode;
 }
 
 // A row as the store returns it. `responseBody === null` is the in-progress marker: the
@@ -143,7 +159,8 @@ export type ReceiveRejectionCode =
   | "wallet_in_flight"
   | "idempotency_key_reused"
   | "idempotency_in_progress"
-  | "receive_queue_full";
+  | "receive_queue_full"
+  | "verification_mode_not_allowed";
 
 export type ReceiveAdmissionOutcome =
   | {
@@ -285,7 +302,12 @@ export function validateReceiveRequest(
 // field sequence below IS the preimage byte sequence — it is written out literally and is
 // never sorted, rearranged, or normalized (the byte-exact signing rule).
 export function canonicalRequestSha256(request: ReceiveRequest): string {
-  const canonical = JSON.stringify({
+  // verification_mode is part of the idempotency fingerprint (ZTR-1301 AC3): a
+  // replay with a different mode is idempotency_key_reused, not a silent mode change.
+  // Include only when non-default so pre-1301 five-field fingerprints stay stable for
+  // omitted / INDEPENDENT creates (Review-B style omit-null upgrade).
+  const mode = resolveVerificationMode(request.verificationMode);
+  const base = {
     implementer_id: request.implementerId,
     node_id: request.nodeId,
     amount_zkz: request.amountZkz,
@@ -296,7 +318,11 @@ export function canonicalRequestSha256(request: ReceiveRequest): string {
       destination_id:
         request.afterLanding.kind === "INTERNAL_MOVE" ? request.afterLanding.destinationId : null,
     },
-  });
+  };
+  const canonical =
+    mode === DEFAULT_VERIFICATION_MODE
+      ? JSON.stringify(base)
+      : JSON.stringify({ ...base, verification_mode: mode });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
@@ -336,6 +362,11 @@ export interface ReceiveAdmissionConfig {
   readonly queueCap: number;
   readonly generateId?: () => string;
   readonly now?: () => number;
+  /**
+   * Operator policy gating NODE_VERIFIED (ZTR-1301). When omitted, refuse-all
+   * (fail closed) — NODE_VERIFIED is never silently admitted.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
 }
 
 export async function admitReceiveExternal(
@@ -345,11 +376,39 @@ export async function admitReceiveExternal(
 ): Promise<ReceiveAdmissionOutcome> {
   const generateId = config.generateId ?? (() => randomUUID());
   const now = config.now ?? (() => Date.now());
+  const policy = config.allowNodeVerifiedPolicy ?? refuseAllNodeVerifiedPolicy();
 
   // Shape, amount, anchor, TTL, explicit after_landing.
   const validation = validateReceiveRequest(request);
   if (!validation.ok) {
     return { outcome: "REJECTED", code: validation.code, detail: validation.detail };
+  }
+
+  // Resolve mode. NODE_VERIFIED is fail-closed gated below — never silent-downgrade.
+  const verificationMode = resolveVerificationMode(request.verificationMode);
+  const requestSha256 = canonicalRequestSha256(request);
+
+  // Gate NODE_VERIFIED before a new insert, but still honour same-hash idempotent
+  // replay if a prior admit already persisted the row (policy may have flipped off).
+  if (verificationMode === "NODE_VERIFIED") {
+    const policyDoc = await policy.getPolicy();
+    const modeAdmit = admitVerificationMode(
+      verificationMode,
+      policyDoc,
+      request.implementerId,
+    );
+    if (!modeAdmit.ok) {
+      const existing = await store.findByIdempotency(
+        request.implementerId,
+        RECEIVE_HTTP_METHOD,
+        RECEIVE_CANONICAL_ROUTE,
+        request.idempotencyKey,
+      );
+      if (existing !== null && existing.requestSha256 === requestSha256) {
+        return decideAgainstExisting(existing, requestSha256);
+      }
+      return { outcome: "REJECTED", code: modeAdmit.code };
+    }
   }
 
   // Resolve and gate the INTERNAL_MOVE destination. This is a read; it creates
@@ -365,8 +424,6 @@ export async function admitReceiveExternal(
     }
     destinationWalletId = destination.wallet.walletId;
   }
-
-  const requestSha256 = canonicalRequestSha256(request);
 
   const operation: ReceiveOperation = {
     operationId: generateId(),
@@ -386,6 +443,7 @@ export async function admitReceiveExternal(
     // Exit invariant: no receiver exists while an unassigned receive is CREATED.
     walletId: null,
     createdAt: now(),
+    verificationMode,
   };
 
   // Rule 3 / RECEIVE_QUEUE_CAP equals POOL_CAP_TOTAL — lock, measure unassigned depth, and either

@@ -1,7 +1,7 @@
 // Operation route handlers for the three Layer-1 operation types.
 // 5.1–5.2, 6.1–6.2.
 
-import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
+import type { OperationKind, VerificationMode } from "@zucoins/generic-node-contracts/operations";
 import type { ExecutionPhase } from "../../core/execution-phase.js";
 import type { PipelineContext } from "../pipeline.js";
 import { apiErrorResponse, type ApiErrorResponse } from "../error-envelope.js";
@@ -20,6 +20,8 @@ export interface OperationObject {
   readonly updated_at: string;
   readonly terminal_at: string | null;
   readonly verification_material_available_until: string | null;
+  /** Immutable after admission (ZTR-1301). */
+  readonly verification_mode: VerificationMode;
 }
 
 export interface ExpectedArtifact {
@@ -98,6 +100,8 @@ export interface CreateReceiveInput {
   readonly anchor: string;
   readonly expires_in_seconds?: number;
   readonly after_landing: { readonly kind: "HOLD" | "INTERNAL_MOVE"; readonly destination_id: string | null };
+  /** Optional; Zod defaults omitted field to INDEPENDENT before the handler. */
+  readonly verification_mode?: VerificationMode;
   readonly idempotencyKey: string;
   /** Credential-bound tenant — never accepted from the request body. */
   readonly implementerId: string;
@@ -109,6 +113,8 @@ export interface CreateInternalMoveInput {
   readonly amount_zkz: string;
   /** Advisory product correlation only — unsigned, never a settlement match key. */
   readonly client_reference?: string;
+  /** Optional; Zod defaults omitted field to INDEPENDENT before the handler. */
+  readonly verification_mode?: VerificationMode;
   readonly idempotencyKey: string;
   /** Credential-bound tenant — never accepted from the request body. */
   readonly implementerId: string;
@@ -125,6 +131,8 @@ export interface CreateExternalSendInput {
   readonly references_operation_id?: string;
   readonly client_reference?: string;
   readonly description?: string;
+  /** Optional; Zod defaults omitted field to INDEPENDENT before the handler. */
+  readonly verification_mode?: VerificationMode;
   readonly idempotencyKey: string;
   /** Credential-bound tenant — never accepted from the request body. */
   readonly implementerId: string;
@@ -402,6 +410,11 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "destination_not_eligible":
       case "same_wallet":
         return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
+      case "verification_mode_not_allowed":
+        return {
+          ok: false,
+          error: apiErrorResponse("verification_mode_not_allowed", requestId),
+        };
       default:
         return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
     }
@@ -426,6 +439,11 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "invalid_ttl":
       case "invalid_after_landing":
         return { ok: false, error: apiErrorResponse("invalid_scalar", requestId) };
+      case "verification_mode_not_allowed":
+        return {
+          ok: false,
+          error: apiErrorResponse("verification_mode_not_allowed", requestId),
+        };
       default:
         return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
     }
@@ -450,6 +468,11 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "source_wallet_not_eligible":
       case "destination_is_internal":
         return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
+      case "verification_mode_not_allowed":
+        return {
+          ok: false,
+          error: apiErrorResponse("verification_mode_not_allowed", requestId),
+        };
       case "signing_key_unavailable":
         return { ok: false, error: apiErrorResponse("service_unavailable", requestId) };
       // ZTR-1271 assign / top-up composition codes (SendAssignRejectionCode).

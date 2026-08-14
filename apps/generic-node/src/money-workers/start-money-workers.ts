@@ -367,7 +367,8 @@ async function mirrorReceiveOperationsToOperations(
     `INSERT INTO operations (
        id, node_id, implementer_id, kind, status, amount_zkz,
        after_landing, after_landing_destination_id,
-       discriminator, anchor, idempotency_key, request_sha256, formation_state
+       discriminator, anchor, idempotency_key, request_sha256, formation_state,
+       verification_mode
      )
      SELECT
        r.operation_id,
@@ -382,7 +383,8 @@ async function mirrorReceiveOperationsToOperations(
        r.anchor,
        r.idempotency_key,
        r.request_sha256,
-       'NOT_REQUIRED'::external_formation_state
+       'NOT_REQUIRED'::external_formation_state,
+       r.verification_mode
      FROM receive_operations r
      WHERE r.status = 'CREATED'
        AND r.wallet_id IS NULL

@@ -62,6 +62,7 @@ import {
   type DeviceSqlExecutor,
   createSqlDeviceKeyStore,
   createSqlOperationRouteStore,
+  createSqlAllowNodeVerifiedPolicy,
   createStatfsDiskUtilization,
   CredentialService,
   DEFAULT_FUNDING_WALLET_SETTING_KEY,
@@ -683,6 +684,8 @@ async function main(): Promise<void> {
     move: moveStore,
     send: sendStore,
     sendSigner,
+    // ZTR-1301: fail-closed NODE_VERIFIED admission gate (ops.allow_node_verified).
+    allowNodeVerifiedPolicy: createSqlAllowNodeVerifiedPolicy(poolSql),
     // GET /v1/external-sends at AWAITING_REDEMPTION returns code fingerprint.
     sendPartials: createSqlSendPartialLoader(pool),
     // Operator TTL default at create (same knob as money workers) — ZTR-1170.

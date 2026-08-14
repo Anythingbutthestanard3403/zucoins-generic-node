@@ -18,6 +18,9 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import type { VerificationMode } from "@zucoins/generic-node-contracts/operations";
+import { DEFAULT_VERIFICATION_MODE } from "@zucoins/generic-node-contracts/operations";
+
 import { parsePositiveZkzAmount } from "../protocol/amounts.js";
 import { parseUuid } from "../protocol/scalars.js";
 import {
@@ -25,6 +28,12 @@ import {
   type DurableExecutionFacts,
   type ExecutionPhase,
 } from "../core/execution-phase.js";
+import {
+  admitVerificationMode,
+  refuseAllNodeVerifiedPolicy,
+  resolveVerificationMode,
+  type AllowNodeVerifiedPolicyPort,
+} from "../verification/allow-node-verified-policy.js";
 
 // The idempotency scope includes the HTTP method and the canonical
 // route. This slice serves exactly one public route.
@@ -74,6 +83,11 @@ export interface MoveCreateRequest {
   readonly clientReference?: string | null;
   readonly idempotencyKey: string;
   /**
+   * Optional admission-time verification mode (ZTR-1301). Omitted → INDEPENDENT.
+   * NODE_VERIFIED requires operator policy ops.allow_node_verified for the implementer.
+   */
+  readonly verificationMode?: VerificationMode;
+  /**
    * Receive-spawned child path only (step 4). Callers of POST /v1/internal-moves
    * cannot set this — the public body schema rejects unknown fields. When set, admission joins
    * the parent's lease group instead of creating a new one.
@@ -101,6 +115,8 @@ export interface MoveOperation {
   readonly idempotencyKey: string;
   readonly requestSha256: string;
   readonly createdAt: number;
+  /** Immutable after admission (ZTR-1301 / schema ZTR-1300). */
+  readonly verificationMode: VerificationMode;
 }
 
 export interface StoredMoveOperation {
@@ -122,6 +138,8 @@ export interface StoredMoveOperation {
   readonly requestSha256: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  /** Immutable after admission (ZTR-1301). Defaults INDEPENDENT when column absent in fixtures. */
+  readonly verificationMode: VerificationMode;
 }
 
 export interface MoveExpectedArtifact {
@@ -158,7 +176,8 @@ export type MoveRejectionCode =
   | "same_wallet"
   | "wallet_busy"
   | "idempotency_key_reused"
-  | "idempotency_in_progress";
+  | "idempotency_in_progress"
+  | "verification_mode_not_allowed";
 
 export type MoveCreateOutcome =
   | {
@@ -363,48 +382,67 @@ export function validateMoveCreateRequest(
 export function canonicalMoveRequestSha256(request: MoveCreateRequest): string {
   const spawned = request.spawnedFromOperationId ?? null;
   const clientReference = request.clientReference ?? null;
+  // verification_mode in fingerprint only when non-default so omitted/INDEPENDENT
+  // keeps pre-1301 fingerprints (ZTR-1301 AC2/AC3).
+  const mode = resolveVerificationMode(request.verificationMode);
+  const withMode = <T extends Record<string, unknown>>(obj: T): T | (T & { verification_mode: VerificationMode }) =>
+    mode === DEFAULT_VERIFICATION_MODE ? obj : { ...obj, verification_mode: mode };
+
   const canonical =
     spawned === null
       ? clientReference === null
-        ? JSON.stringify({
-            implementer_id: request.implementerId,
-            node_id: request.nodeId,
-            source_wallet_id: request.sourceWalletId,
-            destination_id: request.destinationId,
-            amount_zkz: request.amountZkz,
-          })
-        : JSON.stringify({
-            implementer_id: request.implementerId,
-            node_id: request.nodeId,
-            source_wallet_id: request.sourceWalletId,
-            destination_id: request.destinationId,
-            amount_zkz: request.amountZkz,
-            client_reference: clientReference,
-          })
+        ? JSON.stringify(
+            withMode({
+              implementer_id: request.implementerId,
+              node_id: request.nodeId,
+              source_wallet_id: request.sourceWalletId,
+              destination_id: request.destinationId,
+              amount_zkz: request.amountZkz,
+            }),
+          )
+        : JSON.stringify(
+            withMode({
+              implementer_id: request.implementerId,
+              node_id: request.nodeId,
+              source_wallet_id: request.sourceWalletId,
+              destination_id: request.destinationId,
+              amount_zkz: request.amountZkz,
+              client_reference: clientReference,
+            }),
+          )
       : clientReference === null
-        ? JSON.stringify({
-            implementer_id: request.implementerId,
-            node_id: request.nodeId,
-            source_wallet_id: request.sourceWalletId,
-            destination_id: request.destinationId,
-            amount_zkz: request.amountZkz,
-            spawned_from_operation_id: spawned,
-          })
-        : JSON.stringify({
-            implementer_id: request.implementerId,
-            node_id: request.nodeId,
-            source_wallet_id: request.sourceWalletId,
-            destination_id: request.destinationId,
-            amount_zkz: request.amountZkz,
-            client_reference: clientReference,
-            spawned_from_operation_id: spawned,
-          });
+        ? JSON.stringify(
+            withMode({
+              implementer_id: request.implementerId,
+              node_id: request.nodeId,
+              source_wallet_id: request.sourceWalletId,
+              destination_id: request.destinationId,
+              amount_zkz: request.amountZkz,
+              spawned_from_operation_id: spawned,
+            }),
+          )
+        : JSON.stringify(
+            withMode({
+              implementer_id: request.implementerId,
+              node_id: request.nodeId,
+              source_wallet_id: request.sourceWalletId,
+              destination_id: request.destinationId,
+              amount_zkz: request.amountZkz,
+              client_reference: clientReference,
+              spawned_from_operation_id: spawned,
+            }),
+          );
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 export interface MoveCreateConfig {
   readonly generateId?: () => string;
   readonly now?: () => number;
+  /**
+   * Operator policy gating NODE_VERIFIED (ZTR-1301). When omitted, refuse-all
+   * (fail closed) — NODE_VERIFIED is never silently admitted.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
 }
 
 export async function createInternalMove(
@@ -414,6 +452,7 @@ export async function createInternalMove(
 ): Promise<MoveCreateOutcome> {
   const generateId = config.generateId ?? (() => randomUUID());
   const now = config.now ?? (() => Date.now());
+  const policy = config.allowNodeVerifiedPolicy ?? refuseAllNodeVerifiedPolicy();
 
   // Step 1 — validate, then resolve idempotency before any eligibility/busy gate so a
   // same-hash replay never loses to wallet_busy or a later-ineligible wallet (r1/r4).
@@ -422,7 +461,10 @@ export async function createInternalMove(
     return { outcome: "REJECTED", code: validation.code, detail: validation.detail };
   }
 
+  const verificationMode = resolveVerificationMode(request.verificationMode);
   const requestSha256 = canonicalMoveRequestSha256(request);
+  // Idempotency before mode gate so same-hash replay still works if policy later
+  // disables NODE_VERIFIED; different mode remains a payload conflict (AC3).
   const existing = await store.findByIdempotency(
     request.implementerId,
     MOVE_OPERATION_KIND,
@@ -439,6 +481,19 @@ export async function createInternalMove(
       responseStatus: 201,
       responseBody: body,
     };
+  }
+
+  // New admit only: fail-closed NODE_VERIFIED gate (never silent-downgrade).
+  if (verificationMode === "NODE_VERIFIED") {
+    const policyDoc = await policy.getPolicy();
+    const modeAdmit = admitVerificationMode(
+      verificationMode,
+      policyDoc,
+      request.implementerId,
+    );
+    if (!modeAdmit.ok) {
+      return { outcome: "REJECTED", code: modeAdmit.code };
+    }
   }
 
   // Step 2 — source must be a node-generated wallet controlled by this node.
@@ -520,6 +575,7 @@ export async function createInternalMove(
     idempotencyKey: request.idempotencyKey,
     requestSha256,
     createdAt: now(),
+    verificationMode,
   };
 
   // Step 4 — one DB-TX creates the operation, lease group (or join), event, and
@@ -594,6 +650,7 @@ export interface InternalMoveCreateResponse {
     readonly updated_at: string;
     readonly terminal_at: string | null;
     readonly verification_material_available_until: string | null;
+    readonly verification_mode: VerificationMode;
   };
   readonly source_wallet_id: string;
   readonly destination_id: string;
@@ -630,6 +687,10 @@ export function buildInternalMoveResponse(
     "updatedAt" in operation
       ? new Date(operation.updatedAt).toISOString()
       : createdAt;
+  const verificationMode =
+    "verificationMode" in operation && operation.verificationMode !== undefined
+      ? operation.verificationMode
+      : DEFAULT_VERIFICATION_MODE;
   return {
     operation: {
       operation_id: operation.operationId,
@@ -643,6 +704,7 @@ export function buildInternalMoveResponse(
       updated_at: updatedAt,
       terminal_at: null,
       verification_material_available_until: null,
+      verification_mode: verificationMode,
     },
     source_wallet_id: operation.sourceWalletId,
     destination_id: operation.destinationId,

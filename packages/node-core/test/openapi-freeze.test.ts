@@ -314,6 +314,7 @@ describe("field inventory ↔ Zod / parity", () => {
       "anchor",
       "expires_in_seconds",
       "after_landing",
+      "verification_mode",
     ]);
   });
 });

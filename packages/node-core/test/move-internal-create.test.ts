@@ -152,6 +152,7 @@ class ConstraintStore implements MoveCreateStore {
       leaseGroupId,
       idempotencyKey: op.idempotencyKey,
       requestSha256: op.requestSha256,
+      verificationMode: op.verificationMode,
       createdAt: op.createdAt,
       updatedAt: op.createdAt,
     });
@@ -630,6 +631,7 @@ describe("createInternalMove — admission", () => {
         updated_at: new Date(FIXED_NOW).toISOString(),
         terminal_at: null,
         verification_material_available_until: null,
+        verification_mode: "INDEPENDENT",
       },
       source_wallet_id: SOURCE_WALLET_ID,
       destination_id: DESTINATION_ID,

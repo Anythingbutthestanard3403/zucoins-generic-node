@@ -55,6 +55,10 @@ export const API_ERROR_CODES = [
   // Funding wallet W cannot cover external-send amount (ZTR-1289). Stable for
   // Zukaz claim failure mapping — not a transient 503.
   { code: "insufficient_funding_wallet", http: 422 },
+  // NODE_VERIFIED requested but operator policy refuses the implementer (ZTR-1301).
+  { code: "verification_mode_not_allowed", http: 422 },
+  // armed / verification-complete against a mode that does not admit that path (ZTR-1302+).
+  { code: "verification_mode_mismatch", http: 409 },
   // 429 — rate limit
   { code: "rate_limited", http: 429 },
   // 503 — bounded queue / signer unavailable
@@ -98,6 +102,10 @@ const DIAGNOSTIC_MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
   protocol_predicate_failed: "The request fails a custody or protocol predicate.",
   insufficient_funding_wallet:
     "The integration funding wallet cannot cover the requested amount.",
+  verification_mode_not_allowed:
+    "NODE_VERIFIED was requested at admission but operator policy does not allow it for the calling implementer.",
+  verification_mode_mismatch:
+    "armed or verification-complete was called on an operation whose verification_mode does not admit that path.",
   rate_limited: "The principal rate limit is exceeded.",
   receive_queue_full: "The receive bounded queue is at capacity.",
   signer_unavailable: "The signer leadership is currently unavailable.",

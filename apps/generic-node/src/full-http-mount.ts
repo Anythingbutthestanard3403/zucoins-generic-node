@@ -919,6 +919,8 @@ export function createProductionRouteSurface(
           gatewayUrls: config.gatewayUrls,
           exchange: config.gatewayExchange,
           moneyPathStatementTimeoutMs,
+          // Recovery confirm-read (RELEASE_EXPIRED_RECEIVE) needs post-expiry DUPLICATE rows.
+          appendExactRepeat: true,
         })
       : undefined;
 

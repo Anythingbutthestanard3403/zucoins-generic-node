@@ -1071,8 +1071,10 @@ describe("real T0 OBSERVE (offline)", () => {
     expect(main).toMatch(/readiness smoke: intentionally non-durable/);
   });
 
-  // ZTR-1275 census: only createSqlFreshHeadReader may set appendExactRepeat: true.
-  it("gate: only sql-fresh-head-reader sets appendExactRepeat true", () => {
+  // ZTR-1275/1282 census: appendExactRepeat:true only at expiry/recovery confirm-read
+  // wiring (start-money-workers + full-http-mount) and the reader option forwarder.
+  // Landing / MOVE / send-completion must not hardcode true.
+  it("gate: appendExactRepeat true only on confirm-read wiring", () => {
     const moneyWorkersDir = join(here, "../src/money-workers");
     const files = readdirSync(moneyWorkersDir).filter((f) => f.endsWith(".ts"));
     const flagSites: string[] = [];
@@ -1082,7 +1084,9 @@ describe("real T0 OBSERVE (offline)", () => {
         flagSites.push(file);
       }
     }
-    expect(flagSites).toEqual(["sql-fresh-head-reader.ts"]);
+    expect(flagSites.sort()).toEqual(
+      ["sql-fresh-head-reader.ts", "start-money-workers.ts"].sort(),
+    );
     // Persistence only forwards the option; it must not hardcode true.
     const persistence = readFileSync(
       join(moneyWorkersDir, "sql-observation-persistence.ts"),
@@ -1090,9 +1094,18 @@ describe("real T0 OBSERVE (offline)", () => {
     );
     expect(persistence).toMatch(/appendExactRepeat\?/);
     expect(persistence).not.toMatch(/appendExactRepeat\s*:\s*true/);
-    // Fresh-head verified path must pass the flag.
+    // Reader must be option-gated, not unconditionally true.
     const freshHead = readFileSync(join(moneyWorkersDir, "sql-fresh-head-reader.ts"), "utf8");
-    expect(freshHead).toMatch(/appendExactRepeat:\s*true/);
+    expect(freshHead).toMatch(/deps\.appendExactRepeat\s*===\s*true/);
+    expect(freshHead).not.toMatch(/appendExactRepeat:\s*true\s*,/);
+    // Landing + MOVE + send-completion create readers without the flag.
+    for (const file of ["move-advanced-ports.ts"] as const) {
+      const src = readFileSync(join(moneyWorkersDir, file), "utf8");
+      expect(src).not.toMatch(/appendExactRepeat\s*:\s*true/);
+    }
+    // Recovery mount opts in.
+    const mount = readFileSync(join(here, "../src/full-http-mount.ts"), "utf8");
+    expect(mount).toMatch(/appendExactRepeat:\s*true/);
   });
 
   it("parse-result MALFORMED_ENVELOPE applies retain/alert audit action", async () => {

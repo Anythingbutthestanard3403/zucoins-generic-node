@@ -23,7 +23,7 @@ import type {
   WalletKeyOrigin,
   WalletState,
 } from "../custody/index.ts";
-import type { OperationKind } from "../operations/index.ts";
+import type { OperationKind, VerificationMode } from "../operations/index.ts";
 
 /**
  * Summary row served by the operations list read. `destination_address` is part of the summary
@@ -52,6 +52,11 @@ export interface OperationInventoryListItem {
    * resolved one yet.
    */
   readonly destination_address: string | null;
+  /**
+   * Admission-time verification mode (ZTR-1300/1305). Always present on post-1300 rows;
+   * INDEPENDENT is the schema default.
+   */
+  readonly verification_mode: VerificationMode;
 }
 
 /** Point read — the summary row plus the fields only a single-operation view needs. */
@@ -81,6 +86,7 @@ export const OPERATION_INVENTORY_LIST_FIELDS = [
   "terminal_at",
   "expiry_unix_time_secs",
   "destination_address",
+  "verification_mode",
 ] as const;
 
 /** Response field allowlist for the point read — the summary keys plus the detail-only ones. */

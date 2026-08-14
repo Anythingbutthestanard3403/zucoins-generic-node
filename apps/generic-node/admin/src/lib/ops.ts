@@ -18,6 +18,8 @@ export interface NeedsAttentionListItem {
   status: string;
   attention_required: boolean;
   attention_reason: string | null;
+  /** Admission-time verification mode (ZTR-1305). */
+  verification_mode?: "INDEPENDENT" | "NODE_VERIFIED";
   classification: RecoveryClassification | string;
   classification_rationale: string;
   severity: "P0" | "P1" | "P2";

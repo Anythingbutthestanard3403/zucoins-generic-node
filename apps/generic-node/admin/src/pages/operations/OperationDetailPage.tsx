@@ -6,6 +6,7 @@ import { RecoveryActions } from "../../components/RecoveryActions.js";
 import { CopyButton } from "../../components/CopyButton.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { VerificationModeBadge } from "../../components/VerificationModeBadge.js";
 import { ApiError, toApiFailureDetail } from "../../lib/api.js";
 import { relativeTime } from "../../lib/format.js";
 import {
@@ -291,6 +292,8 @@ export function OperationDetailPage() {
     classification === "LANDED_VERIFIED" || /_LANDED$/i.test(status);
   const evidence = recovery?.evidence_manifest ?? [];
   const leases = recovery?.held_leases ?? [];
+  const verificationMode =
+    recovery?.verification_mode ?? inventory?.verification_mode ?? "INDEPENDENT";
 
   return (
     <div className="page">
@@ -302,6 +305,7 @@ export function OperationDetailPage() {
         <div className="toolbar">
           <StatusTag status={status} />
           {classification ? <StatusTag status={classification} /> : null}
+          <VerificationModeBadge mode={verificationMode} />
           <CopyButton value={id} label="Copy id" />
           {isSend ? (
             <Link className="mini-btn" to={`/transfers/${encodeURIComponent(id)}`}>
@@ -403,6 +407,9 @@ export function OperationDetailPage() {
         <DetailItem label="Type">{operationKindLabel(opType)} <span className="quiet mono" style={{ fontSize: 11 }}>{opType}</span></DetailItem>
         <DetailItem label="Status">
           <StatusTag status={status} />
+        </DetailItem>
+        <DetailItem label="Verification mode">
+          <VerificationModeBadge mode={verificationMode} />
         </DetailItem>
         <DetailItem label="Amount">
           <span className="money">{amount}</span> ZKZ

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { VerificationModeBadge } from "../../components/VerificationModeBadge.js";
 import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import {
   IconArrow, IconHalt, IconMark, IconRefresh,
@@ -548,7 +549,7 @@ export function OverviewPage() {
                 <div className="attn" key={a.operation_id}>
                   <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
                   <DivBody
-                    title={`${operationKindLabel(a.operation_type)} · ${statusLabel(a.status)}`}
+                    title={`${operationKindLabel(a.operation_type)} · ${statusLabel(a.status)} · ${a.verification_mode === "NODE_VERIFIED" ? "Node-verified" : "Independent"}`}
                     detail={`${a.operation_id}${a.attention_reason ? ` · ${statusLabel(a.attention_reason)}` : ""} · ${a.operation_type}`}
                   />
                   <Link
@@ -685,7 +686,10 @@ export function OverviewPage() {
                       </td>
                       <td className="mono">{target}</td>
                       <td className="money">{amount}</td>
-                      <td><StatusTag status={row.status} /></td>
+                      <td>
+                        <StatusTag status={row.status} />{" "}
+                        <VerificationModeBadge mode={row.verification_mode} />
+                      </td>
                       <td className="quiet">{row.attention_since ?? "—"}</td>
                       <td><Link to={detailTo} className="linkish">Open</Link></td>
                     </tr>

@@ -115,6 +115,11 @@ import {
   type AutoApprovePolicyPort,
   type AutoApproveRule,
   type AutoApprovePolicyDocument,
+  parseAllowNodeVerifiedPolicyStructure,
+  serializeAllowNodeVerifiedPolicyDocument,
+  type AllowNodeVerifiedDisabledReason,
+  type AllowNodeVerifiedPolicyPort,
+  type AllowNodeVerifiedImplementerEntry,
   type ApprovalChallengeIssuerStore,
   type SecondDeviceCeremonyStore,
   type OperatorPushSubscriptionStore,
@@ -676,6 +681,49 @@ function parseAutoApprovePolicyBody(
       documentJson: canonical,
       enabled: structured.enabled,
       rules: structured.rules,
+    },
+  };
+}
+
+/**
+ * POST /admin/v1/allow-node-verified-policy body — whole-document replace (ZTR-1305).
+ * Fail-closed structure parse; invalid documents never stored.
+ */
+function parseAllowNodeVerifiedPolicyBody(
+  raw: unknown,
+): ParseOk<{
+  documentJson: string;
+  enabled: boolean;
+  implementers: readonly AllowNodeVerifiedImplementerEntry[];
+}> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  let documentJson: string;
+  try {
+    documentJson = JSON.stringify(raw);
+  } catch {
+    return { ok: false, status: 400, code: "invalid_json", message: "body is not JSON-serialisable" };
+  }
+  const structured = parseAllowNodeVerifiedPolicyStructure(documentJson);
+  if (!structured.ok) {
+    return {
+      ok: false,
+      status: 422,
+      code: "validation_error",
+      message: "allow-node-verified policy document is invalid",
+    };
+  }
+  const canonical = serializeAllowNodeVerifiedPolicyDocument(
+    structured.implementers,
+    structured.enabled,
+  );
+  return {
+    ok: true,
+    body: {
+      documentJson: canonical,
+      enabled: structured.enabled,
+      implementers: structured.implementers,
     },
   };
 }
@@ -1563,6 +1611,11 @@ export interface AdminRouteDeps {
    */
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
   /**
+   * NODE_VERIFIED admission policy (ZTR-1305). When omitted, GET surfaces
+   * disabled/absent and POST fails closed (503). Fail-closed on every read error.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
+  /**
    * Optional window-spend reader used by GET auto-approve-policy enrichment.
    * Production wires queryWindowSpend over the custody pool. When omitted,
    * spend displays as "0" (fail-soft display; never invents history).
@@ -1800,6 +1853,11 @@ export interface AdminMutationTxPorts {
    * so node_settings + audit_log commit/roll back with the admin mutation TX.
    */
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  /**
+   * TX-scoped allow-node-verified policy (ZTR-1305). Mutation writes MUST use
+   * this port so node_settings + audit_log commit/roll back with the admin TX.
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   /**
    * TX-scoped wallet money-capability store (ZTR-1269). Mutation writes MUST use
    * this port so wallets CAS + audit_log commit/roll back with the admin TX.
@@ -2829,6 +2887,53 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // --- Allow NODE_VERIFIED policy (ZTR-1305) ---
+    if (verb === "GET" && pathname === "/admin/v1/allow-node-verified-policy") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      const server_time = new Date(nowMs()).toISOString();
+      if (deps.allowNodeVerifiedPolicy === undefined) {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: "absent" satisfies AllowNodeVerifiedDisabledReason,
+          implementers: [],
+          server_time,
+        });
+      }
+      let policy;
+      try {
+        policy = await deps.allowNodeVerifiedPolicy.getPolicy();
+      } catch {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: "unreadable" satisfies AllowNodeVerifiedDisabledReason,
+          implementers: [],
+          server_time,
+        });
+      }
+      const implementers =
+        policy.status === "enabled"
+          ? policy.implementers
+          : (policy.implementers ?? []);
+      if (policy.status === "disabled") {
+        return ok(200, {
+          status: "disabled",
+          disabledReason: policy.disabledReason,
+          implementers,
+          server_time,
+        });
+      }
+      return ok(200, {
+        status: "enabled",
+        implementers,
+        server_time,
+      });
+    }
+
     // --- Additive device-signature policy (doc 07 §17.10 / ZTR-1143) ---
     if (verb === "GET" && pathname === "/admin/v1/device-signature-policy") {
       const gate = await gateMoneyMutation(sessions, authReq, {
@@ -3756,6 +3861,93 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                 short: copy.short,
                 long: copy.long,
                 approve_hint: copy.approve_hint,
+              };
+            },
+          });
+          if (!guarded.ok) {
+            return {
+              outcome: "abort" as const,
+              response: fail(guarded.status, guarded.code, guarded.message, requestId),
+            };
+          }
+          return {
+            outcome: "commit" as const,
+            status: 200,
+            responseBody: guarded.result,
+          };
+        },
+      });
+    }
+
+    // POST /admin/v1/allow-node-verified-policy — whole-document replace (fresh TOTP + audit). ZTR-1305.
+    if (verb === "POST" && pathname === "/admin/v1/allow-node-verified-policy") {
+      if (
+        deps.allowNodeVerifiedPolicy === undefined ||
+        deps.allowNodeVerifiedPolicy.setPolicy === undefined
+      ) {
+        return fail(503, "service_unavailable", "allow-node-verified policy not writable", requestId);
+      }
+      const routeId = "admin_allow_node_verified_policy";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const policyPort = ports.allowNodeVerifiedPolicy ?? deps.allowNodeVerifiedPolicy;
+          if (policyPort === undefined || policyPort.setPolicy === undefined) {
+            return {
+              outcome: "abort" as const,
+              response: fail(
+                503,
+                "service_unavailable",
+                "transactional allow-node-verified policy not wired",
+                requestId,
+              ),
+            };
+          }
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseAllowNodeVerifiedPolicyBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user }) => {
+              await policyPort.setPolicy!(body.documentJson, {
+                actorId: user.id,
+                nodeId,
+              });
+              const server_time = new Date(nowMs()).toISOString();
+              if (!body.enabled) {
+                return {
+                  status: "disabled" as const,
+                  disabledReason: "off" as const,
+                  implementers: body.implementers,
+                  server_time,
+                };
+              }
+              return {
+                status: "enabled" as const,
+                implementers: body.implementers,
+                server_time,
               };
             },
           });
@@ -6540,6 +6732,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
@@ -6596,6 +6789,9 @@ export function createFailClosedAdminRouteDeps(base: {
     breakGlassStore: base.breakGlassStore ?? null,
     ...(base.dualControlPolicy !== undefined ? { dualControlPolicy: base.dualControlPolicy } : {}),
     ...(base.autoApprovePolicy !== undefined ? { autoApprovePolicy: base.autoApprovePolicy } : {}),
+    ...(base.allowNodeVerifiedPolicy !== undefined
+      ? { allowNodeVerifiedPolicy: base.allowNodeVerifiedPolicy }
+      : {}),
     ...(base.queryAutoApproveWindowSpend !== undefined
       ? { queryAutoApproveWindowSpend: base.queryAutoApproveWindowSpend }
       : {}),
@@ -6677,6 +6873,7 @@ export function createLiveAdminRouteDeps(
     readonly breakGlassStore?: BreakGlassAuthorityStore | null;
   readonly dualControlPolicy?: DualControlPolicyPort;
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;

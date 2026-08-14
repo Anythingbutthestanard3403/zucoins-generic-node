@@ -134,6 +134,12 @@ export interface RecoveryFacts {
    * Null when attention is clear or the column was never written.
    */
   readonly attentionDetail: string | null;
+  /**
+   * Admission-time verification mode (ZTR-1305). Operator attention + recovery
+   * surfaces render a mode badge from this field. Defaults to INDEPENDENT when
+   * a store omits it (pre-1300 fixtures).
+   */
+  readonly verificationMode?: "INDEPENDENT" | "NODE_VERIFIED";
   readonly rowVersion: number;
   /** Max held lease epoch across active leases; null when none held. */
   readonly leaseEpoch: number | null;

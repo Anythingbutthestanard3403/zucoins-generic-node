@@ -144,6 +144,7 @@ const OPERATION_RECORD: Readonly<Record<string, unknown>> = {
   verification_verdict: "PENDING",
   implementer_id: "implementer-e2e-1",
   client_reference: null,
+  verification_mode: "INDEPENDENT",
 };
 
 /**
@@ -202,6 +203,7 @@ const RECOVERY = {
   status: "CREATED",
   attention_required: false,
   attention_reason: null,
+  verification_mode: "INDEPENDENT",
   classification: "NONE",
   classification_rationale: "No recovery action required.",
   permitted_actions: [],
@@ -431,6 +433,14 @@ export async function registerAdminApiRoutes(
     if (key === `GET /admin/v1/operations/${E2E_OPERATION_ID}/recovery`) return json(RECOVERY);
     if (key === "GET /admin/v1/readiness") return json(READINESS);
     if (key === "GET /admin/v1/auto-approve-policy") return json(AUTO_APPROVE_POLICY);
+    if (key === "GET /admin/v1/allow-node-verified-policy") {
+      return json({
+        status: "disabled",
+        disabledReason: "absent",
+        implementers: [],
+        server_time: "2026-07-30T00:00:00.000Z",
+      });
+    }
     if (key === "GET /admin/v1/dual-control-policy") return json(DUAL_CONTROL_POLICY);
     if (key === "GET /admin/v1/vault-master") return json(VAULT_MASTER);
     if (key === "GET /admin/v1/destinations") return json(DESTINATIONS_LIST);

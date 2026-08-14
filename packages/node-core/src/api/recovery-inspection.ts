@@ -64,6 +64,8 @@ export interface NeedsAttentionListItem {
   readonly status: string;
   readonly attention_required: boolean;
   readonly attention_reason: string | null;
+  /** Admission-time verification mode (ZTR-1305). */
+  readonly verification_mode: "INDEPENDENT" | "NODE_VERIFIED";
   readonly classification: RecoveryClassification;
   readonly classification_rationale: string;
   readonly severity: "P0" | "P1" | "P2";
@@ -112,6 +114,8 @@ export interface RecoveryDetailResponse {
   readonly attention_reason: string | null;
   /** operations.attention_detail — structured evidence gap text (ZTR-1279). */
   readonly attention_detail: string | null;
+  /** Admission-time verification mode (ZTR-1305). */
+  readonly verification_mode: "INDEPENDENT" | "NODE_VERIFIED";
   readonly classification: RecoveryClassification;
   readonly classification_rationale: string;
   readonly permitted_actions: readonly OperatorRecoveryAction[];
@@ -184,6 +188,7 @@ function projectListItem(facts: RecoveryFacts): NeedsAttentionListItem {
     status: facts.status,
     attention_required: facts.attentionRequired,
     attention_reason: facts.attentionReason,
+    verification_mode: facts.verificationMode ?? "INDEPENDENT",
     classification: inspected.classification,
     classification_rationale: inspected.classificationRationale,
     severity: severityFor(inspected.classification),
@@ -271,6 +276,7 @@ export async function handleGetRecovery(
       attention_required: facts.attentionRequired,
       attention_reason: facts.attentionReason,
       attention_detail: facts.attentionDetail,
+      verification_mode: facts.verificationMode ?? "INDEPENDENT",
       classification: inspected.classification,
       classification_rationale: inspected.classificationRationale,
       permitted_actions: inspected.permittedActions,

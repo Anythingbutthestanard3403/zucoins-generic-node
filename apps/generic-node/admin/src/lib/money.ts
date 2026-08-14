@@ -73,6 +73,8 @@ export interface RecoveryDetail {
   attention_reason: string | null;
   /** Structured evidence-gap JSON from operations.attention_detail (ZTR-1279). */
   attention_detail?: string | null;
+  /** Admission-time verification mode (ZTR-1305). */
+  verification_mode?: "INDEPENDENT" | "NODE_VERIFIED";
   classification: string;
   classification_rationale: string;
   permitted_actions: readonly string[];
@@ -2160,6 +2162,44 @@ export async function postAutoApprovePolicy(
   totp: string,
 ): Promise<AutoApprovePolicyResponse> {
   return api<AutoApprovePolicyResponse>("/auto-approve-policy", {
+    method: "POST",
+    body: JSON.stringify(body),
+    totp,
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+// --- Allow NODE_VERIFIED policy (ZTR-1305) ---
+
+export interface AllowNodeVerifiedImplementerView {
+  readonly implementer_id: string;
+  readonly enabled: boolean;
+}
+
+export interface AllowNodeVerifiedPolicyResponse {
+  readonly status: "enabled" | "disabled";
+  readonly disabledReason?: "absent" | "unreadable" | "invalid" | "off";
+  readonly implementers: readonly AllowNodeVerifiedImplementerView[];
+  readonly server_time: string;
+}
+
+export interface AllowNodeVerifiedPolicyWriteBody {
+  readonly enabled: boolean;
+  readonly implementers: readonly {
+    readonly implementer_id: string;
+    readonly enabled: boolean;
+  }[];
+}
+
+export async function fetchAllowNodeVerifiedPolicy(): Promise<AllowNodeVerifiedPolicyResponse> {
+  return api<AllowNodeVerifiedPolicyResponse>("/allow-node-verified-policy");
+}
+
+export async function postAllowNodeVerifiedPolicy(
+  body: AllowNodeVerifiedPolicyWriteBody,
+  totp: string,
+): Promise<AllowNodeVerifiedPolicyResponse> {
+  return api<AllowNodeVerifiedPolicyResponse>("/allow-node-verified-policy", {
     method: "POST",
     body: JSON.stringify(body),
     totp,

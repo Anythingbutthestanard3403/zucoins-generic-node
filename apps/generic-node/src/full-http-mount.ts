@@ -45,6 +45,7 @@ import {
   LIVE_OPERATOR_PARK_ROUTES,
   LIVE_IMPLEMENTER_ROUTES,
   LIVE_AUTO_APPROVE_POLICY_ROUTES,
+  LIVE_ALLOW_NODE_VERIFIED_POLICY_ROUTES,
   LIVE_INTEGRATION_REQUEST_ROUTES,
   createSqlImplementerRegistry,
   createSqlDefaultFundingWallet,
@@ -106,6 +107,7 @@ import {
   createSqlDeviceSignaturePolicy,
   createSqlDualControlPolicy,
   createSqlAutoApprovePolicy,
+  createSqlAllowNodeVerifiedPolicy,
   createSqlWalletMoneyCapabilityStore,
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
@@ -113,6 +115,7 @@ import {
   type DualControlMode,
   type DualControlPolicyPort,
   type AutoApprovePolicyPort,
+  type AllowNodeVerifiedPolicyPort,
   type DeviceSignaturePolicyPort,
   type WalletMoneyCapabilityStore,
   type DefaultFundingWalletPort,
@@ -275,6 +278,7 @@ export {
   LIVE_OPERATOR_PARK_ROUTES,
   LIVE_IMPLEMENTER_ROUTES,
   LIVE_AUTO_APPROVE_POLICY_ROUTES,
+  LIVE_ALLOW_NODE_VERIFIED_POLICY_ROUTES,
   LIVE_INTEGRATION_REQUEST_ROUTES,
   requiredProductionRouteKeys,
   routeKeyOf,
@@ -421,6 +425,12 @@ export interface ProductionSurfaceConfig {
    */
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
   /**
+   * Allow NODE_VERIFIED policy port (ZTR-1305). Production wires SQL over
+   * node_settings; tests may inject InMemoryAllowNodeVerifiedPolicy. When
+   * omitted, mount builds a SQL port from config.pool (fail closed).
+   */
+  readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
+  /**
    * Transaction-local money-path statement_timeout for recovery / attention
    * custody TXs (ZTR-1156). Defaults to MONEY_PATH_STATEMENT_TIMEOUT_MS_DEFAULT
    * inside the store factories when omitted.
@@ -501,6 +511,7 @@ export interface ProductionRouteSurface {
   readonly liveHaltRoutes: typeof LIVE_HALT_ROUTES;
   readonly liveImplementerRoutes: typeof LIVE_IMPLEMENTER_ROUTES;
   readonly liveAutoApprovePolicyRoutes: typeof LIVE_AUTO_APPROVE_POLICY_ROUTES;
+  readonly liveAllowNodeVerifiedPolicyRoutes: typeof LIVE_ALLOW_NODE_VERIFIED_POLICY_ROUTES;
   readonly liveIntegrationRequestRoutes: typeof LIVE_INTEGRATION_REQUEST_ROUTES;
   /** @deprecated prefer liveHaltRoutes; kept for prior greps. */
   readonly deferredHalt: typeof DEFERRED_HALT_ROUTE;
@@ -845,6 +856,9 @@ export function createProductionRouteSurface(
   // Auto-approve policy (ZTR-1237): durable node_settings row, fail closed.
   const autoApprovePolicy: AutoApprovePolicyPort =
     config.autoApprovePolicy ?? createSqlAutoApprovePolicy(config.pool);
+  // Allow NODE_VERIFIED policy (ZTR-1305): durable node_settings row, fail closed.
+  const allowNodeVerifiedPolicy: AllowNodeVerifiedPolicyPort =
+    config.allowNodeVerifiedPolicy ?? createSqlAllowNodeVerifiedPolicy(config.pool);
   const queryAutoApproveWindowSpend = async (
     implementerId: string,
     windowHours: number,
@@ -963,6 +977,7 @@ export function createProductionRouteSurface(
     dualControlPolicy,
     deviceSignaturePolicy,
     autoApprovePolicy,
+    allowNodeVerifiedPolicy,
     queryAutoApproveWindowSpend,
     challengeIssuerStore,
     secondDeviceEnrol: {
@@ -1053,6 +1068,7 @@ export function createProductionRouteSurface(
         deviceSignaturePolicy: txDeviceSignaturePolicy,
         dualControlPolicy: txDualControlPolicy,
         autoApprovePolicy: createSqlAutoApprovePolicy(client),
+        allowNodeVerifiedPolicy: createSqlAllowNodeVerifiedPolicy(client),
         walletMoneyCapabilityStore: txWalletMoneyCapability,
       };
     },
@@ -1248,6 +1264,7 @@ export function createProductionRouteSurface(
     liveHaltRoutes: LIVE_HALT_ROUTES,
     liveImplementerRoutes: LIVE_IMPLEMENTER_ROUTES,
     liveAutoApprovePolicyRoutes: LIVE_AUTO_APPROVE_POLICY_ROUTES,
+    liveAllowNodeVerifiedPolicyRoutes: LIVE_ALLOW_NODE_VERIFIED_POLICY_ROUTES,
     liveIntegrationRequestRoutes: LIVE_INTEGRATION_REQUEST_ROUTES,
     deferredHalt: DEFERRED_HALT_ROUTE,
     liveAttentionRetractionRoutes: LIVE_ATTENTION_RETRACTION_ROUTES,

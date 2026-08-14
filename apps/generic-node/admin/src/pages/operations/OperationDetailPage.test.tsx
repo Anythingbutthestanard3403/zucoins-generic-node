@@ -30,6 +30,7 @@ const inventory = {
   verification_verdict: "PENDING",
   implementer_id: "28fe27f4-9c65-4279-ac2f-18a36aac2994",
   client_reference: null,
+  verification_mode: "INDEPENDENT",
 };
 
 const recovery = {
@@ -38,6 +39,7 @@ const recovery = {
   status: "RECEIVE_LANDED",
   attention_required: false,
   attention_reason: null,
+  verification_mode: "INDEPENDENT",
   classification: "LANDED_VERIFIED",
   classification_rationale: "landing_exact",
   permitted_actions: [] as string[],

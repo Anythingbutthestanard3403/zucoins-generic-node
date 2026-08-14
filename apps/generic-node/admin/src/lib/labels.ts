@@ -48,6 +48,34 @@ export function moneyModeHelp(mode: string | null | undefined): string {
   return MONEY_MODE_LABELS[key]?.help ?? "Unrecognised money mode.";
 }
 
+/**
+ * Per-operation verification mode (ZTR-1305) — short chip + help copy.
+ */
+export const VERIFICATION_MODE_LABELS = {
+  INDEPENDENT: {
+    short: "Independent",
+    help: "Consumer must arm and complete verification before the wallet lease releases.",
+  },
+  NODE_VERIFIED: {
+    short: "Node-verified",
+    help: "Node landing proof closes custody; no consumer verification-complete. Requires ops.allow_node_verified.",
+  },
+} as const;
+
+export type VerificationModeKey = keyof typeof VERIFICATION_MODE_LABELS;
+
+export function verificationModeLabel(mode: string | null | undefined): string {
+  if (mode == null || mode === "") return "Independent";
+  const key = mode.trim().toUpperCase() as VerificationModeKey;
+  return VERIFICATION_MODE_LABELS[key]?.short ?? mode;
+}
+
+export function verificationModeHelp(mode: string | null | undefined): string {
+  if (mode == null || mode === "") return "Mode defaults to independent when omitted.";
+  const key = mode.trim().toUpperCase() as VerificationModeKey;
+  return VERIFICATION_MODE_LABELS[key]?.help ?? "Unrecognised verification mode.";
+}
+
 export type OperationKindKey = keyof typeof OPERATION_KIND_LABELS;
 
 /** Status / formation / attention / inventory codes → operator text. */
@@ -95,6 +123,11 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = {
   SIGNING_CLAIMED: "Signing in progress",
   PARTIAL_PERSISTED: "Partial formation persisted",
   PARTIAL_DELIVERED: "Partial formation delivered",
+
+  // Verification mode (ZTR-1305) — also chip-labelled via VERIFICATION_MODE_LABELS
+  INDEPENDENT: "Independent",
+  NODE_VERIFIED: "Node-verified",
+  RELEASED_NODE_VERIFIED: "Released (node-verified)",
 
   // After-landing policy
   HOLD: "Hold in receive wallet",

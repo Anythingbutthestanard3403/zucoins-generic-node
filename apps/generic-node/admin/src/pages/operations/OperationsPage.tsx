@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { ReleaseCountdown } from "../../components/ReleaseCountdown.js";
 import { StatusTag } from "../../components/StatusTag.js";
+import { VerificationModeBadge } from "../../components/VerificationModeBadge.js";
 import { RecoveryActions } from "../../components/RecoveryActions.js";
 import {
   canRetractAttention,
@@ -288,7 +289,9 @@ export function OperationsPage() {
                       <div className={`type-ic ${a.severity === "P0" ? "danger" : ""}`} title={a.severity}>{severityShort(a.severity)}</div>
                       <div className="body-t">
                         <div className="t">
-                          {operationKindLabel(a.operation_type)} · {statusLabel(a.status)} <StatusTag status={a.classification} />
+                          {operationKindLabel(a.operation_type)} · {statusLabel(a.status)}{" "}
+                          <StatusTag status={a.classification} />{" "}
+                          <VerificationModeBadge mode={a.verification_mode} />
                         </div>
                         <div className="d">
                           <code>{a.operation_id}</code>

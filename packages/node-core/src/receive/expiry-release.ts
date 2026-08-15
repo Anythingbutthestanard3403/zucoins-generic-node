@@ -1378,8 +1378,11 @@ export class SqlReceiveExpiryReleaseService {
         freshObservedAtMs >= expiresAtMs + safetyMarginMs &&
         freshObservedAtMs <= nowMs &&
         nowMs - freshObservedAtMs <= safetyMarginMs;
+      // ZTR-1274 r2: freshness is an append-only observation row, never T0 and
+      // never the cursor clock. Confirm-read appends a DUPLICATE row outside this TX.
       const freshExact =
         observations !== undefined &&
+        observations.fresh_id !== observations.t0_id &&
         observations.t0_wallet_id === lease.wallet_id &&
         observations.fresh_wallet_id === lease.wallet_id &&
         observations.t0_wallet_public_key ===
@@ -1390,7 +1393,8 @@ export class SqlReceiveExpiryReleaseService {
         observations.fresh_observer_domain === "NODE" &&
         verifiedObservation(observations) &&
         exactProjection(observations) &&
-        freshWithinWindow;
+        freshWithinWindow &&
+        safeUnchangedRelationship(observations);
       const anomalyOrLineage =
         observations === undefined ||
         asBool(observations.anomaly_exists) ||

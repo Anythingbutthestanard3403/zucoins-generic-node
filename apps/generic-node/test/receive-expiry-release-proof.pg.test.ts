@@ -25,6 +25,7 @@ import {
   InMemoryVaultAccessAuditLog,
   assertCanonicalGetTransactionActionData,
   migrateLeaseFoundation,
+  SqlReceiveExpiryReleaseService,
   VaultSqlStore,
   deriveRootKey,
   ensureActiveNodeSigningKey,
@@ -851,6 +852,195 @@ describe.skipIf(!PG_AVAILABLE)(
         } finally {
           handle.stop();
         }
+      },
+      PG_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      "persist T0 → persist identical post-expiry appendExactRepeat → expire names DUPLICATE, not T0 (ZTR-1274 r2)",
+      async () => {
+        // Unique pubkey so persistSqlObservation's public_key lookup cannot bind
+        // T0/fresh to a sibling test's wallet (wallets are UNIQUE per node, not globally).
+        const uniqueKey = publicKeyFromSeed(randomBytes(32));
+        const seeded = await seedAssignedExpiredReceive(pool, {
+          publicKey: uniqueKey,
+          t0HeadBytes: genesisEnvelopeBytes(),
+        });
+        const headBytes = genesisEnvelopeBytes();
+
+        const flagOffReader = createSqlFreshHeadReader({
+          pool,
+          nodeId: seeded.nodeId,
+          gatewayUrls: [GATEWAY_A],
+          exchange: scriptedExchange({ respond: () => headBytes }),
+        });
+        const suppressed = await flagOffReader(seeded.publicKey);
+        expect(suppressed.observationId).toBe(seeded.t0ObservationId);
+
+        const confirmRead = createSqlFreshHeadReader({
+          pool,
+          nodeId: seeded.nodeId,
+          gatewayUrls: [GATEWAY_A],
+          exchange: scriptedExchange({ respond: () => headBytes }),
+          appendExactRepeat: true,
+        });
+        const dup = await confirmRead(seeded.publicKey);
+        expect(dup.relationship).toBe("DUPLICATE");
+        expect(dup.observationId).not.toBe(seeded.t0ObservationId);
+
+        const service = new SqlReceiveExpiryReleaseService({
+          withTransaction: async (fn) => {
+            const client = await pool.connect();
+            try {
+              await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+              const tx = {
+                query: async <R>(text: string, params?: readonly unknown[]) => {
+                  const result = await client.query(text, params as never);
+                  return { rows: result.rows as R[], rowCount: result.rowCount };
+                },
+              };
+              const out = await fn(tx);
+              await client.query("COMMIT");
+              return out;
+            } catch (err) {
+              try {
+                await client.query("ROLLBACK");
+              } catch {
+                /* original */
+              }
+              throw err;
+            } finally {
+              client.release();
+            }
+          },
+        });
+
+        const outcome = await service.expire({
+          operationId: seeded.operationId,
+          freshObservationId: dup.observationId,
+          nowMs: Date.now(),
+        });
+        if (outcome.kind !== "RELEASED") {
+          throw new Error(
+            `expected RELEASED, got ${JSON.stringify(outcome)}`,
+          );
+        }
+        expect(outcome).toMatchObject({
+          kind: "RELEASED",
+          releaseStatus: "RELEASED_T0_UNCHANGED",
+        });
+
+        const proof = await pool.query<{
+          t0: string;
+          fresh: string;
+          relationship: string;
+        }>(
+          `SELECT p.t0_observation_id::text AS t0,
+                  p.fresh_observation_id::text AS fresh,
+                  o.relationship::text AS relationship
+             FROM receive_release_proofs p
+             JOIN gateway_observations o ON o.id = p.fresh_observation_id
+            WHERE p.operation_id = $1::uuid`,
+          [seeded.operationId],
+        );
+        expect(proof.rows[0]?.t0).toBe(seeded.t0ObservationId);
+        expect(proof.rows[0]?.fresh).toBe(dup.observationId);
+        expect(proof.rows[0]?.fresh).not.toBe(seeded.t0ObservationId);
+        expect(proof.rows[0]?.relationship).toBe("DUPLICATE");
+      },
+      PG_TEST_TIMEOUT_MS,
+    );
+
+    it(
+      "expire(t0Id) parks; planted-cursor-only parks; flag-off suppress parks (ZTR-1274 r2)",
+      async () => {
+        const uniqueKey = publicKeyFromSeed(randomBytes(32));
+        const seeded = await seedAssignedExpiredReceive(pool, {
+          publicKey: uniqueKey,
+          t0HeadBytes: genesisEnvelopeBytes(),
+        });
+        const service = new SqlReceiveExpiryReleaseService({
+          withTransaction: async (fn) => {
+            const client = await pool.connect();
+            try {
+              await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+              const tx = {
+                query: async <R>(text: string, params?: readonly unknown[]) => {
+                  const result = await client.query(text, params as never);
+                  return { rows: result.rows as R[], rowCount: result.rowCount };
+                },
+              };
+              const out = await fn(tx);
+              await client.query("COMMIT");
+              return out;
+            } catch (err) {
+              try {
+                await client.query("ROLLBACK");
+              } catch {
+                /* original */
+              }
+              throw err;
+            } finally {
+              client.release();
+            }
+          },
+        });
+
+        const t0Only = await service.expire({
+          operationId: seeded.operationId,
+          freshObservationId: seeded.t0ObservationId,
+          nowMs: Date.now(),
+        });
+        expect(t0Only.kind).toBe("NEEDS_ATTENTION");
+        if (t0Only.kind === "NEEDS_ATTENTION") {
+          expect(t0Only.failedPredicates).toContain("FRESH_VERIFIED_T0_EXACT");
+        }
+
+        const cursorOnly = await pool.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM wallet_observation_cursors
+            WHERE last_recorded_observation_id = $1::uuid`,
+          [seeded.t0ObservationId],
+        );
+        expect(Number(cursorOnly.rows[0]?.n ?? "0")).toBeGreaterThan(0);
+        await pool.query(
+          `UPDATE wallet_observation_cursors
+              SET last_seen_at = now()
+            WHERE last_recorded_observation_id = $1::uuid`,
+          [seeded.t0ObservationId],
+        );
+        const planted = await service.expire({
+          operationId: seeded.operationId,
+          freshObservationId: seeded.t0ObservationId,
+          nowMs: Date.now(),
+        });
+        expect(planted.kind).toBe("NEEDS_ATTENTION");
+
+        const headBytes = genesisEnvelopeBytes();
+        const flagOffReader = createSqlFreshHeadReader({
+          pool,
+          nodeId: seeded.nodeId,
+          gatewayUrls: [GATEWAY_A],
+          exchange: scriptedExchange({ respond: () => headBytes }),
+        });
+        const suppressed = await flagOffReader(seeded.publicKey);
+        expect(suppressed.observationId).toBe(seeded.t0ObservationId);
+        const flagOff = await service.expire({
+          operationId: seeded.operationId,
+          freshObservationId: suppressed.observationId,
+          nowMs: Date.now(),
+        });
+        expect(flagOff.kind).toBe("NEEDS_ATTENTION");
+        const proofs = await pool.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM receive_release_proofs
+            WHERE operation_id = $1::uuid`,
+          [seeded.operationId],
+        );
+        expect(proofs.rows[0]?.n).toBe("0");
+        const wallet = await pool.query<{ state: string }>(
+          `SELECT state::text AS state FROM wallets WHERE id = $1::uuid`,
+          [seeded.walletId],
+        );
+        expect(wallet.rows[0]?.state).toBe("PINNED");
       },
       PG_TEST_TIMEOUT_MS,
     );

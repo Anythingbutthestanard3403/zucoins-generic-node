@@ -809,6 +809,23 @@ describe("assigned expired-unpaid release", () => {
     },
   );
 
+  it("parks when fresh_id is T0 even if bytes/window/DUPLICATE would otherwise hold (ZTR-1274 r2)", async () => {
+    const h = new ExpiryHarness();
+    h.observation!.fresh_id = T0;
+    h.observation!.fresh_relationship = "DUPLICATE";
+    h.observation!.fresh_observed_at = "1970-01-01T00:00:35.000Z";
+
+    const result = await run(h, { freshObservationId: T0 });
+
+    expect(result.kind).toBe("NEEDS_ATTENTION");
+    if (result.kind === "NEEDS_ATTENTION") {
+      expect(result.failedPredicates).toContain("FRESH_VERIFIED_T0_EXACT");
+    }
+    expect(h.walletState).toBe("PINNED");
+    expect(h.receiveProofs).toBe(0);
+    expect(h.releaseCalls).toEqual([]);
+  });
+
   it("restarts idempotently after a committed release", async () => {
     const h = new ExpiryHarness();
     const first = await run(h);

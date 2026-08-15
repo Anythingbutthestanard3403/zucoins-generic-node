@@ -1,5 +1,9 @@
 // Pure release-predicate and frozen-contract parity tests.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { RECEIVE_QUEUE_MAX_WAIT_MS as CONTRACT_QUEUE_MAX_WAIT_MS } from "../../../generic-node-contracts/src/pool-policy/constants.js";
@@ -160,5 +164,23 @@ describe("release predicate mutation matrix", () => {
 
   it("excludes attention-parked receives from the expiry candidate scan (ZTR-1277)", () => {
     expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.attention_required = false");
+  });
+
+  it("LOAD_OBSERVATIONS names append-only fresh.observed_at, never cursor last_seen_at (ZTR-1274 r2)", () => {
+    const sql = RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_OBSERVATIONS;
+    expect(sql).toContain("fresh.observed_at::text AS fresh_observed_at");
+    expect(sql).not.toMatch(/wallet_observation_cursors/i);
+    expect(sql).not.toMatch(/last_seen_at/i);
+    expect(sql).not.toMatch(/suppressedT0SightingIsFresh/i);
+  });
+
+  it("expire() stays DB-only: no persist and no FORCE_RELEASE (ZTR-1274 r2)", () => {
+    const src = readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "expiry-release.ts"),
+      "utf8",
+    );
+    expect(src).not.toMatch(/\bpersistSqlObservation\s*\(/);
+    expect(src).not.toMatch(/\bFORCE_RELEASE\b/);
+    expect(src).not.toMatch(/\bappendExactRepeat\b/);
   });
 });

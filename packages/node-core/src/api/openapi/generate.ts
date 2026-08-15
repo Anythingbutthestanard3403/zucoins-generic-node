@@ -366,6 +366,34 @@ function successResponses(method: string, path: string): Record<string, unknown>
       "503": { $ref: "#/components/responses/ServiceUnavailable" },
     };
   }
+  if (key === "POST /v1/destinations") {
+    return {
+      "200": {
+        description: "Idempotent destination replay",
+        content: {
+          "application/json": { schema: { $ref: "#/components/schemas/DestinationResponse" } },
+        },
+      },
+      "201": {
+        description: "Destination created",
+        content: {
+          "application/json": { schema: { $ref: "#/components/schemas/DestinationResponse" } },
+        },
+      },
+    };
+  }
+  if (key === "GET /v1/destinations") {
+    return {
+      "200": {
+        description: "Destination page",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/DestinationListResponse" },
+          },
+        },
+      },
+    };
+  }
   if (key === "GET /v1/events/stream") {
     return {
       "200": {
@@ -737,6 +765,50 @@ function componentsBlock(
               { type: "null" },
             ],
           },
+        },
+      },
+      DestinationResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "destination_id",
+          "node_id",
+          "wallet_id",
+          "wallet_public_key",
+          "state",
+          "label",
+          "blessed_at",
+          "blessed_by_device_key_id",
+          "blessing_artifact_id",
+          "retired_at",
+          "created_at",
+        ],
+        properties: {
+          destination_id: { type: "string", format: "uuid" },
+          node_id: { type: "string", format: "uuid" },
+          wallet_id: { type: "string", format: "uuid" },
+          wallet_public_key: { type: "string" },
+          state: { type: "string", enum: ["PENDING", "BLESSED", "RETIRED", "WORKER"] },
+          label: { type: "string" },
+          blessed_at: { type: "string", format: "date-time", nullable: true },
+          blessed_by_device_key_id: { type: ["string", "null"], format: "uuid" },
+          blessing_artifact_id: { type: ["string", "null"], format: "uuid" },
+          retired_at: { type: "string", format: "date-time", nullable: true },
+          created_at: { type: "string", format: "date-time" },
+          move_eligible: { type: "boolean" },
+          ineligibility_reason: { type: "string", nullable: true },
+        },
+      },
+      DestinationListResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: ["items", "next_after"],
+        properties: {
+          items: {
+            type: "array",
+            items: { $ref: "#/components/schemas/DestinationResponse" },
+          },
+          next_after: { type: ["string", "null"], format: "uuid" },
         },
       },
       DiscoveryResponse: {

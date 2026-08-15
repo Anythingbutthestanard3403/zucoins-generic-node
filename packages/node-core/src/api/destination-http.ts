@@ -11,7 +11,12 @@ import { apiErrorResponse, type ApiErrorResponse } from "./error-envelope.js";
 import type { PipelineContext } from "./pipeline.js";
 import { CreateDestinationBody, ListDestinationsQuery } from "./route-schemas.js";
 import type { RouteHandlerResult } from "./routes/operation-routes.js";
-import type { DestinationPage, DestinationService } from "./destination.js";
+import type {
+  DestinationListItem,
+  DestinationPage,
+  DestinationRecord,
+  DestinationService,
+} from "./destination.js";
 import { reportingErrorResponse, reportingJsonResponse } from "../reporting/errors.js";
 import type {
   ReportingHandlerResult,
@@ -42,6 +47,33 @@ function fail(error: ApiErrorResponse): RouteHandlerResult {
   return { ok: false, error };
 }
 
+/**
+ * Public v1 dest JSON is snake_case (`destination_id`, `wallet_id`, …).
+ * Domain records stay camelCase; this is the only HTTP projection.
+ */
+export function destinationToWire(
+  item: DestinationRecord | DestinationListItem,
+): Record<string, unknown> {
+  const wire: Record<string, unknown> = {
+    destination_id: item.destinationId,
+    node_id: item.nodeId,
+    wallet_id: item.walletId,
+    wallet_public_key: item.walletPublicKey,
+    state: item.state,
+    label: item.label,
+    blessed_at: item.blessedAt,
+    blessed_by_device_key_id: item.blessedByDeviceKeyId,
+    blessing_artifact_id: item.blessingArtifactId,
+    retired_at: item.retiredAt,
+    created_at: item.createdAt,
+  };
+  if ("move_eligible" in item) {
+    wire.move_eligible = item.move_eligible;
+    wire.ineligibility_reason = item.ineligibility_reason;
+  }
+  return wire;
+}
+
 export async function handleCreateDestination(
   ctx: PipelineContext,
   deps: DestinationHttpDeps,
@@ -63,7 +95,7 @@ export async function handleCreateDestination(
       label: body.label,
       idempotencyKey,
     });
-    return success(result.status === "created" ? 201 : 200, result.destination);
+    return success(result.status === "created" ? 201 : 200, destinationToWire(result.destination));
   } catch (err) {
     if (err instanceof z.ZodError) {
       // Canonical invalid_scalar only — never pass Zod's serialized issue array
@@ -80,7 +112,10 @@ export async function handleCreateDestination(
  * are byte-identical by construction.
  */
 export function listDestinationsBody(page: DestinationPage): string {
-  return JSON.stringify({ items: page.items, next_after: page.nextAfter });
+  return JSON.stringify({
+    items: page.items.map(destinationToWire),
+    next_after: page.nextAfter,
+  });
 }
 
 type ListDestinationsFilter = z.infer<typeof ListDestinationsQuery>;

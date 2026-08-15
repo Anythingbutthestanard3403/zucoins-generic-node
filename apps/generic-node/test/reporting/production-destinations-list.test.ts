@@ -507,17 +507,17 @@ describe("live destinations_list page (real PG)", () => {
     expect(text).toBe(await bearerBody({}));
 
     const page = JSON.parse(text) as {
-      items: { destinationId: string; state: string; move_eligible: boolean; walletPublicKey: string }[];
+      items: { destination_id: string; state: string; move_eligible: boolean; wallet_public_key: string }[];
       next_after: string | null;
     };
     // Node A's three rows, and never node B's.
     expect(page.items).toHaveLength(3);
-    expect(page.items.map((row) => row.destinationId).sort()).toEqual(
+    expect(page.items.map((row) => row.destination_id).sort()).toEqual(
       seeded.map((row) => row.id).sort(),
     );
     // Derived eligibility survives the reporting page (move_eligible).
     const blessed = seeded.find((row) => row.state === "BLESSED")!;
-    expect(page.items.find((row) => row.destinationId === blessed.id)?.move_eligible).toBe(true);
+    expect(page.items.find((row) => row.destination_id === blessed.id)?.move_eligible).toBe(true);
     expect(
       page.items.filter((row) => row.state !== "BLESSED").every((row) => !row.move_eligible),
     ).toBe(true);
@@ -552,11 +552,11 @@ describe("live destinations_list page (real PG)", () => {
     const response = await handler(verifiedRequest(NODE_B, "/v1/destinations") as never);
     expect(response.response.status).toBe(200);
     const page = JSON.parse(decode(response.response.bodyBytes)) as {
-      items: { nodeId: string }[];
+      items: { node_id: string }[];
     };
     // Node B has exactly its own single row and none of node A's three.
     expect(page.items).toHaveLength(1);
-    expect(page.items.every((row) => row.nodeId === NODE_B)).toBe(true);
+    expect(page.items.every((row) => row.node_id === NODE_B)).toBe(true);
   });
 
   it("AC2: a foreign `after` id collapses to an empty page, never a differentiated 404", async () => {
@@ -573,8 +573,8 @@ describe("live destinations_list page (real PG)", () => {
     expect(response.response.status).toBe(200);
     const text = decode(response.response.bodyBytes);
     expect(text).toBe(await bearerBody({ after: foreignId }));
-    const page = JSON.parse(text) as { items: { nodeId: string }[] };
-    expect(page.items.every((row) => row.nodeId === NODE_A)).toBe(true);
+    const page = JSON.parse(text) as { items: { node_id: string }[] };
+    expect(page.items.every((row) => row.node_id === NODE_A)).toBe(true);
 
     // An id belonging to no tenant at all is likewise a plain cursor, not an error.
     const unknown = await handler(

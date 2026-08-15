@@ -810,12 +810,11 @@ paths:
         - implementerBearer: []
       responses:
         "200":
-          description: Success
+          description: Implementer identity (effective funding pin + default verification_mode)
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/ImplementerIdentityResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1936,6 +1935,7 @@ components:
         - key_validity_intervals
         - funding_wallet_id
         - funding_wallet_public_key
+        - verification_mode
       properties:
         node_id:
           type: string
@@ -1975,6 +1975,49 @@ components:
           type:
             - string
             - "null"
+        verification_mode:
+          type: string
+          enum:
+            - INDEPENDENT
+            - NODE_VERIFIED
+          description: Node-default create-time verification mode. Always emitted; currently INDEPENDENT.
+    ImplementerIdentityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - implementer_id
+        - funding_wallet_id
+        - funding_wallet_public_key
+        - funding_configured
+        - funding_source
+        - verification_mode
+      properties:
+        implementer_id:
+          type: string
+          format: uuid
+        funding_wallet_id:
+          type:
+            - string
+            - "null"
+          format: uuid
+        funding_wallet_public_key:
+          type:
+            - string
+            - "null"
+        funding_configured:
+          type: boolean
+        funding_source:
+          type: string
+          enum:
+            - implementer
+            - node_default
+            - unset
+        verification_mode:
+          type: string
+          enum:
+            - INDEPENDENT
+            - NODE_VERIFIED
+          description: Node-default create-time verification mode. Always emitted; currently INDEPENDENT.
     LivenessResponse:
       type: object
       additionalProperties: false

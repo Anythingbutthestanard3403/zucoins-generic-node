@@ -59,7 +59,7 @@ export const API_SCHEMA_CONCERN_MANIFEST = defineConcernManifest({
   goldenRefs: [
     {
       path: "src/api-schema/gen/api-schema.json",
-      sha256: "4f221e311d59e44632e1bde082670579c0d48dcea682688d07ace38c5944ffd0",
+      sha256: "5d8542328de2973de32512cecfea6c01f824b14ff6eabc02101da57a917b4197",
     },
   ],
   scanRules: [

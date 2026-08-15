@@ -1,6 +1,8 @@
 /**
  * Per-operation verification-mode vocabulary (contracts: INDEPENDENT | NODE_VERIFIED).
- * Omitted on the wire defaults to INDEPENDENT. Unknown tokens fail closed.
+ * Create-body omit → INDEPENDENT. Discovery / implementer-identity documents always
+ * emit the field (ZTR-1319); those parsers fail closed on omit rather than inventing
+ * this default. Unknown tokens fail closed.
  */
 
 import {

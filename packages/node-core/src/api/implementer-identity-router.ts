@@ -1,4 +1,5 @@
-// GET /v1/implementer/identity — bearer-scoped funding wallet pin (ZTR-1288).
+// GET /v1/implementer/identity — bearer-scoped funding wallet pin (ZTR-1288)
+// plus the node's default verification_mode (ZTR-1319, always emitted).
 //
 // Returns the effective funding_wallet_id + funding_wallet_public_key for the
 // authenticated implementer (explicit pin, else node default, else nulls).
@@ -16,6 +17,7 @@ import {
 } from "./pipeline.js";
 import { findRouteSchema } from "./route-schemas.js";
 import type { OperationRouteStore } from "./routes/operation-routes.js";
+import { DEFAULT_VERIFICATION_MODE } from "@zucoins/generic-node-contracts/operations";
 import {
   resolveEffectiveFundingWallet,
   toFundingWalletWireFields,
@@ -131,6 +133,8 @@ export function createImplementerIdentityRouter(
         funding_wallet_public_key: wire.funding_wallet_public_key,
         funding_configured: effective.configured,
         funding_source: effective.source,
+        // ZTR-1319: node's default create-time mode. Always emitted (never omitted).
+        verification_mode: DEFAULT_VERIFICATION_MODE,
       });
     } catch {
       return err(apiErrorResponse("service_unavailable", outcome.context.requestId));

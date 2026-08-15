@@ -5,4 +5,4 @@
  * Bump this value whenever the frozen API schema vocabulary changes (adding/removing
  * a route, enum value, event, error code, or auth scope).
  */
-export const API_SCHEMA_VERSION = 3 as const;
+export const API_SCHEMA_VERSION = 4 as const;

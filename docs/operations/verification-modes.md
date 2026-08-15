@@ -10,6 +10,7 @@ Related surfaces:
 | Surface | Where |
 | --- | --- |
 | Policy document (`ops.allow_node_verified`) | Admin **Node-verified policy** page · `GET/POST /admin/v1/allow-node-verified-policy` |
+| Discovery / identity | `verification_mode` on `GET /.well-known/zupay-node` and `GET /v1/implementer/identity` (always emitted; currently `INDEPENDENT`) |
 | Create body field | `verification_mode` on receive / move / send create (omit → `INDEPENDENT`) |
 | Transfer-code path | NODE_VERIFIED auto-releases code at ready (ZTR-1302); INDEPENDENT still arms |
 | Lease release stamp | `RELEASED_NODE_VERIFIED` on landing when mode is NODE_VERIFIED (ZTR-1303/1304) |

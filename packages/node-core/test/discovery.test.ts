@@ -57,6 +57,8 @@ describe("discovery document builder", () => {
     // ZTR-1288: unset funding is explicit null (never omitted / never a worker key).
     expect(doc.funding_wallet_id).toBeNull();
     expect(doc.funding_wallet_public_key).toBeNull();
+    // ZTR-1319: verification_mode is always emitted (never omitted).
+    expect(doc.verification_mode).toBe("INDEPENDENT");
   });
 
   it("publishes node-default funding pin when configured (ZTR-1288)", () => {
@@ -85,6 +87,22 @@ describe("discovery document builder", () => {
   it("emits exactly DISCOVERY_RESPONSE_FIELDS in canon sequence", () => {
     const doc = buildNodeIdentityDocument(validDiscoveryConfig());
     expect(Object.keys(doc)).toEqual([...DISCOVERY_RESPONSE_FIELDS]);
+    expect(DISCOVERY_RESPONSE_FIELDS).toContain("verification_mode");
+  });
+
+  it("advertises an explicit verificationMode override (ZTR-1319)", () => {
+    const doc = buildNodeIdentityDocument({
+      ...validDiscoveryConfig(),
+      verificationMode: "NODE_VERIFIED",
+    });
+    expect(doc.verification_mode).toBe("NODE_VERIFIED");
+    expect(NodeIdentityDocumentSchema.safeParse(doc).success).toBe(true);
+  });
+
+  it("rejects a discovery document that omits verification_mode (ZTR-1319)", () => {
+    const doc = buildNodeIdentityDocument(validDiscoveryConfig());
+    const { verification_mode: _omit, ...without } = doc;
+    expect(NodeIdentityDocumentSchema.safeParse(without).success).toBe(false);
   });
 
   it("produces output that passes the Zod schema", () => {

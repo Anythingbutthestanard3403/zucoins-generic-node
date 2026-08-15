@@ -47,6 +47,7 @@ import {
   DEFAULT_DB_PING_TTL_MS,
   createDestinationService,
   createDeviceBlessingAuthorizer,
+  DestinationIdempotencyKeyClaimedError,
   insertNodeGeneratedWalletWithPendingDestination,
   deleteNodeGeneratedWalletMint,
   createHostEvidenceRuntimeMetricsCollector,
@@ -255,6 +256,13 @@ function createLeadershipPool(pool: Pool): LeadershipLockPool {
   };
 }
 
+function isPgUniqueViolation(err: unknown): boolean {
+  if (err !== null && typeof err === "object" && "code" in err) {
+    if (String((err as { code?: unknown }).code) === "23505") return true;
+  }
+  return err instanceof Error && /\b23505\b/.test(err.message);
+}
+
 function createNodeGeneratedWalletKeyGenerator(deps: {
   readonly pool: Pool;
   readonly vault: EncryptedWalletKeyStore;
@@ -266,10 +274,13 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
    */
   readonly onWalletMinted?: (walletId: string) => void;
 }): {
-  generate(nodeId: Uuid): Promise<{ readonly walletId: Uuid; readonly publicKey: WalletPublicKey }>;
+  generate(
+    nodeId: Uuid,
+    claim?: { readonly idempotencyKey: string; readonly label: string },
+  ): Promise<{ readonly walletId: Uuid; readonly publicKey: WalletPublicKey }>;
 } {
   return {
-    async generate(nodeId) {
+    async generate(nodeId, claim) {
       const { privateKey, publicKey: pubObj } = generateKeyPairSync("ed25519");
       const spki = pubObj.export({ format: "der", type: "spki" });
       const publicKey = toBase64UrlPadded(Buffer.from(spki).subarray(-32)) as WalletPublicKey;
@@ -278,15 +289,57 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
       const seed = Buffer.from(d, "base64url");
       const secret64 = Buffer.concat([seed, Buffer.from(spki).subarray(-32)]);
       const walletId = randomUUID() as Uuid;
+      let persisted = false;
       try {
-        // Commit wallet + PENDING dest on the pool so vault.seal (separate
-        // connection) can see the wallets FK target. Register later adopts
-        // the dest row via ON CONFLICT (wallet_id).
-        await insertNodeGeneratedWalletWithPendingDestination(deps.pool, {
-          walletId,
-          nodeId,
-          publicKey,
-        });
+        if (claim !== undefined) {
+          // Keyed register mint: UNIQUE (node_id, idempotency_key) is the first
+          // committed write. Both INSERTs share one checked-out client so a
+          // 23505 rolls back the wallet too. vault.seal stays AFTER COMMIT —
+          // seal uses another connection and must see the wallets FK.
+          const client = await deps.pool.connect();
+          try {
+            await client.query("BEGIN");
+            const tx = {
+              query: async <R extends Record<string, unknown> = Record<string, unknown>>(
+                text: string,
+                params?: readonly unknown[],
+              ) => {
+                const result = await client.query(text, params as never);
+                return { rows: result.rows as R[], rowCount: result.rowCount };
+              },
+            };
+            await insertNodeGeneratedWalletWithPendingDestination(tx, {
+              walletId,
+              nodeId,
+              publicKey,
+              label: claim.label,
+              idempotencyKey: claim.idempotencyKey,
+            });
+            await client.query("COMMIT");
+            persisted = true;
+          } catch (err) {
+            try {
+              await client.query("ROLLBACK");
+            } catch {
+              // surface the original error
+            }
+            if (isPgUniqueViolation(err)) {
+              throw new DestinationIdempotencyKeyClaimedError(nodeId, claim.idempotencyKey);
+            }
+            throw err;
+          } finally {
+            client.release();
+          }
+        } else {
+          // Pool / funding: no register key. Autocommit on the pool so seal
+          // can see the wallets FK. NULL keys remain valid.
+          await insertNodeGeneratedWalletWithPendingDestination(deps.pool, {
+            walletId,
+            nodeId,
+            publicKey,
+          });
+          persisted = true;
+        }
         await deps.vault.seal(
           {
             nodeId,
@@ -297,14 +350,16 @@ function createNodeGeneratedWalletKeyGenerator(deps: {
           },
           secret64,
         );
-        // Post-commit only — never fire on a rolled-back mint.
+        // Post-seal only — never fire on a rolled-back mint.
         deps.onWalletMinted?.(walletId);
         return { walletId, publicKey };
       } catch (err) {
-        try {
-          await deleteNodeGeneratedWalletMint(deps.pool, walletId);
-        } catch {
-          // best-effort compensate
+        if (persisted) {
+          try {
+            await deleteNodeGeneratedWalletMint(deps.pool, walletId);
+          } catch {
+            // best-effort compensate
+          }
         }
         throw err;
       } finally {

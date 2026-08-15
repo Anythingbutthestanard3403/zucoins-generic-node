@@ -117,8 +117,38 @@ export interface DestinationStore {
 
 // The node generates a fresh wallet keypair inside its vault and exposes only the
 // public key here — the service never touches private key material.
+// Register passes `{ idempotencyKey, label }` so a production generator can
+// reserve the UNIQUE (node_id, key) inside the same mint txn. In-memory
+// generators ignore the claim.
+export interface DestinationWalletKeyClaim {
+  readonly idempotencyKey: string;
+  readonly label: string;
+}
+
 export interface DestinationWalletKeyGenerator {
-  generate(nodeId: Uuid): Promise<{ readonly walletId: Uuid; readonly publicKey: WalletPublicKey }>;
+  generate(
+    nodeId: Uuid,
+    claim?: DestinationWalletKeyClaim,
+  ): Promise<{ readonly walletId: Uuid; readonly publicKey: WalletPublicKey }>;
+}
+
+/**
+ * Unique-claim miss on destinations_node_idempotency_key_uidx. The caller
+ * already rolled back its mint; register must find the winner and return
+ * already_registered — never treat this as service_unavailable.
+ */
+export class DestinationIdempotencyKeyClaimedError extends Error {
+  constructor(
+    readonly nodeId: Uuid,
+    readonly idempotencyKey: string,
+  ) {
+    super("destination idempotency key already claimed");
+    this.name = "DestinationIdempotencyKeyClaimedError";
+  }
+}
+
+export function isDestinationIdempotencyKeyClaimed(err: unknown): boolean {
+  return err instanceof DestinationIdempotencyKeyClaimedError;
 }
 
 // The destination-blessing ceremony (A.4.2 `zp-destination-bless-v1`): the caller
@@ -264,7 +294,21 @@ export function createDestinationService(deps: {
 
       // Node-minted keypair only — RegisterDestinationRequest has no public-key /
       // address / key_origin field, so no code path can write an imported origin.
-      const wallet = await keyGenerator.generate(request.nodeId);
+      // Pass the claim so a production generator reserves UNIQUE (node_id, key)
+      // inside the mint txn. A typed unique-claim miss means another writer
+      // already committed that key; replay, never mint again.
+      let wallet: { readonly walletId: Uuid; readonly publicKey: WalletPublicKey };
+      try {
+        wallet = await keyGenerator.generate(request.nodeId, {
+          idempotencyKey: request.idempotencyKey,
+          label: request.label,
+        });
+      } catch (err) {
+        if (!isDestinationIdempotencyKeyClaimed(err)) throw err;
+        const winner = await store.findByIdempotencyKey(request.nodeId, request.idempotencyKey);
+        if (winner === null) throw err;
+        return { status: "already_registered", destination: winner };
+      }
       const destination = await store.insert(
         {
           destinationId: ids.destinationId(),

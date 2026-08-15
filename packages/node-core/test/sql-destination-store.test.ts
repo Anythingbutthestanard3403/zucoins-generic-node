@@ -57,10 +57,13 @@ describe("createSqlDestinationStore", () => {
       WALLET,
       "sink",
       "2026-07-29T00:00:00.000Z",
+      "idem-key-should-not-appear-in-sql",
     ]);
     expect(calls[0]!.text).toMatch(/label/);
+    expect(calls[0]!.text).toMatch(/idempotency_key/);
     expect(calls[0]!.text).toMatch(/ON CONFLICT \(wallet_id\)/);
     expect(calls[0]!.text).toMatch(/RETURNING/);
+    expect(calls[0]!.text).not.toContain("idem-key-should-not-appear-in-sql");
   });
 
   it("findById maps a row and returns null when missing", async () => {
@@ -91,10 +94,101 @@ describe("createSqlDestinationStore", () => {
     expect(await store.findById(DEST)).toBeNull();
   });
 
-  it("findByIdempotencyKey is a no-op without schema column", async () => {
-    const sql = { query: vi.fn(async () => ({ rows: [] })) };
+  it("findByIdempotencyKey selects by node_id + key and maps the row", async () => {
+    const sql = {
+      query: vi.fn(async () => ({
+        rows: [
+          {
+            id: DEST,
+            node_id: NODE,
+            wallet_id: WALLET,
+            wallet_public_key: PUB,
+            state: "PENDING",
+            label: "Primary sink",
+            blessed_at: null,
+            blessed_by_device_key_id: null,
+            blessing_artifact_id: null,
+            retired_at: null,
+            created_at: "2026-07-29T00:00:00.000Z",
+          },
+        ],
+      })),
+    };
     const store = createSqlDestinationStore(sql);
-    expect(await store.findByIdempotencyKey(NODE, "k")).toBeNull();
-    expect(sql.query).not.toHaveBeenCalled();
+    const row = await store.findByIdempotencyKey(NODE, "register-key-aaaaaaa");
+    expect(row?.destinationId).toBe(DEST);
+    expect(row?.walletId).toBe(WALLET);
+    expect(sql.query).toHaveBeenCalledTimes(1);
+    const [text, params] = sql.query.mock.calls[0]!;
+    expect(text).toMatch(/idempotency_key = \$2/);
+    expect(text).toMatch(/d\.node_id = \$1/);
+    expect(text).not.toContain(NODE);
+    expect(params).toEqual([NODE, "register-key-aaaaaaa"]);
+    sql.query.mockResolvedValueOnce({ rows: [] });
+    expect(await store.findByIdempotencyKey(NODE, "missing-key-bbbbbbb")).toBeNull();
+  });
+
+  it("insert unique-violation on the key replays the original row", async () => {
+    const destRow = {
+      id: DEST,
+      node_id: NODE,
+      wallet_id: WALLET,
+      wallet_public_key: PUB,
+      state: "PENDING",
+      label: "Primary sink",
+      blessed_at: null,
+      blessed_by_device_key_id: null,
+      blessing_artifact_id: null,
+      retired_at: null,
+      created_at: "2026-07-29T00:00:00.000Z",
+    };
+    const sql = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes("INSERT INTO destinations")) {
+          const err = Object.assign(new Error("duplicate key value 23505"), { code: "23505" });
+          throw err;
+        }
+        return { rows: [destRow] };
+      }),
+    };
+    const store = createSqlDestinationStore(sql);
+    const replayed = await store.insert(
+      {
+        destinationId: "99999999-9999-4999-8999-999999999999" as Uuid,
+        nodeId: NODE,
+        walletId: "88888888-8888-4888-8888-888888888888" as Uuid,
+        walletPublicKey: PUB,
+        label: "other",
+        createdAt: "2026-07-29T00:00:00.000Z",
+      },
+      "register-key-aaaaaaa",
+    );
+    expect(replayed.destinationId).toBe(DEST);
+    expect(replayed.walletId).toBe(WALLET);
+    expect(sql.query).toHaveBeenCalledTimes(2);
+  });
+
+  it("insert 23505 without a winner row rethrows (never success-without-replay)", async () => {
+    const err = Object.assign(new Error("duplicate key value 23505"), { code: "23505" });
+    const sql = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes("INSERT INTO destinations")) throw err;
+        return { rows: [] };
+      }),
+    };
+    const store = createSqlDestinationStore(sql);
+    await expect(
+      store.insert(
+        {
+          destinationId: DEST,
+          nodeId: NODE,
+          walletId: WALLET,
+          walletPublicKey: PUB,
+          label: "sink",
+          createdAt: "2026-07-29T00:00:00.000Z",
+        },
+        "register-key-aaaaaaa",
+      ),
+    ).rejects.toBe(err);
   });
 });

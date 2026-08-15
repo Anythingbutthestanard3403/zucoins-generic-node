@@ -406,6 +406,8 @@ export {
 export {
   createDestinationService,
   deriveMoveEligibility,
+  DestinationIdempotencyKeyClaimedError,
+  isDestinationIdempotencyKeyClaimed,
   type BlessDestinationOutcome,
   type BlessDestinationRequest,
   type BlessingAuthorizer,
@@ -420,6 +422,7 @@ export {
   type DestinationState,
   type DestinationStore,
   type DestinationWalletFacts,
+  type DestinationWalletKeyClaim,
   type DestinationWalletKeyGenerator,
   type NewDestination,
   type RegisterDestinationOutcome,

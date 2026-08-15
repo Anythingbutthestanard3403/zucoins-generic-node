@@ -18,13 +18,25 @@ export interface DestinationSqlExecutor {
   ): Promise<{ rows: R[] }>;
 }
 
-const SELECT_DESTINATION = `
+const DESTINATION_COLUMNS = `
 SELECT d.id, d.node_id, d.wallet_id, w.public_key AS wallet_public_key, d.state,
        d.label, d.blessed_at, d.blessed_by_device_key_id, d.blessing_artifact_id,
        d.retired_at, d.created_at
   FROM destinations d
-  JOIN wallets w ON w.id = d.wallet_id
+  JOIN wallets w ON w.id = d.wallet_id`;
+
+const SELECT_DESTINATION = `${DESTINATION_COLUMNS}
  WHERE d.id = $1`;
+
+const SELECT_BY_IDEMPOTENCY_KEY = `${DESTINATION_COLUMNS}
+ WHERE d.node_id = $1 AND d.idempotency_key = $2`;
+
+function isUniqueViolation(err: unknown): boolean {
+  if (err !== null && typeof err === "object" && "code" in err) {
+    if (String((err as { code?: unknown }).code) === "23505") return true;
+  }
+  return err instanceof Error && /\b23505\b/.test(err.message);
+}
 
 function mapRow(row: Record<string, unknown>): DestinationRecord {
   return {
@@ -51,9 +63,9 @@ function mapRow(row: Record<string, unknown>): DestinationRecord {
 }
 
 /**
- * Live PG DestinationStore. Idempotency of register is service-layer:
- * destinations DDL has no idempotency_key column, so findByIdempotencyKey is
- * a no-op (null). Label is persisted on destinations.label (ZTR-1169).
+ * Live PG DestinationStore. Register idempotency is durable on
+ * destinations.idempotency_key, UNIQUE (node_id, idempotency_key) when the
+ * key is present (ZTR-1310). Label is persisted on destinations.label (ZTR-1169).
  */
 export function createSqlDestinationStore(sql: DestinationSqlExecutor): DestinationStore {
   return {
@@ -63,33 +75,53 @@ export function createSqlDestinationStore(sql: DestinationSqlExecutor): Destinat
       return row === undefined ? null : mapRow(row);
     },
 
-    async findByIdempotencyKey() {
-      return null;
+    async findByIdempotencyKey(nodeId, idempotencyKey) {
+      const result = await sql.query(SELECT_BY_IDEMPOTENCY_KEY, [nodeId, idempotencyKey]);
+      const row = result.rows[0];
+      return row === undefined ? null : mapRow(row);
     },
 
-    async insert(record: NewDestination) {
+    async insert(record: NewDestination, idempotencyKey: string) {
       // wallet_id is UNIQUE. Mint composition already inserts PENDING; register
       // must adopt that row (and apply the operator label) rather than fail or
       // create a second dest. CASE keeps a BLESSED/RETIRED label unchanged.
-      const result = await sql.query(
-        `INSERT INTO destinations (id, node_id, wallet_id, label, state, created_at)
-         VALUES ($1, $2, $3, $4, 'PENDING', $5::timestamptz)
-         ON CONFLICT (wallet_id) DO UPDATE
-            SET label = CASE
-                          WHEN destinations.state = 'PENDING' THEN EXCLUDED.label
-                          ELSE destinations.label
-                        END
-         RETURNING id, node_id, wallet_id, label, state, created_at,
-                   blessed_at, blessed_by_device_key_id, blessing_artifact_id,
-                   retired_at`,
-        [
-          record.destinationId,
+      // Stamp idempotency_key only when the existing row has none so a replay
+      // cannot rebind another register's key.
+      let result: { rows: Record<string, unknown>[] };
+      try {
+        result = await sql.query(
+          `INSERT INTO destinations (id, node_id, wallet_id, label, state, created_at, idempotency_key)
+           VALUES ($1, $2, $3, $4, 'PENDING', $5::timestamptz, $6)
+           ON CONFLICT (wallet_id) DO UPDATE
+              SET label = CASE
+                            WHEN destinations.state = 'PENDING' THEN EXCLUDED.label
+                            ELSE destinations.label
+                          END,
+                  idempotency_key = COALESCE(destinations.idempotency_key, EXCLUDED.idempotency_key)
+           RETURNING id, node_id, wallet_id, label, state, created_at,
+                     blessed_at, blessed_by_device_key_id, blessing_artifact_id,
+                     retired_at`,
+          [
+            record.destinationId,
+            record.nodeId,
+            record.walletId,
+            record.label,
+            record.createdAt,
+            idempotencyKey,
+          ],
+        );
+      } catch (err) {
+        // Concurrent first-use of the same (node_id, key) loses on the partial
+        // UNIQUE and must replay the winner rather than mint a second dest.
+        if (!isUniqueViolation(err)) throw err;
+        const replay = await sql.query(SELECT_BY_IDEMPOTENCY_KEY, [
           record.nodeId,
-          record.walletId,
-          record.label,
-          record.createdAt,
-        ],
-      );
+          idempotencyKey,
+        ]);
+        const replayRow = replay.rows[0];
+        if (replayRow === undefined) throw err;
+        return mapRow(replayRow);
+      }
       const row = result.rows[0];
       if (row === undefined) {
         throw new Error("destination insert missed row");

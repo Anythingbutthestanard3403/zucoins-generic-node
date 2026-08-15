@@ -21,13 +21,15 @@ describe("ZTR-1307 · every mint path arms push provision", () => {
     );
     const sealAt = fn.indexOf("await deps.vault.seal");
     const hookAt = fn.indexOf("deps.onWalletMinted?.(walletId)");
-    const catchAt = fn.indexOf("} catch (err) {");
+    const compensateAt = fn.lastIndexOf("} catch (err) {");
     expect(sealAt).toBeGreaterThan(0);
     expect(hookAt).toBeGreaterThan(sealAt);
-    expect(hookAt).toBeLessThan(catchAt);
+    expect(hookAt).toBeLessThan(compensateAt);
     // Compensation path must not call the hook.
-    const catchBlock = fn.slice(catchAt, fn.indexOf("} finally {", catchAt));
+    const catchBlock = fn.slice(compensateAt, fn.indexOf("} finally {", compensateAt));
     expect(catchBlock).not.toContain("onWalletMinted");
+    expect(fn).toContain("DestinationIdempotencyKeyClaimedError");
+    expect(fn.indexOf('await client.query("COMMIT")')).toBeLessThan(sealAt);
   });
 
   it("pool scale-up already wires onWalletsMinted (unchanged contract)", () => {

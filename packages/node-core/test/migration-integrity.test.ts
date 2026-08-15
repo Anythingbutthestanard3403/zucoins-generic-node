@@ -232,6 +232,8 @@ const SCHEMA_FILES = [
   "destination-state-worker.sql",
   // Worker-sink CHECK + G2 overlay. ALTER / CREATE OR REPLACE only.
   "destination-worker-sink.sql",
+  // ZTR-1310: destinations.idempotency_key column + unique index. ALTER / CREATE INDEX only.
+  "destinations-idempotency-key.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -266,6 +268,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "destinations-pending-backfill.sql",
   "destination-state-worker.sql",
   "destination-worker-sink.sql",
+  "destinations-idempotency-key.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -612,6 +615,10 @@ const GREENFIELD: Record<
   "destination-worker-sink.sql": {
     applies: false,
     missingFragment: "destination-worker-sink requires destinations",
+  },
+  "destinations-idempotency-key.sql": {
+    applies: false,
+    missingFragment: "destinations-idempotency-key requires destinations",
   },
 };
 

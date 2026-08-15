@@ -34,9 +34,10 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
     expect(calls[0]!.text).toBe(INSERT_NODE_GENERATED_WALLET_SQL);
     expect(calls[0]!.params).toEqual([WALLET, NODE, PUB, true, true, true, "FULL"]);
     expect(calls[1]!.text).toBe(INSERT_PENDING_DESTINATION_FOR_WALLET_SQL);
-    expect(calls[1]!.params).toEqual([WALLET, NODE, "pool", "PENDING"]);
+    expect(calls[1]!.params).toEqual([WALLET, NODE, "pool", "PENDING", null]);
     expect(calls[0]!.text).toContain("'node_generated'");
-    expect(calls[1]!.text).toContain("$4");
+    expect(calls[1]!.text).toContain("$5");
+    expect(calls[1]!.text).toMatch(/idempotency_key/);
     expect(calls[1]!.text).toMatch(/ON CONFLICT \(wallet_id\) DO NOTHING/);
     expect(calls[0]!.text).not.toContain(WALLET);
     expect(calls[1]!.text).not.toContain(WALLET);
@@ -55,7 +56,25 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
       nodeId: NODE,
       publicKey: PUB,
     });
-    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING"]);
+    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING", null]);
+  });
+
+  it("binds optional idempotencyKey on dest INSERT (NULL when omitted)", async () => {
+    const params: (readonly unknown[] | undefined)[] = [];
+    const sql = {
+      query: vi.fn(async (_text: string, p?: readonly unknown[]) => {
+        params.push(p);
+        return { rows: [] };
+      }),
+    };
+    await insertNodeGeneratedWalletWithPendingDestination(sql, {
+      walletId: WALLET,
+      nodeId: NODE,
+      publicKey: PUB,
+      label: "register",
+      idempotencyKey: "register-retry-key-1",
+    });
+    expect(params[1]).toEqual([WALLET, NODE, "register", "PENDING", "register-retry-key-1"]);
   });
 
   it("SEND_ONLY writes SEND_ONLY wallet + WORKER dest", async () => {
@@ -74,7 +93,7 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
       role: "SEND_ONLY",
     });
     expect(calls[0]!.params).toEqual([WALLET, NODE, PUB, false, true, true, "SEND_ONLY"]);
-    expect(calls[1]!.params).toEqual([WALLET, NODE, "send-worker", "WORKER"]);
+    expect(calls[1]!.params).toEqual([WALLET, NODE, "send-worker", "WORKER", null]);
   });
 
   it("RECEIVE_ONLY writes RECEIVE_ONLY wallet + PENDING dest", async () => {
@@ -92,7 +111,7 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
       role: "RECEIVE_ONLY",
     });
     expect(params[0]).toEqual([WALLET, NODE, PUB, true, false, true, "RECEIVE_ONLY"]);
-    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING"]);
+    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING", null]);
   });
 });
 

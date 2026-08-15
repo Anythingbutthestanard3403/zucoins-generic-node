@@ -15,6 +15,7 @@
     "custody-eligibility.sql",
     "destination-state-worker.sql",
     "destination-worker-sink.sql",
+    "destinations-idempotency-key.sql",
     "destinations-label.sql",
     "destinations-pending-backfill.sql",
     "device-enrollment-challenges.sql",
@@ -2115,7 +2116,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_126",
+      "satisfiedBy": "index:operations_unique_127",
       "ok": true
     },
     {
@@ -2162,7 +2163,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_69",
+      "satisfiedBy": "index:audit_log_unique_70",
       "ok": true
     },
     {

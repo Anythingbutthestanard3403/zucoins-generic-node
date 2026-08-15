@@ -639,6 +639,15 @@ export {
   type DestinationsPendingBackfillInvariant,
 } from "./schema/destinations-pending-backfill.contract.js";
 
+// ZTR-1310: destinations.idempotency_key for register replay (node_id + key).
+export {
+  DESTINATIONS_IDEMPOTENCY_KEY_EXECUTION_OBLIGATIONS,
+  DESTINATIONS_IDEMPOTENCY_KEY_INVARIANTS,
+  DESTINATIONS_IDEMPOTENCY_KEY_SCHEMA_FILE,
+  DESTINATIONS_IDEMPOTENCY_KEY_SOURCE,
+  type DestinationsIdempotencyKeyInvariant,
+} from "./schema/destinations-idempotency-key.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

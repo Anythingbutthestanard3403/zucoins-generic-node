@@ -245,6 +245,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // Worker-sink CHECK + G2 overlay (BLESSED|WORKER). Requires the enum slice.
   // Appended only; does not rewrite frozen custody / money-capability slices.
   "destination-worker-sink",
+  // ZTR-1310: destinations.idempotency_key + UNIQUE (node_id, key). Pure column
+  // + index extension on custody destinations. Appended only.
+  "destinations-idempotency-key",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

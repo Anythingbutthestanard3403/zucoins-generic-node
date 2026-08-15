@@ -480,13 +480,29 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(enumIdx).toBeGreaterThan(modeIdx);
     expect(enumIdx).toBeGreaterThan(backfillIdx);
     expect(sinkIdx).toBeGreaterThan(enumIdx);
-    expect(sinkIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(sinkIdx).toBeLessThan(MONEY_SCHEMA_PACK_ORDER.length);
     const files = loadMoneySchemaMigrations();
     expect(files[enumIdx]!.sql).toContain("ALTER TYPE destination_state ADD VALUE 'WORKER'");
     expect(files[sinkIdx]!.sql).toContain("destination-worker-sink requires destinations");
     expect(files[sinkIdx]!.sql).toContain("AND destination_row.state IS DISTINCT FROM 'WORKER'");
     expect(files[sinkIdx]!.sql).toContain("state <> 'WORKER'");
     expect(files[sinkIdx]!.sql).not.toContain("(state = 'WORKER') = (");
+  });
+
+  it("pack lands destinations-idempotency-key after worker-sink (ZTR-1310)", () => {
+    const sinkIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destination-worker-sink");
+    const keyIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-idempotency-key");
+    const custodyIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("custody-eligibility");
+    expect(sinkIdx).toBeGreaterThanOrEqual(0);
+    expect(custodyIdx).toBeGreaterThanOrEqual(0);
+    expect(keyIdx).toBeGreaterThan(sinkIdx);
+    expect(keyIdx).toBeGreaterThan(custodyIdx);
+    expect(keyIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[keyIdx]!.sql).toContain("destinations-idempotency-key requires destinations");
+    expect(files[keyIdx]!.sql).toContain("ADD COLUMN IF NOT EXISTS idempotency_key text");
+    expect(files[keyIdx]!.sql).toContain("destinations_node_idempotency_key_uidx");
+    expect(files[keyIdx]!.sql).toContain("(node_id, idempotency_key)");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

@@ -620,7 +620,7 @@ describe("API response and read shapes", () => {
     expect(approved.response.approval_status).toBe("APPROVED");
   });
 
-  it("maps a readable REJECTED row to CONSUMED, not a fourth wire value", async () => {
+  it("maps a readable REJECTED row to approval_status REJECTED, not CONSUMED", async () => {
     const store = readyStore();
     const created = await create(store);
     if (created.outcome !== "CREATED") throw new Error("expected CREATED");
@@ -631,7 +631,24 @@ describe("API response and read shapes", () => {
     expect(rejected.outcome).toBe("FOUND");
     if (rejected.outcome !== "FOUND") return;
     expect(rejected.response.operation.state).toBe("REJECTED");
-    expect(rejected.response.approval_status).toBe("CONSUMED");
+    expect(rejected.response.approval_status).toBe("REJECTED");
+    expect(rejected.response.approval_status).not.toBe("CONSUMED");
+  });
+
+  it("keeps terminal-consumed approval rows as CONSUMED", async () => {
+    const store = readyStore();
+    const created = await create(store);
+    if (created.outcome !== "CREATED") throw new Error("expected CREATED");
+    const row = store.operations.get(created.operation.operationId) as StoredSendOperation;
+
+    for (const status of ["AWAITING_REDEMPTION", "NEEDS_ATTENTION", "EXTERNAL_SEND_LANDED"] as const) {
+      store.operations.set(row.operationId, { ...row, status });
+      const read = await readExternalSend(store, row.operationId);
+      expect(read.outcome).toBe("FOUND");
+      if (read.outcome !== "FOUND") return;
+      expect(read.response.operation.state).toBe(status);
+      expect(read.response.approval_status).toBe("CONSUMED");
+    }
   });
 });
 

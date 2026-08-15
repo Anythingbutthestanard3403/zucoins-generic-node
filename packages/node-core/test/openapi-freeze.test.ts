@@ -230,6 +230,7 @@ describe("field inventory ↔ Zod / parity", () => {
       "PENDING",
       "APPROVED",
       "CONSUMED",
+      "REJECTED",
     ]);
     const committed = readFileSync(OPENAPI_PATH, "utf8");
     const yamlBlock = committed.match(

@@ -497,12 +497,31 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(custodyIdx).toBeGreaterThanOrEqual(0);
     expect(keyIdx).toBeGreaterThan(sinkIdx);
     expect(keyIdx).toBeGreaterThan(custodyIdx);
-    expect(keyIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(keyIdx).toBeLessThan(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[keyIdx]!.sql).toContain("destinations-idempotency-key requires destinations");
     expect(files[keyIdx]!.sql).toContain("ADD COLUMN IF NOT EXISTS idempotency_key text");
     expect(files[keyIdx]!.sql).toContain("destinations_node_idempotency_key_uidx");
     expect(files[keyIdx]!.sql).toContain("(node_id, idempotency_key)");
+  });
+
+  it("pack lands send-proven-not-landed-close after destinations-idempotency-key (ZTR-1318)", () => {
+    const keyIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("destinations-idempotency-key");
+    const closeIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-proven-not-landed-close");
+    const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
+    const riskIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("operator-accepted-risk-release");
+    expect(keyIdx).toBeGreaterThanOrEqual(0);
+    expect(leaseIdx).toBeGreaterThanOrEqual(0);
+    expect(riskIdx).toBeGreaterThanOrEqual(0);
+    expect(closeIdx).toBeGreaterThan(keyIdx);
+    expect(closeIdx).toBeGreaterThan(leaseIdx);
+    expect(closeIdx).toBeGreaterThan(riskIdx);
+    expect(closeIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[closeIdx]!.sql).toContain("send-proven-not-landed-close requires lease_release_proofs");
+    expect(files[closeIdx]!.sql).toContain("SEND_PROVEN_NOT_LANDED_CLOSE");
+    expect(files[closeIdx]!.sql).toContain("RECEIVE_OPERATOR_ACCEPTED_RISK");
+    expect(files[closeIdx]!.sql).toContain("EXTERNAL_SEND_LANDED");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

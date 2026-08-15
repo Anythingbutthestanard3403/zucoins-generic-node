@@ -10,6 +10,7 @@ export const TERMINAL_POSITIVE_PROOF_KINDS = [
   "RECEIVE_EXPIRED_T0",
   "OPERATOR_QUARANTINE_RELEASE",
   "RECEIVE_OPERATOR_ACCEPTED_RISK",
+  "SEND_PROVEN_NOT_LANDED_CLOSE",
 ] as const;
 
 export type TerminalPositiveProofKind = (typeof TERMINAL_POSITIVE_PROOF_KINDS)[number];
@@ -17,7 +18,8 @@ export type TerminalPositiveProofKind = (typeof TERMINAL_POSITIVE_PROOF_KINDS)[n
 /**
  * The landed-proof kind an operation of each kind mints on release
  * (`lease_release_proofs.proof_kind`). The remaining kinds — RECEIVE_EXPIRED_T0,
- * OPERATOR_QUARANTINE_RELEASE, RECEIVE_OPERATOR_ACCEPTED_RISK — are not landings and have
+ * OPERATOR_QUARANTINE_RELEASE, RECEIVE_OPERATOR_ACCEPTED_RISK,
+ * SEND_PROVEN_NOT_LANDED_CLOSE — are not landings and have
  * no operation kind, so they are deliberately absent.
  *
  * Lives here rather than at the composition root because it is lease vocabulary, and

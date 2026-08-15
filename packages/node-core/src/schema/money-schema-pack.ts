@@ -248,6 +248,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1310: destinations.idempotency_key + UNIQUE (node_id, key). Pure column
   // + index extension on custody destinations. Appended only.
   "destinations-idempotency-key",
+  // ZTR-1318: SEND_PROVEN_NOT_LANDED_CLOSE lease proof kind.
+  // CHECK-constraint ALTER on lease_release_proofs. Requires lease-foundation
+  // + operator-accepted-risk-release (last prior proof_kind rewrite). Appended only.
+  "send-proven-not-landed-close",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

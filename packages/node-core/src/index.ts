@@ -648,6 +648,17 @@ export {
   type DestinationsIdempotencyKeyInvariant,
 } from "./schema/destinations-idempotency-key.contract.js";
 
+// ZTR-1318: distinct lease proof kind for CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED.
+export {
+  SCHEMA_SEND_PROVEN_NOT_LANDED_CLOSE_OBLIGATIONS,
+  SEND_PROVEN_NOT_LANDED_CLOSE_EXTENDS,
+  SEND_PROVEN_NOT_LANDED_CLOSE_INVARIANTS,
+  SEND_PROVEN_NOT_LANDED_CLOSE_PROOF_KIND,
+  SEND_PROVEN_NOT_LANDED_CLOSE_SCHEMA_FILE,
+  SEND_PROVEN_NOT_LANDED_CLOSE_SOURCE,
+  type SendProvenNotLandedCloseInvariant,
+} from "./schema/send-proven-not-landed-close.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

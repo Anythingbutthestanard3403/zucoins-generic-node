@@ -622,6 +622,7 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     `);
     await applySchema(pool, readFileSync(`${schemaDir}verification-mode.sql`, "utf8"));
     await migrateLeaseFoundation(pool);
+    await applySchema(pool, readFileSync(`${schemaDir}send-proven-not-landed-close.sql`, "utf8"));
     // nodes/implementers are now the real reporting-persistence.sql tables (not the
     // old bare id-only stubs), so their NOT NULL columns need placeholder values.
     await pool.query(
@@ -1013,10 +1014,13 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     );
     expect(activeLease.rowCount).toBe(0);
     const membership = await pool.query(
-      `SELECT released_at FROM wallet_lease_memberships WHERE id = $1::uuid`,
+      `SELECT released_at, release_reason FROM wallet_lease_memberships WHERE id = $1::uuid`,
       [lease.membershipId],
     );
     expect((membership.rows[0] as { released_at: Date | null }).released_at).not.toBeNull();
+    expect((membership.rows[0] as { release_reason: string }).release_reason).toBe(
+      "RECOVERY_CLOSE_SEND",
+    );
 
     // AC5 — the release went through the guarded proof path: a minted proof row for this
     // exact (wallet, operation, group, epoch), and it is CONSUMED. No other release path.
@@ -1032,7 +1036,8 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       proof_digest: string;
       consumed_at: Date | null;
     };
-    expect(proofRow.proof_kind).toBe("EXTERNAL_SEND_LANDED");
+    expect(proofRow.proof_kind).toBe("SEND_PROVEN_NOT_LANDED_CLOSE");
+    expect(proofRow.proof_kind).not.toBe("EXTERNAL_SEND_LANDED");
     expect(proofRow.consumed_at).not.toBeNull();
     expect(proofRow.proof_digest).toMatch(/^[0-9a-f]{64}$/);
 

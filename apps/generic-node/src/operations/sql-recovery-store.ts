@@ -318,7 +318,7 @@ const SQL_LOAD_ACTIVE_LEASE_FOR_RELEASE = `
 `;
 
 const CLOSE_SEND_RELEASE_REASON = "RECOVERY_CLOSE_SEND" as const;
-const CLOSE_SEND_PROOF_KIND = "EXTERNAL_SEND_LANDED" as const;
+const CLOSE_SEND_PROOF_KIND = "SEND_PROVEN_NOT_LANDED_CLOSE" as const;
 
 /** Pass-through lease SqlExecutor bound to an open SERIALIZABLE client. */
 function clientAsSqlExecutor(client: PoolClient): LeaseSqlExecutor {

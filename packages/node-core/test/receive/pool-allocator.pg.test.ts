@@ -251,7 +251,8 @@ function insertPendingDest(url: string, walletId: string, label = "pool"): void 
     url,
     INSERT_PENDING_DESTINATION_FOR_WALLET_SQL.replace(/\$1::uuid/g, `'${walletId}'::uuid`)
       .replace(/\$2::uuid/g, `'${NODE}'::uuid`)
-      .replace("$3", `'${label}'`),
+      .replace("$3", `'${label}'`)
+      .replace("$4", `'PENDING'`),
   );
 }
 

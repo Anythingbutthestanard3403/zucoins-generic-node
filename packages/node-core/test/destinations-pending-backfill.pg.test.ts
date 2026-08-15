@@ -135,12 +135,17 @@ describe("destinations pending backfill + mint composition PG (ZTR-1306)", () =>
     await must(
       INSERT_NODE_GENERATED_WALLET_SQL.replace(/\$1::uuid/g, `'${WMINT}'::uuid`)
         .replace(/\$2::uuid/g, `'${NODE_ID}'::uuid`)
-        .replace("$3", `'${PUB("A")}'`),
+        .replace("$3", `'${PUB("A")}'`)
+        .replace("$4", "true")
+        .replace("$5", "true")
+        .replace("$6", "true")
+        .replace("$7", `'FULL'`),
     );
     await must(
       INSERT_PENDING_DESTINATION_FOR_WALLET_SQL.replace(/\$1::uuid/g, `'${WMINT}'::uuid`)
         .replace(/\$2::uuid/g, `'${NODE_ID}'::uuid`)
-        .replace("$3", `'pool'`),
+        .replace("$3", `'pool'`)
+        .replace("$4", `'PENDING'`),
     );
     const row = await must(
       `SELECT count(*)::text || '|' || min(state::text) || '|' || min(label)

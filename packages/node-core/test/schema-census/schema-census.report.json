@@ -13,6 +13,8 @@
     "audit-log.sql",
     "base-enums-domains.sql",
     "custody-eligibility.sql",
+    "destination-state-worker.sql",
+    "destination-worker-sink.sql",
     "destinations-label.sql",
     "destinations-pending-backfill.sql",
     "device-enrollment-challenges.sql",

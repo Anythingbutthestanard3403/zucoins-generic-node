@@ -220,9 +220,10 @@ type GatherResult =
  * statuses. One scan covers both rather than a second worker over the same rows.
  *
  * The two statuses get SEPARATE budgets, and that separation is load-bearing. A parked send
- * has no terminal path while the reserved close is off, so it stays NEEDS_ATTENTION
- * indefinitely; one shared FIFO would let `batchSize` parked rows occupy every slot forever
- * and live AWAITING_REDEMPTION sends would stop landing at all. The live arm therefore always
+ * can now close via CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED (ZTR-1129) or late-land via this
+ * re-scan, but a no-op parked re-check still does not advance FIFO position. One shared
+ * FIFO would let `batchSize` parked rows occupy every slot forever and live
+ * AWAITING_REDEMPTION sends would stop landing at all. The live arm therefore always
  * gets its full `batchSize`, and the parked re-scan gets its own small budget on top.
  *
  * Within its budget the parked arm samples at random rather than oldest-first, for the same

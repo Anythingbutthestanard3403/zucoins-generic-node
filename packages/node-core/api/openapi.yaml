@@ -94,12 +94,11 @@ paths:
                   description: Lowercase canonical UUID (RFC 4122 hex form).
       responses:
         "200":
-          description: Success
+          description: Destination after the ceremony
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/DestinationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -138,12 +137,11 @@ paths:
               properties: {}
       responses:
         "200":
-          description: Success
+          description: Destination after the ceremony
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/DestinationResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1603,7 +1601,18 @@ components:
               pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             details:
               type: object
-              additionalProperties: true
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  enum:
+                    - no_free_send_worker
+                    - no_hub_liquidity
+                    - worker_destination_missing
+                    - halted
+                    - assign_not_wired
+                    - move_rejected
+                  description: Assign/capacity rejection when code is service_unavailable (ZTR-1309).
     OperationObject:
       type: object
       additionalProperties: false

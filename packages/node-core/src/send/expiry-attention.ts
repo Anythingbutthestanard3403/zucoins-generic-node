@@ -8,8 +8,9 @@
 // SEND_EXTERNAL expiry single-source (expiry is a pre-delivery gate ONLY post-delivery), exact partial only (exact partial only).
 //
 // Scope of this module:
-// 1. Detect past signed redemption deadline on a delivered AWAITING_REDEMPTION partial
-// and park to NEEDS_ATTENTION (never EXPIRED / REJECTED, never release lease).
+// 1. Classify past signed redemption deadline on a delivered AWAITING_REDEMPTION
+//    partial (never EXPIRED / REJECTED, never release lease). Production park
+//    lives in send-completion-lander against CAS_AWAITING_TO_NEEDS_ATTENTION.
 // 2. Operator CONTINUE_EXTERNAL_WAIT → clear attention, return AWAITING_REDEMPTION.
 // 3. Operator REDELIVER_EXACT_PARTIAL → hand out identical stored bytes; stamp counters only.
 //
@@ -392,42 +393,6 @@ export interface SendExpiryOperationFacts {
   readonly leaseEpoch: number | null;
 }
 
-export type ParkPastExpiryResult =
-  | {
-      readonly kind: "PARKED";
-      readonly operationId: string;
-      readonly attentionReason: AttentionReason;
-      readonly attentionEpisode: number;
-      readonly rowVersion: number;
-      readonly formationState: string;
-      readonly leaseEpochBefore: number | null;
-      readonly leaseEpochAfter: number | null;
-      readonly partialBytesBefore: string;
-      readonly partialBytesAfter: string;
-    }
-  | {
-      readonly kind: "ALREADY_ATTENTION";
-      readonly operationId: string;
-      readonly attentionReason: string | null;
-      readonly attentionEpisode: number;
-    }
-  | {
-      readonly kind: "NOT_YET_EXPIRED";
-      readonly operationId: string;
-      readonly remainingSecs: number;
-    }
-  | {
-      readonly kind: "NOOP";
-      readonly operationId: string;
-      readonly reason:
-        | "TERMINAL"
-        | "NO_PARTIAL"
-        | "PRE_DELIVERY"
-        | "MISSING_T2"
-        | "CAS_LOST_RACE"
-        | "NOT_FOUND";
-    };
-
 export type ContinueExternalWaitResult =
   | {
       readonly kind: "CONTINUED";
@@ -628,183 +593,6 @@ export async function loadSendExpiryOperationFacts(
   operationId: string,
 ): Promise<SendExpiryOperationFacts | null> {
   return loadFacts(query, operationId);
-}
-
-/**
- * Park a past-T2 AWAITING_REDEMPTION send into NEEDS_ATTENTION.
- *
- * Idempotent on already-attention. Never transitions to EXPIRED/REJECTED. Never
- * touches wallet_active_leases. Partial immutable bytes must be bit-identical
- * before and after (asserted; throws on mutation).
- */
-/**
- * Optional dual-chain projection after a successful park CAS (ZTR-1146). Bound by the
- * composition root so `operation.needs_attention` reaches implementer_events on the same
- * transaction as the AWAITING_REDEMPTION → NEEDS_ATTENTION flip.
- */
-export type SendExpiryDualChainEmitter = (
-  query: SqlQueryFn,
-  input: {
-    readonly operationId: string;
-    readonly attentionReason: AttentionReason;
-    readonly attentionEpisode: number;
-    readonly dataText: string;
-  },
-) => Promise<void>;
-
-export async function parkPastExpiryAwaitingRedemption(
-  query: SqlQueryFn,
-  input: {
-    readonly operationId: string;
-    readonly nowUnixSecs: number;
-    readonly attentionReason?: AttentionReason;
-    readonly dualChain?: SendExpiryDualChainEmitter;
-  },
-): Promise<ParkPastExpiryResult> {
-  const reason = input.attentionReason ?? SEND_EXPIRY_ATTENTION_REASON;
-  const facts = await loadFacts(query, input.operationId);
-  if (facts === null) {
-    return { kind: "NOOP", operationId: input.operationId, reason: "NOT_FOUND" };
-  }
-
-  const signedExpiry =
-    facts.innerPreimageText === null
-      ? null
-      : extractSignedExpiryUnixSecs(facts.innerPreimageText);
-
-  const evaluation = evaluatePostDeliveryExpiry({
-    status: facts.status,
-    partialExists: facts.partialExists,
-    firstDeliveredAt: facts.firstDeliveredAt,
-    redemptionExpiryUnixSecs: signedExpiry,
-    nowUnixSecs: input.nowUnixSecs,
-  });
-
-  if (evaluation.outcome === "ALREADY_ATTENTION") {
-    return {
-      kind: "ALREADY_ATTENTION",
-      operationId: facts.operationId,
-      attentionReason: facts.attentionReason,
-      attentionEpisode: facts.attentionEpisode,
-    };
-  }
-
-  if (evaluation.outcome === "NOT_YET_EXPIRED") {
-    return {
-      kind: "NOT_YET_EXPIRED",
-      operationId: facts.operationId,
-      remainingSecs: evaluation.remainingSecs,
-    };
-  }
-
-  if (evaluation.outcome === "TERMINAL_NOOP") {
-    return { kind: "NOOP", operationId: facts.operationId, reason: "TERMINAL" };
-  }
-
-  if (evaluation.outcome === "PRE_DELIVERY_GATE_ONLY") {
-    return { kind: "NOOP", operationId: facts.operationId, reason: "PRE_DELIVERY" };
-  }
-
-  if (evaluation.outcome !== "PAST_EXPIRY_PARK_ATTENTION") {
-    if (!facts.partialExists) {
-      return { kind: "NOOP", operationId: facts.operationId, reason: "NO_PARTIAL" };
-    }
-    if (signedExpiry === null) {
-      return { kind: "NOOP", operationId: facts.operationId, reason: "MISSING_T2" };
-    }
-    return { kind: "NOOP", operationId: facts.operationId, reason: "NO_PARTIAL" };
-  }
-
-  const bytesBefore = partialFingerprintFromFacts(facts);
-  if (bytesBefore === null) {
-    return { kind: "NOOP", operationId: facts.operationId, reason: "NO_PARTIAL" };
-  }
-  const leaseBefore = facts.leaseEpoch;
-
-  // Atomicity: CAS_AWAITING_TO_NEEDS_ATTENTION is one statement (UPDATE + INSERT event).
-  // A crash cannot leave NEEDS_ATTENTION without the audit row. data_text (incl. episode)
-  // is built inside the CTE from the post-increment row — never client-stamped.
-  const cas = await query(SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION, [
-    input.operationId,
-    reason,
-    OPERATION_NEEDS_ATTENTION_EVENT,
-  ]);
-  const casRow = cas[0];
-  if (casRow === undefined) {
-    // Re-read: concurrent park or status drift.
-    const again = await loadFacts(query, input.operationId);
-    if (again !== null && again.status === "NEEDS_ATTENTION") {
-      return {
-        kind: "ALREADY_ATTENTION",
-        operationId: again.operationId,
-        attentionReason: again.attentionReason,
-        attentionEpisode: again.attentionEpisode,
-      };
-    }
-    return { kind: "NOOP", operationId: input.operationId, reason: "CAS_LOST_RACE" };
-  }
-
-  const episode = Number(casRow.attention_episode);
-  if (casRow.event_id === null || casRow.event_id === undefined) {
-    throw new Error(
-      `parkPastExpiryAwaitingRedemption: CAS returned without event_id for ${input.operationId}`,
-    );
-  }
-
-  const after = await loadFacts(query, input.operationId);
-  if (after === null) {
-    throw new Error(
-      `parkPastExpiryAwaitingRedemption: operation ${input.operationId} disappeared after CAS`,
-    );
-  }
-  const bytesAfter = partialFingerprintFromFacts(after);
-  if (bytesAfter === null || bytesAfter !== bytesBefore) {
-    throw new Error(
-      `parkPastExpiryAwaitingRedemption: immutable partial bytes mutated for ${input.operationId}`,
-    );
-  }
-  const leaseAfter = await loadLeaseEpoch(query, facts.sourceWalletId);
-  if (leaseBefore !== null && leaseAfter === null) {
-    throw new Error(
-      `parkPastExpiryAwaitingRedemption: source lease released for ${input.operationId} (the one-in-flight-per-wallet rule)`,
-    );
-  }
-  if (
-    leaseBefore !== null &&
-    leaseAfter !== null &&
-    leaseBefore !== leaseAfter
-  ) {
-    throw new Error(
-      `parkPastExpiryAwaitingRedemption: lease_epoch changed for ${input.operationId}`,
-    );
-  }
-
-  if (input.dualChain !== undefined) {
-    const dataText = JSON.stringify({
-      attention_reason: reason,
-      attention_episode: episode,
-      parked_at_unix_secs: input.nowUnixSecs,
-    });
-    await input.dualChain(query, {
-      operationId: input.operationId,
-      attentionReason: reason,
-      attentionEpisode: episode,
-      dataText,
-    });
-  }
-
-  return {
-    kind: "PARKED",
-    operationId: input.operationId,
-    attentionReason: reason,
-    attentionEpisode: episode,
-    rowVersion: Number(casRow.row_version),
-    formationState: String(casRow.formation_state),
-    leaseEpochBefore: leaseBefore,
-    leaseEpochAfter: leaseAfter,
-    partialBytesBefore: bytesBefore,
-    partialBytesAfter: bytesAfter,
-  };
 }
 
 /**

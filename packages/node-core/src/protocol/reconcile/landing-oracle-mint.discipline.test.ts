@@ -16,7 +16,6 @@ const ALLOWED_MINT_PRODUCTION_RELATIVE = new Set([
   "protocol/reconcile/landing-oracle-mint.fixture.ts",
   "verifier/landing-path-oracle.ts",
   "verifier/ancestry-walker.ts",
-  "send/late-landing-reconcile.ts",
 ]);
 
 const IMPORT_MINT_CHANNEL = /landing-oracle-mint\.js/;

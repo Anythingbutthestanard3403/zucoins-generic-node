@@ -30,7 +30,7 @@ import {
 } from "@zucoins/generic-node-contracts/route-policy";
 
 import { ROUTE_SCHEMAS } from "../route-schemas.js";
-import { API_ERROR_CODES } from "../error-envelope.js";
+import { API_ERROR_CODES, ASSIGN_CAPACITY_REASONS } from "../error-envelope.js";
 import {
   IDEMPOTENCY_KEY_MAX_LENGTH,
   IDEMPOTENCY_KEY_MIN_LENGTH,
@@ -367,6 +367,19 @@ function successResponses(method: string, path: string): Record<string, unknown>
       "503": { $ref: "#/components/responses/ServiceUnavailable" },
     };
   }
+  if (
+    key === "POST /admin/v1/destinations/:destination_id/bless" ||
+    key === "POST /admin/v1/destinations/:destination_id/retire"
+  ) {
+    return {
+      "200": {
+        description: "Destination after the ceremony",
+        content: {
+          "application/json": { schema: { $ref: "#/components/schemas/DestinationResponse" } },
+        },
+      },
+    };
+  }
   if (key === "POST /v1/destinations") {
     return {
       "200": {
@@ -573,7 +586,18 @@ function componentsBlock(
                 description: "Diagnostic only — clients branch on code.",
               },
               request_id: { type: "string", pattern: UUID_PATTERN },
-              details: { type: "object", additionalProperties: true },
+              details: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  reason: {
+                    type: "string",
+                    enum: [...ASSIGN_CAPACITY_REASONS],
+                    description:
+                      "Assign/capacity rejection when code is service_unavailable (ZTR-1309).",
+                  },
+                },
+              },
             },
           },
         },

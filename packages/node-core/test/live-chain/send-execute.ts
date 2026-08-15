@@ -1172,7 +1172,7 @@ export async function executeAuthorizedSendExternal(
   // landed and release the source lease on coins that never moved. So bind the returned body
   // to the attempt THIS run formed, before the walk is allowed to mean anything.
   //
-  // Same idiom as the production caller (src/send/late-landing-reconcile.ts:186-197):
+  // Same idiom as the production lander (send-completion-lander + landing-path-oracle):
   // reverify, then compare the verifier's own byte-exact reconstruction against the retained
   // bytes. Never a fresh hand-rolled re-serialization of the parsed inner (the byte-exact signing rule).
   // The node never sees the completed body — the recipient co-signs step 2 — so the retained
@@ -1255,7 +1255,7 @@ export async function executeAuthorizedSendExternal(
   // external INBOUND is never "attributed to an in-flight operation", so it would reclassify
   // every buried landing as a breach — the exact misclassification removes. An
   // unattributed *outbound* successor draining the leased source is a real residual and is
-  // filed against the oracle's callers (this module and src/send/late-landing-reconcile.ts).
+  // filed against the oracle's callers (this module and send-completion-lander).
   trailPush(
     trail,
     `landing walk LANDED_COMPLETE_PATH depth=${landingProof.depth} — our attempt landed ` +

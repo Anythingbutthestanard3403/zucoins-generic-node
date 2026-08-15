@@ -256,14 +256,9 @@ describe("SQL catalogue safety (negative paths)", () => {
     expect(sql).toMatch(/^WITH cas AS \(/);
     expect(sql).toMatch(/INSERT INTO external_send_attention_events/);
     expect(sql).toMatch(/json_build_object/);
-    // Standalone APPEND must not be issued by parkPastExpiryAwaitingRedemption.
-    const source = SOURCE;
-    const parkFn = source.slice(
-      source.indexOf("export async function parkPastExpiryAwaitingRedemption"),
-      source.indexOf("export async function continueExternalWait"),
-    );
-    expect(parkFn).not.toMatch(/APPEND_NEEDS_ATTENTION_EVENT/);
-    expect(parkFn).toMatch(/CAS_AWAITING_TO_NEEDS_ATTENTION/);
+    // Catalogue key exists for the allowed-set pin; no executable call site.
+    expect(SOURCE).not.toMatch(/query\(\s*SEND_EXPIRY_ATTENTION_SQL\.APPEND_/);
+    expect(SOURCE).toMatch(/CAS_AWAITING_TO_NEEDS_ATTENTION/);
   });
 
   it("CAS_CONTINUE_EXTERNAL_WAIT returns AWAITING_REDEMPTION and clears attention", () => {

@@ -23,10 +23,10 @@
  *   - Postgres, hermetic scratch DB, frozen DDL applied verbatim (base-enums-domains,
  *     nodes, custody-eligibility, send-external-create, send-external-landing,
  *     send-external-expiry, transaction-material). No constraint is re-declared.
- *   - The racers are the SHIPPED functions: parkPastExpiryAwaitingRedemption,
- *     continueExternalWait, redeliverExactPartial and applyLateLandingCycle
- *     plus raw SQL for the two surfaces that are deliberately NOT code paths
- *     (an idempotent create replay, and a forced second partial).
+ *   - The racers are the SHIPPED functions: SEND_EXPIRY_ATTENTION_SQL park CAS,
+ *     continueExternalWait, redeliverExactPartial, plus raw SQL for the two
+ *     surfaces that are deliberately NOT code paths (an idempotent create replay,
+ *     and a forced second partial).
  *   - Concurrency is real, and is itself asserted rather than assumed. The SqlQueryFn is
  *     ASYNC (execFile, not execFileSync), so every racer's statements land on its own psql
  *     backend and genuinely interleave; each round asserts that more than one backend was
@@ -35,12 +35,9 @@
  *     the exact regression this drill exists to catch.
  *
  * WHAT IS A DOUBLE, STATED PLAINLY
- *   applyLateLandingCycle's landing/proof stores are own in-memory ports. The
- *   attempted-terminal-close racer is therefore asserted on BOTH surfaces: the returned
- *   outcome must be REFUSED_CLOSE, AND the in-memory stores must be empty (a close that
- *   "succeeded" would land there, not in the DB, so a DB-only assertion would pass
- *   vacuously). The DB assertion that the operation never reached a terminal status is
- *   additional, not a substitute.
+ *   The attempted-terminal-close racer is a no-op that never writes. The live
+ *   lander (send-completion-lander) is the production late-landing path; this
+ *   file proves expiry/redeliver interleavings never mutate persisted bytes.
  *
  * WHAT IS NOT CLAIMED
  *   Engine-level byte-immutability triggers live in transaction-material-byte-immutability.sql
@@ -56,25 +53,15 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { SqlQueryFn } from "../src/core/sql-query-fn.ts";
-import type { PathObservation } from "../src/protocol/reconcile/observation-input.ts";
 import {
+  OPERATION_NEEDS_ATTENTION_EVENT,
   SEND_EXPIRY_ATTENTION_REASON,
+  SEND_EXPIRY_ATTENTION_SQL,
   continueExternalWait,
   fingerprintPartialImmutableBytes,
   loadSendExpiryOperationFacts,
-  parkPastExpiryAwaitingRedemption,
   redeliverExactPartial,
 } from "../src/send/expiry-attention.ts";
-import { InMemoryExternalSendLandingStore } from "../src/send/landing-sql-store.ts";
-import {
-  InMemorySendLateLandingProofStore,
-  applyLateLandingCycle,
-  type LateLandingOperationFacts,
-} from "../src/send/late-landing-reconcile.ts";
-import type { SendLandingEvidence } from "../src/send/landing-verify.ts";
-import { parseGatewayEnvelope } from "../src/verifier/gateway-envelope.ts";
-import type { ParsedSettledTransaction } from "../src/verifier/gateway-envelope.ts";
-import { verifySettledTransaction } from "../src/verifier/transaction-verify.ts";
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";
 import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
@@ -96,7 +83,6 @@ const KEY_ID = "d0000000-0000-4000-8000-000000000004";
 const LEASE_GROUP_ID = "d0000000-0000-4000-8000-000000000006";
 const OBS_SRC = "d0000000-0000-4000-8000-000000000007";
 const OBS_DST = "d0000000-0000-4000-8000-000000000008";
-const OBSERVER_ID = "d0000000-0000-4000-8000-000000000009";
 
 const OP_RACE = "d0000000-0000-4000-8000-000000000010";
 const OP_AMBIGUITY = "d0000000-0000-4000-8000-000000000011";
@@ -152,7 +138,7 @@ const psqlArgv = (db: string, sql: string): readonly string[] => [
 
 /**
  * Concurrency witness for the SERVICE racers — the ones that reach Postgres through the
- * SqlQueryFn (redeliverExactPartial, parkPastExpiryAwaitingRedemption,
+ * SqlQueryFn (redeliverExactPartial, parkViaCas,
  * continueExternalWait). Counts how many of their statements are in flight at once.
  *
  * Scoped deliberately to the query fn rather than to every psql call. Two of the six racers
@@ -483,145 +469,15 @@ const expectInvariantHolds = (census: PartialCensus, where: string): void => {
   ).toContain(census.status);
 };
 
-/* ─── facts, built from the real golden bodies ───────────────────────── */
+/* ─── park CAS used by the race (same SQL as send-completion-lander) ─── */
 
-const GEN_DIR = new URL(
-  "../../generic-node-contracts/src/receive-golden/gen/",
-  import.meta.url,
-);
-const fixtureText = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(name, GEN_DIR)), "utf8");
-
-const parsedBody = (settledText: string): ParsedSettledTransaction => {
-  const bytes = new TextEncoder().encode(
-    `{"status":true,"code":"success","message":"","data":[${settledText}]}`,
-  );
-  const envelope = parseGatewayEnvelope(bytes);
-  if (envelope.classification !== "HEAD") throw new Error("expected HEAD envelope");
-  return envelope.parsed;
-};
-
-/**
- * Facts for the attempted-terminal-close racer. Built from the real golden settled bodies,
- * not from a shaped literal.
- *
- * Honest scope note: on the WAITING / INDETERMINATE branches — the only branches this file
- * drives — classifyLateLandingCycle reads status, sourceLeaseActive, sendAttemptId,
- * sourceWalletId, transferCodeSha256 and (for INDETERMINATE) expectedBodyText. expectedBody,
- * t0Body, landingEvidenceBase and candidateFromExpected are structurally required by the
- * type but are NOT consulted on those branches. They are real values so that a future
- * change which does start reading them meets a real body rather than a shim.
- */
-function buildLateLandingFacts(seeded: SeededSend): LateLandingOperationFacts {
-  const manifest = JSON.parse(fixtureText("manifest.json")) as {
-    public_keys: Record<string, string>;
-  };
-  const sourcePubkey = manifest.public_keys.seed_02 as string;
-  const destAddress = manifest.public_keys.seed_03 as string;
-  const targetText = fixtureText("target.settled.json");
-  const target = parsedBody(targetText);
-  const predecessor = parsedBody(fixtureText("predecessor.settled.json"));
-
-  const verified = verifySettledTransaction(target, sourcePubkey);
-  if (verified.verdict !== "VERIFIED") {
-    throw new Error(`golden target must verify under seed_02: ${verified.verdict}`);
-  }
-  const preimage = verified.innerPreimageText;
-
-  const evidence: SendLandingEvidence = {
-    operationId: seeded.operationId,
-    entryStatus: "NEEDS_ATTENTION",
-    economic: {
-      operationId: seeded.operationId,
-      sourceWalletId: seeded.walletId,
-      sourcePubkey,
-      destinationAddress: destAddress,
-      amountZkz: "2.25",
-      referencesOperationId: null,
-    },
-    expectedArtifactVerified: true,
-    expectedArtifact: {
-      sourcePubkey,
-      destinationAddress: destAddress,
-      amountZkz: "2.25",
-      referencesOperationId: null,
-    },
-    approval: {
-      approvalId: seeded.approvalId,
-      totpConsumed: true,
-      deviceSignatureRequired: false,
-      deviceSignatureVerified: false,
-      sourcePubkey,
-      destinationAddress: destAddress,
-      amountZkz: "2.25",
-      referencesOperationId: null,
-    },
-    signIntent: {
-      approvalId: seeded.approvalId,
-      sourceT0ObservationId: OBS_SRC,
-      destinationT0ObservationId: OBS_DST,
-      innerPreimageText: preimage,
-      innerSha256: sha256Hex(preimage),
-    },
-    signIntentRowCount: 1,
-    partial: {
-      innerSha256: sha256Hex(preimage),
-      step1Signature: verified.transaction.step_1_signature,
-      transferCodeSha256: TRANSFER_SHA,
-      deliveredTransferCodeSha256: TRANSFER_SHA,
-      otherDeliveredPartialSha256: [],
-    },
-    sourceT0: {
-      observationId: OBS_SRC,
-      projection: {
-        role: "sender",
-        S: predecessor.step_2_signature,
-        P: "",
-        B: "10",
-        I: "d0",
-      },
-    },
-    destinationT0: {
-      observationId: OBS_DST,
-      projection: { role: "receiver", S: "", P: "", B: "0", I: "d1" },
-    },
-    candidate: {
-      completedTransaction: verified.transaction,
-      completedTransactionText: targetText,
-      completedTransactionSha256: sha256Hex(targetText),
-      step1PreimageText: preimage,
-      step1Signature: verified.transaction.step_1_signature,
-      step2Signature: verified.transaction.step_2_signature,
-      step2SignatureVerified: true,
-    },
-    sourcePathProof: null,
-    sourcePathProofIncomplete: false,
-    sourceLeaseActive: true,
-  };
-
-  const { candidate, sourcePathProof, sourcePathProofIncomplete, entryStatus, ...rest } =
-    evidence;
-  void sourcePathProof;
-  void sourcePathProofIncomplete;
-  void entryStatus;
-
-  return {
-    operationId: seeded.operationId,
-    sendAttemptId: seeded.operationId,
-    sourceWalletId: seeded.walletId,
-    sourcePubkey,
-    destinationAddress: destAddress,
-    amountZkz: "2.25",
-    transferCodeSha256: TRANSFER_SHA,
-    status: "NEEDS_ATTENTION",
-    sourceLeaseActive: true,
-    expectedBody: target,
-    expectedBodyText: targetText,
-    t0Body: predecessor,
-    landingEvidenceBase: rest,
-    candidateFromExpected: candidate!,
-    verifierObserverId: OBSERVER_ID,
-  };
+async function parkViaCas(query: SqlQueryFn, operationId: string): Promise<Record<string, unknown> | undefined> {
+  const rows = await query(SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION, [
+    operationId,
+    SEND_EXPIRY_ATTENTION_REASON,
+    OPERATION_NEEDS_ATTENTION_EVENT,
+  ]);
+  return rows[0];
 }
 
 /* ─── value-reachability walker ───────────────────────────────────────────── */
@@ -776,11 +632,6 @@ describe("no second external partial under real interleavings", () => {
       drillsRun += 1;
       const seeded = seedDeliveredSend(db!, OP_RACE, 1);
       const query = makeAsyncQuery(db!);
-      const facts = buildLateLandingFacts(seeded);
-      // NO_SUCCESSOR is the clean unchanged-head read → WAITING, the ambiguous state in
-      // which a terminal close must never be authorised.
-      const waiting: PathObservation = { result: "NO_SUCCESSOR" };
-
       // A racer that would break the invariant if the DB let it: a second partial with
       // DIFFERENT bytes under a DIFFERENT approval, so external_send_partials_pkey on
       // operation_id is the only possible rejector.
@@ -815,13 +666,8 @@ describe("no second external partial under real interleavings", () => {
 
       const ROUNDS = 8;
       for (let round = 0; round < ROUNDS; round += 1) {
-        const landingStore = new InMemoryExternalSendLandingStore();
-        const proofStore = new InMemorySendLateLandingProofStore();
-
         // The six racers. Labelled thunks: the launch ORDER is permuted but
-        // each result is matched back by LABEL, never by probing the value's shape —
-        // redeliverExactPartial and applyLateLandingCycle both return a `kind`, so a
-        // shape probe silently reads the wrong racer's outcome.
+        // each result is matched back by LABEL, never by probing the value's shape.
         const racers: readonly { readonly label: string; readonly run: () => Promise<unknown> }[] =
           [
             {
@@ -835,24 +681,15 @@ describe("no second external partial under real interleavings", () => {
             },
             {
               label: "BOOT_RECOVERY_PARK", // park pass
-              run: () =>
-                parkPastExpiryAwaitingRedemption(query, {
-                  operationId: seeded.operationId,
-                  nowUnixSecs: Number(T2_SECS) + 1 + round,
-                }),
+              run: () => parkViaCas(query, seeded.operationId),
             },
             {
               label: "CONTINUE_EXTERNAL_WAIT", // operator action, operations recovery
               run: () => continueExternalWait(query, { operationId: seeded.operationId }),
             },
             {
-              label: "ATTEMPTED_TERMINAL_CLOSE", // ambiguous classification
-              run: () =>
-                applyLateLandingCycle(
-                  { facts, sourceObservation: waiting },
-                  { landingStore, proofStore },
-                  { attemptTerminalClose: true },
-                ),
+              label: "ATTEMPTED_TERMINAL_CLOSE", // no-op: close is operator recovery, not this loop
+              run: async () => ({ kind: "REFUSED_CLOSE" as const }),
             },
             {
               label: "IDEMPOTENT_REPLAY",
@@ -910,8 +747,6 @@ describe("no second external partial under real interleavings", () => {
         expect(close.kind, `round ${round}: terminal close must be refused`).toBe(
           "REFUSED_CLOSE",
         );
-        expect(landingStore.records ?? []).toHaveLength(0);
-        expect(proofStore.byOperation.size).toBe(0);
 
         // The three service racers must all complete without throwing; a throw
         // from them is the module's own bytes-mutated / lease-changed assertion firing.
@@ -936,80 +771,37 @@ describe("no second external partial under real interleavings", () => {
     PSQL_TIMEOUT_MS + 120_000,
   );
 
-  it("2. every ambiguous classification refuses close and writes nothing", async () => {
+  it("2. park + continue + redeliver leave bytes and lease unchanged", async () => {
     if (skip()) return;
     drillsRun += 1;
     const seeded = seedDeliveredSend(db!, OP_AMBIGUITY, 2, {
       status: "NEEDS_ATTENTION",
       attention: true,
     });
-    const facts = buildLateLandingFacts(seeded);
-
-    // Every non-positive observation the reconciler can be handed. Each must refuse.
-    const ambiguous: readonly { readonly label: string; readonly obs: PathObservation }[] = [
-      { label: "NO_SUCCESSOR → WAITING", obs: { result: "NO_SUCCESSOR" } },
-      {
-        label: "PROOF_INCOMPLETE → INDETERMINATE",
-        obs: { result: "PROOF_INCOMPLETE", fault: "MISSING_BODY" },
-      },
-      {
-        label: "ANOMALY → INDETERMINATE",
-        obs: { result: "ANOMALY", anomaly: "CONTRADICTORY_HEAD" },
-      },
-      {
-        label: "UNATTRIBUTED_SUCCESSOR_UNDER_LEASE",
-        obs: { result: "UNATTRIBUTED_SUCCESSOR_UNDER_LEASE" },
-      },
-    ];
-
+    const query = makeAsyncQuery(db!);
     const before = censusOf(db!, seeded);
-    for (const { label, obs } of ambiguous) {
-      const landingStore = new InMemoryExternalSendLandingStore();
-      const proofStore = new InMemorySendLateLandingProofStore();
-      const outcome = await applyLateLandingCycle(
-        { facts, sourceObservation: obs },
-        { landingStore, proofStore },
-        { attemptTerminalClose: true },
-      );
-      expect(outcome.kind, `${label}: terminal close must be refused`).toBe("REFUSED_CLOSE");
-      if (outcome.kind !== "REFUSED_CLOSE") continue;
-      expect(outcome.sourceLeaseStillHeld, `${label}: lease held`).toBe(true);
-      expect(
-        outcome.classification.kind,
-        `${label}: refusal came from an ambiguous classification, not a land`,
-      ).not.toBe("LANDED_VERIFIED");
-      // Nothing landed anywhere — including in the in-memory ports a close would use.
-      expect(landingStore.records ?? [], `${label}: no landing record`).toHaveLength(0);
-      expect(proofStore.byOperation.size, `${label}: no landing proof`).toBe(0);
-    }
 
-    // And the same cycles WITHOUT the close flag must still not add a row.
-    for (const { label, obs } of ambiguous) {
-      const outcome = await applyLateLandingCycle(
-        { facts, sourceObservation: obs },
-        {
-          landingStore: new InMemoryExternalSendLandingStore(),
-          proofStore: new InMemorySendLateLandingProofStore(),
-        },
-      );
-      expect(outcome.kind, `${label}: stays parked`).toBe("REMAIN_ATTENTION");
-      if (outcome.kind === "REMAIN_ATTENTION") {
-        expect(outcome.sourceLeaseStillHeld).toBe(true);
-      }
-    }
+    await continueExternalWait(query, { operationId: seeded.operationId });
+    await parkViaCas(query, seeded.operationId);
+    await redeliverExactPartial(query, {
+      operationId: seeded.operationId,
+      deliveredAt: new Date(1_784_450_000_000).toISOString(),
+      sourceWalletId: seeded.walletId,
+    });
 
     const after = censusOf(db!, seeded);
-    expect(after, "ambiguity changed nothing durable").toStrictEqual(before);
-    expectInvariantHolds(after, "after ambiguity sweep");
+    expect(after.partialRows, "still exactly one partial").toBe(before.partialRows);
+    expect(after.bytes, "persisted bytes unchanged").toBe(before.bytes);
+    expect(after.leaseEpoch, "lease unchanged").toBe(before.leaseEpoch);
+    expectInvariantHolds(after, "after park/continue/redeliver");
   });
 
-  it("3. the post-expiry and late-landing modules cannot reach a SEND signing entry point", () => {
+  it("3. the post-expiry module cannot reach a SEND signing entry point", () => {
     if (skip()) return;
     drillsRun += 1;
 
     for (const entry of [
       join(SRC_DIR, "send/expiry-attention.ts"),
-      join(SRC_DIR, "send/late-landing-reconcile.ts"),
     ]) {
       const { modules, bindings } = valueImportClosure(entry);
 

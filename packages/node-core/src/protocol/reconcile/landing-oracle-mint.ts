@@ -6,7 +6,6 @@
 // ONLY these production modules may import this file (enforced by discrimination test):
 // - src/verifier/landing-path-oracle.ts (proveReceiveLanding / proveSendLanding)
 // - src/verifier/ancestry-walker.ts (walkAncestryPath)
-// - src/send/late-landing-reconcile.ts (durable body-revalidated rebuild)
 // Tests import via landing-oracle-mint.fixture.ts only.
 
 const landingPathProofBrand = Symbol("landingPathProofBrand");

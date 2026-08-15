@@ -24,6 +24,7 @@ import {
   SELECT_TOPUP_HUB_SQL,
 } from "../src/assign-and-topup.js";
 import { registerPgRequiredGuard } from "./pg-required-guard.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
 
@@ -165,6 +166,7 @@ CREATE TABLE IF NOT EXISTS operations (
     slimObs,
     sendOps,
     ops,
+    verificationModeFixtureSql(),
   ].join("\n");
 };
 

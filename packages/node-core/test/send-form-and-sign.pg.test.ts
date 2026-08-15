@@ -32,6 +32,7 @@ import {
   WALLET_INNER_PREIMAGE_TEXT,
   WALLET_STEP_1_SIGNATURE,
 } from "./fixtures/splitchain-v2-byte-evidence.ts";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const contractSql = readFileSync(
@@ -266,7 +267,8 @@ describe.skipIf(databaseUrl === undefined)(
            INSERT INTO wallets (id) VALUES ('${SOURCE_WALLET}');
            ${contractSql}
            ${WALLET_ACTIVE_LEASES_DDL}
-           ${SEND_OPERATIONS_DDL}`,
+           ${SEND_OPERATIONS_DDL}
+           ${verificationModeFixtureSql()}`,
         ),
       );
       reachable = true;

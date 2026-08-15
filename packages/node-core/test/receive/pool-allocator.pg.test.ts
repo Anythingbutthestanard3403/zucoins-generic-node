@@ -51,6 +51,7 @@ import {
   withTx,
 } from "../psql-harness.ts";
 import { tokenizeCustodySql } from "../custody-eligibility-sql-statements.js";
+import { verificationModeFixtureSql } from "../verification-mode-fixture.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
@@ -133,7 +134,7 @@ CREATE TABLE receive_release_proofs (
 const applySchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n${verificationModeFixtureSql()}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });

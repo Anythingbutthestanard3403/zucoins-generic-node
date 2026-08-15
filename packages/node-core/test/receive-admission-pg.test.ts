@@ -48,6 +48,7 @@ import {
 import { RECEIVE_ADMISSION_LOCK_KEY } from "../src/receive/pool-allocator.js";
 import { STATEMENTS, SqlReceiveAdmissionStore } from "../src/receive/sql-store.js";
 import { PsqlSessionExecutor } from "./psql-harness.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 /* ─── constants ───────────────────────────────────────────────────── */
 
@@ -239,6 +240,7 @@ const executeInsert = (args: InsertArgs): string =>
     lit(args.destinationId ?? null),
     lit(args.walletId ?? null),
     lit(1700000000000),
+    lit("INDEPENDENT"),
   ].join(", ")});`;
 
 // The same row shape written with a plain INSERT, so the constraint — not ON CONFLICT DO
@@ -284,6 +286,7 @@ describeIfPg("receive admission — real frozen DDL against real PostgreSQL", ()
     applyDdl(scratchDb, CUSTODY_DDL);
     applyDdl(scratchDb, RECEIVE_DDL);
     applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
+    applyDdl(scratchDb, verificationModeFixtureSql());
     psqlMust(scratchDb, seedNode());
     psqlMust(scratchDb, seedVerifiedWallet(DEST_WALLET, RECOVERY_ID, pubkey("DEST")));
     psqlMust(scratchDb, seedVerifiedWallet(RECEIVER_WALLET, RECOVERY_ID_2, pubkey("RCVR")));

@@ -25,6 +25,7 @@ import {
 import { SqlSendCreateStore } from "../src/send/sql-store.js";
 import type { SendArtifactSigner } from "../src/send/create.js";
 import { WalletBusyError, IdempotencyKeyReusedError } from "../src/api/routes/operation-routes.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const MAINTENANCE_DB = "postgres";
 const EXPECTED_DRILL_COUNT = 6;
@@ -174,6 +175,13 @@ CREATE TABLE operation_verifications (
   id uuid PRIMARY KEY,
   operation_id uuid NOT NULL REFERENCES operations(id),
   verdict verification_verdict NOT NULL
+);
+-- SELECT_BY_OPERATION_ID_WITH_LIVE LEFT JOINs receive_codes (ZTR-1302).
+-- Stub only the columns that join/read; do not apply receive-codes.sql (FK chain).
+CREATE TABLE IF NOT EXISTS receive_codes (
+  operation_id uuid PRIMARY KEY REFERENCES operations(id),
+  code_status text,
+  transfer_code_text text
 );
 `;
 
@@ -385,6 +393,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
     applyDdl(scratchDb, PROJECTION_FRAGMENT);
     applyDdl(scratchDb, SEND_DDL);
+    applyDdl(scratchDb, verificationModeFixtureSql());
 
     psqlMust(
       scratchDb,

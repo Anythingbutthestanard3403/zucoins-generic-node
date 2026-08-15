@@ -38,6 +38,7 @@ import {
   wrapModifyingCteAsJson,
 } from "./psql-harness.js";
 import { registerPgRequiredGuard } from "./pg-required-guard.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaDir = resolve(here, "../src/schema");
@@ -253,7 +254,7 @@ const insertCreatedSend = (
   ].join(", ");
   return (
     `INSERT INTO operations (id) VALUES ('${operationId}'); ` +
-    `INSERT INTO send_operations (${cols}) VALUES (${vals}, now()); ` +
+    `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
     `INSERT INTO send_operation_expected_artifacts ` +
     `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
     `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -315,6 +316,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     applyFile(scratchDb, "approval-stores.sql");
     applyFile(scratchDb, "operational-stores.sql");
     applyFile(scratchDb, "audit-log.sql", true);
+    applySql(scratchDb, verificationModeFixtureSql(), "verification-mode");
     psqlMust(scratchDb, seedNode());
     // local socket URL for PsqlSessionExecutor
     dbUrl = `postgresql:///${scratchDb}`;
@@ -486,7 +488,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     psqlMust(
       scratchDb,
       `INSERT INTO operations (id) VALUES ('${operationId}'); ` +
-        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now()); ` +
+        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
         `INSERT INTO send_operation_expected_artifacts ` +
         `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
         `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -642,7 +644,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now());`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
       );
       psqlMust(
         scratchDb,
@@ -680,7 +682,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now());`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
       );
       psqlMust(scratchDb, insertTotpApprovalDirect(randomUUID(), op, ch, 42_000 + Math.floor(Math.random() * 1000)));
     }
@@ -714,7 +716,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now());`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
       );
       psqlMust(scratchDb, insertAutoApprovalDirect(randomUUID(), op, "now()"));
     }
@@ -756,7 +758,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     psqlMust(
       scratchDb,
       `INSERT INTO operations (id) VALUES ('${op}'); ` +
-        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now()); ` +
+        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
         `INSERT INTO send_operation_expected_artifacts ` +
         `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
         `VALUES ('${randomUUID()}', '${op}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -834,7 +836,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now()); ` +
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
           `INSERT INTO send_operation_expected_artifacts ` +
           `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
           `VALUES ('${randomUUID()}', '${op}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +

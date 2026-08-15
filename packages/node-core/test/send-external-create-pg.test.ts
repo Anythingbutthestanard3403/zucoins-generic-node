@@ -55,6 +55,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OPERATION_COLUMNS, STATEMENTS } from "../src/send/sql-store.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 /* ─── constants ───────────────────────────────────────────────────── */
 
@@ -242,6 +243,7 @@ const executeInsert = (args: InsertArgs): string =>
     lit(null),
     lit(null),
     lit(1700000000000),
+    lit("INDEPENDENT"),
     lit(args.artifactId),
     lit("zp-send-external-expected-v1"),
     lit(1),
@@ -273,7 +275,7 @@ const rawOperationInsert = (args: InsertArgs): string =>
     lit(args.referencesOperationId ?? null),
     lit(null),
     lit(null),
-  ].join(", ")}, now());`;
+  ].join(", ")}, now(), 'INDEPENDENT');`;
 
 const rawArtifactInsert = (artifactId: string, operationId: string): string =>
   `INSERT INTO send_operation_expected_artifacts ` +
@@ -301,6 +303,7 @@ describeIfPg("external-send create — real frozen DDL against real PostgreSQL",
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
     applyDdl(scratchDb, SEND_DDL);
+    applyDdl(scratchDb, verificationModeFixtureSql());
     psqlMust(scratchDb, seedNode());
     psqlMust(scratchDb, seedVerifiedWallet(SOURCE_WALLET, RECOVERY_ID, pubkey("SRC")));
     psqlMust(scratchDb, seedVerifiedWallet(OTHER_WALLET, RECOVERY_ID_2, pubkey("OTH")));

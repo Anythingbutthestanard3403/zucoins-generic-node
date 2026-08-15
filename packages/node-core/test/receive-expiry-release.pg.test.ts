@@ -28,6 +28,7 @@ import {
   withDatabase,
   withTx,
 } from "./psql-harness.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
 const PG_REQUIRED = process.env.PG_REQUIRED === "1";
@@ -317,6 +318,7 @@ describe("receive expiry/release PostgreSQL drills", () => {
        `,
     );
     psqlMust(dbUrl, expiry);
+    psqlMust(dbUrl, verificationModeFixtureSql());
     await migrateLeaseFoundation(db);
     psqlMust(
       dbUrl,

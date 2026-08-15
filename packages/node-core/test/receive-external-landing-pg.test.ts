@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -370,6 +371,7 @@ describe("receive-external landing PG drills", () => {
       `${createTableBlock(operations, "operations")}\n${createTableBlock(operations, "operation_wallets")}`,
     );
     applyDdlFile(db, join(SCHEMA_DIR, "receive-external-landing.sql"));
+    psqlMust(db, verificationModeFixtureSql());
     ready = true;
   });
 

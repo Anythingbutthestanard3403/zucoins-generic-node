@@ -44,13 +44,18 @@ async function* readSseFrames(
 function isSubscribeLifecycleProjection(value: unknown): value is SubscribeLifecycleProjection {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  const modeOk =
+    v.verification_mode === undefined ||
+    v.verification_mode === "INDEPENDENT" ||
+    v.verification_mode === "NODE_VERIFIED";
   return (
     typeof v.operation_id === "string" &&
     typeof v.operation_type === "string" &&
     typeof v.state === "string" &&
     typeof v.row_version === "number" &&
     typeof v.attention_required === "boolean" &&
-    typeof v.updated_at === "string"
+    typeof v.updated_at === "string" &&
+    modeOk
   );
 }
 

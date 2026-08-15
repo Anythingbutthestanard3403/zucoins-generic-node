@@ -1,12 +1,23 @@
 {
   "name": "@zucoins/generic-node-consumer",
   "version": "0.0.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Anythingbutthestanard3403/zucoins-generic-node.git",
+    "directory": "packages/generic-node-consumer"
   },
   "scripts": {
     "build": "tsc -b",
@@ -14,10 +25,18 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "@zucoins/generic-node-contracts": "workspace:*",
+    "@zucoins/generic-node-contracts": "workspace:*"
+  },
+  "peerDependencies": {
     "@zucoins/node-core": "workspace:*"
   },
+  "peerDependenciesMeta": {
+    "@zucoins/node-core": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@zucoins/node-core": "workspace:*",
     "vitest": "^3.2.6"
   }
 }

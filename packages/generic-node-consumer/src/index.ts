@@ -110,6 +110,14 @@ export {
   type InstructionOriginResult,
   type VerifiedReceiveInstruction,
 } from "./instruction-origin.js";
+export {
+  DEFAULT_VERIFICATION_MODE,
+  VERIFICATION_MODES,
+  VerificationModeDriftError,
+  isVerificationMode,
+  parseVerificationMode,
+  type VerificationMode,
+} from "./verification-mode.js";
 
 // ---------------------------------------------------------------------------
 // Changed-response ledger + node-state vocabulary
@@ -209,3 +217,19 @@ export {
   type ExternalSendOperationView,
   type GetExternalSendInput,
 } from "./http/sends.js";
+export {
+  DISCOVERY_PATH as WELL_KNOWN_DISCOVERY_PATH,
+  IMPLEMENTER_IDENTITY_PATH,
+  IdentityDocumentError,
+  getDiscovery,
+  getImplementerIdentity,
+  parseImplementerIdentityDocument,
+  parseNodeIdentityDocument,
+  type DiscoveryKeyValidityWire,
+  type DiscoveryKeyWireEntry,
+  type FundingSource,
+  type GetDiscoveryInput,
+  type GetImplementerIdentityInput,
+  type ImplementerIdentityDocument,
+  type NodeIdentityDocument,
+} from "./http/discovery.js";

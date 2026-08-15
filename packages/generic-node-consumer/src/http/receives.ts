@@ -8,6 +8,7 @@ import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
 
 import { assertOk } from "./errors.js";
 import { resolveFetch, resolveUrl, type NodeClientConfig } from "./client-types.js";
+import type { VerificationMode } from "../verification-mode.js";
 
 /** Common operation representation, embedded in every point read. */
 export interface CommonOperationView {
@@ -22,6 +23,8 @@ export interface CommonOperationView {
   readonly updated_at: string;
   readonly terminal_at: string | null;
   readonly verification_material_available_until: string | null;
+  /** Immutable after admission; omitted on legacy bodies defaults to INDEPENDENT. */
+  readonly verification_mode?: VerificationMode;
 }
 
 export type AfterLanding =
@@ -34,6 +37,8 @@ export interface CreateReceiveRequest {
   readonly anchor: string;
   readonly expires_in_seconds?: number;
   readonly after_landing: AfterLanding;
+  /** Optional; omitted → INDEPENDENT. NODE_VERIFIED requires operator policy. */
+  readonly verification_mode?: VerificationMode;
 }
 
 /** Shared by the 201/202 create response and the point read (transfer_code always null there). */

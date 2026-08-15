@@ -76,6 +76,54 @@ describe("createReceive", () => {
     expect(result.code_status).toBe("AWAITING_ARM");
   });
 
+  it("forwards verification_mode NODE_VERIFIED on create", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async (_url, init) => {
+      const sent = JSON.parse(init!.body as string) as { verification_mode?: string };
+      return jsonResponse(201, {
+        operation: {
+          operation_id: OP_ID,
+          operation_type: "RECEIVE_EXTERNAL",
+          state: "READY",
+          amount_zkz: "5.5",
+          row_version: 2,
+          attention_required: false,
+          attention_reason: null,
+          created_at: "2026-07-18T12:00:00.000Z",
+          updated_at: "2026-07-18T12:00:00.000Z",
+          terminal_at: null,
+          verification_material_available_until: null,
+          verification_mode: sent.verification_mode,
+        },
+        receiver_pubkey: "padded-base64url",
+        discriminator: OP_ID,
+        expires_at: "2026-07-18T12:05:00.000Z",
+        after_landing: { kind: "HOLD", destination_id: null },
+        code_status: "RELEASED",
+        transfer_code: "code",
+        expected_artifact: null,
+        t0: null,
+        subscription_handle: "sh_secret",
+      });
+    });
+
+    const result = await createReceive({
+      config: { ...CONFIG, fetchImpl },
+      bearerKey: "ik_test",
+      idempotencyKey: "idem-mode-1",
+      request: {
+        amount_zkz: "5.5",
+        anchor: "ord_01J2",
+        after_landing: { kind: "HOLD", destination_id: null },
+        verification_mode: "NODE_VERIFIED",
+      },
+    });
+
+    expect(JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string)).toMatchObject({
+      verification_mode: "NODE_VERIFIED",
+    });
+    expect(result.operation.verification_mode).toBe("NODE_VERIFIED");
+  });
+
   it("surfaces a 503 receive_queue_full as NodeApiError", async () => {
     const fetchImpl = vi.fn<FetchLike>(async () =>
       jsonResponse(503, {

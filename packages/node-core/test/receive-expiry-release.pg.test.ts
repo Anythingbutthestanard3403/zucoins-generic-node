@@ -280,6 +280,12 @@ describe("receive expiry/release PostgreSQL drills", () => {
        );
        CREATE TABLE node_signing_keys (id uuid PRIMARY KEY);`,
     );
+    // ZTR-1274 r2: expire SQL fixtures must load full observation-stores.sql
+    // (wallet_observation_cursors). Do not JOIN the cursor as freshness evidence.
+    psqlMust(
+      dbUrl,
+      readFileSync(resolve(SCHEMA, "observation-stores.sql"), "utf8"),
+    );
     // operation_expected_artifacts and receive_codes are frozen slices; use the
     // byte-exact file contents rather than inline stubs. expected-artifacts.sql owns
     // operation_expected_artifacts and must apply before receive-codes.sql so the
@@ -736,6 +742,48 @@ describe("receive expiry/release PostgreSQL drills", () => {
             WHERE operation_id='${op}'`,
         ).ok,
       ).toBe(false);
+    },
+  );
+
+  it.skipIf(!live)(
+    "expire(t0Id) and planted-cursor-only park (ZTR-1274 r2)",
+    async () => {
+      const { op, wallet } = await seedServiceReady(90);
+      const t0 = operationId(390); // seedServiceReady(90) T0 = operationId(300+90)
+      const nowMs = Date.now();
+      psqlMust(
+        dbUrl,
+        `INSERT INTO wallet_observation_cursors (
+           observer_id, wallet_id, wallet_public_key, last_recorded_observation_id,
+           last_raw_response_sha256, last_semantic_fingerprint, last_seen_at,
+           consecutive_repeat_count, next_wallet_seq
+         ) VALUES (
+           '${OBSERVER}', '${wallet}',
+           (SELECT public_key FROM wallets WHERE id='${wallet}'),
+           '${t0}', '${SHA}', '${SHA}', to_timestamp(${nowMs} / 1000.0),
+           1, 2
+         );`,
+      );
+      let proofId = 790;
+      const service = new SqlReceiveExpiryReleaseService({
+        withTransaction: (fn) => withTx(dbUrl, fn),
+      });
+      const t0Only = await service.expire({
+        operationId: op,
+        freshObservationId: t0,
+        nowMs,
+        newId: () => operationId(proofId++),
+      });
+      expect(t0Only.kind).toBe("NEEDS_ATTENTION");
+      if (t0Only.kind === "NEEDS_ATTENTION") {
+        expect(t0Only.failedPredicates).toContain("FRESH_VERIFIED_T0_EXACT");
+      }
+      expect(
+        psqlMust(
+          dbUrl,
+          `SELECT count(*) FROM receive_release_proofs WHERE operation_id='${op}'`,
+        ).trim(),
+      ).toBe("0");
     },
   );
 

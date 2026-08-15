@@ -84,6 +84,9 @@ describe("money-workers composition", () => {
     expect(workers).toMatch(/readFreshHead/);
     expect(workers).toMatch(/freshObservationId/);
     expect(workers).not.toMatch(/freshObservationId:\s*null,\s*\n\s*nowMs/);
+    // ZTR-1274 r2: expiry confirm-read persists appendExactRepeat this tick, outside expire TX.
+    expect(workers).toMatch(/appendExactRepeat:\s*true/);
+    expect(workers).toMatch(/expiryConfirmReadFreshHead/);
     expect(main).toMatch(/signerLeadership:\s*shutdownRegistry\.authority/);
     // Review fix: production producer + retained handle enqueue path.
     expect(workers).toMatch(/runReceiveCandidateIntakeStep/);

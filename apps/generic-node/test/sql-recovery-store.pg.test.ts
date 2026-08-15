@@ -82,6 +82,9 @@ const PACK_SLICES = [
   "observation-ledger",
   // LOAD_OBSERVATIONS probes observation_anomalies (EXISTS subquery).
   "observation-anomaly-indexes",
+  // ZTR-1274 r2: expire SQL fixtures must load full observation-stores.sql
+  // (wallet_observation_cursors). Confirm-read persist needs the cursor table.
+  "observation-stores",
   "receive-codes",
   // SqlReceiveExpiryReleaseService's LOAD_MATERIAL_FACTS query reads receive_arms.
   "receive-arms",
@@ -2033,6 +2036,31 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       attention_required: false,
       status: "EXPIRED",
     }]);
+  });
+
+  it("RELEASE_EXPIRED_RECEIVE parks when confirm-read returns T0 (ZTR-1274 r2)", async () => {
+    const fx = await seedReleaseableExpiredReceive();
+    freshHeadByPubkey.set(fx.publicKey, fx.t0ObservationId);
+
+    const { nonce } = await inspectionStore.issueRecoveryNonce(fx.operationId);
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId: fx.operationId,
+        effect: { kind: "RELEASE_EXPIRED_RECEIVE", releaseStatus: "RELEASED_T0_UNCHANGED", walletPinnedToAvailable: true },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+        classification: "PROVEN_NOT_LANDED",
+      }),
+    );
+
+    expect(result).toMatchObject({ ok: false, reason: "predicate_failed" });
+    expect(await walletState(fx.walletId)).toBe("PINNED");
+    const proofs = await pool.query(
+      `SELECT 1 FROM receive_release_proofs WHERE operation_id = $1::uuid`,
+      [fx.operationId],
+    );
+    expect(proofs.rowCount).toBe(0);
   });
 
   it("RELEASE_EXPIRED_RECEIVE refuses when the receive has payment evidence, leaving the lease and wallet untouched", async () => {

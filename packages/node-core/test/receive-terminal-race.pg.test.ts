@@ -381,6 +381,11 @@ describe("receive terminal-race fault injection (real PG)", () => {
        );
        CREATE TABLE node_signing_keys (id uuid PRIMARY KEY);`,
     );
+    // ZTR-1274 r2: expire SQL fixtures must load full observation-stores.sql.
+    psqlMust(
+      dbUrl,
+      readFileSync(resolve(SCHEMA, "observation-stores.sql"), "utf8"),
+    );
     // operation_expected_artifacts and receive_codes are frozen slices; use byte-exact
     // file contents. expected-artifacts.sql owns operation_expected_artifacts and must
     // apply before receive-codes.sql so the expected_artifact_id FK resolves.

@@ -192,6 +192,20 @@ const TRANSACTION_SITES: Readonly<Record<string, readonly TransactionSite[]>> = 
   ],
   "apps/generic-node/src/main.ts": [
     {
+      site: "createNodeGeneratedWalletKeyGenerator keyed register mint",
+      pathClass: "other",
+      isolation: "READ COMMITTED",
+      mechanism: "CONSTRAINT",
+      covering:
+        "destinations_node_idempotency_key_uidx UNIQUE (node_id, idempotency_key) WHERE " +
+        "idempotency_key IS NOT NULL — first committed write of a register. Loser 23505 " +
+        "rolls back the wallet+dest pair. No amount, lease, signature, or ledger write. " +
+        "vault.seal is AFTER COMMIT on a separate connection.",
+      pinned:
+        "pool.connect() → BEGIN → insertNodeGeneratedWalletWithPendingDestination(tx, " +
+        "{idempotencyKey,label}) → COMMIT on that client; seal + onWalletMinted only after",
+    },
+    {
       site: "withPgTransaction (shared by the RECEIVE and MOVE admission stores)",
       pathClass: "money-path",
       // One BEGIN, two consumers, two different mechanisms. `mechanism` carries a single

@@ -1,71 +1,61 @@
-# ZTR-1310 implementer — destination register idempotency
+# ZTR-1310 implementer — Candidate A remediations (PR #166)
 
 **Linear:** https://linear.app/zutopia/issue/ZTR-1310
 **Branch:** `ztr-1310-dest-idempotency`
-**Claim run:** `3d381124-470f-4385-8a94-20c9607f6b13`
-**Base:** `origin/main` @ `be826b9a1d4e18670ab26941be13b5364e626ab0`
+**PR:** #166
+**Claim run:** `16d07a35-2a66-4abd-b6c7-666371bf6dcd`
+**Pinned origin/main:** `be826b9a1d4e18670ab26941be13b5364e626ab0`
+**Pinned prior head:** `bb51881e6f9d73d5c3f988be73fadbb358512de7`
+**Plan:** `tasks/plan-ZTR-1310.md`
 
-## Problem
+## Problem (Review B)
 
-`createSqlDestinationStore.findByIdempotencyKey` always returned `null`.
-`DestinationService.register` already treated a hit as `already_registered`, and
-the in-memory store honored the key, but the live PG store neither persisted
-nor looked up `idempotency_key`. A client retry after timeout minted another
-wallet every time.
+PR #166 persisted `destinations.idempotency_key` and taught live
+`findByIdempotencyKey` to SELECT it. That only closed **serial** retry after a
+committed key. Production `generate` still dest-on-minted with a **NULL** key
+on the pool, then `store.insert` claimed UNIQUE. Overlap / timeout-after-mint
+left a committed wallet+dest with no key.
 
-## Decisions
+## Candidate A (this change)
 
-1. **Match the DestinationStore port** — key is `(node_id, idempotency_key)`.
-   Destinations are not implementer-API operations, so this is not the
-   `(implementer_id, http_method, route, idempotency_key)` ledger. No second
-   ledger table.
-2. **Column on `destinations`** — appended pack slice
-   `destinations-idempotency-key.sql`. Nullable text so mint / pool / backfill
-   rows stay valid. CHECK `^[!-~]{16,255}$` when present. Partial UNIQUE
-   `(node_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
-3. **Register write** — `insert` now binds the key. `ON CONFLICT (wallet_id)`
-   adopts a mint PENDING row and stamps the key only via
-   `COALESCE(existing, excluded)` so a later register cannot rebind another
-   key. A 23505 on the node+key UNIQUE replays the winner row.
-4. **Bless / retire / MOVE eligibility unchanged.**
+UNIQUE `(node_id, idempotency_key)` is the first committed write of a register.
+No wallet/dest for this attempt commits unless that row set already carries
+the key.
 
-## AC
+```
+findByIdempotencyKey → hit? already_registered
+materialize ed25519 in memory
+BEGIN
+  INSERT wallets
+  INSERT destinations (…, idempotency_key)
+COMMIT          -- loser 23505 → ROLLBACK → no wallet, no dest
+vault.seal      -- after commit, other connection
+onWalletMinted  -- post-seal only
+```
 
-- [x] Live PG `findByIdempotencyKey(nodeId, key)` returns the original dest row
-- [x] Second `register` with the same key does not mint; `already_registered`
-      + original dest id / wallet id / public key
-- [x] Persist under DestinationStore port scope `(node_id, idempotency_key)`
-- [x] PG test + unit/in-memory stay green
-- [x] Numbered SQL slice + matching `*.contract.ts`; appended to
-      `MONEY_SCHEMA_PACK_ORDER`
-- [x] No forbidden vocabulary
-- [x] Bless / retire / public MOVE eligibility not changed
-
-## Verify (this commit)
-
-| cmd | result |
-|-----|--------|
-| `pnpm install` | lockfile up to date, 324 packages |
-| `pnpm exec tsc -b` | exit 0 |
-| unit: dest store + census + pack + destination.test | **71 passed** |
-| PG: `sql-destination-store.pg` + `migration-integrity` | **14 passed** |
-| `pnpm --filter @zucoins/node-core lint` | 0 errors (5 pre-existing warnings) |
-
-Pre-existing on `origin/main` (not this ticket): `openapi-freeze` (WORKER query
-enum missing from committed yaml) and `pool-allocator.pg` dest-on-mint `$4`
-bind.
+23505 → typed `DestinationIdempotencyKeyClaimedError` → find →
+`already_registered`. Never delete a committed mint.
 
 ## Files
 
-- `packages/node-core/src/schema/destinations-idempotency-key.sql`
-- `packages/node-core/src/schema/destinations-idempotency-key.contract.ts`
-- `packages/node-core/src/schema/money-schema-pack.ts`
-- `packages/node-core/src/api/sql-destination-store.ts`
-- `packages/node-core/src/index.ts`
-- `packages/node-core/test/sql-destination-store.test.ts`
-- `packages/node-core/test/sql-destination-store.pg.test.ts`
-- `packages/node-core/test/destinations-idempotency-key.census.test.ts`
-- `packages/node-core/test/money-schema-pack.test.ts`
-- `packages/node-core/test/migration-integrity.test.ts`
-- `packages/node-core/test/schema-census/schema-census.report.json`
-- `tasks/ztr-1310-implementer.md`
+- `packages/node-core/src/api/insert-node-generated-wallet.ts` — dest INSERT
+  binds optional `idempotency_key`; keyed mint must share one txn client
+- `packages/node-core/src/api/destination.ts` — `generate(nodeId, claim?)`;
+  register catches claim-miss
+- `packages/node-core/src/api/sql-destination-store.ts` — unchanged (find +
+  23505 replay; missing winner still throws)
+- `apps/generic-node/src/main.ts` — keyed generate: pinned client BEGIN →
+  helper(tx, {idempotencyKey,label}) → COMMIT → seal → hook. 23505 ROLLBACK
+  + claim-miss. Pool/funding stay key-less.
+- Tests per plan §4 (concurrent overlap, timeout-after-keyed-persist, 23505
+  loser wallet rollback, serial retry keep, register generate binds key)
+- `tasks/plan-ZTR-1310.md` — reviewed plan copied into the worktree
+- `apps/generic-node/test/transaction-isolation.census.test.ts` — classify
+  the new keyed-mint BEGIN (`other` / CONSTRAINT)
+
+## Not done (per plan §5)
+
+Bless / retire / MOVE; drop UNIQUE; reservation table; nullable wallet_id;
+delete loser mint as primary fix; seal inside txn; serialization retry around
+seal; `onWalletMinted` on rolled-back mint; pool/funding register key;
+forbidden terms.

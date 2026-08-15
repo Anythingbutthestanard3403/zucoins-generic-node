@@ -5,6 +5,13 @@
 // Callers own key generation and vault.seal (key-custody). This helper only
 // writes wallets + destinations. Same executor for both inserts so a caller
 // that already holds a transaction keeps them atomic.
+//
+// When `idempotencyKey` is set, both INSERTs MUST run on one already-open
+// transaction client. The dest row is the first committed write that carries
+// the key (partial UNIQUE on (node_id, idempotency_key)); a 23505 must
+// ROLLBACK the whole pair so this attempt leaves no wallet and no dest.
+// Pool / funding mints omit the key (NULL). Do not autocommit a keyed mint
+// on a pool.
 
 export interface NodeGeneratedWalletSqlExecutor {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -23,8 +30,8 @@ INSERT INTO wallets (
 )` as const;
 
 export const INSERT_PENDING_DESTINATION_FOR_WALLET_SQL = `
-INSERT INTO destinations (id, node_id, wallet_id, label, state)
-VALUES (gen_random_uuid(), $2::uuid, $1::uuid, $3, $4)
+INSERT INTO destinations (id, node_id, wallet_id, label, state, idempotency_key)
+VALUES (gen_random_uuid(), $2::uuid, $1::uuid, $3, $4, $5)
 ON CONFLICT (wallet_id) DO NOTHING` as const;
 
 export const DELETE_PENDING_DESTINATION_FOR_WALLET_SQL = `
@@ -41,6 +48,12 @@ export interface InsertNodeGeneratedWalletInput {
   readonly publicKey: string;
   /** Operator-facing destinations.label. Empty is valid; register overwrites. */
   readonly label?: string;
+  /**
+   * Register replay key. NULL when omitted (pool / funding / dest-on-mint).
+   * When set, the caller MUST run this helper on one txn client so a unique
+   * miss rolls back the wallet too.
+   */
+  readonly idempotencyKey?: string;
   /**
    * Default FULL (register / funding). Pool scaler passes SEND_ONLY (WORKER
    * dest, no blessing) or RECEIVE_ONLY (PENDING dest, blessable).
@@ -96,6 +109,7 @@ export async function insertNodeGeneratedWalletWithPendingDestination(
     input.nodeId,
     input.label ?? "",
     spec.destState,
+    input.idempotencyKey ?? null,
   ]);
 }
 

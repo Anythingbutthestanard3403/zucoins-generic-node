@@ -6,10 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   createDestinationService,
   deriveMoveEligibility,
+  DestinationIdempotencyKeyClaimedError,
   type BlessingAuthorizer,
   type DestinationRecord,
   type DestinationStore,
   type DestinationWalletFacts,
+  type DestinationWalletKeyClaim,
   type DestinationWalletKeyGenerator,
   type NewDestination,
 } from "../src/api/destination.js";
@@ -277,6 +279,76 @@ describe("destination registration", () => {
     if (first.status === "created" && second.status === "already_registered") {
       expect(second.destination.destinationId).toBe(first.destination.destinationId);
     }
+  });
+
+  it("passes the register claim into generate", async () => {
+    const seen: Array<{ nodeId: Uuid; claim: DestinationWalletKeyClaim | undefined }> = [];
+    const keyGenerator: DestinationWalletKeyGenerator = {
+      async generate(nodeId, claim) {
+        seen.push({ nodeId, claim });
+        return { walletId: uuid("claimw1"), publicKey: pubkey("claimw1") };
+      },
+    };
+    const { service } = makeService({ keyGenerator });
+    const outcome = await service.register({
+      nodeId: NODE_ID,
+      label: "claimed sink",
+      idempotencyKey: "idem-claim-key-01",
+    });
+    expect(outcome.status).toBe("created");
+    expect(seen).toEqual([
+      {
+        nodeId: NODE_ID,
+        claim: { idempotencyKey: "idem-claim-key-01", label: "claimed sink" },
+      },
+    ]);
+  });
+
+  it("maps a typed unique-claim miss to already_registered without a second insert", async () => {
+    const store = new MemoryDestinationStore();
+    const first = await makeService({ store }).service.register({
+      nodeId: NODE_ID,
+      label: "winner",
+      idempotencyKey: "idem-claim-miss",
+    });
+    expect(first.status).toBe("created");
+    if (first.status !== "created") return;
+
+    // Simulate both first-use finds missing: generate is reached, UNIQUE already
+    // belongs to the winner, so generate throws the typed claim-miss.
+    let findCalls = 0;
+    const origFind = store.findByIdempotencyKey.bind(store);
+    store.findByIdempotencyKey = async (nodeId, key) => {
+      findCalls += 1;
+      if (findCalls === 1) return null;
+      return origFind(nodeId, key);
+    };
+    let generateCalls = 0;
+    const keyGenerator: DestinationWalletKeyGenerator = {
+      async generate() {
+        generateCalls += 1;
+        throw new DestinationIdempotencyKeyClaimedError(NODE_ID, "idem-claim-miss");
+      },
+    };
+    let insertCalls = 0;
+    const origInsert = store.insert.bind(store);
+    store.insert = async (record, idempotencyKey) => {
+      insertCalls += 1;
+      return origInsert(record, idempotencyKey);
+    };
+
+    const { service } = makeService({ store, keyGenerator });
+    const second = await service.register({
+      nodeId: NODE_ID,
+      label: "loser",
+      idempotencyKey: "idem-claim-miss",
+    });
+    expect(second.status).toBe("already_registered");
+    expect(generateCalls).toBe(1);
+    expect(insertCalls).toBe(0);
+    if (second.status !== "already_registered") return;
+    expect(second.destination.destinationId).toBe(first.destination.destinationId);
+    expect(second.destination.walletId).toBe(first.destination.walletId);
   });
 
   it("scopes idempotency to the node", async () => {

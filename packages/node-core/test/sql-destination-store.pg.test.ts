@@ -10,15 +10,20 @@ import { readFileSync } from "node:fs";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { randomUUID } from "node:crypto";
+
 import {
   createDestinationService,
+  DestinationIdempotencyKeyClaimedError,
   type DestinationWalletKeyGenerator,
 } from "../src/api/destination.js";
+import { insertNodeGeneratedWalletWithPendingDestination } from "../src/api/insert-node-generated-wallet.js";
 import { createSqlDestinationStore } from "../src/api/sql-destination-store.js";
 import type { Uuid, WalletPublicKey } from "../src/protocol/scalars.js";
 import { registerPgRequiredGuard } from "./pg-required-guard.js";
 import {
   PsqlExecutor,
+  PsqlSessionExecutor,
   extractSqlstate,
   runPsql,
   withDatabase,
@@ -39,7 +44,7 @@ const prerequisiteDdl = ((): string => {
   return `${base}\n${nodes[0]}\n`;
 })();
 
-const schemaDdl = `${prerequisiteDdl}${readSchema("custody-eligibility.sql")}\n`;
+const schemaDdl = `${prerequisiteDdl}${readSchema("custody-eligibility.sql")}\n${readSchema("wallet-money-capability.sql")}\n`;
 const keySliceDdl = readSchema("destinations-idempotency-key.sql");
 
 const scratchDb = `ztr_1310_lane_${Date.now()}_${process.pid}`;
@@ -239,5 +244,176 @@ describe("sql destination store register idempotency PG (ZTR-1310)", () => {
     );
     expect(second.ok).toBe(false);
     expect(extractSqlstate(second.stderr)).toBe("23505");
+  });
+
+  it("timeout after keyed persist: retry does not mint and returns already_registered", async () => {
+    if (!schemaReady) return;
+    const sql = new PsqlExecutor(scratchDbUrl);
+    const store = createSqlDestinationStore(sql);
+    const walletId = "77777777-7777-4777-8777-777777777777" as Uuid;
+    const destId = "88888888-8888-4888-8888-888888888888" as Uuid;
+    const pub = PUB("T") as WalletPublicKey;
+    const key = "register-timeout-key-1";
+    expect(runPsql(scratchDbUrl, mintWalletSql(walletId, NODE, pub)).ok).toBe(true);
+    const seeded = runPsql(
+      scratchDbUrl,
+      `INSERT INTO destinations (id, node_id, wallet_id, label, state, idempotency_key)
+       VALUES ('${destId}', '${NODE}', '${walletId}', 'seeded', 'PENDING', '${key}')`,
+    );
+    expect(seeded.ok, seeded.stderr).toBe(true);
+    let mintCount = 0;
+    const service = createDestinationService({
+      store,
+      keyGenerator: {
+        async generate() {
+          mintCount += 1;
+          throw new Error("generate must not run after keyed persist");
+        },
+      },
+      blessingAuthorizer: { async authorize() { return null; } },
+      clock: { now: () => "2026-08-15T00:00:00.000Z" },
+      ids: { destinationId: () => randomUUID() as Uuid },
+    });
+    const walletsBefore = runPsql(
+      scratchDbUrl,
+      `SELECT count(*)::text FROM wallets WHERE node_id = '${NODE}' AND public_key = '${pub}'`,
+    );
+    expect(walletsBefore.stdout.trim()).toBe("1");
+    const retry = await service.register({
+      nodeId: NODE as Uuid,
+      label: "seeded",
+      idempotencyKey: key,
+    });
+    expect(retry.status).toBe("already_registered");
+    expect(mintCount).toBe(0);
+    if (retry.status !== "already_registered") return;
+    expect(retry.destination.destinationId).toBe(destId);
+    expect(retry.destination.walletId).toBe(walletId);
+    expect(retry.destination.walletPublicKey).toBe(pub);
+    const walletsAfter = runPsql(
+      scratchDbUrl,
+      `SELECT count(*)::text FROM wallets WHERE node_id = '${NODE}' AND public_key = '${pub}'`,
+    );
+    expect(walletsAfter.stdout.trim()).toBe("1");
+  });
+
+  it("23505 rolls back the loser wallet; winner dest carries the key", async () => {
+    if (!schemaReady) return;
+    const key = "register-rollback-key-1";
+    const wa = "a1111111-1111-4111-8111-111111111111";
+    const wb = "a2222222-2222-4222-8222-222222222222";
+    const da = "b1111111-1111-4111-8111-111111111111";
+    const db = "b2222222-2222-4222-8222-222222222222";
+    const winner = new PsqlSessionExecutor(scratchDbUrl);
+    const loser = new PsqlSessionExecutor(scratchDbUrl);
+    try {
+      await winner.begin();
+      await loser.begin();
+      await winner.query(mintWalletSql(wa, NODE, PUB("P")));
+      await loser.query(mintWalletSql(wb, NODE, PUB("Q")));
+      await winner.query(
+        `INSERT INTO destinations (id, node_id, wallet_id, label, state, idempotency_key)
+         VALUES ($1, $2, $3, 'winner', 'PENDING', $4)`,
+        [da, NODE, wa, key],
+      );
+      const loserInsert = loser.query(
+        `INSERT INTO destinations (id, node_id, wallet_id, label, state, idempotency_key)
+         VALUES ($1, $2, $3, 'loser', 'PENDING', $4)`,
+        [db, NODE, wb, key],
+      );
+      await winner.commit();
+      await expect(loserInsert).rejects.toMatchObject({ code: "23505" });
+      await loser.rollback();
+    } finally {
+      winner.stop();
+      loser.stop();
+    }
+    const winnerWallet = runPsql(scratchDbUrl, `SELECT count(*)::text FROM wallets WHERE id = '${wa}'`);
+    const loserWallet = runPsql(scratchDbUrl, `SELECT count(*)::text FROM wallets WHERE id = '${wb}'`);
+    const keyed = runPsql(
+      scratchDbUrl,
+      `SELECT wallet_id::text FROM destinations WHERE node_id = '${NODE}' AND idempotency_key = '${key}'`,
+    );
+    expect(winnerWallet.stdout.trim()).toBe("1");
+    expect(loserWallet.stdout.trim()).toBe("0");
+    expect(keyed.ok, keyed.stderr).toBe(true);
+    expect(keyed.stdout.trim()).toBe(wa);
+  });
+
+  it("concurrent overlapping register: one created dest/wallet, zero NULL-key dests", async () => {
+    if (!schemaReady) return;
+    const sql = new PsqlExecutor(scratchDbUrl);
+    const store = createSqlDestinationStore(sql);
+    const key = "register-overlap-key-1";
+    const attempted = new Set<string>();
+    let mintSeq = 0;
+    const persist: DestinationWalletKeyGenerator = {
+      async generate(nodeId, claim) {
+        mintSeq += 1;
+        const session = new PsqlSessionExecutor(scratchDbUrl);
+        const walletId = randomUUID() as Uuid;
+        attempted.add(walletId);
+        const publicKey = PUB(mintSeq === 1 ? "J" : "K") as WalletPublicKey;
+        try {
+          await session.begin();
+          await insertNodeGeneratedWalletWithPendingDestination(session, {
+            walletId,
+            nodeId,
+            publicKey,
+            label: claim?.label ?? "",
+            idempotencyKey: claim?.idempotencyKey,
+          });
+          await session.commit();
+          return { walletId, publicKey };
+        } catch (err) {
+          await session.rollback();
+          const code =
+            err !== null && typeof err === "object" && "code" in err
+              ? String((err as { code?: unknown }).code)
+              : "";
+          if (code === "23505" && claim !== undefined) {
+            throw new DestinationIdempotencyKeyClaimedError(nodeId, claim.idempotencyKey);
+          }
+          throw err;
+        } finally {
+          session.stop();
+        }
+      },
+    };
+    const service = createDestinationService({
+      store,
+      keyGenerator: persist,
+      blessingAuthorizer: { async authorize() { return null; } },
+      clock: { now: () => "2026-08-15T00:00:00.000Z" },
+      ids: { destinationId: () => randomUUID() as Uuid },
+    });
+    const [left, right] = await Promise.all([
+      service.register({ nodeId: NODE as Uuid, label: "overlap", idempotencyKey: key }),
+      service.register({ nodeId: NODE as Uuid, label: "overlap", idempotencyKey: key }),
+    ]);
+    const statuses = [left.status, right.status].sort().join("+");
+    expect(
+      statuses === "already_registered+created" || statuses === "already_registered+already_registered",
+      statuses,
+    ).toBe(true);
+    expect(left.destination.destinationId).toBe(right.destination.destinationId);
+    expect(left.destination.walletId).toBe(right.destination.walletId);
+    expect(left.destination.walletPublicKey).toBe(right.destination.walletPublicKey);
+    const destCount = runPsql(
+      scratchDbUrl,
+      `SELECT count(*)::text FROM destinations WHERE node_id = '${NODE}' AND idempotency_key = '${key}'`,
+    );
+    expect(destCount.stdout.trim()).toBe("1");
+    const ids = [...attempted].map((id) => `'${id}'`).join(",");
+    const walletCount = runPsql(
+      scratchDbUrl,
+      `SELECT count(*)::text FROM wallets WHERE id IN (${ids})`,
+    );
+    expect(walletCount.stdout.trim()).toBe("1");
+    const nullKeys = runPsql(
+      scratchDbUrl,
+      `SELECT count(*)::text FROM destinations WHERE wallet_id IN (${ids}) AND idempotency_key IS NULL`,
+    );
+    expect(nullKeys.stdout.trim()).toBe("0");
   });
 });

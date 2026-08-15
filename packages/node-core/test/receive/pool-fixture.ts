@@ -82,7 +82,7 @@ const receiveReleaseProofSql = blockFrom(
 export const applyPoolSchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofSql}\n${verificationModeFixtureSql()}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${readSchema("destinations-idempotency-key.sql")}\n${operationsSql}\n${receiveReleaseProofSql}\n${verificationModeFixtureSql()}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });

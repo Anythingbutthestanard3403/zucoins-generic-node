@@ -58,4 +58,19 @@ describe("production dest-on-mint census (ZTR-1306)", () => {
       expect(src, rel).toContain("deleteNodeGeneratedWalletMint");
     }
   });
+
+  it("register generate binds idempotencyKey; pool/funding stay key-less", () => {
+    const main = readFileSync(join(srcRoot, "main.ts"), "utf8");
+    const gen = main.slice(
+      main.indexOf("function createNodeGeneratedWalletKeyGenerator"),
+      main.indexOf("async function main(): Promise<void>"),
+    );
+    expect(gen).toContain("idempotencyKey: claim.idempotencyKey");
+    expect(gen).toContain("label: claim.label");
+    expect(gen).toContain('await client.query("BEGIN")');
+    const pool = readFileSync(join(srcRoot, "money-workers/start-money-workers.ts"), "utf8");
+    const funding = readFileSync(join(srcRoot, "full-http-mount.ts"), "utf8");
+    expect(pool).not.toContain("idempotencyKey:");
+    expect(funding).not.toContain("idempotencyKey:");
+  });
 });

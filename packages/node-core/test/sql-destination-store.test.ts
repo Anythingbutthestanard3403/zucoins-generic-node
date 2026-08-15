@@ -167,4 +167,28 @@ describe("createSqlDestinationStore", () => {
     expect(replayed.walletId).toBe(WALLET);
     expect(sql.query).toHaveBeenCalledTimes(2);
   });
+
+  it("insert 23505 without a winner row rethrows (never success-without-replay)", async () => {
+    const err = Object.assign(new Error("duplicate key value 23505"), { code: "23505" });
+    const sql = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes("INSERT INTO destinations")) throw err;
+        return { rows: [] };
+      }),
+    };
+    const store = createSqlDestinationStore(sql);
+    await expect(
+      store.insert(
+        {
+          destinationId: DEST,
+          nodeId: NODE,
+          walletId: WALLET,
+          walletPublicKey: PUB,
+          label: "sink",
+          createdAt: "2026-07-29T00:00:00.000Z",
+        },
+        "register-key-aaaaaaa",
+      ),
+    ).rejects.toBe(err);
+  });
 });

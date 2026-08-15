@@ -39,8 +39,9 @@ const prerequisiteDdl = ((): string => {
 
 const custodyDdl = readSchema("custody-eligibility.sql");
 const capabilityDdl = readSchema("wallet-money-capability.sql");
+const keySliceDdl = readSchema("destinations-idempotency-key.sql");
 const backfillDdl = readSchema("destinations-pending-backfill.sql");
-const schemaDdl = `${prerequisiteDdl}${custodyDdl}\n${capabilityDdl}\n`;
+const schemaDdl = `${prerequisiteDdl}${custodyDdl}\n${capabilityDdl}\n${keySliceDdl}\n`;
 
 const scratchDb = `dest_pending_bf_${Date.now()}_${process.pid}`;
 let scratchDbUrl = "";
@@ -145,7 +146,8 @@ describe("destinations pending backfill + mint composition PG (ZTR-1306)", () =>
       INSERT_PENDING_DESTINATION_FOR_WALLET_SQL.replace(/\$1::uuid/g, `'${WMINT}'::uuid`)
         .replace(/\$2::uuid/g, `'${NODE_ID}'::uuid`)
         .replace("$3", `'pool'`)
-        .replace("$4", `'PENDING'`),
+        .replace("$4", `'PENDING'`)
+        .replace("$5", "NULL"),
     );
     const row = await must(
       `SELECT count(*)::text || '|' || min(state::text) || '|' || min(label)

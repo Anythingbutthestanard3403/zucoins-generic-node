@@ -145,6 +145,11 @@ const PACK_SLICES = [
   "transaction-material",
   "submit-attempts",
 ] as const;
+const VERIFICATION_MODE_SLICE = readFileSync(`${schemaDir}verification-mode.sql`, "utf8");
+const WALLET_MONEY_CAPABILITY_SLICE = readFileSync(
+  `${schemaDir}wallet-money-capability.sql`,
+  "utf8",
+);
 
 function packSql(): string {
   const declared = new Set<string>();
@@ -221,8 +226,18 @@ CREATE TABLE send_operations (
   formation_state text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS node_settings (
+  setting_key text PRIMARY KEY,
+  setting_value text NOT NULL,
+  row_version bigint NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id uuid PRIMARY KEY,
+  action text NOT NULL
+);
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS receive_release_status text;
 `;
-  return `${declarations.join("\n")}\n${tables}\n${extras}`;
+  return `${declarations.join("\n")}\n${tables}\n${WALLET_MONEY_CAPABILITY_SLICE}\n${extras}\n${VERIFICATION_MODE_SLICE}`;
 }
 
 async function _waitFor(

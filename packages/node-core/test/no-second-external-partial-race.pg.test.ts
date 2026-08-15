@@ -76,6 +76,7 @@ import { parseGatewayEnvelope } from "../src/verifier/gateway-envelope.ts";
 import type { ParsedSettledTransaction } from "../src/verifier/gateway-envelope.ts";
 import { verifySettledTransaction } from "../src/verifier/transaction-verify.ts";
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = join(HERE, "../src");
@@ -736,6 +737,7 @@ describe("no second external partial under real interleavings", () => {
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-create.sql"));
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-landing.sql"));
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-expiry.sql"));
+    psqlMust(db, verificationModeFixtureSql());
     applyMaterialStubs(db);
     seedNode(db);
     suiteReady = true;

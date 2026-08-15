@@ -333,7 +333,7 @@ describe.skipIf(!PG_AVAILABLE)(
           config: {
             nodeId,
             ownerInstanceId: nodeId,
-            poolCapTotal: 10,
+            poolCapTotal: 16,
             receiveQueueCap: 20,
             receiveQueueMaxWaitSecs: 600,
             receiveTtlDefaultSecs: 300,
@@ -363,23 +363,28 @@ describe.skipIf(!PG_AVAILABLE)(
         });
 
         try {
-          // Step 1: tick to mint pool wallets.
-          await handle.tickOnce();
+          // Step 1: tick until SEND_ONLY then RECEIVE_ONLY floors are minted.
+          // Shared scaler spends the first batch on send workers; receive
+          // wallets appear on a later tick once remaining cap exists.
           await waitFor(
             async () => {
+              await handle.tickOnce();
               const r = await pool.query<{ n: string }>(
-                `SELECT count(*)::text AS n FROM wallets WHERE node_id = $1::uuid`,
+                `SELECT count(*)::text AS n FROM wallets
+                  WHERE node_id = $1::uuid AND allow_external_receive IS TRUE`,
                 [nodeId],
               );
               return Number(r.rows[0]?.n ?? "0") >= 5;
             },
-            { timeoutMs: 10_000, intervalMs: 100, label: "pool mint >= 5 wallets" },
+            { timeoutMs: 10_000, intervalMs: 100, label: "receive-capable pool mint >= 5" },
           );
 
           // Step 2: stamp recovery verification so wallets become eligible for lease.
           const wallets = await pool.query<{ id: string; public_key: string }>(
             `SELECT id::text AS id, public_key FROM wallets
-              WHERE node_id = $1::uuid AND recovery_verified_at IS NULL
+              WHERE node_id = $1::uuid
+                AND recovery_verified_at IS NULL
+                AND allow_external_receive IS TRUE
               LIMIT 5`,
             [nodeId],
           );

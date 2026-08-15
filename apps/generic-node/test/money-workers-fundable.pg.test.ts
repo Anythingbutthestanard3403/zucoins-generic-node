@@ -324,7 +324,7 @@ describe.skipIf(!PG_AVAILABLE)("money workers fundable path (disposable PG)", ()
         config: {
           nodeId,
           ownerInstanceId: nodeId,
-          poolCapTotal: 10,
+          poolCapTotal: 16,
           receiveQueueCap: 20,
           receiveQueueMaxWaitSecs: 600,
           receiveTtlDefaultSecs: 300,
@@ -369,12 +369,13 @@ describe.skipIf(!PG_AVAILABLE)("money workers fundable path (disposable PG)", ()
         await waitFor(
           async () => {
             const r = await pool.query<{ n: string }>(
-              `SELECT count(*)::text AS n FROM wallets WHERE node_id = $1::uuid`,
+              `SELECT count(*)::text AS n FROM wallets
+                WHERE node_id = $1::uuid AND allow_external_receive IS TRUE`,
               [nodeId],
             );
             return Number(r.rows[0]?.n ?? "0") >= 5;
           },
-          { timeoutMs: 20_000, intervalMs: 200, label: "pool mint >= POOL_FLOOR" },
+          { timeoutMs: 20_000, intervalMs: 200, label: "receive-capable pool mint >= POOL_FLOOR" },
         );
 
         const unverified = await pool.query<{ n: string }>(
@@ -411,6 +412,11 @@ describe.skipIf(!PG_AVAILABLE)("money workers fundable path (disposable PG)", ()
         let stamped = 0;
         for (const [walletId, row] of wallets) {
           if (row.recoveryVerifiedAt !== null) continue;
+          const flags = await pool.query<{ allow_external_receive: boolean }>(
+            `SELECT allow_external_receive FROM wallets WHERE id = $1::uuid`,
+            [walletId],
+          );
+          if (flags.rows[0]?.allow_external_receive !== true) continue;
           const exportSha = createHash("sha256")
             .update(`fixture-export|${walletId}`, "utf8")
             .digest("hex");

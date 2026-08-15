@@ -26,6 +26,7 @@ import type { ReceiveLeasePort, SqlExecutor } from "../../src/receive/pool-alloc
 import type { MintWallet } from "../../src/receive/pool-scaler.ts";
 import { psqlMust } from "../psql-harness.ts";
 import { tokenizeCustodySql } from "../custody-eligibility-sql-statements.js";
+import { verificationModeFixtureSql } from "../verification-mode-fixture.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaDir = resolve(here, "../../src/schema");
@@ -81,7 +82,7 @@ const receiveReleaseProofSql = blockFrom(
 export const applyPoolSchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofSql}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofSql}\n${verificationModeFixtureSql()}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });

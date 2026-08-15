@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_DIR = join(HERE, "../src/schema");
 const MAINTENANCE_DB = "postgres";
@@ -266,6 +268,7 @@ describe("send-external landing PG drills", () => {
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-landing.sql"));
     // attention_reason / attention_episode + co-presence CHECK.
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-expiry.sql"));
+    psqlMust(db, verificationModeFixtureSql());
     seedNode(db);
     seedWallet(db, WALLET_ID);
   });

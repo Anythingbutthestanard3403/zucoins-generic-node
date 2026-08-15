@@ -39,6 +39,7 @@ import {
   type LateLandingProofProgress,
   type SendLateLandingProofStore,
 } from "../src/send/late-landing-reconcile.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_DIR = join(HERE, "../src/schema");
@@ -818,6 +819,7 @@ describe("send late-landing PG drills", () => {
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-create.sql"));
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-landing.sql"));
     applyDdlFile(db, join(SCHEMA_DIR, "send-external-expiry.sql"));
+    psqlMust(db, verificationModeFixtureSql());
     psqlMust(
       db,
       `

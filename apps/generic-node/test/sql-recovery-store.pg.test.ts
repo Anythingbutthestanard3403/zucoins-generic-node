@@ -606,12 +606,21 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     await pool.query(FK_TARGET_STUBS);
     await applySchema(pool, packSql());
     await pool.query(ACK_TABLE_STUBS);
-    // Store SELECTs operations.verification_mode (ZTR-1300). Full verification-mode.sql
-    // requires receive_operations + node_settings; the column default is enough here.
-    await pool.query(
-      `ALTER TABLE operations
-         ADD COLUMN IF NOT EXISTS verification_mode text NOT NULL DEFAULT 'INDEPENDENT'`,
-    );
+    // Production scaler/assign SELECT allow_external_* (wallet-money-capability.sql).
+    // This pack applies custody-eligibility wallets but not the later column slice.
+    await applySchema(pool, readFileSync(`${schemaDir}wallet-money-capability.sql`, "utf8"));
+    // ZTR-1314: production SELECT lists operations.verification_mode. Stub
+    // receive_operations + node_settings (this pack never applies those slices)
+    // then the landed verification-mode.sql — do not invent a numbered migration.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS receive_operations (operation_id uuid PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS node_settings (
+        setting_key text PRIMARY KEY,
+        setting_value text NOT NULL,
+        row_version bigint NOT NULL DEFAULT 1
+      );
+    `);
+    await applySchema(pool, readFileSync(`${schemaDir}verification-mode.sql`, "utf8"));
     await migrateLeaseFoundation(pool);
     // nodes/implementers are now the real reporting-persistence.sql tables (not the
     // old bare id-only stubs), so their NOT NULL columns need placeholder values.

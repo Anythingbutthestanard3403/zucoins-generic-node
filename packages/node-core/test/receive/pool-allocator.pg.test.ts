@@ -51,6 +51,7 @@ import {
   withTx,
 } from "../psql-harness.ts";
 import { tokenizeCustodySql } from "../custody-eligibility-sql-statements.js";
+import { verificationModeFixtureSql } from "../verification-mode-fixture.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
@@ -133,7 +134,7 @@ CREATE TABLE receive_release_proofs (
 const applySchema = (url: string): void => {
   try {
     execFileSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-1", "-f", "-"], {
-      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n`,
+      input: `${prerequisiteDdl}${custodySql}\n${readSchema("wallet-money-capability.sql")}\n${operationsSql}\n${receiveReleaseProofsSql}\n${verificationModeFixtureSql()}\n`,
       encoding: "utf-8",
       timeout: 60_000,
     });
@@ -251,7 +252,8 @@ function insertPendingDest(url: string, walletId: string, label = "pool"): void 
     url,
     INSERT_PENDING_DESTINATION_FOR_WALLET_SQL.replace(/\$1::uuid/g, `'${walletId}'::uuid`)
       .replace(/\$2::uuid/g, `'${NODE}'::uuid`)
-      .replace("$3", `'${label}'`),
+      .replace("$3", `'${label}'`)
+      .replace("$4", `'PENDING'`),
   );
 }
 

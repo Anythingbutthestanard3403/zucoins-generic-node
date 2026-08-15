@@ -230,8 +230,8 @@ describe("NeedsAttentionQuerySchema", () => {
 });
 
 describe("classifyRecovery + derivePermittedActions (pure)", () => {
-  it("closed action set is exactly ten", () => {
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
+  it("closed action set is exactly eleven", () => {
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(11);
   });
 
   it("NEVER includes forbidden actions for any fixture", () => {
@@ -649,6 +649,60 @@ describe("classifyRecovery + derivePermittedActions (pure)", () => {
     expect(actions).not.toContain("REBUILD_INTERNAL_MOVE");
     expect(actions).not.toContain("RELEASE_EXPIRED_RECEIVE");
     expect(actions).not.toContain("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");
+    expect(actions).not.toContain("CLOSE_LANDED_UNACKNOWLEDGED");
+  });
+
+  it("CLOSE_LANDED_UNACKNOWLEDGED only for INDEPENDENT land + lease + overdue ack", () => {
+    const overdue = baseFacts({
+      status: "EXTERNAL_SEND_LANDED",
+      attentionRequired: false,
+      verificationMode: "INDEPENDENT",
+      hasLandingProof: true,
+      landingProofVerdict: "LANDED_EXACT",
+      send: {
+        hasSignIntent: true,
+        hasSignerCall: true,
+        hasSignature: true,
+        hasDurablePartial: true,
+        hasDelivery: true,
+        protocolExpiredPlusMargin: false,
+        freshHeadEqualsSourceT0: false,
+        completePathExclusionProved: false,
+        hasSignerAudit: true,
+        hasMatchingExactByteRecord: true,
+        hasVerificationAcknowledgement: false,
+        verificationCompleteOverdue: true,
+      },
+    });
+    expect(classifyRecovery(overdue).classification).toBe("LANDED_VERIFIED");
+    expect(derivePermittedActions(overdue).permittedActions).toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
+
+    const stillOpen = baseFacts({
+      ...overdue,
+      send: { ...overdue.send!, verificationCompleteOverdue: false },
+    });
+    expect(derivePermittedActions(stillOpen).permittedActions).not.toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
+
+    const alreadyAcked = baseFacts({
+      ...overdue,
+      send: { ...overdue.send!, hasVerificationAcknowledgement: true },
+    });
+    expect(derivePermittedActions(alreadyAcked).permittedActions).not.toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
+
+    const noLease = baseFacts({
+      ...overdue,
+      heldLeases: [],
+      leaseEpoch: null,
+    });
+    expect(derivePermittedActions(noLease).permittedActions).not.toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
   });
 });
 

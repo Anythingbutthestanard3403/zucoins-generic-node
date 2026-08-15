@@ -114,8 +114,9 @@ describe("ApproveInboxPage", () => {
     expect(isLiveRecoveryAction("CONTINUE_EXTERNAL_WAIT")).toBe(true);
     expect(isLiveRecoveryAction("CLOSE_NEVER_STARTED_EXTERNAL_SEND")).toBe(true);
     expect(isLiveRecoveryAction("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED")).toBe(true);
+    expect(isLiveRecoveryAction("CLOSE_LANDED_UNACKNOWLEDGED")).toBe(true);
     expect(isLiveRecoveryAction("REBUILD_INTERNAL_MOVE")).toBe(false);
-    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(9);
+    expect(LIVE_RECOVERY_ACTIONS).toHaveLength(10);
   });
 
   it("never paints pending fetch as clear or unavailable", () => {
@@ -324,6 +325,7 @@ describe("ApproveInboxPage", () => {
                     "REDELIVER_EXACT_PARTIAL",
                     "CONTINUE_EXTERNAL_WAIT",
                     "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+                    "CLOSE_LANDED_UNACKNOWLEDGED",
                     "REBUILD_INTERNAL_MOVE",
                     "FORCE_LANDED",
                   ],
@@ -351,6 +353,7 @@ describe("ApproveInboxPage", () => {
     expect(screen.getByRole("button", { name: "Re-send exact transfer code" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Continue waiting for redemption" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Close send (proven not landed)" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Release overdue landed-send lease" })).toBeEnabled();
     // Reserved + unknown stay disabled with honest reasons; never POSTable as enabled.
     const unavailable = screen.getByTestId("approve-recovery-unimplemented");
     expect(unavailable.textContent).toMatch(/Rebuild internal transfer/);

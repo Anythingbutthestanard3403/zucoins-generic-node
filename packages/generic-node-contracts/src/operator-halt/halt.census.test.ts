@@ -65,20 +65,21 @@ describe("halt semantics census (kill-switch rule)", () => {
     }
   });
 
-  it("transcribes the operator-action catalog as a closed set of exactly ten actions, in table sequence", () => {
+  it("transcribes the operator-action catalog as a closed set of exactly eleven actions, in table sequence", () => {
     assertFieldOrder(OPERATOR_RECOVERY_ACTIONS, [
       "RETRY_OBSERVATION",
       "REDELIVER_EXACT_PARTIAL",
       "CONTINUE_EXTERNAL_WAIT",
       "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
       "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+      "CLOSE_LANDED_UNACKNOWLEDGED",
       "REBUILD_INTERNAL_MOVE",
       "RELEASE_EXPIRED_RECEIVE",
       "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
       "QUARANTINE_WALLETS",
       "ACKNOWLEDGE_KEEP_PINNED",
     ]);
-    expect(new Set(OPERATOR_RECOVERY_ACTIONS).size).toBe(10);
+    expect(new Set(OPERATOR_RECOVERY_ACTIONS).size).toBe(11);
   });
 
   it("freezes REBUILD_INTERNAL_MOVE as the sole reserved catalog action (CLOSE authorized ZTR-1226)", () => {
@@ -116,7 +117,7 @@ describe("halt semantics census (kill-switch rule)", () => {
     }
   });
 
-  it("gates exactly REBUILD_INTERNAL_MOVE, and leaves the other nine catalog actions never-gated", () => {
+  it("gates exactly REBUILD_INTERNAL_MOVE, and leaves the other ten catalog actions never-gated", () => {
     assertFieldOrder(HALT_GATED_RECOVERY_ACTIONS, ["REBUILD_INTERNAL_MOVE"]);
     assertFieldOrder(HALT_NEVER_GATED_RECOVERY_ACTIONS, [
       "RETRY_OBSERVATION",
@@ -124,6 +125,7 @@ describe("halt semantics census (kill-switch rule)", () => {
       "CONTINUE_EXTERNAL_WAIT",
       "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
       "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+      "CLOSE_LANDED_UNACKNOWLEDGED",
       "RELEASE_EXPIRED_RECEIVE",
       "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
       "QUARANTINE_WALLETS",

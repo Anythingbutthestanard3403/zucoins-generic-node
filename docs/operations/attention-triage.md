@@ -143,6 +143,13 @@ PROVEN_NOT_LANDED oracle). Either CLOSE terminals **both** `operations` and
 `send_operations` to `REJECTED` in the same SERIALIZABLE TX (unique-index pin lifts only
 then).
 
+An INDEPENDENT send that already landed but never received `verification-complete` is a
+different case: status is already `EXTERNAL_SEND_LANDED` and the worker is lost only
+because the `SEND_SOURCE` lease is still held. Resolve with `CLOSE_LANDED_UNACKNOWLEDGED`
+(ZTR-1316). That path keeps LANDED, releases the lease under
+`SEND_LANDED_UNACKNOWLEDGED_CLOSE`, and never invents `FORCE_RELEASE`. The inbox lists
+these rows with lease age.
+
 **Never.** `CHANGE_DESTINATION`. It does not exist. A send is formed against one destination
 and that is the only destination it can ever have. Boot does not auto-accept a new
 destination either.

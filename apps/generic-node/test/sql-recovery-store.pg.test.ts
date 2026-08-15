@@ -623,6 +623,7 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     await applySchema(pool, readFileSync(`${schemaDir}verification-mode.sql`, "utf8"));
     await migrateLeaseFoundation(pool);
     await applySchema(pool, readFileSync(`${schemaDir}send-proven-not-landed-close.sql`, "utf8"));
+    await applySchema(pool, readFileSync(`${schemaDir}send-landed-unacknowledged-close.sql`, "utf8"));
     // nodes/implementers are now the real reporting-persistence.sql tables (not the
     // old bare id-only stubs), so their NOT NULL columns need placeholder values.
     await pool.query(
@@ -1062,6 +1063,172 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
       [nextSendId],
     );
     expect((nextSend.rows[0] as { status: string }).status).toBe("CREATED");
+  });
+
+  it("commits CLOSE_LANDED_UNACKNOWLEDGED: stays LANDED, releases lease with distinct proof", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      sourceWalletId,
+    });
+    await pool.query(
+      `UPDATE operations SET verification_mode = 'INDEPENDENT' WHERE id = $1::uuid`,
+      [operationId],
+    );
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: null,
+    });
+    const lease = await insertLease(sourceWalletId, operationId, "SEND_SOURCE");
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+
+    const facts = await actionStore.loadRecoveryFactsLocked(operationId);
+    expect(facts).not.toBeNull();
+    expect(facts!.send!.verificationCompleteOverdue).toBe(true);
+    expect(derivePermittedActions(facts!).permittedActions).toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
+
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_LANDED_UNACKNOWLEDGED",
+          nextStatus: "EXTERNAL_SEND_LANDED",
+          releaseSourceLease: true,
+          protocolStatusUnchanged: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+        classification: "LANDED_VERIFIED",
+        priorStatus: "EXTERNAL_SEND_LANDED",
+      }),
+    );
+    expect(result).toMatchObject({ ok: true, status: "EXTERNAL_SEND_LANDED" });
+    expect(await sendPairStatuses(operationId)).toEqual({
+      operations: "EXTERNAL_SEND_LANDED",
+      send_operations: "EXTERNAL_SEND_LANDED",
+    });
+
+    const activeLease = await pool.query(
+      `SELECT 1 FROM wallet_active_leases WHERE operation_id = $1::uuid`,
+      [operationId],
+    );
+    expect(activeLease.rowCount).toBe(0);
+    const membership = await pool.query(
+      `SELECT released_at, release_reason FROM wallet_lease_memberships WHERE id = $1::uuid`,
+      [lease.membershipId],
+    );
+    expect((membership.rows[0] as { released_at: Date | null }).released_at).not.toBeNull();
+    expect((membership.rows[0] as { release_reason: string }).release_reason).toBe(
+      "RECOVERY_CLOSE_SEND",
+    );
+
+    const leaseProof = await pool.query(
+      `SELECT proof_kind, proof_digest, consumed_at FROM lease_release_proofs
+        WHERE wallet_id = $1::uuid AND operation_id = $2::uuid
+          AND lease_group_id = $3::uuid AND lease_epoch = $4`,
+      [sourceWalletId, operationId, lease.leaseGroupId, lease.leaseEpoch.toString()],
+    );
+    expect(leaseProof.rowCount).toBe(1);
+    const proofRow = leaseProof.rows[0] as {
+      proof_kind: string;
+      proof_digest: string;
+      consumed_at: Date | null;
+    };
+    expect(proofRow.proof_kind).toBe("SEND_LANDED_UNACKNOWLEDGED_CLOSE");
+    expect(proofRow.proof_kind).not.toBe("EXTERNAL_SEND_LANDED");
+    expect(proofRow.proof_kind).not.toBe("SEND_PROVEN_NOT_LANDED_CLOSE");
+    expect(proofRow.consumed_at).not.toBeNull();
+    expect(proofRow.proof_digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(await walletState(sourceWalletId)).toBe("AVAILABLE");
+  });
+
+  it("listNeedsAttention includes INDEPENDENT LANDED with held lease and age (ZTR-1316)", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      sourceWalletId,
+    });
+    await pool.query(
+      `UPDATE operations SET verification_mode = 'INDEPENDENT' WHERE id = $1::uuid`,
+      [operationId],
+    );
+    await insertLease(sourceWalletId, operationId, "SEND_SOURCE");
+
+    const ackedId = await seedSendOperation({
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      sourceWalletId: await insertWallet(),
+    });
+    await pool.query(
+      `INSERT INTO verification_acknowledgements (id, operation_id, verdict)
+       VALUES ($1::uuid, $2::uuid, 'VERIFIED')`,
+      [randomUUID(), ackedId],
+    );
+
+    const page = await inspectionStore.listNeedsAttention({ limit: 200 });
+    const ids = page.items.map((f) => f.operationId);
+    expect(ids).toContain(operationId);
+    expect(ids).not.toContain(ackedId);
+    const row = page.items.find((f) => f.operationId === operationId)!;
+    expect(row.status).toBe("EXTERNAL_SEND_LANDED");
+    expect(row.heldLeases.length).toBeGreaterThan(0);
+    expect(row.diagnostics[0]?.at).toBeTruthy();
+    expect(derivePermittedActions(row).permittedActions).toContain(
+      "CLOSE_LANDED_UNACKNOWLEDGED",
+    );
+  });
+
+  it("CLOSE_LANDED_UNACKNOWLEDGED refuses when verification-complete already exists", async () => {
+    const sourceWalletId = await insertWallet();
+    const operationId = await seedSendOperation({
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      sourceWalletId,
+    });
+    await seedSendOperationsRow(operationId, sourceWalletId, {
+      status: "EXTERNAL_SEND_LANDED",
+      formationState: "PARTIAL_DELIVERED",
+      attentionReason: null,
+    });
+    await insertLease(sourceWalletId, operationId, "SEND_SOURCE");
+    await pool.query(
+      `INSERT INTO verification_acknowledgements (id, operation_id, verdict)
+       VALUES ($1::uuid, $2::uuid, 'VERIFIED')`,
+      [randomUUID(), operationId],
+    );
+    const { nonce } = await inspectionStore.issueRecoveryNonce(operationId);
+    const result = await actionStore.commitRecoveryAction(
+      commitInput({
+        operationId,
+        effect: {
+          kind: "CLOSE_LANDED_UNACKNOWLEDGED",
+          nextStatus: "EXTERNAL_SEND_LANDED",
+          releaseSourceLease: true,
+          protocolStatusUnchanged: true,
+        },
+        expectedRowVersion: 1,
+        recoveryNonce: nonce,
+        totpTimestep: nextTimestep(),
+        classification: "LANDED_VERIFIED",
+        priorStatus: "EXTERNAL_SEND_LANDED",
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "predicate_failed",
+      detail: "close_landed_unacknowledged_cas_miss",
+    });
+    const stillHeld = await pool.query(
+      `SELECT 1 FROM wallet_active_leases WHERE operation_id = $1::uuid`,
+      [operationId],
+    );
+    expect(stillHeld.rowCount).toBe(1);
   });
 
   // ── ZTR-1129 freeze tripwire ────────────────────────────────────────────────────────────

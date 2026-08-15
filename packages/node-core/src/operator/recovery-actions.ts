@@ -79,6 +79,17 @@ export type RecoveryActionEffect =
       readonly releaseSourceLease: true;
     }
   | {
+      /**
+       * ZTR-1316. INDEPENDENT EXTERNAL_SEND_LANDED whose verification-complete is
+       * overdue. Status stays LANDED — funds already settled. Releases SEND_SOURCE
+       * only through SEND_LANDED_UNACKNOWLEDGED_CLOSE. Not FORCE_RELEASE.
+       */
+      readonly kind: "CLOSE_LANDED_UNACKNOWLEDGED";
+      readonly nextStatus: "EXTERNAL_SEND_LANDED";
+      readonly releaseSourceLease: true;
+      readonly protocolStatusUnchanged: true;
+    }
+  | {
       readonly kind: "REBUILD_INTERNAL_MOVE";
       readonly nextStatus: "CREATED";
       readonly clearAttention: true;
@@ -413,6 +424,36 @@ export function planRecoveryEffect(
           kind: "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
           nextStatus: "REJECTED",
           releaseSourceLease: true,
+        },
+      };
+    }
+
+    case "CLOSE_LANDED_UNACKNOWLEDGED": {
+      if (facts.kind !== "SEND_EXTERNAL" || facts.send === null) {
+        return { ok: false, reason: "predicate_failed", detail: "not_send" };
+      }
+      if (facts.status !== "EXTERNAL_SEND_LANDED") {
+        return { ok: false, reason: "predicate_failed", detail: "close_landed_unacked_status" };
+      }
+      if ((facts.verificationMode ?? "INDEPENDENT") !== "INDEPENDENT") {
+        return { ok: false, reason: "predicate_failed", detail: "close_landed_unacked_mode" };
+      }
+      if (facts.send.hasVerificationAcknowledgement === true) {
+        return { ok: false, reason: "predicate_failed", detail: "verification_already_complete" };
+      }
+      if (facts.heldLeases.length === 0) {
+        return { ok: false, reason: "predicate_failed", detail: "no_held_source_lease" };
+      }
+      if (facts.send.verificationCompleteOverdue !== true) {
+        return { ok: false, reason: "predicate_failed", detail: "verification_complete_not_overdue" };
+      }
+      return {
+        ok: true,
+        effect: {
+          kind: "CLOSE_LANDED_UNACKNOWLEDGED",
+          nextStatus: "EXTERNAL_SEND_LANDED",
+          releaseSourceLease: true,
+          protocolStatusUnchanged: true,
         },
       };
     }

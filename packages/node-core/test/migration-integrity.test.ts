@@ -236,6 +236,8 @@ const SCHEMA_FILES = [
   "destinations-idempotency-key.sql",
   // ZTR-1318: SEND_PROVEN_NOT_LANDED_CLOSE lease proof kind. CHECK ALTER only.
   "send-proven-not-landed-close.sql",
+  // ZTR-1316: SEND_LANDED_UNACKNOWLEDGED_CLOSE lease proof kind. CHECK ALTER only.
+  "send-landed-unacknowledged-close.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -272,6 +274,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "destination-worker-sink.sql",
   "destinations-idempotency-key.sql",
   "send-proven-not-landed-close.sql",
+  "send-landed-unacknowledged-close.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -626,6 +629,10 @@ const GREENFIELD: Record<
   "send-proven-not-landed-close.sql": {
     applies: false,
     missingFragment: "send-proven-not-landed-close requires lease_release_proofs",
+  },
+  "send-landed-unacknowledged-close.sql": {
+    applies: false,
+    missingFragment: "send-landed-unacknowledged-close requires lease_release_proofs",
   },
 };
 

@@ -433,6 +433,7 @@ paths:
                     - CONTINUE_EXTERNAL_WAIT
                     - CLOSE_NEVER_STARTED_EXTERNAL_SEND
                     - CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED
+                    - CLOSE_LANDED_UNACKNOWLEDGED
                     - REBUILD_INTERNAL_MOVE
                     - RELEASE_EXPIRED_RECEIVE
                     - RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK

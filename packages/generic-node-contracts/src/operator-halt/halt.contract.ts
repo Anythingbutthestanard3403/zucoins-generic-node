@@ -61,7 +61,7 @@ export const HALT_NEVER_GATED_INTERNAL_PATHS = [
 export type HaltNeverGatedInternalPath = (typeof HALT_NEVER_GATED_INTERNAL_PATHS)[number];
 
 /**
- * The ten operator recovery actions of the operator-action catalog ("Allowed action
+ * The eleven operator recovery actions of the operator-action catalog ("Allowed action
  * values"), transcribed in the doc's table sequence as a CLOSED set. This is the byte-exact
  * quotation of the spec's action column and the diff anchor for spec↔freeze drift: the census
  * (halt.census.test.ts) pins this sequence against an inline literal and asserts every member is
@@ -71,6 +71,10 @@ export type HaltNeverGatedInternalPath = (typeof HALT_NEVER_GATED_INTERNAL_PATHS
  *
  * ZTR-1280 added RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK after RELEASE_EXPIRED_RECEIVE — the
  * audited last-resort pressure valve when the five/six canonical release predicates cannot hold.
+ * ZTR-1316 added CLOSE_LANDED_UNACKNOWLEDGED after CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED —
+ * operator lease release for INDEPENDENT EXTERNAL_SEND_LANDED whose verification-complete
+ * is overdue. Distinct from FORCE_RELEASE: funds already landed; only the held SEND_SOURCE
+ * lease is released.
  */
 export const OPERATOR_RECOVERY_ACTIONS = [
   "RETRY_OBSERVATION",
@@ -78,6 +82,7 @@ export const OPERATOR_RECOVERY_ACTIONS = [
   "CONTINUE_EXTERNAL_WAIT",
   "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+  "CLOSE_LANDED_UNACKNOWLEDGED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
   "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
@@ -121,6 +126,9 @@ export type RecoveryActionHaltDisposition = "HALT_GATED" | "HALT_NEVER_GATED";
  *   CLOSE_NEVER_STARTED_EXTERNAL_SEND     never — non-signing close + lease release.
  *   CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED never — re-evaluates a stored proof, closes to REJECTED,
  *                                         releases the source lease; signs and submits nothing.
+ *   CLOSE_LANDED_UNACKNOWLEDGED           never — INDEPENDENT land already terminal; releases the
+ *                                         overdue SEND_SOURCE lease with a distinct proof kind;
+ *                                         signs and submits nothing; does not invent FORCE_RELEASE.
  *   REBUILD_INTERNAL_MOVE                 GATED — "archives attempt and authorizes one new
  *                                         attempt": a new MOVE_INTERNAL first formation, the exact
  *                                         signer surface the kill-switch rule's kill-switch stops.

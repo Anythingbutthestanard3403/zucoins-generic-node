@@ -48,6 +48,7 @@ const SECTION_8_1_ACTIONS = [
   "CONTINUE_EXTERNAL_WAIT",
   "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+  "CLOSE_LANDED_UNACKNOWLEDGED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
   "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
@@ -344,6 +345,15 @@ function applyEffect(
         transferCodeText: null,
         transferCodeSha256: null,
       };
+    case "CLOSE_LANDED_UNACKNOWLEDGED":
+      return {
+        ok: true,
+        status: "EXTERNAL_SEND_LANDED",
+        attentionRequired: false,
+        releaseStatus: null,
+        transferCodeText: null,
+        transferCodeSha256: null,
+      };
     case "REBUILD_INTERNAL_MOVE":
       expect(effect.submitOldAttempt).toBe(false);
       return {
@@ -437,11 +447,11 @@ function walkTsFiles(dir: string): string[] {
 }
 
 describe("route/type scan vs frozen ADMIN_ROUTES", () => {
-  it("action catalog is exactly ten, order-matched across contracts + openapi + node-core", () => {
+  it("action catalog is exactly eleven, order-matched across contracts + openapi + node-core", () => {
     expect([...OPERATOR_RECOVERY_ACTIONS]).toEqual([...SECTION_8_1_ACTIONS]);
     expect([...CONTRACT_OPERATOR_RECOVERY_ACTIONS]).toEqual([...SECTION_8_1_ACTIONS]);
     expect(RECOVERY_ACTIONS_BODY.properties.action.enum).toEqual([...SECTION_8_1_ACTIONS]);
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(11);
     // no case-insensitive alias / deprecated synonym admitted
     for (const a of SECTION_8_1_ACTIONS) {
       expect(isOperatorRecoveryAction(a.toLowerCase())).toBe(false);

@@ -664,6 +664,17 @@ export const SEND_CRASH_RECOVERY_SQL = {
     "row_version = row_version + 1 " +
     "WHERE operation_id = $1 AND status = 'NEEDS_ATTENTION' " +
     "RETURNING operation_id, status, row_version",
+
+  /**
+   * CLOSE_LANDED_UNACKNOWLEDGED — keep EXTERNAL_SEND_LANDED (funds already
+   * settled). Attention clear + row_version bump so the operator CAS is
+   * single-winner. Does not rewrite status and does not touch signed bytes.
+   */
+  CLOSE_LANDED_UNACKNOWLEDGED_CAS:
+    "UPDATE send_operations SET attention_required = false, attention_reason = NULL, " +
+    "row_version = row_version + 1 " +
+    "WHERE operation_id = $1 AND status = 'EXTERNAL_SEND_LANDED' " +
+    "RETURNING operation_id, status, row_version",
 } as const;
 
 export async function loadExactPersistedPartial(

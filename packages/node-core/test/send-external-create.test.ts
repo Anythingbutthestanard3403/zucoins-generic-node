@@ -619,6 +619,20 @@ describe("API response and read shapes", () => {
     expect(approved.response.transfer_code_sha256).toBeNull();
     expect(approved.response.approval_status).toBe("APPROVED");
   });
+
+  it("maps a readable REJECTED row to CONSUMED, not a fourth wire value", async () => {
+    const store = readyStore();
+    const created = await create(store);
+    if (created.outcome !== "CREATED") throw new Error("expected CREATED");
+    const row = store.operations.get(created.operation.operationId) as StoredSendOperation;
+    store.operations.set(row.operationId, { ...row, status: "REJECTED" });
+
+    const rejected = await readExternalSend(store, row.operationId);
+    expect(rejected.outcome).toBe("FOUND");
+    if (rejected.outcome !== "FOUND") return;
+    expect(rejected.response.operation.state).toBe("REJECTED");
+    expect(rejected.response.approval_status).toBe("CONSUMED");
+  });
 });
 
 /* ─── money-path statement spelling ──────────

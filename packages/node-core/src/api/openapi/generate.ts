@@ -11,6 +11,7 @@
 //
 // Ticket.
 
+import { EXTERNAL_SEND_APPROVAL_STATUSES } from "@zucoins/generic-node-contracts/api-schema";
 import {
   ADMIN_ROUTES,
   OPERATION_KINDS,
@@ -748,7 +749,7 @@ function componentsBlock(
           references_operation_id: { type: "string", format: "uuid", nullable: true },
           approval_status: {
             type: "string",
-            enum: ["PENDING", "CONSUMED", "REJECTED"],
+            enum: [...EXTERNAL_SEND_APPROVAL_STATUSES],
           },
           transfer_code: { type: "string", nullable: true },
           transfer_code_sha256: { type: "string", nullable: true },

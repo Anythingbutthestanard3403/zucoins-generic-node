@@ -22,6 +22,7 @@ import {
   SELECT_TOPUP_HUB_SQL,
 } from "../src/assign-and-topup.js";
 import { registerPgRequiredGuard } from "./pg-required-guard.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? "";
 
@@ -143,7 +144,16 @@ CREATE UNIQUE INDEX send_operations_one_unsettled_per_source_wallet
   ON send_operations (source_wallet_id)
   WHERE status NOT IN ('EXTERNAL_SEND_LANDED', 'REJECTED');
 `;
-  return [base, nodes[0], implementers?.[0] ?? "", custody, cap, slimObs, sendOps].join("\n");
+  return [
+    base,
+    nodes[0],
+    implementers?.[0] ?? "",
+    custody,
+    cap,
+    slimObs,
+    sendOps,
+    verificationModeFixtureSql(),
+  ].join("\n");
 };
 
 type Mode = "RECEIVE_ONLY" | "SEND_ONLY" | "INTERNAL_ONLY" | "FULL";

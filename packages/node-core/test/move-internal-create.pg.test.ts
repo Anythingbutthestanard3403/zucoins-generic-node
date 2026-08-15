@@ -40,6 +40,7 @@ import {
   type SqlQueryResult,
   type SqlTxFn,
 } from "../src/move/sql-store.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const MAINTENANCE_DB = "postgres";
 const SQLSTATE_UNIQUE_VIOLATION = "23505";
@@ -351,6 +352,7 @@ const executeInsert = (args: InsertArgs): string =>
     lit(null), // client_reference ($8)
     lit(args.idempotencyKey),
     lit(args.requestSha256 ?? SHA_A),
+    lit("INDEPENDENT"),
   ].join(", ")});`;
 
 const rawOperationInsert = (args: InsertArgs): string =>
@@ -389,6 +391,7 @@ describeIfPg("MOVE_INTERNAL admission — real frozen DDL against real PostgreSQ
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
+    applyDdl(scratchDb, verificationModeFixtureSql());
     psqlMust(scratchDb, seedVerifiedWallet(SOURCE_WALLET, RECOVERY_ID, pubkey("SRC")));
     psqlMust(scratchDb, seedVerifiedWallet(DEST_WALLET, RECOVERY_ID_2, pubkey("DST")));
     psqlMust(scratchDb, seedBlessedDestination());
@@ -504,8 +507,10 @@ ${STATEMENTS.INSERT_OPERATION
   .replace(/\$5/g, lit(SOURCE_WALLET))
   .replace(/\$6/g, lit(DESTINATION_ID))
   .replace(/\$7/g, "NULL")
-  .replace(/\$8/g, lit("idem-key-move-drill-0006"))
-  .replace(/\$9/g, lit(SHA_A))
+  .replace(/\$8/g, "NULL")
+  .replace(/\$9/g, lit("idem-key-move-drill-0006"))
+  .replace(/\$10/g, lit(SHA_A))
+  .replace(/\$11/g, lit("INDEPENDENT"))
   .replace(/::uuid/g, "")
   .replace(/::operation_kind/g, "")
   .replace(/::operation_status/g, "")

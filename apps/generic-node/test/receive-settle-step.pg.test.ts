@@ -185,6 +185,7 @@ const PACK_SLICES = [
   "transaction-material",
   "submit-attempts",
 ] as const;
+const VERIFICATION_MODE_SLICE = readFileSync(`${schemaDir}verification-mode.sql`, "utf8");
 
 /** FK targets owned by slices this step never touches. Only the referenced column is needed. */
 const FK_TARGET_STUBS = ["nodes", "implementers", "operation_approvals"]
@@ -214,7 +215,21 @@ function packSql(): string {
         return "";
       },
     );
-  return `${declarations.join("\n")}\n${tables}`;
+  const extras = `
+CREATE TABLE IF NOT EXISTS receive_operations (operation_id uuid PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS send_operations (operation_id uuid PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS node_settings (
+  setting_key text PRIMARY KEY,
+  setting_value text NOT NULL,
+  row_version bigint NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id uuid PRIMARY KEY,
+  action text NOT NULL
+);
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS receive_release_status text;
+`;
+  return `${declarations.join("\n")}\n${tables}\n${extras}\n${VERIFICATION_MODE_SLICE}`;
 }
 
 // ── fakes ──────────────────────────────────────────────────────────────────────────────────

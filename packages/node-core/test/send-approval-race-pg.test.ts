@@ -62,6 +62,7 @@ import {
   SEND_DECISION_CONFLICT,
   SqlSendDecisionStore,
 } from "../src/send/decide.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 /* ─── constants ───────────────────────────────────────────────────── */
 
@@ -262,7 +263,7 @@ const insertCreatedOperation = (operationId: string, sourceWalletId: string): st
     lit(null),
     lit(null),
     lit(null),
-  ].join(", ")}, now()); ` +
+  ].join(", ")}, now(), 'INDEPENDENT'); ` +
   `INSERT INTO send_operation_expected_artifacts ` +
   `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
   `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -317,6 +318,7 @@ describeIfPg(
       applyDdl(scratchDb, prerequisiteDdl, "base-enums+nodes");
       applyDdl(scratchDb, CUSTODY_DDL, "custody-eligibility");
       applyDdl(scratchDb, SEND_DDL, "send-external-create");
+      applyDdl(scratchDb, verificationModeFixtureSql(), "verification-mode");
       psqlMustSync(scratchDb, seedNode());
     }, 60_000);
 

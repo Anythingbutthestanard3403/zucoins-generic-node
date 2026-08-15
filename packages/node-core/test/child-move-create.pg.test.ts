@@ -23,6 +23,7 @@ import {
   type SqlQueryResult,
   type SqlTxFn,
 } from "../src/move/sql-store.js";
+import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
 
 const MAINTENANCE_DB = "postgres";
 
@@ -303,6 +304,7 @@ describeIfPg("createChildMoveAtomically — real PostgreSQL", () => {
     applyDdl(scratchDb, operationsDdl);
     applyDdl(scratchDb, LEASE_FRAGMENT);
     applyDdl(scratchDb, MOVE_ADMISSION_EVENTS_DDL);
+    applyDdl(scratchDb, verificationModeFixtureSql());
     // destinations may require device_keys FK — strip if needed via direct insertennian
     // If seed fails on FK, inject minimal stubs.
     const seedOutcome = runPsql(scratchDb, seedBase());

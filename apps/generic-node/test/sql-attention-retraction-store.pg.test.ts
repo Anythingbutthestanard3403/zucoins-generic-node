@@ -39,6 +39,7 @@ const PACK_SLICES = [
   "move-baseline-binding",
   "receive-external-landing",
 ] as const;
+const VERIFICATION_MODE_SLICE = readFileSync(`${schemaDir}verification-mode.sql`, "utf8");
 
 function packSql(): string {
   const declared = new Set<string>();
@@ -52,7 +53,17 @@ function packSql(): string {
       }
       return "";
     });
-  return `${declarations.join("\n")}\n${tables}`;
+  const extras = `
+CREATE TABLE IF NOT EXISTS receive_operations (operation_id uuid PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS send_operations (operation_id uuid PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS node_settings (
+  setting_key text PRIMARY KEY,
+  setting_value text NOT NULL,
+  row_version bigint NOT NULL DEFAULT 1
+);
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS receive_release_status text;
+`;
+  return `${declarations.join("\n")}\n${tables}\n${extras}\n${VERIFICATION_MODE_SLICE}`;
 }
 
 // CREATE EXTENSION IF NOT EXISTS is not safe under concurrent DDL: two test files racing

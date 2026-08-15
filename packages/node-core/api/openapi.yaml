@@ -1817,8 +1817,8 @@ components:
           type: string
           enum:
             - PENDING
+            - APPROVED
             - CONSUMED
-            - REJECTED
         transfer_code:
           type: string
           nullable: true

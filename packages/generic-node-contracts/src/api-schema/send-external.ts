@@ -34,6 +34,16 @@ export const SendExternalRequestSchema = z
   })
   .strict();
 
+/** Wire `approval_status` for create + GET. Create-time is always PENDING. */
+export const EXTERNAL_SEND_APPROVAL_STATUSES = [
+  "PENDING",
+  "APPROVED",
+  "CONSUMED",
+] as const;
+
+export type ExternalSendApprovalStatus =
+  (typeof EXTERNAL_SEND_APPROVAL_STATUSES)[number];
+
 const SendExternalCreatedOperationSchema = SendExternalOperationSchema.extend({
   state: z.literal("CREATED"),
 }).strict();

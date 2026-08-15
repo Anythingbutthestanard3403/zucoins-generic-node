@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import { CANONICAL_DECIMAL_PATTERN } from "@zucoins/generic-node-contracts/amounts";
 import {
   ADMIN_ROUTES,
   OPERATION_KINDS,
@@ -31,7 +32,6 @@ import {
   FORBIDDEN_ROUTE_PREFIXES,
   ROUTE_POLICIES,
 } from "@zucoins/generic-node-contracts/route-policy";
-import { CANONICAL_DECIMAL_PATTERN } from "@zucoins/generic-node-contracts/amounts";
 
 import { ROUTE_SCHEMAS } from "../src/api/route-schemas.js";
 import { SPLITCHAIN_FUTURE_TIME_CEILING_SECS } from "../src/protocol/receive-ttl.js";
@@ -63,6 +63,7 @@ import {
   OPENAPI_VERSION,
 } from "../src/api/openapi/index.js";
 import { renderOpenApiYaml } from "../src/api/openapi/yaml.js";
+import { EXTERNAL_SEND_APPROVAL_STATUSES } from "../src/send/create.js";
 
 // JsonSchema is exported via generate re-export path — import type from request-bodies if needed
 import type { JsonSchema as BodyJsonSchema } from "../src/api/openapi/request-bodies.js";
@@ -218,6 +219,27 @@ describe("two-directional route inventory diff", () => {
 });
 
 describe("field inventory ↔ Zod / parity", () => {
+  it("ExternalSendResponse approval_status enum equals the response-builder vocabulary", () => {
+    const schema = generateOpenApiDocument().components.schemas.ExternalSendResponse as {
+      properties: { approval_status: { enum: readonly string[] } };
+    };
+    expect([...schema.properties.approval_status.enum]).toEqual([
+      ...EXTERNAL_SEND_APPROVAL_STATUSES,
+    ]);
+    expect(schema.properties.approval_status.enum).toEqual([
+      "PENDING",
+      "APPROVED",
+      "CONSUMED",
+    ]);
+    const committed = readFileSync(OPENAPI_PATH, "utf8");
+    const yamlBlock = committed.match(
+      /ExternalSendResponse:[\s\S]*?approval_status:\n\s+type: string\n\s+enum:\n((?:\s+- [A-Z]+\n)+)/,
+    );
+    expect(yamlBlock).not.toBeNull();
+    const yamlEnum = [...(yamlBlock?.[1].matchAll(/- ([A-Z]+)/g) ?? [])].map((m) => m[1]);
+    expect(yamlEnum).toEqual([...EXTERNAL_SEND_APPROVAL_STATUSES]);
+  });
+
   it("freezes the live internal-move read projection fields", () => {
     const schema = generateOpenApiDocument().components.schemas.InternalMoveResponse as {
       required: string[];

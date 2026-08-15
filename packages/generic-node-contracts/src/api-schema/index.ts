@@ -87,10 +87,12 @@ export type {
 } from "./move-internal.ts";
 
 export {
+  EXTERNAL_SEND_APPROVAL_STATUSES,
   SendExternalRequestSchema,
   SendExternalResponseSchema,
 } from "./send-external.ts";
 export type {
+  ExternalSendApprovalStatus,
   SendExternalRequest,
   SendExternalResponse,
 } from "./send-external.ts";

@@ -14,7 +14,11 @@ import {
   ReceiveExternalRequestSchema,
   ReceiveExternalResponseSchema,
 } from "./receive-external.ts";
-import { SendExternalRequestSchema, SendExternalResponseSchema } from "./send-external.ts";
+import {
+  EXTERNAL_SEND_APPROVAL_STATUSES,
+  SendExternalRequestSchema,
+  SendExternalResponseSchema,
+} from "./send-external.ts";
 
 const UUID_A = "7b8bb326-0f2b-4dad-a8e7-40115b375ec4";
 const UUID_B = "8c9cc437-1f3c-4ebe-b9f8-51226c486fd5";
@@ -302,6 +306,14 @@ describe("the named concern MOVE_INTERNAL strict schemas", () => {
 });
 
 describe("the named concern SEND_EXTERNAL strict schemas", () => {
+  it("freezes approval_status as PENDING / APPROVED / CONSUMED", () => {
+    expect([...EXTERNAL_SEND_APPROVAL_STATUSES]).toEqual([
+      "PENDING",
+      "APPROVED",
+      "CONSUMED",
+    ]);
+  });
+
   it("accepts the documented request and response", () => {
     expect(SendExternalRequestSchema.safeParse(SEND_REQUEST).success).toBe(true);
     expect(SendExternalResponseSchema.safeParse(SEND_RESPONSE).success).toBe(true);

@@ -24,6 +24,10 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import {
+  EXTERNAL_SEND_APPROVAL_STATUSES,
+  type ExternalSendApprovalStatus,
+} from "@zucoins/generic-node-contracts/api-schema";
 import type { VerificationMode } from "@zucoins/generic-node-contracts/operations";
 import { DEFAULT_VERIFICATION_MODE } from "@zucoins/generic-node-contracts/operations";
 
@@ -36,6 +40,9 @@ import {
   resolveVerificationMode,
   type AllowNodeVerifiedPolicyPort,
 } from "../verification/allow-node-verified-policy.js";
+
+export { EXTERNAL_SEND_APPROVAL_STATUSES };
+export type { ExternalSendApprovalStatus };
 
 // The idempotency scope includes the HTTP method and the canonical
 // route, never the key alone. This slice serves exactly one route.
@@ -519,7 +526,6 @@ async function resolveIdempotencyConflict(
 // Response body. Create-time freezes transfer_code fields null;
 // AWAITING_REDEMPTION fills transfer_code + sha256 + available_until from
 // the durable partial — never recomputed.
-export type ExternalSendApprovalStatus = "PENDING" | "APPROVED" | "CONSUMED";
 
 export interface ExternalSendPartialDelivery {
   readonly transferCodeText: string;

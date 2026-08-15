@@ -118,6 +118,7 @@ function statusOf(op: string): string {
 async function seedServiceReady(n: number): Promise<{
   op: string;
   wallet: string;
+  t0: string;
   fresh: string;
 }> {
   const op = operationId(100 + n);
@@ -188,7 +189,7 @@ async function seedServiceReady(n: number): Promise<{
       ownerInstanceId: OWNER,
     });
   });
-  return { op, wallet, fresh };
+  return { op, wallet, t0, fresh };
 }
 
 describe("receive expiry/release PostgreSQL drills", () => {
@@ -277,6 +278,14 @@ describe("receive expiry/release PostgreSQL drills", () => {
        );
        CREATE TABLE observation_anomalies (
          observation_id uuid PRIMARY KEY REFERENCES gateway_observations(id)
+       );
+       CREATE TABLE wallet_observation_cursors (
+         observer_id uuid NOT NULL REFERENCES observers(id),
+         wallet_id uuid,
+         wallet_public_key text NOT NULL,
+         last_recorded_observation_id uuid NOT NULL REFERENCES gateway_observations(id),
+         last_seen_at timestamptz NOT NULL,
+         PRIMARY KEY (observer_id, wallet_public_key)
        );
        CREATE TABLE node_signing_keys (id uuid PRIMARY KEY);`,
     );
@@ -736,6 +745,54 @@ describe("receive expiry/release PostgreSQL drills", () => {
             WHERE operation_id='${op}'`,
         ).ok,
       ).toBe(false);
+    },
+  );
+
+  it.skipIf(!live)(
+    "ZTR-1274: suppressed T0 confirm-read (fresh id == T0) still releases when cursor last_seen_at is post-expiry",
+    async () => {
+      const seeded = await seedServiceReady(31);
+      const nowMs = Date.now();
+      // Incident shape: only the T0 row exists. Dedup returned that id.
+      // Cursor last_seen_at is the post-expiry confirm-read clock.
+      psqlMust(
+        dbUrl,
+        `DELETE FROM gateway_observations WHERE id='${seeded.fresh}';
+         INSERT INTO wallet_observation_cursors (
+           observer_id, wallet_id, wallet_public_key,
+           last_recorded_observation_id, last_seen_at
+         ) VALUES (
+           '${OBSERVER}', '${seeded.wallet}',
+           (SELECT public_key FROM wallets WHERE id='${seeded.wallet}'),
+           '${seeded.t0}',
+           to_timestamp(${nowMs - 1_000} / 1000.0)
+         );`,
+      );
+
+      let nextId = 810;
+      const service = new SqlReceiveExpiryReleaseService({
+        withTransaction: (fn) => withTx(dbUrl, fn),
+      });
+      const result = await service.expire({
+        operationId: seeded.op,
+        freshObservationId: seeded.t0,
+        nowMs,
+        newId: () => operationId(nextId++),
+      });
+
+      expect(result).toMatchObject({
+        kind: "RELEASED",
+        status: "EXPIRED",
+        releaseStatus: "RELEASED_T0_UNCHANGED",
+        walletId: seeded.wallet,
+        walletState: "AVAILABLE",
+      });
+      expect(
+        psqlMust(
+          dbUrl,
+          `SELECT receive_release_status FROM operations WHERE id='${seeded.op}'`,
+        ).trim(),
+      ).toBe("RELEASED_T0_UNCHANGED");
     },
   );
 

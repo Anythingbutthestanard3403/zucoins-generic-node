@@ -76,6 +76,7 @@ interface Observation {
   fresh_parse_result: string;
   fresh_relationship: string;
   fresh_observed_at: string;
+  cursor_last_seen_at: string | null;
   anomaly_exists: boolean;
 }
 
@@ -146,6 +147,7 @@ class ExpiryHarness implements SqlExecutor {
     fresh_parse_result: "VERIFIED_HEAD",
     fresh_relationship: "DUPLICATE",
     fresh_observed_at: "1970-01-01T00:00:35.000Z",
+    cursor_last_seen_at: null,
     anomaly_exists: false,
   };
   childDisposition: "NONE" | "PENDING" | "JOINED" = "NONE";
@@ -575,6 +577,47 @@ describe("assigned expired-unpaid release", () => {
       releaseStatus: RECEIVE_PROVEN_NOT_STARTED_RELEASE_STATUS,
     });
     expect(h.receiveProofs).toBe(1);
+  });
+
+  it("releases when exact-repeat dedup returns the pre-expiry T0 id after a post-expiry cursor sighting (ZTR-1274)", async () => {
+    const h = new ExpiryHarness();
+    // Incident shape: persistSqlObservation returned last_recorded_observation_id
+    // (the T0 row). observed_at stays pre-expiry; cursor last_seen_at is the
+    // confirm-read clock. Relationship stays FIRST (the T0 row itself).
+    h.observation!.fresh_id = T0;
+    h.observation!.fresh_relationship = "FIRST";
+    h.observation!.fresh_observed_at = "1970-01-01T00:00:00.000Z";
+    h.observation!.cursor_last_seen_at = "1970-01-01T00:00:35.000Z";
+
+    const result = await run(h, { freshObservationId: T0 });
+
+    expect(result).toMatchObject({
+      kind: "RELEASED",
+      status: "EXPIRED",
+      releaseStatus: RECEIVE_EXPIRED_RELEASE_STATUS,
+      walletId: WALLET,
+      walletState: "AVAILABLE",
+    });
+    expect(h.releaseCalls).toEqual(["complete", "mint", "release"]);
+    expect(h.walletState).toBe("AVAILABLE");
+    expect(h.receiveProofs).toBe(1);
+  });
+
+  it("still parks when the T0 id is reused but the cursor last_seen_at is pre-margin (ZTR-1274)", async () => {
+    const h = new ExpiryHarness();
+    h.observation!.fresh_id = T0;
+    h.observation!.fresh_relationship = "FIRST";
+    h.observation!.fresh_observed_at = "1970-01-01T00:00:00.000Z";
+    h.observation!.cursor_last_seen_at = "1970-01-01T00:00:30.000Z";
+
+    const result = await run(h, { freshObservationId: T0 });
+
+    expect(result.kind).toBe("NEEDS_ATTENTION");
+    if (result.kind === "NEEDS_ATTENTION") {
+      expect(result.failedPredicates).toContain("FRESH_VERIFIED_T0_EXACT");
+    }
+    expect(h.releaseCalls).toEqual([]);
+    expect(h.walletState).toBe("PINNED");
   });
 
   it("releases the reachable pre-code walletless projection only after fresh exact T0", async () => {

@@ -161,4 +161,16 @@ describe("release predicate mutation matrix", () => {
   it("excludes attention-parked receives from the expiry candidate scan (ZTR-1277)", () => {
     expect(LOAD_EXPIRED_RECEIVE_CANDIDATES).toContain("o.attention_required = false");
   });
+
+  it("loads cursor last_seen_at so a suppressed T0 confirm-read can still satisfy freshness (ZTR-1274)", () => {
+    expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_OBSERVATIONS).toContain(
+      "tip_cursor.last_seen_at::text AS cursor_last_seen_at",
+    );
+    expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_OBSERVATIONS).toContain(
+      "LEFT JOIN wallet_observation_cursors tip_cursor",
+    );
+    expect(RECEIVE_EXPIRY_RELEASE_STATEMENTS.LOAD_OBSERVATIONS).toContain(
+      "tip_cursor.last_recorded_observation_id = fresh.id",
+    );
+  });
 });

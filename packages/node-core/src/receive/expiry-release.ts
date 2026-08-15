@@ -460,6 +460,7 @@ SELECT t0.id::text AS t0_id,
        fresh.parse_result::text AS fresh_parse_result,
        fresh.relationship::text AS fresh_relationship,
        fresh.observed_at::text AS fresh_observed_at,
+       tip_cursor.last_seen_at::text AS cursor_last_seen_at,
        EXISTS (
          SELECT 1
            FROM observation_anomalies oa
@@ -472,6 +473,10 @@ SELECT t0.id::text AS t0_id,
   JOIN observers t0_observer ON t0_observer.id = t0.observer_id
   JOIN observers fresh_observer ON fresh_observer.id = fresh.observer_id
   JOIN wallets expected ON expected.id = $3::uuid
+  LEFT JOIN wallet_observation_cursors tip_cursor
+    ON tip_cursor.last_recorded_observation_id = fresh.id
+   AND tip_cursor.wallet_public_key = fresh.wallet_public_key
+   AND tip_cursor.observer_id = fresh.observer_id
  WHERE t0.id = $1::uuid`.replace(/\s+/g, " ").trim(),
 
   CAS_TO_EXPIRED: `
@@ -693,6 +698,8 @@ interface ObservationFactsRow {
   readonly fresh_parse_result: string;
   readonly fresh_relationship: string;
   readonly fresh_observed_at: string;
+  /** Cursor last_seen_at when the named fresh row is the stream tip; else null. */
+  readonly cursor_last_seen_at: string | null;
   readonly anomaly_exists: boolean;
 }
 
@@ -734,6 +741,32 @@ function safeUnchangedRelationship(observations: ObservationFactsRow): boolean {
   return (
     observations.fresh_relationship === "DUPLICATE" ||
     observations.fresh_relationship === "EQUIVALENT_STATE_DIFFERENT_ENVELOPE"
+  );
+}
+
+/**
+ * Exact-repeat dedup can return the pre-expiry T0 id (SUPPRESS_AS_SIGHTING).
+ * A post-expiry cursor sighting of that same verified T0 tip is the safe
+ * unchanged-head case FRESH_VERIFIED_T0_EXACT exists to admit (ZTR-1274).
+ */
+function suppressedT0SightingIsFresh(
+  observations: ObservationFactsRow,
+  t0ObservationId: string,
+  expiresAtMs: number,
+  nowMs: number,
+  safetyMarginMs: number,
+): boolean {
+  if (observations.fresh_id !== t0ObservationId) return false;
+  if (observations.fresh_id !== observations.t0_id) return false;
+  const seenAtMs =
+    observations.cursor_last_seen_at === null
+      ? Number.NaN
+      : Date.parse(observations.cursor_last_seen_at);
+  if (!Number.isFinite(seenAtMs)) return false;
+  return (
+    seenAtMs >= expiresAtMs + safetyMarginMs &&
+    seenAtMs <= nowMs &&
+    nowMs - seenAtMs <= safetyMarginMs
   );
 }
 
@@ -1378,7 +1411,17 @@ export class SqlReceiveExpiryReleaseService {
         freshObservedAtMs >= expiresAtMs + safetyMarginMs &&
         freshObservedAtMs <= nowMs &&
         nowMs - freshObservedAtMs <= safetyMarginMs;
-      const freshExact =
+      const suppressedT0Fresh =
+        observations !== undefined &&
+        t0ObservationId !== null &&
+        suppressedT0SightingIsFresh(
+          observations,
+          t0ObservationId,
+          expiresAtMs,
+          nowMs,
+          safetyMarginMs,
+        );
+      const identityExact =
         observations !== undefined &&
         observations.t0_wallet_id === lease.wallet_id &&
         observations.fresh_wallet_id === lease.wallet_id &&
@@ -1389,12 +1432,13 @@ export class SqlReceiveExpiryReleaseService {
         observations.t0_observer_domain === "NODE" &&
         observations.fresh_observer_domain === "NODE" &&
         verifiedObservation(observations) &&
-        exactProjection(observations) &&
-        freshWithinWindow;
+        exactProjection(observations);
+      const freshExact =
+        identityExact && (freshWithinWindow || suppressedT0Fresh);
       const anomalyOrLineage =
         observations === undefined ||
         asBool(observations.anomaly_exists) ||
-        !safeUnchangedRelationship(observations);
+        !(safeUnchangedRelationship(observations) || suppressedT0Fresh);
 
       const completeCodeAndArtifact =
         material.code_exists && material.artifact_exists;
@@ -1436,7 +1480,9 @@ export class SqlReceiveExpiryReleaseService {
         releaseStatus: RECEIVE_EXPIRED_RELEASE_STATUS,
         t0ObservationId,
         freshObservationId: observations.fresh_id,
-        freshObservedAt: observations.fresh_observed_at,
+        freshObservedAt: suppressedT0Fresh
+          ? observations.cursor_last_seen_at
+          : observations.fresh_observed_at,
         predicates,
         newId,
         dualChain,

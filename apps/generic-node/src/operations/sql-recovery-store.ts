@@ -69,8 +69,8 @@ const TERMINAL_OPERATION_STATUSES: ReadonlySet<string> = new Set([
   "RECEIVE_LANDED", "INTERNAL_MOVE_LANDED", "EXTERNAL_SEND_LANDED", "EXPIRED", "REJECTED",
 ]);
 
-// Closed set of effect kinds this store commits — derived from the frozen catalog so a
-// tenth action cannot land in halt.contract without failing the store's set equality.
+// Closed set of effect kinds this store commits — derived from the frozen catalog so an
+// eleventh action cannot land in halt.contract without failing the store's set equality.
 // Unknown future kinds fail closed (effect_not_implemented) before nonce/TOTP burn —
 // never a silent no-op success. RESERVED kinds still have real commit arms so a
 // permitted POST cannot report success without mutation; admission refuses them first.
@@ -89,6 +89,7 @@ export const RECOVERY_ACTION_LABELS: Readonly<Record<RecoveryActionEffect["kind"
   CONTINUE_EXTERNAL_WAIT: "Continue waiting for redemption",
   CLOSE_NEVER_STARTED_EXTERNAL_SEND: "Close never-started send",
   CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED: "Close send (proven not landed)",
+  CLOSE_LANDED_UNACKNOWLEDGED: "Release overdue landed-send lease",
   REBUILD_INTERNAL_MOVE: "Rebuild internal transfer",
   RELEASE_EXPIRED_RECEIVE: "Release expired receive",
   RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK:
@@ -138,17 +139,40 @@ const SQL_STORE_IDEMPOTENCY = `
 // for EXPIRED receives per ZTR-1283). Rows with attention cleared stay out via
 // the attention_required / NEEDS_ATTENTION predicate above.
 //
+// ZTR-1316: INDEPENDENT EXTERNAL_SEND_LANDED with a still-held SEND_SOURCE lease
+// and no verification_acknowledgements row is the one landed exception — the
+// worker is lost from the pool until CLOSE_LANDED_UNACKNOWLEDGED. Age is the
+// lease acquired_at (surfaced as attention_since). NODE_VERIFIED lands already
+// release in the landing TX and stay excluded.
+//
 // Shared WHERE for list + COUNT. Newest-first keyset (created_at DESC, id DESC)
 // so fresh parks are never stuck behind a LIMIT of older rows. `after` is the
 // prior page's last operation_id (inventory-shaped next_cursor). Fetch limit+1
 // to compute has_more (ZTR-1284).
 const SQL_NEEDS_ATTENTION_WHERE = `
-  (attention_required = true OR status = 'NEEDS_ATTENTION')
-  AND status NOT IN (
-        'RECEIVE_LANDED',
-        'INTERNAL_MOVE_LANDED',
-        'EXTERNAL_SEND_LANDED'
-      )
+  (
+    (
+      (attention_required = true OR status = 'NEEDS_ATTENTION')
+      AND status NOT IN (
+            'RECEIVE_LANDED',
+            'INTERNAL_MOVE_LANDED',
+            'EXTERNAL_SEND_LANDED'
+          )
+    )
+    OR (
+      kind = 'SEND_EXTERNAL'
+      AND status = 'EXTERNAL_SEND_LANDED'
+      AND COALESCE(verification_mode, 'INDEPENDENT') = 'INDEPENDENT'
+      AND EXISTS (
+            SELECT 1 FROM wallet_active_leases wal
+             WHERE wal.operation_id = operations.id
+          )
+      AND NOT EXISTS (
+            SELECT 1 FROM verification_acknowledgements va
+             WHERE va.operation_id = operations.id
+          )
+    )
+  )
   AND ($1::text IS NULL OR kind::text = $1)
 `;
 
@@ -159,7 +183,8 @@ const SQL_LIST_NEEDS_ATTENTION = `
          t0_observation_id::text AS t0_observation_id,
          terminal_observation_id::text AS terminal_observation_id,
          expiry_unix_time_secs, formation_state::text AS formation_state,
-         verification_mode::text AS verification_mode
+         verification_mode::text AS verification_mode,
+         verification_material_available_until::text AS verification_material_available_until
     FROM operations
    WHERE ${SQL_NEEDS_ATTENTION_WHERE}
      AND (
@@ -288,6 +313,31 @@ const SQL_CAS_CLOSE_PROVEN_NOT_LANDED = `
   RETURNING row_version::int AS row_version, status::text AS status
 `;
 
+// CLOSE_LANDED_UNACKNOWLEDGED — keep EXTERNAL_SEND_LANDED (funds already settled).
+// INDEPENDENT + lease still held + no verification_acknowledgements. Attention
+// clear + row_version bump only; never FORCE_RELEASE of unsigned funds.
+const SQL_CAS_CLOSE_LANDED_UNACKNOWLEDGED = `
+  UPDATE operations
+     SET attention_required = false,
+         attention_reason = NULL,
+         row_version = row_version + 1,
+         updated_at = now()
+   WHERE id = $1::uuid
+     AND row_version = $2
+     AND kind = 'SEND_EXTERNAL'
+     AND status = 'EXTERNAL_SEND_LANDED'
+     AND COALESCE(verification_mode, 'INDEPENDENT') = 'INDEPENDENT'
+     AND EXISTS (
+           SELECT 1 FROM wallet_active_leases wal
+            WHERE wal.operation_id = $1::uuid
+         )
+     AND NOT EXISTS (
+           SELECT 1 FROM verification_acknowledgements va
+            WHERE va.operation_id = $1::uuid
+         )
+  RETURNING row_version::int AS row_version, status::text AS status
+`;
+
 // REBUILD_INTERNAL_MOVE — archive-and-reset to CREATED. attempt_no stays 1 in
 // transaction-material (CHECK attempt_no = 1); "next attempt" is the new CREATED cycle with
 // attention cleared. Old operation_transactions rows are left unchanged (never resubmitted).
@@ -319,6 +369,11 @@ const SQL_LOAD_ACTIVE_LEASE_FOR_RELEASE = `
 
 const CLOSE_SEND_RELEASE_REASON = "RECOVERY_CLOSE_SEND" as const;
 const CLOSE_SEND_PROOF_KIND = "SEND_PROVEN_NOT_LANDED_CLOSE" as const;
+const CLOSE_LANDED_UNACKED_PROOF_KIND = "SEND_LANDED_UNACKNOWLEDGED_CLOSE" as const;
+
+type CloseSendProofKind =
+  | typeof CLOSE_SEND_PROOF_KIND
+  | typeof CLOSE_LANDED_UNACKED_PROOF_KIND;
 
 /** Pass-through lease SqlExecutor bound to an open SERIALIZABLE client. */
 function clientAsSqlExecutor(client: PoolClient): LeaseSqlExecutor {
@@ -333,6 +388,7 @@ function clientAsSqlExecutor(client: PoolClient): LeaseSqlExecutor {
 async function releaseSourceLeasesForOperation(
   client: PoolClient,
   operationId: string,
+  proofKind: CloseSendProofKind = CLOSE_SEND_PROOF_KIND,
 ): Promise<void> {
   const db = clientAsSqlExecutor(client);
   const leases = await client.query<{
@@ -360,7 +416,7 @@ async function releaseSourceLeasesForOperation(
       membershipId: lease.membership_id,
       leaseGroupId: lease.lease_group_id,
       leaseEpoch: BigInt(lease.lease_epoch),
-      proofKind: CLOSE_SEND_PROOF_KIND,
+      proofKind,
       proofDigest: digest,
     });
     await releaseLease(db, {
@@ -574,6 +630,7 @@ export function createSqlRecoveryInspectionStore(
           t0_observation_id: string | null; terminal_observation_id: string | null;
           expiry_unix_time_secs: string | null; formation_state: string | null;
           verification_mode: string | null;
+          verification_material_available_until: string | null;
         }>(SQL_LIST_NEEDS_ATTENTION, [kind, after, limit + 1]),
         pool.query<{ total: number }>(SQL_COUNT_NEEDS_ATTENTION, [kind]),
       ]);
@@ -589,6 +646,7 @@ export function createSqlRecoveryInspectionStore(
             expiryUnixTimeSecs: r.expiry_unix_time_secs,
             formationState: r.formation_state,
             verificationMode: r.verification_mode === "NODE_VERIFIED" ? "NODE_VERIFIED" : "INDEPENDENT",
+            verificationMaterialAvailableUntil: r.verification_material_available_until,
           });
         if (f !== null) facts.push(f);
       }
@@ -1074,6 +1132,52 @@ export function createSqlRecoveryActionStore(
               finalStatus = casRow.status;
               break;
             }
+            case "CLOSE_LANDED_UNACKNOWLEDGED": {
+              const casResult = await client.query<{ row_version: number; status: string }>(
+                SQL_CAS_CLOSE_LANDED_UNACKNOWLEDGED,
+                [input.operationId, input.expectedRowVersion],
+              );
+              const casRow = casResult.rows[0];
+              if (casRow === undefined) {
+                await client.query("ROLLBACK");
+                const cur = (await client.query<{ row_version: number }>(
+                  SQL_OPERATION_ROW_VERSION, [input.operationId],
+                )).rows[0];
+                if (cur === undefined) {
+                  return { ok: false, reason: "operation_not_found" };
+                }
+                if (cur.row_version !== input.expectedRowVersion) {
+                  return { ok: false, reason: "operation_version_conflict" };
+                }
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "close_landed_unacknowledged_cas_miss",
+                };
+              }
+              const sendCas = await client.query(
+                SEND_CRASH_RECOVERY_SQL.CLOSE_LANDED_UNACKNOWLEDGED_CAS,
+                [input.operationId],
+              );
+              if (sendCas.rows[0] === undefined) {
+                await client.query("ROLLBACK");
+                return {
+                  ok: false,
+                  reason: "predicate_failed",
+                  detail: "close_landed_unacknowledged_cas_miss",
+                };
+              }
+              if (effect.releaseSourceLease) {
+                await releaseSourceLeasesForOperation(
+                  client,
+                  input.operationId,
+                  CLOSE_LANDED_UNACKED_PROOF_KIND,
+                );
+              }
+              finalRowVersion = casRow.row_version;
+              finalStatus = casRow.status;
+              break;
+            }
             case "REBUILD_INTERNAL_MOVE": {
               // Spec: archive old attempt unchanged + authorize next. We never resubmit the
               // old attempt (the never-blind-retry rule). Status → CREATED, attention cleared.
@@ -1210,6 +1314,7 @@ async function loadRecoveryFactsById(
       expiryUnixTimeSecs: r.expiry_unix_time_secs,
       formationState: r.formation_state,
       verificationMode: r.verification_mode === "NODE_VERIFIED" ? "NODE_VERIFIED" : "INDEPENDENT",
+      verificationMaterialAvailableUntil: r.verification_material_available_until,
     }, readFreshHead);
 }
 
@@ -1219,6 +1324,7 @@ interface RecoveryFactsRowExtra {
   readonly expiryUnixTimeSecs: string | null;
   readonly formationState: string | null;
   readonly verificationMode: "INDEPENDENT" | "NODE_VERIFIED";
+  readonly verificationMaterialAvailableUntil: string | null;
 }
 
 async function loadRecoveryFactsFromRow(
@@ -1230,9 +1336,10 @@ async function loadRecoveryFactsFromRow(
 ): Promise<RecoveryFacts | null> {
   // Load active leases for this operation.
   const leaseRows = await pool.query<{
-    wallet_id: string; lease_epoch: string; lease_role: string;
+    wallet_id: string; lease_epoch: string; lease_role: string; acquired_at: string | null;
   }>(
-    `SELECT wallet_id::text, lease_epoch::text, lease_role::text
+    `SELECT wallet_id::text, lease_epoch::text, lease_role::text,
+            acquired_at::text AS acquired_at
        FROM wallet_active_leases WHERE operation_id = $1::uuid`,
     [operationId],
   );
@@ -1242,6 +1349,10 @@ async function loadRecoveryFactsFromRow(
   const maxEpoch = heldLeases.length > 0
     ? Math.max(...heldLeases.map((l) => l.leaseEpoch))
     : null;
+  const oldestLeaseAcquiredAt = leaseRows.rows
+    .map((l) => l.acquired_at)
+    .filter((v): v is string => v !== null)
+    .sort()[0] ?? null;
 
   const parsedKind = parseOperationKind(kind);
   const manifest: EvidenceManifestEntry[] = [];
@@ -1510,6 +1621,49 @@ async function loadRecoveryFactsFromRow(
       }
     }
 
+    const ackCount = (await pool.query(
+      `SELECT 1 FROM verification_acknowledgements WHERE operation_id = $1::uuid`,
+      [operationId],
+    )).rowCount ?? 0;
+    const hasVerificationAcknowledgement = ackCount > 0;
+    if (hasVerificationAcknowledgement) {
+      manifest.push({
+        kind: "verification_acknowledgements",
+        id: null,
+        role: null,
+        digest_sha256: null,
+        summary: "verification-complete acknowledgement present",
+      });
+    }
+
+    // Overdue when INDEPENDENT land has no ack and the proof-access window has
+    // lapsed (or was never stamped — consumer never collected material).
+    let verificationCompleteOverdue = false;
+    if (
+      extra.verificationMode === "INDEPENDENT" &&
+      status === "EXTERNAL_SEND_LANDED" &&
+      !hasVerificationAcknowledgement
+    ) {
+      const until = extra.verificationMaterialAvailableUntil;
+      if (until === null) {
+        verificationCompleteOverdue = true;
+      } else {
+        const untilMs = Date.parse(until);
+        verificationCompleteOverdue = Number.isFinite(untilMs) && Date.now() >= untilMs;
+      }
+      if (verificationCompleteOverdue) {
+        manifest.push({
+          kind: "wallet_active_leases",
+          id: null,
+          role: "SEND_SOURCE",
+          digest_sha256: null,
+          summary: until === null
+            ? "INDEPENDENT land, no verification-complete, no proof-access window"
+            : "INDEPENDENT land, verification-complete overdue past proof-access window",
+        });
+      }
+    }
+
     send = {
       hasSignIntent,
       hasSignerCall: hasSignerAudit,
@@ -1521,6 +1675,8 @@ async function loadRecoveryFactsFromRow(
       completePathExclusionProved,
       hasSignerAudit,
       hasMatchingExactByteRecord: true,
+      hasVerificationAcknowledgement,
+      verificationCompleteOverdue,
     };
   }
 
@@ -1561,7 +1717,9 @@ async function loadRecoveryFactsFromRow(
     hasLineageGap: false,
     invariantBreachNoted: false,
     evidenceManifest: manifest,
-    diagnostics: [],
+    diagnostics: oldestLeaseAcquiredAt !== null
+      ? [{ at: oldestLeaseAcquiredAt, code: "LEASE_HELD", message: "source lease still held" }]
+      : [],
     receive,
     move,
     send,

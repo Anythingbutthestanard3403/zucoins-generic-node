@@ -659,6 +659,17 @@ export {
   type SendProvenNotLandedCloseInvariant,
 } from "./schema/send-proven-not-landed-close.contract.js";
 
+// ZTR-1316: distinct lease proof kind for CLOSE_LANDED_UNACKNOWLEDGED.
+export {
+  SCHEMA_SEND_LANDED_UNACKNOWLEDGED_CLOSE_OBLIGATIONS,
+  SEND_LANDED_UNACKNOWLEDGED_CLOSE_EXTENDS,
+  SEND_LANDED_UNACKNOWLEDGED_CLOSE_INVARIANTS,
+  SEND_LANDED_UNACKNOWLEDGED_CLOSE_PROOF_KIND,
+  SEND_LANDED_UNACKNOWLEDGED_CLOSE_SCHEMA_FILE,
+  SEND_LANDED_UNACKNOWLEDGED_CLOSE_SOURCE,
+  type SendLandedUnacknowledgedCloseInvariant,
+} from "./schema/send-landed-unacknowledged-close.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

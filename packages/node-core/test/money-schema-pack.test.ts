@@ -516,12 +516,28 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(closeIdx).toBeGreaterThan(keyIdx);
     expect(closeIdx).toBeGreaterThan(leaseIdx);
     expect(closeIdx).toBeGreaterThan(riskIdx);
-    expect(closeIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(closeIdx).toBeLessThan(MONEY_SCHEMA_PACK_ORDER.length - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[closeIdx]!.sql).toContain("send-proven-not-landed-close requires lease_release_proofs");
     expect(files[closeIdx]!.sql).toContain("SEND_PROVEN_NOT_LANDED_CLOSE");
     expect(files[closeIdx]!.sql).toContain("RECEIVE_OPERATOR_ACCEPTED_RISK");
     expect(files[closeIdx]!.sql).toContain("EXTERNAL_SEND_LANDED");
+  });
+
+  it("pack lands send-landed-unacknowledged-close after send-proven-not-landed-close (ZTR-1316)", () => {
+    const provenIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-proven-not-landed-close");
+    const unackedIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-landed-unacknowledged-close");
+    const leaseIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("lease-foundation");
+    expect(provenIdx).toBeGreaterThanOrEqual(0);
+    expect(leaseIdx).toBeGreaterThanOrEqual(0);
+    expect(unackedIdx).toBeGreaterThan(provenIdx);
+    expect(unackedIdx).toBeGreaterThan(leaseIdx);
+    expect(unackedIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[unackedIdx]!.sql).toContain("send-landed-unacknowledged-close requires lease_release_proofs");
+    expect(files[unackedIdx]!.sql).toContain("SEND_LANDED_UNACKNOWLEDGED_CLOSE");
+    expect(files[unackedIdx]!.sql).toContain("SEND_PROVEN_NOT_LANDED_CLOSE");
+    expect(files[unackedIdx]!.sql).toContain("EXTERNAL_SEND_LANDED");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

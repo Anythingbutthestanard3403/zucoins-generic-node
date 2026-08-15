@@ -23,7 +23,7 @@ proxy metrics for several of them. Silence from an unbound signal is not an all-
 5. **Never delete evidence.** Observation and anomaly ledgers are permanent, including exact
    repeats. Storage pressure is remedied with capacity, never with pruning.
 
-## The nine actions you actually have
+## The eleven actions you actually have
 
 Everything an operator may do to a flagged operation goes through
 `POST /admin/v1/operations/:operation_id/recovery-actions`, which re-evaluates every
@@ -32,7 +32,9 @@ CSRF and an idempotency key. The catalogue is closed:
 
 `RETRY_OBSERVATION` · `REDELIVER_EXACT_PARTIAL` · `CONTINUE_EXTERNAL_WAIT` ·
 `CLOSE_NEVER_STARTED_EXTERNAL_SEND` · `CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED` ·
-`REBUILD_INTERNAL_MOVE` · `RELEASE_EXPIRED_RECEIVE` · `QUARANTINE_WALLETS` ·
+`CLOSE_LANDED_UNACKNOWLEDGED` ·
+`REBUILD_INTERNAL_MOVE` · `RELEASE_EXPIRED_RECEIVE` ·
+`RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK` · `QUARANTINE_WALLETS` ·
 `ACKNOWLEDGE_KEEP_PINNED`
 
 These do not exist, in the API or in SQL, and asking for one is a rejected request rather
@@ -50,6 +52,13 @@ RESERVED at launch.
 plus the aging margin **and** either `freshHeadEqualsSourceT0` or
 `completePathExclusionProved`. Timer-only expiry does not license the close. There is still
 no generic PROVEN_NOT_LANDED oracle (D9.6).
+
+`CLOSE_LANDED_UNACKNOWLEDGED` is live under ZTR-1316: an INDEPENDENT `EXTERNAL_SEND_LANDED`
+send whose `SEND_SOURCE` lease is still held because the consumer never posted
+`verification-complete`. Status stays `EXTERNAL_SEND_LANDED` (funds already settled). The
+lease is released through proof kind `SEND_LANDED_UNACKNOWLEDGED_CLOSE` — never
+`EXTERNAL_SEND_LANDED` and never `FORCE_RELEASE`. Surfaced in the attention inbox with
+lease age.
 
 ## halt
 

@@ -252,6 +252,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // CHECK-constraint ALTER on lease_release_proofs. Requires lease-foundation
   // + operator-accepted-risk-release (last prior proof_kind rewrite). Appended only.
   "send-proven-not-landed-close",
+  // ZTR-1316: SEND_LANDED_UNACKNOWLEDGED_CLOSE lease proof kind.
+  // CHECK-constraint ALTER on lease_release_proofs. Requires send-proven-not-landed-close
+  // (last prior proof_kind rewrite). Appended only.
+  "send-landed-unacknowledged-close",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

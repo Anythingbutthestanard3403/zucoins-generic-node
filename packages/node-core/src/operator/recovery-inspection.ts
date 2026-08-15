@@ -1,6 +1,6 @@
 // pure recovery classification and permitted-action derivation.
 //
-// The closed classification set, the action predicates, the nine permitted actions, and the
+// The closed classification set, the action predicates, the eleven permitted actions, and the
 // forbidden surface are all defined here. There is no generic PROVEN_NOT_LANDED oracle —
 // evidence-complete cases only.
 //
@@ -23,13 +23,14 @@ export const RECOVERY_CLASSIFICATIONS = [
 
 export type RecoveryClassification = (typeof RECOVERY_CLASSIFICATIONS)[number];
 
-/** Closed set of ten operator recovery actions (ZTR-1280 added operator-risk release). */
+/** Closed set of eleven operator recovery actions (ZTR-1316 added landed-unacked close). */
 export const OPERATOR_RECOVERY_ACTIONS = [
   "RETRY_OBSERVATION",
   "REDELIVER_EXACT_PARTIAL",
   "CONTINUE_EXTERNAL_WAIT",
   "CLOSE_NEVER_STARTED_EXTERNAL_SEND",
   "CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED",
+  "CLOSE_LANDED_UNACKNOWLEDGED",
   "REBUILD_INTERNAL_MOVE",
   "RELEASE_EXPIRED_RECEIVE",
   "RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK",
@@ -117,6 +118,17 @@ export interface SendRecoveryFacts {
   readonly completePathExclusionProved: boolean;
   readonly hasSignerAudit: boolean;
   readonly hasMatchingExactByteRecord: boolean;
+  /**
+   * True when verification_acknowledgements has a row for this operation.
+   * Vacuous false for non-sends and pre-ack fixtures that omit the field.
+   */
+  readonly hasVerificationAcknowledgement?: boolean;
+  /**
+   * True when verification-complete is overdue: INDEPENDENT land, no ack, and
+   * either the proof-access window has lapsed or no window was recorded
+   * (consumer never collected material). Vacuous false when omitted.
+   */
+  readonly verificationCompleteOverdue?: boolean;
 }
 
 /**
@@ -214,6 +226,16 @@ function sendNeverStarted(s: SendRecoveryFacts): boolean {
     !s.hasDurablePartial &&
     !s.hasDelivery
   );
+}
+
+/** INDEPENDENT land whose consumer never posted verification-complete, past the window. */
+export function sendLandedUnacknowledgedOverdue(facts: RecoveryFacts): boolean {
+  if (facts.kind !== "SEND_EXTERNAL" || facts.send === null) return false;
+  if (facts.status !== "EXTERNAL_SEND_LANDED") return false;
+  if ((facts.verificationMode ?? "INDEPENDENT") !== "INDEPENDENT") return false;
+  if (facts.send.hasVerificationAcknowledgement === true) return false;
+  if (facts.heldLeases.length === 0) return false;
+  return facts.send.verificationCompleteOverdue === true;
 }
 
 /**
@@ -485,10 +507,15 @@ export function derivePermittedActions(
     ) {
       actions.add("CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED");
     }
+    // ZTR-1316: INDEPENDENT land with lease still held and verification-complete overdue.
+    if (sendLandedUnacknowledgedOverdue(facts)) {
+      actions.add("CLOSE_LANDED_UNACKNOWLEDGED");
+    }
   }
 
   // LANDED_VERIFIED: automatic effect is advance-to-landed. Inspection reports
-  // no resolving operator action beyond acknowledgement if already attention-flagged.
+  // no resolving operator action beyond acknowledgement if already attention-flagged,
+  // except CLOSE_LANDED_UNACKNOWLEDGED (lease still held pending overdue ack).
   if (classification === "LANDED_VERIFIED") {
     actions.delete("RELEASE_EXPIRED_RECEIVE");
     actions.delete("RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK");

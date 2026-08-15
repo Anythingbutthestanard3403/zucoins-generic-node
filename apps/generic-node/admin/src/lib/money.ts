@@ -421,7 +421,7 @@ export const RESERVED_RECOVERY_ACTIONS = CONTRACT_RESERVED_RECOVERY_ACTIONS;
 
 /**
  * Live recovery actions the operator console may POST today: the frozen closed catalog
- * minus RESERVED. Derived as a set difference so a tenth action or a promotion out of
+ * minus RESERVED. Derived as a set difference so an eleventh action or a promotion out of
  * RESERVED fails the catalog-equality test rather than silently hiding a button.
  */
 export const LIVE_RECOVERY_ACTIONS = OPERATOR_RECOVERY_ACTIONS.filter(
@@ -441,6 +441,7 @@ const RECOVERY_ACTION_LABELS: Readonly<Record<string, string>> = {
   CONTINUE_EXTERNAL_WAIT: "Continue waiting for redemption",
   CLOSE_NEVER_STARTED_EXTERNAL_SEND: "Close never-started send",
   CLOSE_EXTERNAL_SEND_PROVEN_NOT_LANDED: "Close send (proven not landed)",
+  CLOSE_LANDED_UNACKNOWLEDGED: "Release overdue landed-send lease",
   REBUILD_INTERNAL_MOVE: "Rebuild internal transfer",
   RELEASE_EXPIRED_RECEIVE: "Release expired receive",
   RELEASE_EXPIRED_RECEIVE_OPERATOR_RISK:

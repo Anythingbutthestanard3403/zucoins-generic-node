@@ -64,6 +64,7 @@
     "send-external-create.sql",
     "send-external-expiry.sql",
     "send-external-landing.sql",
+    "send-landed-unacknowledged-close.sql",
     "send-proven-not-landed-close.sql",
     "session-subscription-stores.sql",
     "signer-support.sql",

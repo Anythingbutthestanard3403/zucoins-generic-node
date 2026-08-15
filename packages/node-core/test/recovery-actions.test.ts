@@ -274,6 +274,15 @@ function applyEffect(
         transferCodeText: null,
         transferCodeSha256: null,
       };
+    case "CLOSE_LANDED_UNACKNOWLEDGED":
+      return {
+        ok: true,
+        status: "EXTERNAL_SEND_LANDED",
+        attentionRequired: false,
+        releaseStatus: null,
+        transferCodeText: null,
+        transferCodeSha256: null,
+      };
     case "REBUILD_INTERNAL_MOVE":
       // archiveOldAttemptUnchanged + createNextAttemptNumber; never submit old.
       expect(effect.submitOldAttempt).toBe(false);
@@ -393,8 +402,8 @@ describe("route registration", () => {
 });
 
 describe("structural forbidden surface", () => {
-  it("closed catalog is exactly ten and has no forbidden tokens", () => {
-    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(10);
+  it("closed catalog is exactly eleven and has no forbidden tokens", () => {
+    expect(OPERATOR_RECOVERY_ACTIONS).toHaveLength(11);
     for (const f of FORBIDDEN_RECOVERY_ACTIONS) {
       expect(isOperatorRecoveryAction(f)).toBe(false);
       expect(isForbiddenRecoveryAction(f)).toBe(true);
@@ -853,6 +862,31 @@ describe("planRecoveryEffect exhaustiveness over every action", () => {
             completePathExclusionProved: false,
             hasSignerAudit: true,
             hasMatchingExactByteRecord: true,
+          },
+        }),
+        proof: null,
+      },
+      {
+        action: "CLOSE_LANDED_UNACKNOWLEDGED",
+        facts: baseSend({
+          status: "EXTERNAL_SEND_LANDED",
+          attentionRequired: false,
+          verificationMode: "INDEPENDENT",
+          hasLandingProof: true,
+          landingProofVerdict: "LANDED_EXACT",
+          send: {
+            hasSignIntent: true,
+            hasSignerCall: true,
+            hasSignature: true,
+            hasDurablePartial: true,
+            hasDelivery: true,
+            protocolExpiredPlusMargin: false,
+            freshHeadEqualsSourceT0: false,
+            completePathExclusionProved: false,
+            hasSignerAudit: true,
+            hasMatchingExactByteRecord: true,
+            hasVerificationAcknowledgement: false,
+            verificationCompleteOverdue: true,
           },
         }),
         proof: null,

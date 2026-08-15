@@ -53,6 +53,53 @@ describe("subscribeToOperation", () => {
     expect(projections).toEqual([frame1, frame2]);
   });
 
+  it("accepts verification_mode on a lifecycle frame", async () => {
+    const frame = {
+      operation_id: OP_ID,
+      operation_type: "RECEIVE_EXTERNAL",
+      state: "READY",
+      row_version: 2,
+      attention_required: false,
+      updated_at: "2026-07-18T12:00:00.000Z",
+      verification_mode: "NODE_VERIFIED",
+    };
+    const projections = await collect(
+      subscribeToOperation({
+        config: {
+          baseUrl: "https://node.example.com",
+          fetchImpl: fetchReturning(sseStream([`data: ${JSON.stringify(frame)}\n\n`])),
+        },
+        operationId: OP_ID,
+        subscriptionHandle: "sh_secret",
+      }),
+    );
+    expect(projections[0]!.verification_mode).toBe("NODE_VERIFIED");
+  });
+
+  it("rejects a lifecycle frame with unknown verification_mode", async () => {
+    const frame = {
+      operation_id: OP_ID,
+      operation_type: "RECEIVE_EXTERNAL",
+      state: "READY",
+      row_version: 2,
+      attention_required: false,
+      updated_at: "2026-07-18T12:00:00.000Z",
+      verification_mode: "HYBRID",
+    };
+    await expect(
+      collect(
+        subscribeToOperation({
+          config: {
+            baseUrl: "https://node.example.com",
+            fetchImpl: fetchReturning(sseStream([`data: ${JSON.stringify(frame)}\n\n`])),
+          },
+          operationId: OP_ID,
+          subscriptionHandle: "sh_secret",
+        }),
+      ),
+    ).rejects.toThrow(/frozen lifecycle projection/);
+  });
+
   it("reassembles a multi-line data: frame by joining with newlines", async () => {
     const frame = {
       operation_id: OP_ID,

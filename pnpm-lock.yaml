@@ -149,10 +149,10 @@ importers:
       '@zucoins/generic-node-contracts':
         specifier: workspace:*
         version: link:../generic-node-contracts
+    devDependencies:
       '@zucoins/node-core':
         specifier: workspace:*
         version: link:../node-core
-    devDependencies:
       vitest:
         specifier: ^3.2.6
         version: 3.2.7(@types/node@22.20.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(tsx@4.23.5)

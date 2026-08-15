@@ -8,6 +8,7 @@ import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
 import { assertOk } from "./errors.js";
 import { resolveFetch, resolveUrl, type NodeClientConfig } from "./client-types.js";
 import type { CommonOperationView } from "./receives.js";
+import type { VerificationMode } from "../verification-mode.js";
 
 export interface CreateInternalMoveRequest {
   readonly source_wallet_id: string;
@@ -15,6 +16,8 @@ export interface CreateInternalMoveRequest {
   readonly amount_zkz: string;
   /** Advisory product correlation — unsigned, never a settlement match key. */
   readonly client_reference?: string;
+  /** Optional; omitted → INDEPENDENT. NODE_VERIFIED requires operator policy. */
+  readonly verification_mode?: VerificationMode;
 }
 
 export interface InternalMoveOperationView {

@@ -8,6 +8,7 @@ import type { OperationKind } from "@zucoins/generic-node-contracts/operations";
 import { assertOk } from "./errors.js";
 import { resolveFetch, resolveUrl, type NodeClientConfig } from "./client-types.js";
 import type { CommonOperationView } from "./receives.js";
+import type { VerificationMode } from "../verification-mode.js";
 
 export interface CreateExternalSendRequest {
   /**
@@ -20,6 +21,8 @@ export interface CreateExternalSendRequest {
   readonly references_operation_id?: string;
   readonly client_reference?: string;
   readonly description?: string;
+  /** Optional; omitted → INDEPENDENT. NODE_VERIFIED requires operator policy. */
+  readonly verification_mode?: VerificationMode;
 }
 
 export interface ExternalSendOperationView {

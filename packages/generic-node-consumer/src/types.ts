@@ -13,6 +13,7 @@ import type {
   OperationProofVerdictKind,
 } from "@zucoins/node-core/verifier/consumer";
 import type { CachedIdentityPin } from "@zucoins/node-core/verifier/consumer/pinning";
+import type { VerificationMode } from "./verification-mode.js";
 
 /** The three public money operations — the only composition units. */
 export const PUBLIC_OPERATION_KINDS = ["receive", "move", "send"] as const;
@@ -67,6 +68,8 @@ export interface SubscribeLifecycleProjection {
   readonly row_version: number;
   readonly attention_required: boolean;
   readonly updated_at: string;
+  /** Present when the node includes admission-frozen mode on the lifecycle frame. */
+  readonly verification_mode?: VerificationMode;
 }
 
 /**
@@ -160,6 +163,8 @@ export interface VerificationMaterialWire {
   readonly operation_id: string;
   readonly operation_type: OperationKind;
   readonly state: string;
+  /** Immutable after admission; omitted on legacy bodies defaults to INDEPENDENT. */
+  readonly verification_mode?: VerificationMode;
   /** Present once the served operation reaches its kind's landed-terminal status. */
   readonly landed_attempt_no?: number;
   readonly expected_artifact: {

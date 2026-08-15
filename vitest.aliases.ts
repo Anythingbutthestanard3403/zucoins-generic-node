@@ -6,9 +6,29 @@ export interface SourceAlias {
   replacement: string;
 }
 
+type ExportConditions = {
+  import?: unknown;
+  default?: unknown;
+  types?: unknown;
+};
+
+type ExportTarget = string | ExportConditions;
+
 interface PackageManifest {
   name: string;
-  exports: Record<string, string>;
+  exports: Record<string, ExportTarget>;
+}
+
+/** String path from a package `exports` value: a string, or `import` / `default` / `types`. */
+export function resolveExportTarget(target: ExportTarget): string {
+  if (typeof target === "string") return target;
+  for (const key of ["import", "default", "types"] as const) {
+    const value = target[key];
+    if (typeof value === "string") return value;
+  }
+  throw new TypeError(
+    "package export target is not a string or conditions object with import/default/types",
+  );
 }
 
 /**
@@ -32,11 +52,14 @@ export function packageSourceAliases(packageDirUrl: URL): SourceAlias[] {
   ) as PackageManifest;
 
   return Object.entries(manifest.exports)
-    .map(([subpath, target]) => ({
-      find: subpath === "." ? manifest.name : `${manifest.name}/${subpath.slice("./".length)}`,
-      replacement: fileURLToPath(
-        new URL(target.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"), packageDirUrl),
-      ),
-    }))
+    .map(([subpath, target]) => {
+      const resolved = resolveExportTarget(target);
+      return {
+        find: subpath === "." ? manifest.name : `${manifest.name}/${subpath.slice("./".length)}`,
+        replacement: fileURLToPath(
+          new URL(resolved.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"), packageDirUrl),
+        ),
+      };
+    })
     .sort((left, right) => right.find.length - left.find.length);
 }

@@ -430,6 +430,7 @@ export {
 
 export {
   createDestinationsListRouteHandler,
+  destinationToWire,
   handleCreateDestination,
   handleListDestinations,
   listDestinationsBody,

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDestinationsListRouteHandler,
+  destinationToWire,
   handleCreateDestination,
   handleListDestinations,
   listDestinationsBody,
@@ -150,7 +151,7 @@ describe("reporting-credential destinations list", () => {
     const bearerBody = (bearer as { readonly body: string }).body;
     expect(decode(reporting.response.bodyBytes)).toBe(bearerBody);
     expect(JSON.parse(bearerBody)).toEqual({
-      items: [item("2", NODE_A, "BLESSED")],
+      items: [destinationToWire(item("2", NODE_A, "BLESSED"))],
       next_after: null,
     });
   });
@@ -224,7 +225,10 @@ describe("reporting-credential destinations list", () => {
   it("listDestinationsBody is the single renderer for both auth classes", () => {
     const page: DestinationPage = { items: NODE_A_ROWS, nextAfter: NODE_A_ROWS[1]!.destinationId };
     expect(listDestinationsBody(page)).toBe(
-      JSON.stringify({ items: NODE_A_ROWS, next_after: NODE_A_ROWS[1]!.destinationId }),
+      JSON.stringify({
+        items: NODE_A_ROWS.map(destinationToWire),
+        next_after: NODE_A_ROWS[1]!.destinationId,
+      }),
     );
   });
 });

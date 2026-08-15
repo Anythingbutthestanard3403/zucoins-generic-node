@@ -1819,6 +1819,7 @@ components:
             - PENDING
             - APPROVED
             - CONSUMED
+            - REJECTED
         transfer_code:
           type: string
           nullable: true

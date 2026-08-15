@@ -575,7 +575,9 @@ export function buildExternalSendResponse(
       ? "PENDING"
       : operation.status === "APPROVED"
         ? "APPROVED"
-        : "CONSUMED";
+        : operation.status === "REJECTED"
+          ? "REJECTED"
+          : "CONSUMED";
   const verificationMode =
     "verificationMode" in operation && operation.verificationMode !== undefined
       ? operation.verificationMode

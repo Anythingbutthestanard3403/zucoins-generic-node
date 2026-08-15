@@ -306,11 +306,12 @@ describe("the named concern MOVE_INTERNAL strict schemas", () => {
 });
 
 describe("the named concern SEND_EXTERNAL strict schemas", () => {
-  it("freezes approval_status as PENDING / APPROVED / CONSUMED", () => {
+  it("freezes approval_status as PENDING / APPROVED / CONSUMED / REJECTED", () => {
     expect([...EXTERNAL_SEND_APPROVAL_STATUSES]).toEqual([
       "PENDING",
       "APPROVED",
       "CONSUMED",
+      "REJECTED",
     ]);
   });
 

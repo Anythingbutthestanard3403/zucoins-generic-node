@@ -39,6 +39,7 @@ export const EXTERNAL_SEND_APPROVAL_STATUSES = [
   "PENDING",
   "APPROVED",
   "CONSUMED",
+  "REJECTED",
 ] as const;
 
 export type ExternalSendApprovalStatus =

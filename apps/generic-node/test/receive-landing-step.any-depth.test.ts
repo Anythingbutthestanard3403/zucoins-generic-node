@@ -7,7 +7,7 @@
 //
 // Golden chain (seed_02): predecessor credits 10 ZKZ from genesis; target then spends 2.25
 // with target.P == predecessor.S. Extra hops after target are signed with the same seeds as
-// packages/node-core late-landing-reconcile tests.
+// the landing-path-oracle any-depth fixtures.
 
 import { createHash, createPrivateKey, sign } from "node:crypto";
 import { readFileSync } from "node:fs";

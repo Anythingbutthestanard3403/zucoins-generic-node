@@ -1,7 +1,6 @@
 // Census: binds the frozen successor-index invariant inventory to the literal SQL
 // contract text so the two truth carriers cannot drift apart silently. Static text
-// proof; the real-PostgreSQL behaviour proof is send-completion-lander.pg.test.ts and
-// send-late-landing-reconcile.pg.test.ts.
+// proof; the real-PostgreSQL behaviour proof is send-completion-lander.pg.test.ts.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -24,14 +24,13 @@ import type { SqlQueryFn } from "../src/core/sql-query-fn.ts";
 import {
   SEND_EXPIRY_ATTENTION_REASON,
   SEND_EXPIRY_ATTENTION_SQL,
-  SEND_PARTIAL_AGING_MARGIN_SECS,
   assertNoForbiddenSqlInAllowedSet,
   continueExternalWait,
   evaluatePostDeliveryExpiry,
   fingerprintPartialImmutableBytes,
   loadSendExpiryOperationFacts,
-  parkPastExpiryAwaitingRedemption,
   redeliverExactPartial,
+  OPERATION_NEEDS_ATTENTION_EVENT,
 } from "../src/send/expiry-attention.ts";
 import { registerPgRequiredGuard } from "./pg-required-guard.ts";
 import { verificationModeFixtureSql } from "./verification-mode-fixture.js";
@@ -158,6 +157,20 @@ function makeQuery(db: string): SqlQueryFn {
     const line = outcome.stdout.trim().split("\n").filter(Boolean).at(-1) ?? "[]";
     return JSON.parse(line) as Record<string, unknown>[];
   };
+}
+
+/** Production park is send-completion-lander; tests drive the same CAS SQL. */
+async function parkViaCas(
+  query: SqlQueryFn,
+  operationId: string,
+  reason: string = SEND_EXPIRY_ATTENTION_REASON,
+): Promise<Record<string, unknown> | undefined> {
+  const rows = await query(SEND_EXPIRY_ATTENTION_SQL.CAS_AWAITING_TO_NEEDS_ATTENTION, [
+    operationId,
+    reason,
+    OPERATION_NEEDS_ATTENTION_EVENT,
+  ]);
+  return rows[0];
 }
 
 const seedNode = (db: string): void => {
@@ -416,20 +429,11 @@ describe("SEND expiry attention PG drills", () => {
     expect(before?.leaseHeld).toBe(true);
     expect(before?.leaseEpoch).toBe(7);
 
-    const result = await parkPastExpiryAwaitingRedemption(query, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 1,
-    });
-    expect(result.kind).toBe("PARKED");
-    if (result.kind !== "PARKED") return;
-    expect(result.attentionReason).toBe(SEND_EXPIRY_ATTENTION_REASON);
-    expect(result.attentionEpisode).toBe(1);
-    expect(result.partialBytesBefore).toBe(expectedBytes);
-    expect(result.partialBytesAfter).toBe(expectedBytes);
-    expect(result.leaseEpochBefore).toBe(7);
-    expect(result.leaseEpochAfter).toBe(7);
-    // formation_state untouched on park
-    expect(result.formationState).toBe("PARTIAL_DELIVERED");
+    const cas = await parkViaCas(query, opId);
+    expect(cas).toBeDefined();
+    expect(cas!.attention_reason).toBe(SEND_EXPIRY_ATTENTION_REASON);
+    expect(Number(cas!.attention_episode)).toBe(1);
+    expect(String(cas!.formation_state)).toBe("PARTIAL_DELIVERED");
 
     const after = await loadSendExpiryOperationFacts(query, opId);
     expect(after?.status).toBe("NEEDS_ATTENTION");
@@ -493,11 +497,8 @@ describe("SEND expiry attention PG drills", () => {
     seedAwaitingSend(db!, opId, { idemKey: "idem-continue-003-xxxxxx", walletId: walletFor(3) });
     const query = makeQuery(db!);
 
-    const parked = await parkPastExpiryAwaitingRedemption(query, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 5,
-    });
-    expect(parked.kind).toBe("PARKED");
+    const parked = await parkViaCas(query, opId);
+    expect(parked).toBeDefined();
 
     const cont = await continueExternalWait(query, { operationId: opId });
     expect(cont.kind).toBe("CONTINUED");
@@ -531,10 +532,7 @@ describe("SEND expiry attention PG drills", () => {
     const query = makeQuery(db!);
 
     // Park then redeliver from attention (late recipient still needs the code).
-    await parkPastExpiryAwaitingRedemption(query, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 1,
-    });
+    await parkViaCas(query, opId);
 
     const red = await redeliverExactPartial(query, {
       operationId: opId,
@@ -567,11 +565,8 @@ describe("SEND expiry attention PG drills", () => {
     seedAwaitingSend(db!, opId, { idemKey: "idem-restart-005-xxxxxx", walletId });
     const query = makeQuery(db!);
 
-    const parked = await parkPastExpiryAwaitingRedemption(query, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 1,
-    });
-    expect(parked.kind).toBe("PARKED");
+    const parked = await parkViaCas(query, opId);
+    expect(parked).toBeDefined();
 
     // Simulate process restart: new query handle, re-load facts only.
     const query2 = makeQuery(db!);
@@ -580,12 +575,9 @@ describe("SEND expiry attention PG drills", () => {
     expect(facts?.attentionRequired).toBe(true);
     expect(facts?.attentionEpisode).toBe(1);
 
-    // Re-evaluate must not invent a terminal state from a fresh head-less clock read.
-    const again = await parkPastExpiryAwaitingRedemption(query2, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + SEND_PARTIAL_AGING_MARGIN_SECS + 100,
-    });
-    expect(again.kind).toBe("ALREADY_ATTENTION");
+    // Re-park is a no-op: CAS only matches AWAITING_REDEMPTION.
+    const again = await parkViaCas(query2, opId);
+    expect(again).toBeUndefined();
     expect(
       runPsql(db!, `SELECT status FROM send_operations WHERE operation_id='${opId}'`).stdout.trim(),
     ).toBe("NEEDS_ATTENTION");
@@ -612,13 +604,17 @@ describe("SEND expiry attention PG drills", () => {
     });
     const query = makeQuery(db!);
 
-    const result = await parkPastExpiryAwaitingRedemption(query, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 9999,
-    });
-    expect(result.kind).toBe("NOOP");
-    if (result.kind !== "NOOP") return;
-    expect(result.reason).toBe("PRE_DELIVERY");
+    const result = await parkViaCas(query, opId);
+    expect(result).toBeUndefined();
+    expect(
+      evaluatePostDeliveryExpiry({
+        status: "APPROVED",
+        partialExists: false,
+        firstDeliveredAt: null,
+        redemptionExpiryUnixSecs: T2_SECS,
+        nowUnixSecs: Number(T2_SECS) + 9999,
+      }).outcome,
+    ).toBe("PRE_DELIVERY_GATE_ONLY");
 
     expect(
       runPsql(db!, `SELECT status FROM send_operations WHERE operation_id='${opId}'`).stdout.trim(),
@@ -676,10 +672,7 @@ describe("SEND expiry attention PG drills", () => {
       const query = makeQuery(db!);
       let threw = false;
       try {
-        await parkPastExpiryAwaitingRedemption(query, {
-          operationId: opId,
-          nowUnixSecs: Number(T2_SECS) + 10,
-        });
+        await parkViaCas(query, opId);
       } catch {
         threw = true;
       }
@@ -717,13 +710,9 @@ describe("SEND expiry attention PG drills", () => {
 
     // After restore, the same park must succeed with event co-present.
     const query2 = makeQuery(db!);
-    const parked = await parkPastExpiryAwaitingRedemption(query2, {
-      operationId: opId,
-      nowUnixSecs: Number(T2_SECS) + 10,
-    });
-    expect(parked.kind).toBe("PARKED");
-    if (parked.kind !== "PARKED") return;
-    expect(parked.attentionEpisode).toBe(1);
+    const parked = await parkViaCas(query2, opId);
+    expect(parked).toBeDefined();
+    expect(Number(parked!.attention_episode)).toBe(1);
     const eventRow = runPsql(
       db!,
       `SELECT event_type || '|' || attention_episode::text || '|' || attention_reason || '|' || ` +

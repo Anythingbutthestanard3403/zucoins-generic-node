@@ -235,7 +235,8 @@ export type SendAssignRejectionCode =
   | "insufficient_funding_wallet"
   | "move_rejected"
   | "send_rejected"
-  | "halted";
+  | "halted"
+  | "assign_not_wired";
 
 export interface ObservedBalanceRow {
   readonly walletId: string;

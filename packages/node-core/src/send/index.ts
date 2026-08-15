@@ -113,44 +113,15 @@ export {
   extractSignedExpiryUnixSecs,
   fingerprintPartialImmutableBytes,
   loadSendExpiryOperationFacts,
-  parkPastExpiryAwaitingRedemption,
-  type SendExpiryDualChainEmitter,
   continueExternalWait,
   redeliverExactPartial,
   assertNoForbiddenSqlInAllowedSet,
   type SendExpiryBoundary,
   type SendExpiryEvaluation,
   type SendExpiryOperationFacts,
-  type ParkPastExpiryResult,
   type ContinueExternalWaitResult,
   type RedeliverExactPartialResult,
 } from "./expiry-attention.js";
-
-// post-expiry late-landing reconciliation (positive half).
-// Never releases the source lease; never terminally closes on incomplete proof.
-export {
-  LATE_LANDING_RECONCILE_ALLOWED_SQL,
-  InMemorySendLateLandingProofStore,
-  StagingLineagePathProofStore,
-  assertLateLandingSqlCatalogueSafe,
-  classifyLateLandingCycle,
-  applyLateLandingCycle,
-  lateLandingAttentionReason,
-  refusesTerminalClose,
-  proveSendLanding,
-  landingProofToPathObservation,
-  type LineageProofVerdict,
-  type OperationLandingProofRow,
-  type LateLandingProofProgress,
-  type SendLateLandingProofStore,
-  type LateLandingClassification,
-  type LateLandingApplyOutcome,
-  type LateLandingOperationFacts,
-  type LateLandingCycleInput,
-  type ApplyLateLandingDeps,
-  type FreshHeadRead,
-  type ReadFreshHead,
-} from "./late-landing-reconcile.js";
 
 // Dual-control two-human policy (durable node_settings + audit — ZTR-1214).
 export {

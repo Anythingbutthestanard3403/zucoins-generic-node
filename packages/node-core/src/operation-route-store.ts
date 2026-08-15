@@ -443,7 +443,7 @@ export function createSqlOperationRouteStore(
       if (config.assignSql === undefined) {
         // Legacy / unit fixtures without SQL assign ports — explicit source only.
         if (input.source_wallet_id === undefined) {
-          throw new SendAdmissionError(
+          throwAssignRejection(
             "assign_not_wired",
             "optional source_wallet_id requires assign SQL ports",
           );

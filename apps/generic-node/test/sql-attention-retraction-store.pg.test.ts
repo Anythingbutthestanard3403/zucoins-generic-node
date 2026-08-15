@@ -40,6 +40,10 @@ const PACK_SLICES = [
   "receive-external-landing",
 ] as const;
 const VERIFICATION_MODE_SLICE = readFileSync(`${schemaDir}verification-mode.sql`, "utf8");
+const WALLET_MONEY_CAPABILITY_SLICE = readFileSync(
+  `${schemaDir}wallet-money-capability.sql`,
+  "utf8",
+);
 
 function packSql(): string {
   const declared = new Set<string>();
@@ -63,7 +67,7 @@ CREATE TABLE IF NOT EXISTS node_settings (
 );
 ALTER TABLE operations ADD COLUMN IF NOT EXISTS receive_release_status text;
 `;
-  return `${declarations.join("\n")}\n${tables}\n${extras}\n${VERIFICATION_MODE_SLICE}`;
+  return `${declarations.join("\n")}\n${tables}\n${WALLET_MONEY_CAPABILITY_SLICE}\n${extras}\n${VERIFICATION_MODE_SLICE}`;
 }
 
 // CREATE EXTENSION IF NOT EXISTS is not safe under concurrent DDL: two test files racing

@@ -606,6 +606,9 @@ describe.skipIf(databaseUrl === undefined)("SQL recovery-action store against a 
     await pool.query(FK_TARGET_STUBS);
     await applySchema(pool, packSql());
     await pool.query(ACK_TABLE_STUBS);
+    // Production scaler/assign SELECT allow_external_* (wallet-money-capability.sql).
+    // This pack applies custody-eligibility wallets but not the later column slice.
+    await applySchema(pool, readFileSync(`${schemaDir}wallet-money-capability.sql`, "utf8"));
     // ZTR-1314: production SELECT lists operations.verification_mode. Stub
     // receive_operations + node_settings (this pack never applies those slices)
     // then the landed verification-mode.sql — do not invent a numbered migration.

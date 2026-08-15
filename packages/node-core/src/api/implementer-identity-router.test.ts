@@ -49,6 +49,7 @@ describe("ZTR-1288 · implementer identity router", () => {
       funding_wallet_public_key: PUB,
       funding_configured: true,
       funding_source: "implementer",
+      verification_mode: "INDEPENDENT",
     });
   });
 
@@ -80,6 +81,15 @@ describe("ZTR-1288 · implementer identity router", () => {
     expect(body.funding_wallet_public_key).toBeNull();
     expect(body.funding_configured).toBe(false);
     expect(body.funding_source).toBe("unset");
+    expect(body.verification_mode).toBe("INDEPENDENT");
+    expect(Object.keys(body)).toEqual([
+      "implementer_id",
+      "funding_wallet_id",
+      "funding_wallet_public_key",
+      "funding_configured",
+      "funding_source",
+      "verification_mode",
+    ]);
   });
 
   it("401 without bearer", async () => {

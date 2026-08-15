@@ -1,7 +1,8 @@
 /**
  * Public discovery (`GET /.well-known/zupay-node`) and implementer who-am-I
  * (`GET /v1/implementer/identity`). Parses `verification_mode` with the
- * contracts vocabulary (omitted → INDEPENDENT).
+ * contracts vocabulary. Omitted / null fails closed — the node always emits it
+ * (ZTR-1319); inventing INDEPENDENT would assert a default the node never stated.
  */
 
 import { DISCOVERY_PATH } from "@zucoins/generic-node-contracts/instruction-origin";
@@ -30,7 +31,7 @@ export interface DiscoveryKeyValidityWire {
 
 /**
  * Identity document from `GET /.well-known/zupay-node`.
- * `verification_mode` is the contracts closed set; omitted on the wire → INDEPENDENT.
+ * `verification_mode` is required on the wire (node always emits it).
  */
 export interface NodeIdentityDocument {
   readonly node_id: string;
@@ -49,7 +50,7 @@ export type FundingSource = "implementer" | "node_default" | "unset";
 
 /**
  * Who-am-I document from `GET /v1/implementer/identity`.
- * `verification_mode` omitted on the wire → INDEPENDENT.
+ * `verification_mode` is required on the wire (node always emits it).
  */
 export interface ImplementerIdentityDocument {
   readonly implementer_id: string;
@@ -140,7 +141,14 @@ function asFundingSource(value: unknown): FundingSource {
   return value as FundingSource;
 }
 
-/** Parse `GET /.well-known/zupay-node`. Unknown `verification_mode` fails closed. */
+function requireVerificationMode(value: unknown): VerificationMode {
+  if (value === undefined || value === null) {
+    throw new IdentityDocumentError("verification_mode is required");
+  }
+  return parseVerificationMode(value);
+}
+
+/** Parse `GET /.well-known/zupay-node`. Missing / unknown `verification_mode` fails closed. */
 export function parseNodeIdentityDocument(value: unknown): NodeIdentityDocument {
   const rec = asRecord(value, "discovery document");
   return {
@@ -168,11 +176,11 @@ export function parseNodeIdentityDocument(value: unknown): NodeIdentityDocument 
       rec.funding_wallet_public_key,
       "funding_wallet_public_key",
     ),
-    verification_mode: parseVerificationMode(rec.verification_mode),
+    verification_mode: requireVerificationMode(rec.verification_mode),
   };
 }
 
-/** Parse `GET /v1/implementer/identity`. Unknown `verification_mode` fails closed. */
+/** Parse `GET /v1/implementer/identity`. Missing / unknown `verification_mode` fails closed. */
 export function parseImplementerIdentityDocument(value: unknown): ImplementerIdentityDocument {
   const rec = asRecord(value, "implementer identity");
   if (typeof rec.funding_configured !== "boolean") {
@@ -187,7 +195,7 @@ export function parseImplementerIdentityDocument(value: unknown): ImplementerIde
     ),
     funding_configured: rec.funding_configured,
     funding_source: asFundingSource(rec.funding_source),
-    verification_mode: parseVerificationMode(rec.verification_mode),
+    verification_mode: requireVerificationMode(rec.verification_mode),
   };
 }
 

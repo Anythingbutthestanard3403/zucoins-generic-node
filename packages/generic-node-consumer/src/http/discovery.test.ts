@@ -27,6 +27,7 @@ function discoveryBody(over: Record<string, unknown> = {}): Record<string, unkno
     key_validity_intervals: [{ key_id: KEY_ID, valid_from: "2026-01-01T00:00:00.000Z", valid_until: null }],
     funding_wallet_id: null,
     funding_wallet_public_key: null,
+    verification_mode: "INDEPENDENT",
     ...over,
   };
 }
@@ -38,6 +39,7 @@ function identityBody(over: Record<string, unknown> = {}): Record<string, unknow
     funding_wallet_public_key: null,
     funding_configured: false,
     funding_source: "unset",
+    verification_mode: "INDEPENDENT",
     ...over,
   };
 }
@@ -50,7 +52,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("parseNodeIdentityDocument", () => {
-  it("defaults omitted verification_mode to INDEPENDENT", () => {
+  it("reads emitted INDEPENDENT from /.well-known/zupay-node", () => {
     const doc = parseNodeIdentityDocument(discoveryBody());
     expect(doc.verification_mode).toBe("INDEPENDENT");
     expect(doc.node_id).toBe(NODE_ID);
@@ -59,6 +61,18 @@ describe("parseNodeIdentityDocument", () => {
   it("preserves NODE_VERIFIED from /.well-known/zupay-node", () => {
     const doc = parseNodeIdentityDocument(discoveryBody({ verification_mode: "NODE_VERIFIED" }));
     expect(doc.verification_mode).toBe("NODE_VERIFIED");
+  });
+
+  it("rejects omitted verification_mode (fail closed; no silent INDEPENDENT)", () => {
+    const { verification_mode: _omit, ...body } = discoveryBody();
+    expect(() => parseNodeIdentityDocument(body)).toThrow(IdentityDocumentError);
+    expect(() => parseNodeIdentityDocument(body)).toThrow(/verification_mode is required/);
+  });
+
+  it("rejects null verification_mode", () => {
+    expect(() => parseNodeIdentityDocument(discoveryBody({ verification_mode: null }))).toThrow(
+      IdentityDocumentError,
+    );
   });
 
   it("rejects unknown verification_mode", () => {
@@ -73,7 +87,7 @@ describe("parseNodeIdentityDocument", () => {
 });
 
 describe("parseImplementerIdentityDocument", () => {
-  it("defaults omitted verification_mode to INDEPENDENT", () => {
+  it("reads emitted INDEPENDENT on who-am-I", () => {
     expect(parseImplementerIdentityDocument(identityBody()).verification_mode).toBe("INDEPENDENT");
   });
 
@@ -81,6 +95,12 @@ describe("parseImplementerIdentityDocument", () => {
     const doc = parseImplementerIdentityDocument(identityBody({ verification_mode: "NODE_VERIFIED" }));
     expect(doc.verification_mode).toBe("NODE_VERIFIED");
     expect(doc.implementer_id).toBe(IMPLEMENTER_ID);
+  });
+
+  it("rejects omitted verification_mode (fail closed; no silent INDEPENDENT)", () => {
+    const { verification_mode: _omit, ...body } = identityBody();
+    expect(() => parseImplementerIdentityDocument(body)).toThrow(IdentityDocumentError);
+    expect(() => parseImplementerIdentityDocument(body)).toThrow(/verification_mode is required/);
   });
 
   it("rejects unknown verification_mode", () => {

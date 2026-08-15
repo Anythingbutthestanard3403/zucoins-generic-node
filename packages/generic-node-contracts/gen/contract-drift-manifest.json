@@ -263,7 +263,7 @@
       "goldenRefs": [
         {
           "path": "src/api-schema/gen/api-schema.json",
-          "sha256": "4f221e311d59e44632e1bde082670579c0d48dcea682688d07ace38c5944ffd0"
+          "sha256": "5d8542328de2973de32512cecfea6c01f824b14ff6eabc02101da57a917b4197"
         }
       ]
     },
@@ -1108,7 +1108,7 @@
         ],
         "driftAuditStatus": "automated-clean",
         "sourceDoc": "api-contract discovery endpoint",
-        "note": "DISCOVERY_PATH, all nine DISCOVERY_RESPONSE_FIELDS, and all five DISCOVERY_EXCLUSIONS resolve one-for-one against the api contract's discovery prose under snake_case normalisation, in the doc's own sequence. The `zupay` literal is retained per the compatibility-literal preservation rule."
+        "note": "DISCOVERY_PATH, all ten DISCOVERY_RESPONSE_FIELDS, and all five DISCOVERY_EXCLUSIONS resolve one-for-one against the api contract's discovery prose under snake_case normalisation, in the doc's own sequence. The `zupay` literal is retained per the compatibility-literal preservation rule."
       }
     },
     {

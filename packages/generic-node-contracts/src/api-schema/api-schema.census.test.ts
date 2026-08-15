@@ -27,7 +27,7 @@ import {
 
 describe("the crypto-goldens concern.2 API schema version metadata", () => {
   it("freezes the schema version for drift detection", () => {
-    expect(API_SCHEMA_VERSION).toBe(3);
+    expect(API_SCHEMA_VERSION).toBe(4);
   });
 });
 
@@ -383,8 +383,9 @@ describe("the crypto-goldens concern.2 discovery endpoint census", () => {
     expect(DISCOVERY_PATH).toBe("/.well-known/zupay-node");
   });
 
-  it("has exactly 9 response fields (includes funding wallet pin ZTR-1288)", () => {
-    expect(DISCOVERY_RESPONSE_FIELDS).toHaveLength(9);
+  it("has exactly 10 response fields (funding pin ZTR-1288 + verification_mode ZTR-1319)", () => {
+    expect(DISCOVERY_RESPONSE_FIELDS).toHaveLength(10);
+    expect(DISCOVERY_RESPONSE_FIELDS).toContain("verification_mode");
   });
 
   it("has exactly 5 exclusions", () => {

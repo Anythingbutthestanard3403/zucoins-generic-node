@@ -11,13 +11,17 @@
 //
 // Ticket.
 
-import { EXTERNAL_SEND_APPROVAL_STATUSES } from "@zucoins/generic-node-contracts/api-schema";
+import {
+  DISCOVERY_RESPONSE_FIELDS,
+  EXTERNAL_SEND_APPROVAL_STATUSES,
+} from "@zucoins/generic-node-contracts/api-schema";
 import {
   ADMIN_ROUTES,
   OPERATION_KINDS,
   PUBLIC_ROUTES,
   RETIRED_ROUTES,
   RETIRED_ROUTES_NON_PATH_CATEGORY,
+  VERIFICATION_MODES,
   isRetiredImportEndpoint,
   type RouteEntry,
 } from "@zucoins/generic-node-contracts/operations";
@@ -337,6 +341,18 @@ function successResponses(method: string, path: string): Record<string, unknown>
         content: {
           "application/json": {
             schema: { $ref: "#/components/schemas/DiscoveryResponse" },
+          },
+        },
+      },
+    };
+  }
+  if (key === "GET /v1/implementer/identity") {
+    return {
+      "200": {
+        description: "Implementer identity (effective funding pin + default verification_mode)",
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ImplementerIdentityResponse" },
           },
         },
       },
@@ -815,17 +831,7 @@ function componentsBlock(
       DiscoveryResponse: {
         type: "object",
         additionalProperties: false,
-        required: [
-          "node_id",
-          "api_version",
-          "supported_operation_types",
-          "event_signing_public_keys",
-          "expected_artifact_public_keys",
-          "canonical_suite_versions",
-          "key_validity_intervals",
-          "funding_wallet_id",
-          "funding_wallet_public_key",
-        ],
+        required: [...DISCOVERY_RESPONSE_FIELDS],
         properties: {
           node_id: { type: "string", format: "uuid" },
           api_version: { type: "string" },
@@ -840,6 +846,41 @@ function componentsBlock(
           // ZTR-1288: node-default funding pin; null when unset (never a worker key).
           funding_wallet_id: { type: ["string", "null"], format: "uuid" },
           funding_wallet_public_key: { type: ["string", "null"] },
+          // ZTR-1319: node's default create-time verification_mode; always present.
+          verification_mode: {
+            type: "string",
+            enum: [...VERIFICATION_MODES],
+            description:
+              "Node-default create-time verification mode. Always emitted; currently INDEPENDENT.",
+          },
+        },
+      },
+      ImplementerIdentityResponse: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "implementer_id",
+          "funding_wallet_id",
+          "funding_wallet_public_key",
+          "funding_configured",
+          "funding_source",
+          "verification_mode",
+        ],
+        properties: {
+          implementer_id: { type: "string", format: "uuid" },
+          funding_wallet_id: { type: ["string", "null"], format: "uuid" },
+          funding_wallet_public_key: { type: ["string", "null"] },
+          funding_configured: { type: "boolean" },
+          funding_source: {
+            type: "string",
+            enum: ["implementer", "node_default", "unset"],
+          },
+          verification_mode: {
+            type: "string",
+            enum: [...VERIFICATION_MODES],
+            description:
+              "Node-default create-time verification mode. Always emitted; currently INDEPENDENT.",
+          },
         },
       },
       LivenessResponse: {

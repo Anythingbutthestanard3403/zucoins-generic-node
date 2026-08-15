@@ -654,9 +654,11 @@ describe("cross-cutting — no sensitive leak under any fault condition", () => 
       "key_validity_intervals",
       "node_id",
       "supported_operation_types",
+      "verification_mode",
     ]);
     expect(doc.funding_wallet_id).toBeNull();
     expect(doc.funding_wallet_public_key).toBeNull();
+    expect(doc.verification_mode).toBe("INDEPENDENT");
   });
 
   it("liveness body is exactly {status, version, timestamp}", () => {

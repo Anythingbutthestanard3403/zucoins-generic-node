@@ -7,10 +7,18 @@
 //
 // ZTR-1288: funding_wallet_id + funding_wallet_public_key are the node-default
 // funding pin (reserve/proof). Explicit null when unset — never a worker key.
+// ZTR-1319: verification_mode is the node's default create-time mode (always
+// emitted; currently INDEPENDENT). Never omitted so consumers cannot invent it.
 
 import { z } from "zod";
 import { UuidSchema, WalletPublicKeySchema, Rfc3339MsSchema } from "./scalars.js";
-import { OPERATION_KINDS, type OperationKind } from "@zucoins/generic-node-contracts/operations";
+import {
+  DEFAULT_VERIFICATION_MODE,
+  OPERATION_KINDS,
+  VERIFICATION_MODES,
+  type OperationKind,
+  type VerificationMode,
+} from "@zucoins/generic-node-contracts/operations";
 import { DISCOVERY_RESPONSE_FIELDS } from "@zucoins/generic-node-contracts/api-schema";
 
 export const KeyValidityIntervalSchema = z
@@ -43,6 +51,8 @@ export const NodeIdentityDocumentSchema = z
     // ZTR-1288 — node-default funding pin; null when unset / unhealthy.
     funding_wallet_id: UuidSchema.nullable(),
     funding_wallet_public_key: WalletPublicKeySchema.nullable(),
+    // ZTR-1319 — node's default create-time verification_mode; always present.
+    verification_mode: z.enum(VERIFICATION_MODES),
   })
   .strict();
 
@@ -71,6 +81,11 @@ export interface DiscoveryConfig {
    */
   readonly fundingWalletId?: string | null;
   readonly fundingWalletPublicKey?: string | null;
+  /**
+   * Node-default verification_mode advertised on discovery (ZTR-1319).
+   * Omit to emit DEFAULT_VERIFICATION_MODE (`INDEPENDENT`). Always present on the wire.
+   */
+  readonly verificationMode?: VerificationMode;
 }
 
 export function buildNodeIdentityDocument(config: DiscoveryConfig): NodeIdentityDocument {
@@ -104,6 +119,7 @@ export function buildNodeIdentityDocument(config: DiscoveryConfig): NodeIdentity
     key_validity_intervals: intervals,
     funding_wallet_id: fundingId,
     funding_wallet_public_key: fundingKey,
+    verification_mode: config.verificationMode ?? DEFAULT_VERIFICATION_MODE,
   };
 
   // Fail closed if builder drift reorders / renames canon fields.

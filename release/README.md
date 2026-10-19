@@ -57,7 +57,7 @@ An unresolvable head is `REGISTRY_REF_UNRESOLVED` / `REGISTRY_REF_UNPARSABLE`
 
 **Machine enforcement of STRICT dual (ZTR-678 D1):** the merger preflight is the VERIFIED path `scripts/release-targets-strict-dual.mjs check --base <base> --head <head> --pr <n>`, which DERIVES the pass count from the PR's own head-pinned, per-lane-deduped, claim-window-checked verdict comments (ZTR-1064) and requires two DISTINCT reviewer runs. Exit `3` refuses single-PASS merge when `manualReviewRequired` or `moneyPathHit` is set. `--pass-count <n>` is **not** the preflight — it is an audited operator override that verifies NOTHING (no head pin, no lane, no provenance) and prints an AUDIT line; reserve it for a fence that cannot reach the evidence or a sanctioned single-run-legacy `DUAL_SINGLE_RUN` during migration, and never as `--pr`'s equal. The fence matches `scripts/release-targets*.mjs` so weakening it is itself funded-affecting-control. Agent prose in `merger.md` / `reviewer.md` documents the call site only.
 
-This is a review-DEPTH signal only, orthogonal to and distinct from the money-path sentinel (D9.41): a control-glob hit is not a money-path hit, and vice-versa. `SOURCE_PATH` funded detection is unchanged — a PR touching a real funded source glob (e.g. `apps/node/**`) still surfaces `funded-manual-node` as `SOURCE_PATH` funded routing regardless of any co-changed control path, and a co-changed funded-affecting-control path keeps `manualReviewRequired: true` alongside it.
+This is a review-DEPTH signal only, orthogonal to and distinct from the money-path sentinel (D9.41): a control-glob hit is not a money-path hit, and vice-versa. `SOURCE_PATH` detection is unchanged. ZTR-907 cleared `apps/node/**` from `funded-manual-node`'s classification globs, so a path under that tree is unclassified (fail closed) rather than routed to a funded target. The row stays inactive. A co-changed funded-affecting-control path still keeps `manualReviewRequired: true`.
 
 ## Enforcement status (D9.23)
 
@@ -84,8 +84,9 @@ Railway-native cron service for a live-operations-engineer to provision. It is n
 Actions workflow (D9.23). Operator cadence, expected output, and the drift-alarm response
 path are in [`docs/runbooks/release-binding-drift-check.md`](../docs/runbooks/release-binding-drift-check.md).
 
-Decommissioned targets (`funded-manual-node` per D9.61, `public-reference-node` per D9.61) are
-excluded by the `active: false` gate on their registry rows and are not drift-checked.
+Retired targets (`public-reference-node` per D9.61, `funded-manual-node`) are excluded by the
+`active: false` gate on their registry rows and are not drift-checked. ZTR-907 left
+`funded-manual-node` inactive and cleared `apps/node/**` from its classification globs.
 
 ## Scheduled backup assurance (sibling control)
 
@@ -123,7 +124,7 @@ left dangling deliberately — see D10.53(7) for the three grounds and the owner
 
 ## Watch-pattern rationale: `/package.json`
 
-The retired `hosted-platform` and (when active) `funded-manual-node` watch lists include `/package.json` (root, not per-package) deliberately: the root `package.json` pins the pnpm/Node toolchain and workspace-wide scripts, so a change there can alter what gets installed or how any workspace package builds, even without touching that package's own source. It is deploy-relevant for every Railway-built target and is kept in active targets' watch lists for that reason, consistent with `/pnpm-lock.yaml` and `/pnpm-workspace.yaml` already being present for the same reason.
+The retired `hosted-platform` watch list includes `/package.json` (root, not per-package) deliberately: the root `package.json` pins the pnpm/Node toolchain and workspace-wide scripts, so a change there can alter what gets installed or how any workspace package builds, even without touching that package's own source. It is deploy-relevant for every Railway-built target and is kept in active targets' watch lists for that reason, consistent with `/pnpm-lock.yaml` and `/pnpm-workspace.yaml` already being present for the same reason.
 
 ## Rollback evidence
 
@@ -131,7 +132,9 @@ Record the last-known-good commit or immutable artifact digest before release, t
 
 ## Funded node boundary
 
-The `funded-manual-node` record is descriptive. It cannot authorize, select, or execute a deployment. It is `active: false`; its `classificationGlobs` are `apps/node/**` (the v1 treasury-node image) plus shared/toolchain globs — a **different node** than `generic-node`. Its `deployMode: automatic` / `approval: agent-autonomous-d9.47` / `liveAcceptance: testwallet-bounded-d9.46` fields are de-gated **only** under the D9.46 test-wallet carve-out and D9.47's extension of it to this one v1 target. **Scope: `funded-manual-node` alone** — these de-gated values must never be read across onto `generic-node` or any other row (that misread is the ZTR-938 incident ZTR-974/D10.25 exist to prevent recurrence of). D9.61 decommissioned the two dead Railway service bindings this target once pointed at; the registry row itself remains because the live, funded E2E node still runs the v1 image these fields describe. If ZTR-907 scraps v1 (`apps/node/**`), this target retires with it — until then it is v1-only and out of scope for `generic-node` work.
+ZTR-907 left `funded-manual-node` inactive. The v1 tree is not in this repo, and the row's `classificationGlobs` are empty, so `apps/node/**` is not a classification glob. A path under that prefix fails closed as unclassified. Do not put `apps/node/**` back on this row or any other row to send new work at the v1 tree.
+
+The old row's de-gated values (`deployMode: automatic`, `approval: agent-autonomous-d9.47`, `liveAcceptance: testwallet-bounded-d9.46`) belonged to that v1 target alone under D9.46 and D9.47. They must never be copied onto `generic-node` or any other row (that misread is the ZTR-938 incident ZTR-974/D10.25 exist to prevent recurrence of). If this row is marked active again, `validateRegistry` still rejects a hybrid posture.
 
 ## Generic node boundary
 
@@ -155,7 +158,7 @@ absence of keys. `deployMode: manual-riley-gated` / `approval: riley-explicit-in
 are unchanged and are a deliberate, narrower override of D10.8's default merger
 deploy-and-verify authority, enforced in code by `GENERIC_NODE_CUSTODY_TRIPWIRE`
 (`scripts/release-targets.mjs`). **Scope: `generic-node` alone** — do not copy
-`funded-manual-node`'s de-gated values (D9.46/D9.47, v1-only, see "Funded node boundary"
+the v1 row's historical de-gated values (D9.46/D9.47, see "Funded node boundary"
 above) onto this target.
 
 **Custody rollback:** use stop-first drain deploy

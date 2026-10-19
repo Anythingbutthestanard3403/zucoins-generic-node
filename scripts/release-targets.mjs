@@ -268,6 +268,10 @@ export function validateRegistry(registry = loadRegistry(), { checkFiles = true,
     }
   }
 
+  // ZTR-907: the row stays inactive and its classificationGlobs no longer name
+  // apps/node/**. The posture check still fires if a later edit marks the row
+  // active, so a hybrid funded target cannot return quietly. A missing row
+  // must not throw.
   const funded = registry.targets.find((target) => target.id === "funded-manual-node");
   // Dual-state allowlist: the funded target must match EVERY field of exactly one
   // ratified safety posture below. Mixing fields across states (a hybrid) is rejected,
@@ -294,7 +298,7 @@ export function validateRegistry(registry = loadRegistry(), { checkFiles = true,
     funded.approval === state.approval &&
     typeof funded.liveAcceptance === "string" && state.liveAcceptance(funded.liveAcceptance) &&
     funded.externalBinding?.driftCheck === state.driftCheck;
-  if (funded.active && !FUNDED_SAFE_STATES.some(fundedMatchesState)) {
+  if (funded && funded.active && !FUNDED_SAFE_STATES.some(fundedMatchesState)) {
     fail("FUNDED_TARGET_UNSAFE", "funded target must remain manual, Riley-gated, and live-acceptance gated");
   }
   const generic = registry.targets.find((target) => target.id === "generic-node");

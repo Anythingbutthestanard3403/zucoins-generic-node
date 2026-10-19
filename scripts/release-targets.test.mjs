@@ -134,13 +134,26 @@ test("custody tripwire: active generic-node without zero-custody or Riley gate f
   );
 });
 
+test("v1 apps/node prefix is unclassified and the funded row no longer names it (ZTR-907)", () => {
+  const registry = validateRegistry();
+  const funded = registry.targets.find((t) => t.id === "funded-manual-node");
+  assert.equal(funded.active, false);
+  assert.equal(
+    funded.classificationGlobs.some((glob) => glob.includes("apps/node")),
+    false,
+  );
+  assert.throws(
+    () => classifyPaths(["apps/node/src/server.ts"]),
+    (error) => error.code === "UNCLASSIFIED_PATH",
+  );
+});
+
 test("funded target hybrid posture is rejected", () => {
   const registry = cloneRegistry();
   const funded = registry.targets.find((t) => t.id === "funded-manual-node");
-  // Make active with hybrid unsafe fields
   funded.active = true;
   funded.deployMode = "automatic";
-  funded.approval = "riley-explicit-in-session"; // hybrid with automatic
+  funded.approval = "riley-explicit-in-session";
   funded.liveAcceptance = "real-zkz-gated";
   funded.externalBinding = {
     driftCheck: "scheduled-read-only",

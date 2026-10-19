@@ -59,8 +59,9 @@
 //                                      It mirrors the inactive `generic-node` deploy target's
 //                                      3rd classificationGlob member; it classifies ONLY to that
 //                                      inactive target (zero active surface -> Tier-1 auto-Done
-//                                      eligible) and — unlike apps/node, covered by the
-//                                      funded-manual-node target — has NO funded-target backstop.
+//                                      eligible). ZTR-907 left `funded-manual-node` inactive with empty
+//                                      classification globs, so `apps/node/**` classifies to no target.
+//                                      This package has NO funded-target backstop.
 //                                      Wholesale is the only reliable cover here.
 //     packages/node-core/**            v2 signing / custody / schema / vectors contracts
 //     packages/generic-node-contracts/**   transfer-code / vault / signing / golden contracts

@@ -450,11 +450,15 @@ test("AC3 mixed apps/node + CLAUDE.md: money-path detection unchanged by control
   const withMoney = scanPaths(["apps/node/src/wallet/transfer-code-builder.ts", "CLAUDE.md"]);
   assert.equal(withMoney.moneyPathHit, true);
   assert.deepEqual(withMoney.offendingPaths, ["apps/node/src/wallet/transfer-code-builder.ts"]);
-  // Cross-module: classify still sees SOURCE_PATH funded + benign control, no strict
-  const classified = classifyPaths(["apps/node/src/server.ts", "CLAUDE.md"]);
-  assert.equal(classified.manualReviewRequired, false);
-  assert.ok(classified.affectedTargets.some((t) => t.id === "funded-manual-node"));
-  assert.deepEqual(classified.controlPaths, ["CLAUDE.md"]);
+  // ZTR-907: funded-manual-node no longer classifies apps/node/**. A path under
+  // that prefix fails closed. Benign governance stays non-strict.
+  assert.throws(
+    () => classifyPaths(["apps/node/src/server.ts"]),
+    (error) => error.code === "UNCLASSIFIED_PATH",
+  );
+  const governed = classifyPaths(["CLAUDE.md"]);
+  assert.equal(governed.manualReviewRequired, false);
+  assert.deepEqual(governed.controlPaths, ["CLAUDE.md"]);
 });
 
 // ---------------------------------------------------------------------------

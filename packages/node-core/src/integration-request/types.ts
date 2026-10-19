@@ -27,6 +27,9 @@ export const INTEGRATION_REQUEST_PENDING_CAP = 100;
 
 export interface ProposedIntegrationRule {
   readonly rule_id?: string;
+  readonly label?: string | null;
+  readonly reserve_wallet_id?: string | null;
+  readonly total_cap_zkz?: string | null;
   readonly per_send_max_zkz: string;
   readonly per_send_min_zkz: string | null;
   readonly window_hours: number;
@@ -40,6 +43,9 @@ export interface IntegrationRequestRow {
   readonly display_name: string;
   readonly requested_scopes: readonly ImplementerScope[];
   readonly proposed_rule_json: string;
+  readonly requested_rules_json: string;
+  readonly requested_webhook_url: string | null;
+  readonly requested_connector_scopes: readonly string[];
   readonly approved_rule_json: string | null;
   readonly status: IntegrationRequestStatus;
   readonly row_version: number;
@@ -56,8 +62,11 @@ export interface IntegrationRequestRow {
 export interface IntegrationRequestIntakeInput {
   readonly nodeId: string;
   readonly displayName: string;
-  readonly requestedScopes: readonly IntegrationRequestIntakeScope[];
+  readonly requestedScopes: readonly ImplementerScope[];
   readonly proposedRuleJson: string;
+  readonly requestedRulesJson?: string;
+  readonly requestedWebhookUrl?: string | null;
+  readonly requestedConnectorScopes?: readonly string[];
   readonly claimTokenHash: string;
   readonly requestId?: string;
   readonly now?: Date;

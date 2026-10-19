@@ -4,6 +4,8 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
+import { DEFAULT_CONNECTOR_SCOPES } from "../credential/connector-scopes.js";
+
 export const INTEGRATION_REQUEST_APPROVED_ACTION =
   "integration_request.approved" as const;
 export const INTEGRATION_REQUEST_DECLINED_ACTION =
@@ -21,6 +23,9 @@ export interface IntegrationRequestRecord {
   readonly node_id: string;
   readonly display_name: string;
   readonly requested_scopes: readonly string[];
+  readonly requested_rules: readonly unknown[];
+  readonly requested_webhook_url: string | null;
+  readonly requested_connector_scopes: readonly string[];
   readonly proposed_rule_json: string;
   readonly approved_rule_json: string | null;
   readonly status: IntegrationRequestListingStatus;
@@ -102,6 +107,9 @@ interface Row extends Record<string, unknown> {
   readonly node_id: string;
   readonly display_name: string;
   readonly requested_scopes: unknown;
+  readonly requested_rules?: unknown;
+  readonly requested_webhook_url?: string | null;
+  readonly requested_connector_scopes?: unknown;
   readonly proposed_rule_json: string;
   readonly approved_rule_json: string | null;
   readonly status: string;
@@ -128,12 +136,35 @@ function scopesOf(raw: unknown): readonly string[] {
   return [];
 }
 
+function jsonArray(raw: unknown): readonly unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function connectorScopeList(raw: unknown): readonly string[] {
+  const items = jsonArray(raw);
+  if (items.length === 0 && raw === undefined) return [...DEFAULT_CONNECTOR_SCOPES];
+  return items.map(String);
+}
+
 function toRecord(row: Row): IntegrationRequestRecord {
   return {
     id: row.id,
     node_id: row.node_id,
     display_name: row.display_name,
     requested_scopes: scopesOf(row.requested_scopes),
+    requested_rules: jsonArray(row.requested_rules),
+    requested_webhook_url:
+      typeof row.requested_webhook_url === "string" ? row.requested_webhook_url : null,
+    requested_connector_scopes: connectorScopeList(row.requested_connector_scopes),
     proposed_rule_json: row.proposed_rule_json,
     approved_rule_json: row.approved_rule_json,
     status: row.status as IntegrationRequestListingStatus,
@@ -154,6 +185,9 @@ const SELECT_COLS = `id::text AS id,
   node_id::text AS node_id,
   display_name,
   requested_scopes,
+  requested_rules,
+  requested_webhook_url,
+  requested_connector_scopes,
   proposed_rule_json,
   approved_rule_json,
   status,
@@ -201,6 +235,9 @@ RETURNING
   (SELECT node_id FROM updated) AS node_id,
   (SELECT display_name FROM updated) AS display_name,
   (SELECT requested_scopes FROM updated) AS requested_scopes,
+  (SELECT requested_rules FROM updated) AS requested_rules,
+  (SELECT requested_webhook_url FROM updated) AS requested_webhook_url,
+  (SELECT requested_connector_scopes FROM updated) AS requested_connector_scopes,
   (SELECT proposed_rule_json FROM updated) AS proposed_rule_json,
   (SELECT approved_rule_json FROM updated) AS approved_rule_json,
   (SELECT status FROM updated) AS status,
@@ -236,6 +273,9 @@ RETURNING
   (SELECT node_id FROM updated) AS node_id,
   (SELECT display_name FROM updated) AS display_name,
   (SELECT requested_scopes FROM updated) AS requested_scopes,
+  (SELECT requested_rules FROM updated) AS requested_rules,
+  (SELECT requested_webhook_url FROM updated) AS requested_webhook_url,
+  (SELECT requested_connector_scopes FROM updated) AS requested_connector_scopes,
   (SELECT proposed_rule_json FROM updated) AS proposed_rule_json,
   (SELECT approved_rule_json FROM updated) AS approved_rule_json,
   (SELECT status FROM updated) AS status,
@@ -351,7 +391,15 @@ export class InMemoryIntegrationRequestStore implements IntegrationRequestStore 
   }
 
   seed(row: IntegrationRequestRecord): void {
-    this.rows.set(row.id, { ...row, requested_scopes: [...row.requested_scopes] });
+    this.rows.set(row.id, {
+      ...row,
+      requested_scopes: [...row.requested_scopes],
+      requested_rules: [...(row.requested_rules ?? [])],
+      requested_webhook_url: row.requested_webhook_url ?? null,
+      requested_connector_scopes: [
+        ...(row.requested_connector_scopes ?? DEFAULT_CONNECTOR_SCOPES),
+      ],
+    });
   }
 
   async list(

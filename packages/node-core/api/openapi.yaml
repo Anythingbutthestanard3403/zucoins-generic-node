@@ -857,9 +857,7 @@ paths:
                   minItems: 1
                   items:
                     type: string
-                    enum:
-                      - "send:create"
-                      - "send:read"
+                    minLength: 1
                 proposed_rule:
                   type: object
                   additionalProperties: true
@@ -867,6 +865,18 @@ paths:
                   properties:
                     rule_id:
                       type: string
+                    label:
+                      type:
+                        - string
+                        - "null"
+                    reserve_wallet_id:
+                      type:
+                        - string
+                        - "null"
+                    total_cap_zkz:
+                      type:
+                        - string
+                        - "null"
                     per_send_max_zkz:
                       type: string
                     per_send_min_zkz:
@@ -882,6 +892,16 @@ paths:
                       type:
                         - string
                         - "null"
+                requested_rules:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                requested_webhook_url:
+                  type:
+                    - string
+                    - "null"
+                  minLength: 1
       responses:
         "201":
           description: Integration request accepted (claim token returned once)

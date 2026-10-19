@@ -399,7 +399,7 @@ export const CREATE_INTEGRATION_REQUEST_BODY: JsonSchema = {
     requested_scopes: {
       type: "array",
       minItems: 1,
-      items: { type: "string", enum: ["send:create", "send:read"] },
+      items: { type: "string", minLength: 1 },
     },
     proposed_rule: {
       type: "object",
@@ -408,6 +408,9 @@ export const CREATE_INTEGRATION_REQUEST_BODY: JsonSchema = {
         "Platform-proposed auto-approve rule (ZTR-1234 amount/window grammar; no implementer_id).",
       properties: {
         rule_id: { type: "string" },
+        label: { type: ["string", "null"] },
+        reserve_wallet_id: { type: ["string", "null"] },
+        total_cap_zkz: { type: ["string", "null"] },
         per_send_max_zkz: { type: "string" },
         per_send_min_zkz: { type: ["string", "null"] },
         window_hours: { type: "integer", minimum: 1 },
@@ -415,6 +418,11 @@ export const CREATE_INTEGRATION_REQUEST_BODY: JsonSchema = {
         expires_at: { type: ["string", "null"] },
       },
     },
+    requested_rules: {
+      type: "array",
+      items: { type: "object", additionalProperties: true },
+    },
+    requested_webhook_url: { type: ["string", "null"], minLength: 1 },
   },
 };
 

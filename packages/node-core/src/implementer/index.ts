@@ -66,3 +66,16 @@ export {
   type IntegrationRequestStoreErrorCode,
 } from "./integration-requests.js";
 
+export {
+  InMemoryConnectorConfigStore,
+  SqlConnectorConfigStore,
+  createSqlConnectorConfigStore,
+  normalizeConnectorScopes,
+  type ConnectorConfigPatchInput,
+  type ConnectorConfigRecord,
+  type ConnectorConfigSqlExecutor,
+  type ConnectorConfigStore,
+  type ConnectorConfigUpsertInput,
+  type ConnectorPolicyMode,
+} from "./connector-configs.js";
+

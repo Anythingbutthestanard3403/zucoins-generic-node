@@ -47,6 +47,9 @@ interface RequestRow extends Record<string, unknown> {
   readonly implementer_id: string | null;
   readonly issued_credential_id: string | null;
   readonly claimed_at: unknown;
+  readonly requested_rules?: unknown;
+  readonly requested_webhook_url?: unknown;
+  readonly requested_connector_scopes?: unknown;
 }
 
 function toIso(value: unknown): string {
@@ -82,22 +85,39 @@ function toRow(r: RequestRow): IntegrationRequestRow {
     implementer_id: r.implementer_id,
     issued_credential_id: r.issued_credential_id,
     claimed_at: toIsoOrNull(r.claimed_at),
+    requested_rules_json: rulesJson(r.requested_rules),
+    requested_webhook_url: typeof r.requested_webhook_url === "string" ? r.requested_webhook_url : null,
+    requested_connector_scopes: stringList(r.requested_connector_scopes),
   };
+}
+
+function rulesJson(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw === undefined || raw === null) return "[]";
+  return JSON.stringify(raw);
+}
+
+function stringList(raw: unknown): readonly string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  return [];
 }
 
 const SELECT_COLS = `id::text AS id, node_id::text AS node_id, display_name,
   requested_scopes, proposed_rule_json, approved_rule_json, status,
   row_version, claim_token_hash, created_at, expires_at, decided_at,
   decided_by::text AS decided_by, implementer_id::text AS implementer_id,
-  issued_credential_id::text AS issued_credential_id, claimed_at`;
+  issued_credential_id::text AS issued_credential_id, claimed_at,
+  requested_rules, requested_webhook_url, requested_connector_scopes`;
 
 const COUNT_PENDING_SQL = `SELECT count(*)::text AS n FROM integration_requests WHERE status = 'PENDING'`;
 
 const INSERT_SQL = `INSERT INTO integration_requests (
   id, node_id, display_name, requested_scopes, proposed_rule_json, status,
-  row_version, claim_token_hash, created_at, expires_at
+  row_version, claim_token_hash, created_at, expires_at,
+  requested_rules, requested_webhook_url, requested_connector_scopes
 ) VALUES (
-  $1::uuid, $2::uuid, $3, $4::text[], $5, 'PENDING', 1, $6, $7::timestamptz, $8::timestamptz
+  $1::uuid, $2::uuid, $3, $4::text[], $5, 'PENDING', 1, $6, $7::timestamptz, $8::timestamptz,
+  $9::jsonb, $10, $11::jsonb
 ) RETURNING ${SELECT_COLS}`;
 
 const FIND_SQL = `SELECT ${SELECT_COLS} FROM integration_requests WHERE id = $1::uuid`;
@@ -205,6 +225,13 @@ export class SqlIntegrationRequestStore implements IntegrationRequestStore {
       input.claimTokenHash,
       createdAt,
       expiresAt,
+      input.requestedRulesJson ?? "[]",
+      input.requestedWebhookUrl ?? null,
+      JSON.stringify(input.requestedConnectorScopes ?? [
+        "receives:write",
+        "sends:write",
+        "wallets:read_linked",
+      ]),
     ]);
     const row = rows[0];
     if (row === undefined) {

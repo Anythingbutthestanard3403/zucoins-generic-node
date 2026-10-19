@@ -119,12 +119,15 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   credential: ["proof-body"],
   // Named integration identity registry (create/list/retire + audit). Imports core only
   // for the AuditLogRow shape used by the in-memory adapter; SQL store is leaf-over-SQL.
-  implementer: ["core"],
+  // Connector labels live in credential/ (a leaf over proof-body) so this module
+  // and the public intake module can share them. credential does not import implementer.
+  implementer: ["core", "credential"],
   // Route 2 public handshake store + handlers. Imports api (error envelope,
   // pipeline) + credential (issue shapes) + protocol (amount grammar) +
   // reporting (rate limiter) + schema (status contract). api does not import
   // this module — composition root wires the router.
-  "integration-request": ["api", "credential", "protocol", "reporting", "schema"],
+  // Hook-target checks use the existing URL classifier in net/.
+  "integration-request": ["api", "credential", "protocol", "reporting", "schema", "net"],
   vault: [],
   // verification-complete acknowledgement: reuses the reporting SHA-256 helper for
   // the evidence-set digest and declares its own SqlExecutor port, like every other

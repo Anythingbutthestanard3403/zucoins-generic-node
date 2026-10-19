@@ -20,6 +20,14 @@ export {
 } from "./types.js";
 
 export {
+  CONNECTOR_SCOPES,
+  DEFAULT_CONNECTOR_SCOPES,
+  credentialScopesForConnectorScopes,
+  isConnectorScope,
+  type ConnectorScope,
+} from "./connector-scopes.js";
+
+export {
   CREDENTIAL_COLUMNS,
   CREDENTIAL_STATEMENTS,
   SqlCredentialStore,

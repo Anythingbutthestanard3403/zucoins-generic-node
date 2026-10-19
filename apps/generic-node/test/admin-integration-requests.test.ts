@@ -11,17 +11,25 @@ import {
   createInMemoryHaltEvidenceRecorder,
   createInMemoryOperatorHaltStore,
   hashPassword,
+  CredentialService,
   InMemoryAdminSessionStore,
   InMemoryAdminUserStore,
+  InMemoryAllowNodeVerifiedPolicy,
   InMemoryAutoApprovePolicy,
+  InMemoryConnectorConfigStore,
+  InMemoryDefaultFundingWallet,
   InMemoryDeviceSignaturePolicy,
   InMemoryDualControlPolicy,
   InMemoryImplementerRegistry,
   InMemoryIntegrationRequestStore,
   RUNNING,
   TotpConsumptionLog,
+  evaluateAutoApproveRule,
   type AdminUser,
+  type CredentialAuditEntry,
+  type CredentialStore,
   type IntegrationRequestRecord,
+  type StoredCredential,
 } from "@zucoins/node-core";
 
 import { createAdminRouter } from "../src/admin-router.js";
@@ -89,6 +97,9 @@ function pendingRow(over: Partial<IntegrationRequestRecord> = {}): IntegrationRe
     node_id: NODE_ID,
     display_name: "Platform Alpha",
     requested_scopes: ["send:create", "send:read"],
+    requested_rules: [],
+    requested_webhook_url: null,
+    requested_connector_scopes: ["receives:write", "sends:write", "wallets:read_linked"],
     proposed_rule_json: JSON.stringify(validRule({ per_send_max_zkz: "25" })),
     approved_rule_json: null,
     status: "PENDING",
@@ -102,11 +113,52 @@ function pendingRow(over: Partial<IntegrationRequestRecord> = {}): IntegrationRe
   };
 }
 
+class MemoryCredentialStore implements CredentialStore {
+  readonly rows = new Map<string, StoredCredential>();
+  readonly audit: CredentialAuditEntry[] = [];
+
+  async issue(row: StoredCredential, audit: CredentialAuditEntry): Promise<void> {
+    this.rows.set(row.id, row);
+    this.audit.push(audit);
+  }
+  async findByHash(credentialHash: string): Promise<StoredCredential | null> {
+    for (const row of this.rows.values()) {
+      if (row.credential_hash === credentialHash) return row;
+    }
+    return null;
+  }
+  async findById(credentialId: string, implementerId: string): Promise<StoredCredential | null> {
+    const row = this.rows.get(credentialId);
+    if (row === undefined || row.implementer_id !== implementerId) return null;
+    return row;
+  }
+  async findByCredentialId(credentialId: string): Promise<StoredCredential | null> {
+    return this.rows.get(credentialId) ?? null;
+  }
+  async listByImplementer(implementerId: string): Promise<StoredCredential[]> {
+    return [...this.rows.values()].filter((row) => row.implementer_id === implementerId);
+  }
+  async listAll(): Promise<StoredCredential[]> {
+    return [...this.rows.values()];
+  }
+  async rotate(): Promise<boolean> {
+    throw new Error("rotate unused");
+  }
+  async revoke(): Promise<boolean> {
+    return false;
+  }
+}
+
 function makeRouter(opts?: {
   readonly omitStore?: boolean;
   readonly policy?: InMemoryAutoApprovePolicy;
   readonly store?: InMemoryIntegrationRequestStore;
   readonly registry?: InMemoryImplementerRegistry;
+  readonly connectorConfigStore?: InMemoryConnectorConfigStore;
+  readonly defaultFundingWallet?: InMemoryDefaultFundingWallet;
+  readonly credentialService?: CredentialService;
+  readonly allowNodeVerifiedPolicy?: InMemoryAllowNodeVerifiedPolicy;
+  readonly nowMs?: () => number;
 }) {
   const userStore = new InMemoryAdminUserStore();
   const sessions = createAdminSessionService(
@@ -148,6 +200,18 @@ function makeRouter(opts?: {
       autoApprovePolicy,
       implementerRegistry,
       ...(integrationRequestStore !== undefined ? { integrationRequestStore } : {}),
+      ...(opts?.connectorConfigStore !== undefined
+        ? { connectorConfigStore: opts.connectorConfigStore }
+        : {}),
+      ...(opts?.defaultFundingWallet !== undefined
+        ? { defaultFundingWallet: opts.defaultFundingWallet }
+        : {}),
+      ...(opts?.credentialService !== undefined
+        ? { credentialService: opts.credentialService }
+        : {}),
+      ...(opts?.allowNodeVerifiedPolicy !== undefined
+        ? { allowNodeVerifiedPolicy: opts.allowNodeVerifiedPolicy }
+        : {}),
     }),
     sendDecisionStore: {
       rejectCreated: async () => {
@@ -163,6 +227,17 @@ function makeRouter(opts?: {
     autoApprovePolicy,
     implementerRegistry,
     ...(integrationRequestStore !== undefined ? { integrationRequestStore } : {}),
+    ...(opts?.connectorConfigStore !== undefined
+      ? { connectorConfigStore: opts.connectorConfigStore }
+      : {}),
+    ...(opts?.defaultFundingWallet !== undefined
+      ? { defaultFundingWallet: opts.defaultFundingWallet }
+      : {}),
+    ...(opts?.credentialService !== undefined ? { credentialService: opts.credentialService } : {}),
+    ...(opts?.allowNodeVerifiedPolicy !== undefined
+      ? { allowNodeVerifiedPolicy: opts.allowNodeVerifiedPolicy }
+      : {}),
+    ...(opts?.nowMs !== undefined ? { nowMs: opts.nowMs } : {}),
     recoveryStore: {
       listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
       loadRecoveryFacts: async () => null,
@@ -579,5 +654,204 @@ describe("admin integration-requests", () => {
     const expiredBody = JSON.parse(expiredRes.body) as { data: Array<{ id: string; status: string }> };
     // list filter EXPIRED only returns durable EXPIRED; projection maps PENDING→EXPIRED when status filter is EXPIRED
     expect(expiredBody.data.some((r) => r.id === REQ_ID && r.status === "EXPIRED")).toBe(true);
+  });
+
+  it("approve binds the reserve, records NODE_VERIFIED, and admits the implementer", async () => {
+    const store = new InMemoryIntegrationRequestStore();
+    store.seed(
+      pendingRow({
+        display_name: "promo-engine",
+        requested_connector_scopes: ["sends:write", "wallets:read_linked"],
+        requested_webhook_url: "https://hooks.example/promo",
+      }),
+    );
+    const registry = new InMemoryImplementerRegistry();
+    const reserveId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa10";
+    registry.seedWallet({
+      id: reserveId,
+      public_key: "pub-main",
+      display_label: "Main Reserve",
+    });
+    const policy = new InMemoryAutoApprovePolicy();
+    const allow = new InMemoryAllowNodeVerifiedPolicy();
+    const connectors = new InMemoryConnectorConfigStore();
+    const { router, userStore } = makeRouter({
+      store,
+      registry,
+      policy,
+      connectorConfigStore: connectors,
+      allowNodeVerifiedPolicy: allow,
+    });
+    const { cookie, csrf } = await login(router, userStore);
+    const res = await router(
+      "POST",
+      `/admin/v1/integration-requests/${REQ_ID}/approve`,
+      Buffer.from(
+        JSON.stringify({
+          expected_row_version: 1,
+          rule: validRule({
+            rule_id: "launch-promo",
+            per_send_max_zkz: "10",
+            window_cap_zkz: "100",
+            total_cap_zkz: "500",
+          }),
+          default_reserve_wallet_id: reserveId,
+          scopes: ["sends:write", "wallets:read_linked"],
+          webhook_enabled: true,
+        }),
+      ),
+      {
+        origin: ORIGIN,
+        cookie,
+        "x-csrf-token": csrf,
+        "x-zp-totp": totpNow(),
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(200);
+    const out = JSON.parse(res.body) as {
+      implementer: { id: string; name: string };
+      rule: { rule_id: string };
+    };
+    expect(out.implementer.name).toBe("promo-engine");
+    expect(out.rule.rule_id).toBe("launch-promo");
+    const saved = await connectors.get(out.implementer.id);
+    expect(saved?.policy_mode).toBe("NODE_VERIFIED");
+    expect(saved?.scopes).toEqual(["sends:write", "wallets:read_linked"]);
+    expect(saved?.webhook_url).toBe("https://hooks.example/promo");
+    expect(saved?.webhook_enabled).toBe(true);
+    const impl = await registry.get(out.implementer.id);
+    expect(impl?.reserve_wallets[0]?.wallet_id).toBe(reserveId);
+    expect(impl?.reserve_wallets[0]?.is_default).toBe(true);
+    expect(allow.isNodeVerifiedAllowed(out.implementer.id)).toBe(true);
+    const decision = evaluateAutoApproveRule(await policy.getPolicy(), {
+      implementerId: out.implementer.id,
+      amountZkz: "10",
+      requestedRuleId: "launch-promo",
+    });
+    expect(decision.decision).toBe("approve");
+  });
+
+  it("manual create mints one ik_ key and lists the connector", async () => {
+    const registry = new InMemoryImplementerRegistry();
+    const reserveId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa11";
+    registry.seedWallet({
+      id: reserveId,
+      public_key: "pub-main",
+      display_label: "Main Reserve",
+    });
+    const policy = new InMemoryAutoApprovePolicy();
+    const connectors = new InMemoryConnectorConfigStore();
+    const credentials = new CredentialService(new MemoryCredentialStore());
+    const { router, userStore } = makeRouter({
+      registry,
+      policy,
+      connectorConfigStore: connectors,
+      credentialService: credentials,
+    });
+    const { cookie, csrf } = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/connectors",
+      Buffer.from(
+        JSON.stringify({
+          display_name: "promo-engine",
+          scopes: ["sends:write", "wallets:read_linked"],
+          linked_reserve_wallet_ids: [reserveId],
+          rules: [
+            {
+              rule_id: "launch-promo",
+              per_send_max_zkz: "10",
+              per_send_min_zkz: null,
+              window_hours: 24,
+              window_cap_zkz: "100",
+              total_cap_zkz: "500",
+              expires_at: null,
+            },
+          ],
+          webhook_url: "https://hooks.example/promo",
+        }),
+      ),
+      {
+        origin: ORIGIN,
+        cookie,
+        "x-csrf-token": csrf,
+        "x-zp-totp": totpNow(),
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(200);
+    const created = JSON.parse(res.body) as {
+      implementer_id: string;
+      api_key: string;
+      policy_mode: string;
+      scopes: string[];
+      linked_reserves: Array<{ wallet_id: string; display_name: string | null; is_default: boolean }>;
+    };
+    expect(created.api_key.startsWith("ik_")).toBe(true);
+    expect(created.policy_mode).toBe("NODE_VERIFIED");
+    expect(created.scopes).toEqual(["sends:write", "wallets:read_linked"]);
+    expect(created.linked_reserves[0]?.display_name).toBe("Main Reserve");
+    const validated = await credentials.validate(created.api_key);
+    expect(validated.implementer_id).toBe(created.implementer_id);
+    expect(validated.scopes).toEqual(["send:create", "send:read"]);
+    const listed = await router("GET", "/admin/v1/connectors", new Uint8Array(), {
+      origin: ORIGIN,
+      cookie,
+      "x-csrf-token": csrf,
+    });
+    expect(listed.status).toBe(200);
+    const body = JSON.parse(listed.body) as {
+      connectors: Array<{
+        implementer_id: string;
+        api_keys: Array<{ key_prefix: string; last_used_at: null }>;
+        spend_rules: Array<{ rule_id: string }>;
+      }>;
+    };
+    expect(body.connectors).toHaveLength(1);
+    expect(body.connectors[0]!.implementer_id).toBe(created.implementer_id);
+    expect(body.connectors[0]!.api_keys[0]!.last_used_at).toBeNull();
+    expect(body.connectors[0]!.api_keys[0]!.key_prefix.startsWith("ik_")).toBe(true);
+    expect(body.connectors[0]!.spend_rules.some((rule) => rule.rule_id === "launch-promo")).toBe(true);
+    const over = evaluateAutoApproveRule(await policy.getPolicy(), {
+      implementerId: created.implementer_id,
+      amountZkz: "11",
+      requestedRuleId: "launch-promo",
+    });
+    expect(over.decision).toBe("fall_through");
+  });
+
+  it("manual create rejects a loopback hook target", async () => {
+    const registry = new InMemoryImplementerRegistry();
+    const connectors = new InMemoryConnectorConfigStore();
+    const credentials = new CredentialService(new MemoryCredentialStore());
+    const { router, userStore } = makeRouter({
+      registry,
+      connectorConfigStore: connectors,
+      credentialService: credentials,
+    });
+    const { cookie, csrf } = await login(router, userStore);
+    const res = await router(
+      "POST",
+      "/admin/v1/connectors",
+      Buffer.from(
+        JSON.stringify({
+          display_name: "promo-engine",
+          webhook_url: "http://127.0.0.1:9000/hook",
+        }),
+      ),
+      {
+        origin: ORIGIN,
+        cookie,
+        "x-csrf-token": csrf,
+        "x-zp-totp": totpNow(),
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+    );
+    expect(res.status).toBe(400);
+    expect(await connectors.list()).toHaveLength(0);
   });
 });

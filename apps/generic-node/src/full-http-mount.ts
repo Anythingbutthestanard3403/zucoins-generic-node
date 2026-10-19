@@ -50,6 +50,7 @@ import {
   LIVE_INTEGRATION_REQUEST_ROUTES,
   createSqlImplementerRegistry,
   createSqlDefaultFundingWallet,
+  createSqlConnectorConfigStore,
   createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
@@ -935,6 +936,8 @@ export function createProductionRouteSurface(
     }
   })();
 
+  const adminConnectorConfigStore = createSqlConnectorConfigStore(poolSqlExecutor);
+
   const baseDeps = {
     sessions,
     userStore,
@@ -957,6 +960,7 @@ export function createProductionRouteSurface(
         : (input: { readonly displayLabel: string }) => reservePool.mintNamed(input.displayLabel),
     onVaultInitialized: reservePool?.ensure,
     integrationRequestStore: adminIntegrationRequestStore,
+    connectorConfigStore: adminConnectorConfigStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -1091,6 +1095,15 @@ export function createProductionRouteSurface(
         }),
         defaultFundingWallet: txDefaultFundingWallet,
         integrationRequestStore: createSqlIntegrationRequestStore({
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        }),
+        connectorConfigStore: createSqlConnectorConfigStore({
           query: async <R extends Record<string, unknown>>(
             text: string,
             params?: readonly unknown[],

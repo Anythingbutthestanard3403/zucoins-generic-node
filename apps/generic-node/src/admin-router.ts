@@ -140,6 +140,12 @@ import {
   type ConnectorConfigStore,
   type ConnectorPolicyMode,
   type ConnectorScope,
+  ConnectorRuleRequestStoreError,
+  buildApprovedConnectorRule,
+  parseConnectorRuleRequestOverrides,
+  type ConnectorRuleRequestRecord,
+  type ConnectorRuleRequestStore,
+  type ConnectorRuleRequestOverrides,
 } from "@zucoins/node-core";
 import {
   isWalletMoneyMode,
@@ -1018,14 +1024,21 @@ function connectorMutationAbort(
     if (
       coded.code === "POLICY_INVALID" ||
       coded.code === "RESERVE_UNAVAILABLE" ||
-      coded.code === "RESERVE_BIND_FAILED"
+      coded.code === "RESERVE_BIND_FAILED" ||
+      coded.code === "RULE_NOT_PENDING" ||
+      coded.code === "NOT_PENDING"
     ) {
       return { outcome: "abort", response: fail(409, "conflict", err.message, requestId) };
     }
-    if (coded.code === "INVALID_CONNECTOR_SCOPES") {
+    if (coded.code === "INVALID_CONNECTOR_SCOPES" || coded.code === "INVALID_RULE") {
       return { outcome: "abort", response: fail(400, "invalid_scalar", err.message, requestId) };
     }
-    if (coded.code === "not_found" || coded.status === 404) {
+    if (
+      coded.code === "not_found" ||
+      coded.status === 404 ||
+      coded.code === "RULE_REQUEST_MISSING" ||
+      coded.code === "NOT_FOUND"
+    ) {
       return { outcome: "abort", response: fail(404, "not_found", err.message, requestId) };
     }
     if (coded.code === "service_unavailable" || coded.status === 503) {
@@ -1318,6 +1331,63 @@ function toIntegrationRequestListing(row: IntegrationRequestRecord) {
     decided_by: row.decided_by,
     implementer_id: row.implementer_id,
   };
+}
+
+function toAdminRuleRequest(row: ConnectorRuleRequestRecord) {
+  return {
+    request_id: row.request_id,
+    implementer_id: row.implementer_id,
+    rule_id: row.rule_id,
+    label: row.label,
+    reserve_wallet_id: row.reserve_wallet_id,
+    total_cap_zkz: row.total_cap_zkz,
+    per_send_max_zkz: row.per_send_max_zkz,
+    per_send_min_zkz: row.per_send_min_zkz,
+    window_hours: row.window_hours,
+    window_cap_zkz: row.window_cap_zkz,
+    expires_at: row.expires_at,
+    status: row.status,
+    webhook_enabled: row.webhook_enabled,
+    created_at: row.created_at,
+    decided_at: row.decided_at,
+    decided_by: row.decided_by,
+  };
+}
+
+function parseAdminRuleRequestDecisionBody(
+  raw: unknown,
+): ParseOk<ConnectorRuleRequestOverrides> | ParseFail {
+  const parsed = parseConnectorRuleRequestOverrides(raw);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: parsed.code,
+      message: parsed.message,
+    };
+  }
+  return { ok: true, body: parsed.value };
+}
+
+function ruleRequestThrownResponse(error: unknown, requestId: string): AdminRouterResponse | null {
+  if (!(error instanceof Error)) return null;
+  const code = (error as { code?: string }).code;
+  if (error instanceof ConnectorRuleRequestStoreError && error.code === "NOT_FOUND") {
+    return fail(404, "not_found", "rule request not found", requestId);
+  }
+  if (error instanceof ConnectorRuleRequestStoreError && error.code === "NOT_PENDING") {
+    return fail(409, "conflict", "rule request is not pending", requestId);
+  }
+  if (code === "RULE_REQUEST_MISSING" || code === "NOT_FOUND") {
+    return fail(404, "not_found", error.message, requestId);
+  }
+  if (code === "RULE_NOT_PENDING" || code === "NOT_PENDING") {
+    return fail(409, "conflict", error.message, requestId);
+  }
+  if (code === "INVALID_RULE") return fail(400, "invalid_scalar", error.message, requestId);
+  if (code === "POLICY_INVALID") return fail(409, "conflict", error.message, requestId);
+  if (code === "service_unavailable") return fail(503, "service_unavailable", error.message, requestId);
+  return null;
 }
 
 /**
@@ -2530,6 +2600,11 @@ export interface AdminRouteDeps {
    */
   readonly connectorConfigStore?: ConnectorConfigStore;
   /**
+   * Platform spend-rule inbox (ZTR-1331). When omitted, list/admit/decline
+   * fail closed (503).
+   */
+  readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
+  /**
    * REQUIRED admin-mutation idempotency. Routes check for a completed row before
    * the TOTP burn; the shared executor commits child effects and exact response bytes together.
    * Missing production wiring fails closed with idempotency_unavailable.
@@ -2661,6 +2736,11 @@ export interface AdminMutationTxPorts {
    * row commits with the implementer and the reserve bind.
    */
   readonly connectorConfigStore?: ConnectorConfigStore;
+  /**
+   * TX-scoped spend-rule request store (ZTR-1331). Admit and decline MUST use
+   * this port so the request row, audit row, and policy document share one TX.
+   */
+  readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
   /**
    * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
    * port so node_settings + audit_log commit/roll back with the admin mutation TX.
@@ -4014,6 +4094,35 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         return ok(200, { connectors });
       } catch {
         return fail(503, "service_unavailable", "connector list unavailable", requestId);
+      }
+    }
+
+    // GET /admin/v1/connector-rules/requests — operator inbox. Session+CSRF; no TOTP.
+    if (verb === "GET" && pathname === "/admin/v1/connector-rules/requests") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      if (deps.connectorRuleRequestStore === undefined) {
+        return fail(503, "service_unavailable", "rule requests not wired", requestId);
+      }
+      const q = parseQuery(rawPath);
+      const statusRaw = q.get("status");
+      const allowed = new Set(["PENDING", "APPROVED", "REJECTED"]);
+      let status: "PENDING" | "APPROVED" | "REJECTED" = "PENDING";
+      if (statusRaw !== null && statusRaw !== "") {
+        if (!allowed.has(statusRaw)) {
+          return fail(400, "invalid_scalar", "status filter is not a known value", requestId);
+        }
+        status = statusRaw as "PENDING" | "APPROVED" | "REJECTED";
+      }
+      try {
+        const rows = await deps.connectorRuleRequestStore.list({ nodeId, status });
+        return ok(200, { requests: rows.map(toAdminRuleRequest) });
+      } catch {
+        return fail(503, "service_unavailable", "rule request list unavailable", requestId);
       }
     }
 
@@ -6717,6 +6826,184 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+    // POST /admin/v1/connector-rules/requests/:id/approve — admit one pending rule.
+    {
+      const m = pathname.match(/^\/admin\/v1\/connector-rules\/requests\/([^/]+)\/approve$/);
+      if (verb === "POST" && m) {
+        if (deps.connectorRuleRequestStore === undefined) {
+          return fail(503, "service_unavailable", "rule requests not wired", requestId);
+        }
+        const requestIdPath = m[1]!;
+        if (!LOWER_UUID_RE.test(requestIdPath)) {
+          return fail(400, "validation_error", "request id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_connector_rule_requests_approve";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const reqStore = ports.connectorRuleRequestStore ?? deps.connectorRuleRequestStore;
+            if (reqStore === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "rule requests not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseAdminRuleRequestDecisionBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user }) => {
+                const existing = await reqStore.get(requestIdPath);
+                if (existing === null || existing.node_id !== nodeId) {
+                  throw Object.assign(new Error("rule request not found"), { code: "RULE_REQUEST_MISSING" });
+                }
+                if (existing.status !== "PENDING") {
+                  throw Object.assign(new Error("rule request is not pending"), { code: "RULE_NOT_PENDING" });
+                }
+                const rule = buildApprovedConnectorRule(existing, body);
+                const policy = ports.autoApprovePolicy ?? deps.autoApprovePolicy;
+                if (policy?.setPolicy === undefined) {
+                  throw Object.assign(new Error("spend rule policy is not writable"), {
+                    code: "service_unavailable",
+                  });
+                }
+                const current = await policy.getPolicy();
+                const merged = mergeRuleIntoAutoApprovePolicy(current, rule);
+                if (!merged.ok) {
+                  throw Object.assign(new Error(merged.message), { code: "POLICY_INVALID" });
+                }
+                await policy.setPolicy(merged.documentJson, { actorId: user.id, nodeId });
+                const saved = await reqStore.decide({
+                  requestId: requestIdPath,
+                  nodeId,
+                  decision: "APPROVED",
+                  actorId: user.id,
+                  reserveWalletId: rule.reserve_wallet_id,
+                  totalCapZkz: rule.total_cap_zkz,
+                  perSendMaxZkz: rule.per_send_max_zkz,
+                  windowHours: rule.window_hours,
+                  windowCapZkz: rule.window_cap_zkz,
+                  expiresAt: rule.expires_at,
+                });
+                return { request: toAdminRuleRequest(saved) };
+              },
+            });
+            if (!guarded.ok) {
+              const mapped =
+                guarded.reason === "mutation_threw"
+                  ? ruleRequestThrownResponse(guarded.error, requestId)
+                  : null;
+              if (mapped !== null) return { outcome: "abort" as const, response: mapped };
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
+    // POST /admin/v1/connector-rules/requests/:id/reject — decline one pending rule.
+    {
+      const m = pathname.match(/^\/admin\/v1\/connector-rules\/requests\/([^/]+)\/reject$/);
+      if (verb === "POST" && m) {
+        if (deps.connectorRuleRequestStore === undefined) {
+          return fail(503, "service_unavailable", "rule requests not wired", requestId);
+        }
+        const requestIdPath = m[1]!;
+        if (!LOWER_UUID_RE.test(requestIdPath)) {
+          return fail(400, "validation_error", "request id must be a canonical uuid", requestId);
+        }
+        const routeId = "admin_connector_rule_requests_reject";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const reqStore = ports.connectorRuleRequestStore ?? deps.connectorRuleRequestStore;
+            if (reqStore === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "rule requests not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseAdminRuleRequestDecisionBody,
+              nowMs: nowMs(),
+              mutate: async ({ user }) => {
+                const saved = await reqStore.decide({
+                  requestId: requestIdPath,
+                  nodeId,
+                  decision: "REJECTED",
+                  actorId: user.id,
+                });
+                return { request: toAdminRuleRequest(saved) };
+              },
+            });
+            if (!guarded.ok) {
+              const mapped =
+                guarded.reason === "mutation_threw"
+                  ? ruleRequestThrownResponse(guarded.error, requestId)
+                  : null;
+              if (mapped !== null) return { outcome: "abort" as const, response: mapped };
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
     // POST /admin/v1/implementers — create a named integration identity.
     // Session+CSRF+fresh TOTP. Retirement of an implementer is a separate route;
     // create never issues credentials (operator issues keys under the new id next).
@@ -8181,6 +8468,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly onVaultInitialized?: AdminRouteDeps["onVaultInitialized"];
   readonly integrationRequestStore?: IntegrationRequestStore;
   readonly connectorConfigStore?: ConnectorConfigStore;
+  readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
   readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;
@@ -8289,6 +8577,7 @@ export function createFailClosedAdminRouteDeps(base: {
     onVaultInitialized: base.onVaultInitialized,
     integrationRequestStore: base.integrationRequestStore,
     connectorConfigStore: base.connectorConfigStore,
+    connectorRuleRequestStore: base.connectorRuleRequestStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
     reportingCredentialService: base.reportingCredentialService,
@@ -8330,6 +8619,7 @@ export function createLiveAdminRouteDeps(
     readonly mintFundingWallet?: AdminRouteDeps["mintFundingWallet"];
     readonly integrationRequestStore?: IntegrationRequestStore;
     readonly connectorConfigStore?: ConnectorConfigStore;
+    readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
     readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;

@@ -26,7 +26,9 @@ import {
   createImplementerIdentityRouter,
   type ImplementerIdentityLoaders,
   createIntegrationRequestRouter,
+  createConnectorRuleRequestRouter,
   type PublicIntegrationRequestStore,
+  type ConnectorRuleRequestStore,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
   enforceTransportGuards,
@@ -183,6 +185,8 @@ export interface NodeRuntimeListenerDeps {
   readonly nodeId?: string;
   /** Route 2 public handshake store (ZTR-1239). Mounted when nodeId set. */
   readonly integrationRequestStore?: PublicIntegrationRequestStore;
+  /** Spend-rule request store (ZTR-1331). Mounted with nodeId and a credential service. */
+  readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
   readonly adminRouter?: AdminRouter;
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;
@@ -686,6 +690,33 @@ export function createNodeRuntimeListener(
         })
       : null;
 
+  const ruleRequestCredentials = deps.adminRouteDeps?.credentialService;
+  const connectorRuleRequestRouter =
+    deps.connectorRuleRequestStore !== undefined &&
+    deps.nodeId !== undefined &&
+    ruleRequestCredentials !== undefined
+      ? createConnectorRuleRequestRouter({
+          store: deps.connectorRuleRequestStore,
+          ...(deps.adminRouteDeps?.connectorConfigStore !== undefined
+            ? { connectorConfigStore: deps.adminRouteDeps.connectorConfigStore }
+            : {}),
+          nodeId: deps.nodeId,
+          validateCredential: async (rawKey) => {
+            try {
+              const hit = await ruleRequestCredentials.validate(rawKey);
+              return { implementer_id: hit.implementer_id, scopes: hit.scopes };
+            } catch (error) {
+              if (error instanceof Error && error.name === "CredentialAuthError") return null;
+              throw error;
+            }
+          },
+          ...(deps.adminRouteDeps?.autoApprovePolicy !== undefined
+            ? { policyReader: deps.adminRouteDeps.autoApprovePolicy }
+            : {}),
+          newRequestId,
+        })
+      : null;
+
   const adminRouter: AdminRouter | null =
     deps.adminRouter ??
     (deps.adminRouteDeps !== undefined ? createAdminRouter(deps.adminRouteDeps) : null);
@@ -966,6 +997,44 @@ export function createNodeRuntimeListener(
         })();
         return;
       }
+    }
+
+    // Spend-rule requests (ZTR-1331). Side router; not a catalog route.
+    if (
+      connectorRuleRequestRouter !== null &&
+      (pathname === "/v1/connector-rules" || pathname.startsWith("/v1/connector-rules/"))
+    ) {
+      void (async () => {
+        try {
+          const bodyBytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
+          const headers = normalizeHeaders(request.rawHeaders);
+          const result = await connectorRuleRequestRouter(
+            request.method ?? "GET",
+            pathname,
+            bodyBytes,
+            headers,
+          );
+          writeJson(response, result.status, result.body, { ...result.headers });
+        } catch (cause) {
+          const requestId = newRequestId();
+          const { cause_name, cause_message } = sanitizeFailureCause(cause);
+          emitUnexpectedFailure(logger, {
+            event: "operation_listener_unexpected_failure",
+            request_id: requestId,
+            method: (request.method ?? "UNKNOWN").toUpperCase(),
+            path_class: operationPathClass(request.method ?? "GET", rawUrl),
+            cause_name,
+            cause_message,
+          });
+          const error = apiErrorResponse("service_unavailable", requestId);
+          try {
+            writeJson(response, error.status, error.body, { ...error.headers });
+          } catch {
+            /* committed */
+          }
+        }
+      })();
+      return;
     }
 
     // Route 2 public handshake (intake + claim poll)

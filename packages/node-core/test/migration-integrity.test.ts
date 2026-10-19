@@ -244,6 +244,8 @@ const SCHEMA_FILES = [
   "send-operations-rule-id.sql",
   // ZTR-1330: connector_configs plus integration_requests proposal columns.
   "connector-configs.sql",
+  // ZTR-1331: connector_rule_requests. Requires implementers + wallets.
+  "connector-rule-requests.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -652,6 +654,10 @@ const GREENFIELD: Record<
   "connector-configs.sql": {
     applies: false,
     missingFragment: "connector-configs requires implementers",
+  },
+  "connector-rule-requests.sql": {
+    applies: false,
+    missingFragment: "connector-rule-requests requires implementers",
   },
 };
 

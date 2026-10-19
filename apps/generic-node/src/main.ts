@@ -1114,6 +1114,7 @@ async function main(): Promise<void> {
       logger: runtimeListenerLogger,
       destinationService: routeSurface.destinationService,
     integrationRequestStore: routeSurface.integrationRequestStore,
+      connectorRuleRequestStore: routeSurface.connectorRuleRequestStore,
       nodeId: config.NODE_ID,
       adminRouteDeps: routeSurface.adminRouteDeps,
       discoveryDocument: routeSurface.discoveryDocument,

@@ -555,7 +555,7 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[reserveIdx]!.sql).toContain("allow_custom_routing");
   });
 
-  it("pack lands connector-configs last (ZTR-1330)", () => {
+  it("pack lands connector-configs before connector-rule-requests (ZTR-1330)", () => {
     const configIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-configs");
     const ruleIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-operations-rule-id");
     const reserveIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-reserve-wallets");
@@ -563,11 +563,23 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(reserveIdx).toBeGreaterThanOrEqual(0);
     expect(configIdx).toBeGreaterThan(ruleIdx);
     expect(configIdx).toBeGreaterThan(reserveIdx);
-    expect(configIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(configIdx).toBe(MONEY_SCHEMA_PACK_ORDER.indexOf("connector-rule-requests") - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[configIdx]!.sql).toContain("connector-configs requires implementers");
     expect(files[configIdx]!.sql).toContain("CREATE TABLE connector_configs");
     expect(files[configIdx]!.sql).toContain("policy_mode text NOT NULL DEFAULT 'NODE_VERIFIED'");
+  });
+
+  it("pack lands connector-rule-requests last (ZTR-1331)", () => {
+    const requestIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-rule-requests");
+    const configIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-configs");
+    expect(configIdx).toBeGreaterThanOrEqual(0);
+    expect(requestIdx).toBeGreaterThan(configIdx);
+    expect(requestIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[requestIdx]!.sql).toContain("connector-rule-requests requires implementers");
+    expect(files[requestIdx]!.sql).toContain("CREATE TABLE connector_rule_requests");
+    expect(files[requestIdx]!.sql).toContain("connector_rule_requests_window_hours_chk");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

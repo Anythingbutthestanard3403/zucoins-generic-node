@@ -801,4 +801,112 @@ describe("admin /admin/v1/implementers", () => {
     expect(putBody.public_key).toBe(PUB);
     expect(putBody.row_version).toBe(1);
   });
+
+  it("PUT reserve bindings and custom routing, and refuses a worker wallet", async () => {
+    let nowMs = 1_700_000_050_000;
+    const registry = new InMemoryImplementerRegistry(() => new Date(nowMs));
+    const reserveId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const workerId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    registry.seed({
+      id: GENESIS_ID,
+      name: "genesis",
+      created_at: "2026-01-01T00:00:00.000Z",
+      retired_at: null,
+    });
+    registry.seedWallet({
+      id: reserveId,
+      public_key: "pub-reserve",
+      nodeId: NODE_ID,
+      display_label: "Main Reserve",
+    });
+    registry.seedWallet({
+      id: workerId,
+      public_key: "pub-worker",
+      nodeId: NODE_ID,
+      money_mode: "SEND_ONLY",
+      destination_state: "WORKER",
+    });
+    const userStore = new InMemoryAdminUserStore();
+    const { router } = makeRouter({
+      implementerRegistry: registry,
+      userStore,
+      nowMs: () => nowMs,
+    });
+    await enrolAdmin(userStore, "p");
+    const { cookie, csrf } = await login(router, userStore, "p");
+    const headers = {
+      cookie,
+      origin: ORIGIN,
+      "x-csrf-token": csrf,
+      "content-type": "application/json",
+    };
+
+    const noTotp = await router(
+      "PUT",
+      `/admin/v1/implementers/${GENESIS_ID}/reserve-wallets`,
+      Buffer.from(JSON.stringify({ wallet_ids: [reserveId], default_wallet_id: reserveId })),
+      { ...headers, "idempotency-key": "idem-reserve-bind-no-totp-0001" },
+    );
+    expect(noTotp.status).toBe(401);
+
+    nowMs += 60_000;
+    const worker = await router(
+      "PUT",
+      `/admin/v1/implementers/${GENESIS_ID}/reserve-wallets`,
+      Buffer.from(JSON.stringify({ wallet_ids: [workerId], default_wallet_id: workerId })),
+      {
+        ...headers,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "idempotency-key": "idem-reserve-bind-worker-0001",
+      },
+    );
+    expect(worker.status).toBe(400);
+    expect(JSON.parse(worker.body)).toMatchObject({
+      error: { code: "validation_error", message: "wallet_ineligible" },
+    });
+
+    nowMs += 60_000;
+    const bound = await router(
+      "PUT",
+      `/admin/v1/implementers/${GENESIS_ID}/reserve-wallets`,
+      Buffer.from(JSON.stringify({ wallet_ids: [reserveId], default_wallet_id: reserveId })),
+      {
+        ...headers,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "idempotency-key": "idem-reserve-bind-ok-0000001",
+      },
+    );
+    expect(bound.status).toBe(200);
+    const boundBody = JSON.parse(bound.body) as {
+      funding_wallet_id: string;
+      reserve_wallets: { wallet_id: string; is_default: boolean }[];
+    };
+    expect(boundBody.funding_wallet_id).toBe(reserveId);
+    expect(boundBody.reserve_wallets).toEqual([
+      {
+        wallet_id: reserveId,
+        public_key: "pub-reserve",
+        display_label: "Main Reserve",
+        is_default: true,
+      },
+    ]);
+
+    nowMs += 60_000;
+    const routing = await router(
+      "PUT",
+      `/admin/v1/implementers/${GENESIS_ID}/custom-routing`,
+      Buffer.from(JSON.stringify({ allow_custom_routing: true })),
+      {
+        ...headers,
+        "x-zp-totp": generateTotp(SECRET, nowMs),
+        "idempotency-key": "idem-custom-routing-ok-00001",
+      },
+    );
+    expect(routing.status).toBe(200);
+    expect(JSON.parse(routing.body)).toEqual({
+      id: GENESIS_ID,
+      allow_custom_routing: true,
+    });
+    expect((await registry.get(GENESIS_ID))?.allow_custom_routing).toBe(true);
+  });
 });

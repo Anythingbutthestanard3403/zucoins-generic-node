@@ -234,6 +234,61 @@ describe("InMemoryImplementerRegistry setReserveWallets", () => {
     expect(cleared.implementer.funding_wallet_id).toBeNull();
     expect(cleared.implementer.reserve_wallets).toEqual([]);
   });
+
+  it("refuses a worker wallet and a wallet whose destination is not BLESSED", async () => {
+    const reg = seeded();
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: NODE,
+      allow_internal_move: true,
+      money_mode: "RECEIVE_ONLY",
+      destination_state: "BLESSED",
+    });
+    const receiveOnly = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_B],
+      defaultWalletId: WALLET_B,
+      actorId: ACTOR,
+    });
+    expect(receiveOnly).toEqual({ ok: false, reason: "wallet_ineligible" });
+
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: NODE,
+      allow_internal_move: true,
+      money_mode: "SEND_ONLY",
+      destination_state: "WORKER",
+    });
+    const sendOnly = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_B],
+      defaultWalletId: WALLET_B,
+      actorId: ACTOR,
+    });
+    expect(sendOnly).toEqual({ ok: false, reason: "wallet_ineligible" });
+
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: NODE,
+      allow_internal_move: true,
+      money_mode: "FULL",
+      destination_state: "PENDING",
+    });
+    const pending = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_B],
+      defaultWalletId: WALLET_B,
+      actorId: ACTOR,
+    });
+    expect(pending).toEqual({ ok: false, reason: "wallet_ineligible" });
+    expect((await reg.get(IMPL))?.funding_wallet_id).toBeNull();
+  });
 });
 
 describe("InMemoryDefaultFundingWallet", () => {

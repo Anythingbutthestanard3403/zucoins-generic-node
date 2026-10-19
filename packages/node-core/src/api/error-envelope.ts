@@ -57,6 +57,8 @@ export const API_ERROR_CODES = [
   { code: "insufficient_funding_wallet", http: 422 },
   // NODE_VERIFIED requested but operator policy refuses the implementer (ZTR-1301).
   { code: "verification_mode_not_allowed", http: 422 },
+  // Explicit after_landing that is not the connector default (ZTR-1326).
+  { code: "custom_routing_not_allowed", http: 422 },
   // armed / verification-complete against a mode that does not admit that path (ZTR-1302+).
   { code: "verification_mode_mismatch", http: 409 },
   // 429 — rate limit
@@ -128,6 +130,8 @@ const DIAGNOSTIC_MESSAGES: Readonly<Record<ApiErrorCode, string>> = {
     "The integration funding wallet cannot cover the requested amount.",
   verification_mode_not_allowed:
     "NODE_VERIFIED was requested at admission but operator policy does not allow it for the calling implementer.",
+  custom_routing_not_allowed:
+    "Connector is not permitted to override default reserve routing.",
   verification_mode_mismatch:
     "armed or verification-complete was called on an operation whose verification_mode does not admit that path.",
   rate_limited: "The principal rate limit is exceeded.",

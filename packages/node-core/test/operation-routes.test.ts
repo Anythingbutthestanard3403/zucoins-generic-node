@@ -530,6 +530,14 @@ describe("CreateReceiveBody schema (unknown_field)", () => {
     expect(CreateReceiveBody.safeParse(VALID_RECEIVE_BODY).success).toBe(true);
   });
 
+  it("accepts an omitted after_landing so the server default applies", () => {
+    const { after_landing: _omitted, ...rest } = VALID_RECEIVE_BODY;
+    const result = CreateReceiveBody.safeParse(rest);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.after_landing).toBeUndefined();
+  });
+
   it("rejects callback_url as an unknown field (the node has no callback surface)", () => {
     const result = CreateReceiveBody.safeParse({
       ...VALID_RECEIVE_BODY,

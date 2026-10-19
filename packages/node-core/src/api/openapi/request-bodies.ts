@@ -148,7 +148,7 @@ const verificationMode: JsonSchema = {
 export const CREATE_RECEIVE_BODY: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["amount_zkz", "anchor", "after_landing"],
+  required: ["amount_zkz", "anchor"],
   properties: {
     amount_zkz: positiveZkz,
     anchor,
@@ -160,6 +160,8 @@ export const CREATE_RECEIVE_BODY: JsonSchema = {
         "Optional TTL hint; node-clamped to RECEIVE_TTL_MIN/MAX. Hard ceiling is SPLITCHAIN_FUTURE_TIME_CEILING_SECS — matches CreateReceiveBody Zod max.",
     },
     after_landing: {
+      description:
+        "Optional. Omitted resolves to the connector default reserve destination, or HOLD when none is configured. An explicit value that differs requires allow_custom_routing.",
       oneOf: [
         {
           type: "object",

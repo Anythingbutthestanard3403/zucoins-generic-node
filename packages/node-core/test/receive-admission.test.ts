@@ -10,6 +10,7 @@
 // deferred: test/receive-admission-pg.test.ts provisions a hermetic scratch database, applies
 // the real frozen DDL, and drills the actual 23505 / 23514 emissions. Neither file alone is
 // the evidence; the pair is.
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -71,6 +72,15 @@ class InProcessSqlExecutor implements SqlExecutor {
     if (text === STATEMENTS.SELECT_DESTINATION) {
       const found = this.destinations.get(params[0] as string);
       return found === undefined ? [] : [found];
+    }
+    // No connector rows in this double. Permit explicit after_landing so the
+    // pre-existing drills keep testing eligibility and idempotency. The live
+    // gate is test/receive-custom-routing.pg.test.ts.
+    if (text === STATEMENTS.SELECT_CONNECTOR_ROUTING) {
+      return [{ allow_custom_routing: true, destination_id: null, is_default: null }];
+    }
+    if (text === STATEMENTS.SELECT_NODE_DEFAULT_DESTINATION) {
+      return [];
     }
     if (text === STATEMENTS.INSERT_IN_PROGRESS) return this.insert(params);
     if (text === STATEMENTS.INSERT_SUBSCRIPTION_HANDLE) {
@@ -448,6 +458,23 @@ describe("canonicalRequestSha256", () => {
     expect(canonicalRequestSha256(validRequest({ idempotencyKey: "zzzzzzzzzzzzzzzz" }))).toBe(
       canonicalRequestSha256(validRequest()),
     );
+  });
+
+  it("fingerprints an omitted after_landing as DEFAULT and keeps an explicit shape stable", () => {
+    const explicit = canonicalRequestSha256(validRequest());
+    const omitted = canonicalRequestSha256(validRequest({ afterLanding: undefined }));
+    expect(omitted).toBe(canonicalRequestSha256(validRequest({ afterLanding: undefined })));
+    expect(omitted).not.toBe(explicit);
+    const request = validRequest({ afterLanding: undefined });
+    const preimage = JSON.stringify({
+      implementer_id: request.implementerId,
+      node_id: request.nodeId,
+      amount_zkz: request.amountZkz,
+      anchor: request.anchor,
+      ttl_ms: request.ttlMs,
+      after_landing: "DEFAULT",
+    });
+    expect(omitted).toBe(createHash("sha256").update(preimage, "utf8").digest("hex"));
   });
 });
 

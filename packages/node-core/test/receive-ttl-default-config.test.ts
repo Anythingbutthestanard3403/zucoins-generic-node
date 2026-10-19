@@ -39,6 +39,13 @@ function mockReceiveStore(onAdmit: (ttlMs: number) => void): ReceiveAdmissionSto
     async countQueuedReceives() {
       return 0;
     },
+    async resolveConnectorRoutingPolicy() {
+      return {
+        allowCustomRouting: true,
+        defaultReserveDestinationId: null,
+        allowedReserveDestinationIds: new Set<string>(),
+      };
+    },
   };
 }
 

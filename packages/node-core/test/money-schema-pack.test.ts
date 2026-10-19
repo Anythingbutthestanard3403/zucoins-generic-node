@@ -570,16 +570,28 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[configIdx]!.sql).toContain("policy_mode text NOT NULL DEFAULT 'NODE_VERIFIED'");
   });
 
-  it("pack lands connector-rule-requests last (ZTR-1331)", () => {
+  it("pack lands connector-rule-requests before webhook deliveries (ZTR-1331)", () => {
     const requestIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-rule-requests");
     const configIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-configs");
     expect(configIdx).toBeGreaterThanOrEqual(0);
     expect(requestIdx).toBeGreaterThan(configIdx);
-    expect(requestIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(requestIdx).toBe(MONEY_SCHEMA_PACK_ORDER.indexOf("webhook-deliveries") - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[requestIdx]!.sql).toContain("connector-rule-requests requires implementers");
     expect(files[requestIdx]!.sql).toContain("CREATE TABLE connector_rule_requests");
     expect(files[requestIdx]!.sql).toContain("connector_rule_requests_window_hours_chk");
+  });
+
+  it("pack lands webhook-deliveries last (ZTR-1333)", () => {
+    const deliveryIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("webhook-deliveries");
+    const requestIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-rule-requests");
+    expect(requestIdx).toBeGreaterThanOrEqual(0);
+    expect(deliveryIdx).toBeGreaterThan(requestIdx);
+    expect(deliveryIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[deliveryIdx]!.sql).toContain("webhook-deliveries requires implementers");
+    expect(files[deliveryIdx]!.sql).toContain("CREATE TABLE webhook_deliveries");
+    expect(files[deliveryIdx]!.sql).toContain("webhook_deliveries_source_uidx");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

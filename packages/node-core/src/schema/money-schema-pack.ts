@@ -269,6 +269,8 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1331: connector_rule_requests. Requires implementers + wallets.
   // Appended only.
   "connector-rule-requests",
+  // ZTR-1333: webhook_deliveries. Requires implementers. Appended only.
+  "webhook-deliveries",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

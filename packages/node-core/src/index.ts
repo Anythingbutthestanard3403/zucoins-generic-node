@@ -721,6 +721,35 @@ export {
   type ConnectorRuleRequestsInvariant,
 } from "./schema/connector-rule-requests.contract.js";
 
+// ZTR-1333: signed hook deliveries, appended after connector-rule-requests.
+export {
+  WEBHOOK_DELIVERIES_EXECUTION_OBLIGATIONS,
+  WEBHOOK_DELIVERIES_INVARIANTS,
+  WEBHOOK_DELIVERIES_SCHEMA_FILE,
+  WEBHOOK_DELIVERIES_SOURCE,
+  type WebhookDeliveriesInvariant,
+} from "./schema/webhook-deliveries.contract.js";
+export {
+  InMemoryWebhookDeliveryStore,
+  SqlWebhookDeliveryStore,
+  WEBHOOK_DELIVERY_BACKOFF_MS,
+  WEBHOOK_DELIVERY_INTERVAL_MS,
+  catchUpWebhookDeliveries,
+  createSqlWebhookDeliveryStore,
+  delayAfterFailedAttempt,
+  loadWebhookTarget,
+  postWebhookJson,
+  productionValidateTarget,
+  signWebhookPayload,
+  webhookHeaders,
+  type WebhookDeliveryPorts,
+  type WebhookDeliveryRecord,
+  type WebhookDeliverySql,
+  type WebhookDeliveryStore,
+  type WebhookEnqueueInput,
+  type WebhookSigner,
+} from "./events/webhook-dispatcher.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

@@ -86,6 +86,12 @@ import {
   SqlReceiveAdmissionStore,
   SqlSendCreateStore,
   appendDurableDualChainEvent,
+  catchUpWebhookDeliveries,
+  createSqlWebhookDeliveryStore,
+  loadWebhookTarget,
+  postWebhookJson,
+  productionValidateTarget,
+  WEBHOOK_DELIVERY_INTERVAL_MS,
   createDualChainMoveCreatedEventAppender,
   type SendArtifactSigner,
   type SendCreatedEventAppender,
@@ -516,6 +522,9 @@ async function main(): Promise<void> {
   const metricsHooks = createMetricsHooks(metrics);
   let moneyWorkers: MoneyWorkersHandle | undefined;
   let backupScheduler: ReturnType<typeof createBackupScheduler> | undefined;
+  const webhookDeliveryTimer: { current: ReturnType<typeof setInterval> | undefined } = {
+    current: undefined,
+  };
   // safety-alert rule set (lease_age/queue_caps/signer_loss P0/P1 with spec-cited
   // postures), fed truthful readings below — never fabricated ones — from this scrape's
   // DB-truth snapshot. Log-only delivery: advisory, never gates admission or a lease.
@@ -1209,6 +1218,7 @@ async function main(): Promise<void> {
     stopWorkers: () => {
       registryHooks.stopWorkers();
       backupScheduler?.stop();
+      if (webhookDeliveryTimer.current !== undefined) clearInterval(webhookDeliveryTimer.current);
     },
     flushInFlight: async () => {
       await registryHooks.flushInFlight();
@@ -1824,6 +1834,44 @@ async function main(): Promise<void> {
   }
 
   // Full boot only: leadership held, recovery ready, money workers started.
+  // Signed hook deliveries. Catch-up signs new rows only while the sealed
+  // identity signer is live. Already-signed rows still post. The claim uses
+  // SKIP LOCKED, and the timer does not hold the process open.
+  const webhookStore = createSqlWebhookDeliveryStore(poolSql);
+  const webhookSigner = (): { sign(preimageBytes: Uint8Array): string } | null => {
+    const held = sendSignerHolder.current;
+    if (!identityEnsured || held.signingKeyId === DEFERRED_SIGNING_KEY_ID) return null;
+    return {
+      sign(preimageBytes: Uint8Array): string {
+        return toBase64UrlPadded(Buffer.from(held.sign(preimageBytes)));
+      },
+    };
+  };
+  let webhookChain: Promise<void> = Promise.resolve();
+  const timer = setInterval(() => {
+    webhookChain = webhookChain
+      .then(async () => {
+        const signer = webhookSigner();
+        if (signer !== null) {
+          await catchUpWebhookDeliveries(webhookStore, poolSql, config.NODE_ID, signer);
+        }
+        await webhookStore.deliverDue(config.NODE_ID, {
+          now: () => new Date(),
+          signer: () => webhookSigner(),
+          targetFor: (implementerId) => loadWebhookTarget(poolSql, implementerId),
+          validateTarget: productionValidateTarget,
+          post: (request) => postWebhookJson(request),
+        });
+      })
+      .catch((err: unknown) => {
+        const name = err instanceof Error ? err.name : "Error";
+        logger.error(`node: hook delivery tick failed (${name})`);
+      });
+  }, WEBHOOK_DELIVERY_INTERVAL_MS);
+  timer.unref();
+  webhookDeliveryTimer.current = timer;
+  logger.info("node: hook delivery loop armed");
+
   // Mirrors the money-worker leadership gate — multi-replica safe (ZTR-1183).
   if (config.BACKUP_SCHEDULE_ENABLED) {
     // Fail closed: a missing/wrong-major-version pg_dump or psql

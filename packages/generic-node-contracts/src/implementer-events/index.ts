@@ -71,3 +71,13 @@ export type {
   DirectoryViewComparison,
   NodeIdentityDirectoryEntry,
 } from "./node-identity-directory.js";
+
+export {
+  DURABLE_EVENT_TO_WEBHOOK,
+  WEBHOOK_EVENT_DOMAIN,
+  WEBHOOK_EVENT_TYPES,
+  canonicalWebhookEventJson,
+  isWebhookEventType,
+  webhookEventPreimage,
+} from "./webhook-event.js";
+export type { WebhookEventPayloadV1, WebhookEventType } from "./webhook-event.js";

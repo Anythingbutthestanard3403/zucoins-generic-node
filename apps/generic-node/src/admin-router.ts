@@ -146,6 +146,8 @@ import {
   type ConnectorRuleRequestRecord,
   type ConnectorRuleRequestStore,
   type ConnectorRuleRequestOverrides,
+  type WebhookDeliveryRecord,
+  type WebhookDeliveryStore,
 } from "@zucoins/node-core";
 import {
   isWalletMoneyMode,
@@ -1390,6 +1392,21 @@ function ruleRequestThrownResponse(error: unknown, requestId: string): AdminRout
   return null;
 }
 
+function toAdminWebhookDelivery(row: WebhookDeliveryRecord) {
+  return {
+    delivery_id: row.delivery_id,
+    implementer_id: row.implementer_id,
+    event_type: row.event_type,
+    operation_id: row.operation_id,
+    status: row.status,
+    attempt_count: row.attempt_count,
+    next_attempt_at: row.next_attempt_at,
+    last_status_code: row.last_status_code,
+    last_error: row.last_error,
+    delivered_at: row.delivered_at,
+  };
+}
+
 /**
  * Merge one operator-final rule into the existing auto-approve document.
  * Rejects when the live document is fail-closed-invalid/unreadable (operator
@@ -2605,6 +2622,11 @@ export interface AdminRouteDeps {
    */
   readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
   /**
+   * Signed hook delivery rows (ZTR-1333). When omitted, the retry route
+   * fails closed (503).
+   */
+  readonly webhookDeliveryStore?: WebhookDeliveryStore;
+  /**
    * REQUIRED admin-mutation idempotency. Routes check for a completed row before
    * the TOTP burn; the shared executor commits child effects and exact response bytes together.
    * Missing production wiring fails closed with idempotency_unavailable.
@@ -2741,6 +2763,11 @@ export interface AdminMutationTxPorts {
    * this port so the request row, audit row, and policy document share one TX.
    */
   readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
+  /**
+   * TX-scoped hook delivery store (ZTR-1333). A manual retry MUST use this port
+   * so the row reset commits with the admin mutation.
+   */
+  readonly webhookDeliveryStore?: WebhookDeliveryStore;
   /**
    * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
    * port so node_settings + audit_log commit/roll back with the admin mutation TX.
@@ -7004,6 +7031,87 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+    // POST /admin/v1/connectors/:implementer_id/webhooks/:delivery_id/retry
+    // Resets one signed delivery so the next tick posts it again. Session+CSRF+TOTP.
+    {
+      const m = pathname.match(/^\/admin\/v1\/connectors\/([^/]+)\/webhooks\/([^/]+)\/retry$/);
+      if (verb === "POST" && m) {
+        if (deps.webhookDeliveryStore === undefined) {
+          return fail(503, "service_unavailable", "hook deliveries not wired", requestId);
+        }
+        const implementerId = m[1]!;
+        const deliveryId = m[2]!;
+        if (!LOWER_UUID_RE.test(implementerId) || !LOWER_UUID_RE.test(deliveryId)) {
+          return fail(400, "validation_error", "ids must be canonical uuids", requestId);
+        }
+        const routeId = "admin_connector_webhook_retry";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const deliveryStore = ports.webhookDeliveryStore ?? deps.webhookDeliveryStore;
+            if (deliveryStore === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "hook deliveries not wired", requestId),
+              };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: parsedBody,
+              validateBody: parseRetireBody,
+              nowMs: nowMs(),
+              mutate: async () => {
+                const saved = await deliveryStore.requeue({
+                  nodeId,
+                  implementerId,
+                  deliveryId,
+                  now: new Date(nowMs()),
+                });
+                if (saved === null) {
+                  throw Object.assign(new Error("delivery not found"), { code: "NOT_FOUND" });
+                }
+                return { delivery: toAdminWebhookDelivery(saved) };
+              },
+            });
+            if (!guarded.ok) {
+              const mapped =
+                guarded.reason === "mutation_threw"
+                  ? ruleRequestThrownResponse(guarded.error, requestId)
+                  : null;
+              if (mapped !== null) return { outcome: "abort" as const, response: mapped };
+              return {
+                outcome: "abort" as const,
+                response: fail(guarded.status, guarded.code, guarded.message, requestId),
+              };
+            }
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
     // POST /admin/v1/implementers — create a named integration identity.
     // Session+CSRF+fresh TOTP. Retirement of an implementer is a separate route;
     // create never issues credentials (operator issues keys under the new id next).
@@ -8469,6 +8577,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly integrationRequestStore?: IntegrationRequestStore;
   readonly connectorConfigStore?: ConnectorConfigStore;
   readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
+  readonly webhookDeliveryStore?: WebhookDeliveryStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
   readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;
@@ -8578,6 +8687,7 @@ export function createFailClosedAdminRouteDeps(base: {
     integrationRequestStore: base.integrationRequestStore,
     connectorConfigStore: base.connectorConfigStore,
     connectorRuleRequestStore: base.connectorRuleRequestStore,
+    webhookDeliveryStore: base.webhookDeliveryStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
     reportingCredentialService: base.reportingCredentialService,
@@ -8620,6 +8730,7 @@ export function createLiveAdminRouteDeps(
     readonly integrationRequestStore?: IntegrationRequestStore;
     readonly connectorConfigStore?: ConnectorConfigStore;
     readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
+    readonly webhookDeliveryStore?: WebhookDeliveryStore;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
     readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;

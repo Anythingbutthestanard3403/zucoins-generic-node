@@ -1,7 +1,9 @@
-// External-send wallet assignment + multi-hub internal top-up composition (ZTR-1270).
-// Funding-wallet reserve hop (ZTR-1289): when the integration pins funding wallet W,
-// shortfall top-up prefers MOVE W→sender; dry / ineligible W → insufficient_funding_wallet
-// (no silent multi-hub substitute). When W is unset, multi-hub INTERNAL_ONLY path remains.
+// External-send wallet assignment + internal top-up composition (ZTR-1270).
+// Funding-wallet reserve hop (ZTR-1289) and connector reserve failover (ZTR-1327).
+// A preferred reserve, an explicit funding wallet, or a non-empty connector reserve
+// link set each fund the shortfall from that set only. An empty link set uses the
+// resolver pin when one is configured, and otherwise an INTERNAL_ONLY hub that is
+// not exclusively linked to a different connector.
 //
 // Runtime inverse of receive-pool assign: pick a free send-capable worker, optionally
 // fund it via MOVE_INTERNAL from funding W (preferred) or an INTERNAL_ONLY hub, then
@@ -15,9 +17,15 @@
 //    is treated as dry (insufficient_funding_wallet).
 // 2. Top-up amount — exact shortfall (N − worker_balance), never full N when partial
 //    funds are already on the worker.
-// 3. Hub pick sequence — when fundingWalletId set: lock that wallet only (must cover
-//    shortfall + allow_internal_move). Else INTERNAL_ONLY only; observed balance ≥
-//    shortfall; wallet id ASC; FOR UPDATE SKIP LOCKED LIMIT 1.
+// 3. Funding pick when the worker is short:
+//    a. preferredReserveWalletId — that wallet only, when it is linked to this
+//       connector or it is the node-wide default. No failover.
+//    b. request.fundingWalletId — that wallet only (ZTR-1289). No failover.
+//    c. connector reserve links — default first, then wallet id, skip locked.
+//       Busy or short links do not fall through to a hub.
+//    d. else the resolver pin — that wallet only.
+//    e. else INTERNAL_ONLY hub, wallet id ASC, skipping a wallet that is linked
+//       only to other connectors unless it is the node-wide default.
 // 4. Lease groups — sequential separate groups: MOVE admits first (own lease group);
 //    SEND is created in the same composition call with references_operation_id = move id
 //    but acquires SEND_SOURCE only after the move has released wallets (formation /
@@ -106,8 +114,27 @@ SELECT w.id::text AS wallet_id,
 
 
 /**
+ * Drop a wallet that is linked only to other connectors. $3 is this connector.
+ * $4 is the node-wide default funding wallet id (text) or null. A wallet linked
+ * to this connector, a wallet with no reserve link, and the node default stay eligible.
+ */
+const HUB_EXCLUDES_FOREIGN_RESERVE_SQL = `
+   AND (
+         NOT EXISTS (
+           SELECT 1
+             FROM implementer_reserve_wallets foreign_irw
+            WHERE foreign_irw.wallet_id = w.id
+              AND NOT EXISTS (
+                    SELECT 1
+                      FROM implementer_reserve_wallets own_irw
+                     WHERE own_irw.wallet_id = w.id
+                       AND own_irw.implementer_id = $3::uuid))
+         OR ($4::text IS NOT NULL AND w.id::text = $4::text))`;
+
+/**
  * Canonical hub pick for exact shortfall $2. INTERNAL_ONLY only (money_mode + flags).
  * Requires a known observed balance ≥ shortfall. id ASC + SKIP LOCKED.
+ * $3 implementer id, $4 node-default wallet id text or null (ZTR-1327).
  */
 export const SELECT_TOPUP_HUB_SQL = `
 SELECT w.id::text AS wallet_id,
@@ -132,6 +159,7 @@ SELECT w.id::text AS wallet_id,
    AND bal.b_amount::numeric >= $2::numeric
    AND NOT EXISTS (
          SELECT 1 FROM wallet_active_leases wal WHERE wal.wallet_id = w.id)
+${HUB_EXCLUDES_FOREIGN_RESERVE_SQL}
  ORDER BY w.id ASC -- contract-allow:order:frozen structural vocabulary
  FOR UPDATE OF w SKIP LOCKED
  LIMIT 1`;
@@ -165,6 +193,104 @@ SELECT w.id::text AS wallet_id,
  WHERE w.id = $1::uuid
    AND w.node_id = $2::uuid
  FOR UPDATE OF w`;
+
+/** Same literal as the implementer module. Duplicated so assign does not import it. */
+export const DEFAULT_FUNDING_WALLET_SETTING_KEY =
+  "integration.default_funding_wallet_id" as const;
+
+export const SELECT_NODE_DEFAULT_FUNDING_WALLET_SQL =
+  `SELECT setting_value FROM node_settings WHERE setting_key = $1`;
+
+/** How many reserve links this connector has. Zero means the legacy pin/hub path. */
+export const SELECT_CONNECTOR_RESERVE_COUNT_SQL = `
+SELECT count(*)::text AS n
+  FROM implementer_reserve_wallets irw
+ WHERE irw.implementer_id = $1::uuid`
+  .replace(/\s+/g, " ")
+  .trim();
+
+/**
+ * Latest verified balance without a sort clause. Max observed_at, then max
+ * wallet_seq at that instant, so a newer observation wins.
+ */
+const LATEST_OBSERVED_BALANCE_JOIN = `
+  INNER JOIN LATERAL (
+        SELECT go.b_amount
+          FROM gateway_observations go
+         WHERE go.wallet_id = w.id
+           AND go.b_amount IS NOT NULL
+           AND go.observed_at = (
+                 SELECT max(go_at.observed_at)
+                   FROM gateway_observations go_at
+                  WHERE go_at.wallet_id = w.id
+                    AND go_at.b_amount IS NOT NULL)
+           AND go.wallet_seq = (
+                 SELECT max(go_seq.wallet_seq)
+                   FROM gateway_observations go_seq
+                  WHERE go_seq.wallet_id = w.id
+                    AND go_seq.b_amount IS NOT NULL
+                    AND go_seq.observed_at = (
+                          SELECT max(go_at2.observed_at)
+                            FROM gateway_observations go_at2
+                           WHERE go_at2.wallet_id = w.id
+                             AND go_at2.b_amount IS NOT NULL))
+         LIMIT 1
+       ) bal ON true`;
+
+/**
+ * Unlocked linked reserves that cover shortfall $3. Caller ranks default-first
+ * then wallet id. No money_mode filter: the funding-wallet lock is the eligibility
+ * model (node_generated, AVAILABLE, allow_internal_move, observed balance).
+ * $1 implementer, $2 node.
+ */
+export const SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL = `
+SELECT w.id::text AS wallet_id,
+       irw.is_default AS is_default,
+       bal.b_amount::text AS observed_balance_zkz
+  FROM implementer_reserve_wallets irw
+  JOIN wallets w ON w.id = irw.wallet_id
+${LATEST_OBSERVED_BALANCE_JOIN}
+ WHERE irw.implementer_id = $1::uuid
+   AND w.node_id = $2::uuid
+   AND w.key_origin = 'node_generated'
+   AND w.state = 'AVAILABLE'
+   AND w.retired_at IS NULL
+   AND w.allow_internal_move IS TRUE
+   AND bal.b_amount::numeric >= $3::numeric
+   AND NOT EXISTS (
+         SELECT 1 FROM wallet_active_leases wal WHERE wal.wallet_id = w.id)
+ FOR UPDATE OF w SKIP LOCKED`;
+
+/** Covering linked reserves including leased rows, so a skip-locked miss can be busy. */
+export const SELECT_CONNECTOR_RESERVE_COVERING_COUNT_SQL = `
+SELECT count(*)::text AS n
+  FROM implementer_reserve_wallets irw
+  JOIN wallets w ON w.id = irw.wallet_id
+${LATEST_OBSERVED_BALANCE_JOIN}
+ WHERE irw.implementer_id = $1::uuid
+   AND w.node_id = $2::uuid
+   AND w.key_origin = 'node_generated'
+   AND w.state = 'AVAILABLE'
+   AND w.retired_at IS NULL
+   AND w.allow_internal_move IS TRUE
+   AND bal.b_amount::numeric >= $3::numeric`;
+
+/** Whether the preferred wallet is linked, and whether any link exists. */
+export const SELECT_PREFERRED_RESERVE_LINK_SQL = `
+SELECT
+  EXISTS (
+    SELECT 1
+      FROM implementer_reserve_wallets irw
+     WHERE irw.implementer_id = $1::uuid
+       AND irw.wallet_id = $2::uuid
+  ) AS linked,
+  EXISTS (
+    SELECT 1
+      FROM implementer_reserve_wallets irw
+     WHERE irw.implementer_id = $1::uuid
+  ) AS has_links`
+  .replace(/\s+/g, " ")
+  .trim();
 
 /**
  * Resolve the composition sink destination id for a worker wallet (MOVE sink handle).
@@ -217,6 +343,11 @@ export const SEND_ASSIGN_SQL = {
   SELECT_SEND_WORKER: SELECT_SEND_WORKER_SQL,
   SELECT_TOPUP_HUB: SELECT_TOPUP_HUB_SQL,
   SELECT_FUNDING_WALLET_FOR_TOPUP: SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
+  SELECT_CONNECTOR_RESERVE_FOR_TOPUP: SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL,
+  SELECT_CONNECTOR_RESERVE_COUNT: SELECT_CONNECTOR_RESERVE_COUNT_SQL,
+  SELECT_CONNECTOR_RESERVE_COVERING_COUNT: SELECT_CONNECTOR_RESERVE_COVERING_COUNT_SQL,
+  SELECT_PREFERRED_RESERVE_LINK: SELECT_PREFERRED_RESERVE_LINK_SQL,
+  SELECT_NODE_DEFAULT_FUNDING_WALLET: SELECT_NODE_DEFAULT_FUNDING_WALLET_SQL,
   SELECT_BLESSED_DESTINATION_FOR_WALLET: SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
   SELECT_SEND_TOPUP_READY: SELECT_SEND_TOPUP_READY_SQL,
   SELECT_SEND_BY_TOPUP_MOVE: SELECT_SEND_BY_TOPUP_MOVE_SQL,
@@ -353,11 +484,17 @@ export interface AssignAndTopUpRequest {
    */
   readonly referencesOperationId: string | null;
   /**
-   * Integration funding wallet W (ZTR-1289). When set, top-up MOVE source is W
-   * only — multi-hub INTERNAL_ONLY is not used as a silent substitute. Null/
-   * undefined preserves pre-1289 multi-hub behaviour (funding pin unset).
+   * Integration funding wallet W (ZTR-1289). When set to a wallet id, top-up
+   * MOVE source is W only. Null/undefined leaves the connector reserve walk,
+   * then the resolver pin, then the restricted hub path.
    */
   readonly fundingWalletId?: string | null;
+  /**
+   * Caller-selected reserve (ZTR-1327). When set, top-up locks that wallet only
+   * after it is linked to this connector or it is the node-wide default.
+   * Omitted from the idempotency fingerprint.
+   */
+  readonly preferredReserveWalletId?: string | null;
   /**
    * Optional admission-time verification mode (ZTR-1301). Threaded into createExternalSend
    * only. Top-up MOVE_INTERNAL is always NODE_VERIFIED (node-owned); never inherits this.
@@ -390,9 +527,9 @@ export interface AssignAndTopUpDeps {
    */
   readonly moveIdempotencyKeyFor?: (sendIdempotencyKey: string) => string;
   /**
-   * Optional async resolver for funding wallet W when request.fundingWalletId is
-   * omitted. Wired by the route store from implementer pin + node default.
-   * Returning null means funding is unset → multi-hub fallback.
+   * Optional async resolver for funding wallet W. Used only when the request
+   * names no preferred reserve, names no funding wallet, and the connector has
+   * zero reserve links. Returning null leaves the restricted hub path.
    */
   readonly resolveFundingWalletId?: (
     implementerId: string,
@@ -465,17 +602,107 @@ async function pickHub(
   tx: AssignSqlExecutor,
   nodeId: string,
   shortfallZkz: string,
+  implementerId: string,
+  nodeDefaultWalletId: string | null,
 ): Promise<HubPick | null> {
   const result = await tx.query<{
     wallet_id: string;
     observed_balance_zkz: string;
-  }>(SELECT_TOPUP_HUB_SQL, [nodeId, shortfallZkz]);
+  }>(SELECT_TOPUP_HUB_SQL, [
+    nodeId,
+    shortfallZkz,
+    implementerId,
+    nodeDefaultWalletId,
+  ]);
   const row = result.rows[0];
   if (row === undefined) return null;
   return {
     walletId: row.wallet_id,
     observedBalanceZkz: row.observed_balance_zkz,
   };
+}
+
+function pgBool(value: boolean | string | null | undefined): boolean {
+  return value === true || value === "t" || value === "true" || value === "1";
+}
+
+/** Default link first, then wallet id. Balance filtering stays in the SQL. */
+export function rankLinkedReservesForTopUp<
+  T extends { readonly walletId: string; readonly isDefault: boolean },
+>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => {
+    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
+    if (a.walletId < b.walletId) return -1;
+    if (a.walletId > b.walletId) return 1;
+    return 0;
+  });
+}
+
+async function readNodeDefaultFundingWalletId(
+  tx: AssignSqlExecutor,
+): Promise<string | null> {
+  const result = await tx.query<{ setting_value: string | null }>(
+    SELECT_NODE_DEFAULT_FUNDING_WALLET_SQL,
+    [DEFAULT_FUNDING_WALLET_SETTING_KEY],
+  );
+  const value = result.rows[0]?.setting_value ?? null;
+  if (value === null || value.length === 0) return null;
+  try {
+    parseUuid(value);
+  } catch {
+    return null;
+  }
+  return value;
+}
+
+async function countConnectorReserves(
+  tx: AssignSqlExecutor,
+  implementerId: string,
+): Promise<number> {
+  const result = await tx.query<{ n: string }>(SELECT_CONNECTOR_RESERVE_COUNT_SQL, [
+    implementerId,
+  ]);
+  return Number(result.rows[0]?.n ?? "0");
+}
+
+async function pickLinkedReserve(
+  tx: AssignSqlExecutor,
+  implementerId: string,
+  nodeId: string,
+  shortfallZkz: string,
+): Promise<
+  | { readonly ok: true; readonly pick: HubPick }
+  | { readonly ok: false; readonly reason: string }
+> {
+  const result = await tx.query<{
+    wallet_id: string;
+    is_default: boolean | string;
+    observed_balance_zkz: string;
+  }>(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL, [implementerId, nodeId, shortfallZkz]);
+  const ranked = rankLinkedReservesForTopUp(
+    result.rows.map((row) => ({
+      walletId: row.wallet_id,
+      isDefault: pgBool(row.is_default),
+      observedBalanceZkz: row.observed_balance_zkz,
+    })),
+  );
+  const first = ranked[0];
+  if (first !== undefined) {
+    return {
+      ok: true,
+      pick: {
+        walletId: first.walletId,
+        observedBalanceZkz: first.observedBalanceZkz,
+      },
+    };
+  }
+  const covering = await tx.query<{ n: string }>(
+    SELECT_CONNECTOR_RESERVE_COVERING_COUNT_SQL,
+    [implementerId, nodeId, shortfallZkz],
+  );
+  const n = Number(covering.rows[0]?.n ?? "0");
+  if (n > 0) return { ok: false, reason: "funding_wallet_busy" };
+  return { ok: false, reason: `funding_wallet_shortfall need=${shortfallZkz}` };
 }
 
 /**
@@ -705,21 +932,34 @@ export async function assignAndTopUpExternalSend(
     }
   }
 
-  // Resolve funding wallet W once before selection (ZTR-1289). Request field wins;
-  // else optional dep resolver (route store). Null ⇒ multi-hub fallback.
-  let resolvedFundingWalletId: string | null =
-    request.fundingWalletId === undefined ? null : request.fundingWalletId;
-  if (resolvedFundingWalletId === null && deps.resolveFundingWalletId !== undefined) {
-    resolvedFundingWalletId = await deps.resolveFundingWalletId(request.implementerId);
-  }
-  if (resolvedFundingWalletId !== null) {
+  // Explicit request pin (ZTR-1289) and preferred reserve (ZTR-1327). A null
+  // fundingWalletId is unset. The resolver runs later, and only when this
+  // connector has no reserve links.
+  const explicitFundingWalletId =
+    typeof request.fundingWalletId === "string" ? request.fundingWalletId : null;
+  const preferredReserveWalletId =
+    typeof request.preferredReserveWalletId === "string"
+      ? request.preferredReserveWalletId
+      : null;
+  if (explicitFundingWalletId !== null) {
     try {
-      parseUuid(resolvedFundingWalletId);
+      parseUuid(explicitFundingWalletId);
     } catch {
       return {
         outcome: "REJECTED",
         code: "insufficient_funding_wallet",
         detail: "invalid_funding_wallet_id",
+      };
+    }
+  }
+  if (preferredReserveWalletId !== null) {
+    try {
+      parseUuid(preferredReserveWalletId);
+    } catch {
+      return {
+        outcome: "REJECTED",
+        code: "insufficient_funding_wallet",
+        detail: "invalid_preferred_reserve_wallet_id",
       };
     }
   }
@@ -800,10 +1040,14 @@ export async function assignAndTopUpExternalSend(
       observed = worker.observedBalanceZkz;
     }
 
-    // Funding W must not be the external-send source (reserve ≠ sender).
+    const planMode = request.sourceWalletId !== null ? "explicit" : "assigned";
+
+    // Explicit pin must not be the external-send source. Preferred and the
+    // resolver pin are checked on the path that would actually use them.
     if (
-      resolvedFundingWalletId !== null &&
-      workerWalletId === resolvedFundingWalletId
+      preferredReserveWalletId === null &&
+      explicitFundingWalletId !== null &&
+      workerWalletId === explicitFundingWalletId
     ) {
       return {
         mode: "reject",
@@ -812,14 +1056,45 @@ export async function assignAndTopUpExternalSend(
       };
     }
 
+    let linkCount = 0;
+    let resolverFundingWalletId: string | null = null;
+    if (preferredReserveWalletId === null && explicitFundingWalletId === null) {
+      linkCount = await countConnectorReserves(tx, request.implementerId);
+      if (linkCount === 0 && deps.resolveFundingWalletId !== undefined) {
+        resolverFundingWalletId = await deps.resolveFundingWalletId(request.implementerId);
+        if (resolverFundingWalletId !== null) {
+          try {
+            parseUuid(resolverFundingWalletId);
+          } catch {
+            return {
+              mode: "reject",
+              code: "insufficient_funding_wallet",
+              detail: "invalid_funding_wallet_id",
+            };
+          }
+          if (workerWalletId === resolverFundingWalletId) {
+            return {
+              mode: "reject",
+              code: "send_rejected",
+              detail: "funding_wallet_cannot_be_send_source",
+            };
+          }
+        }
+      }
+    }
+
+    const attributedFundingWalletId =
+      explicitFundingWalletId ??
+      (linkCount > 0 ? null : resolverFundingWalletId);
+
     const funding = decideWorkerFunding(request.amountZkz, observed);
     if (funding.kind === "funded") {
       return {
-        mode: request.sourceWalletId !== null ? "explicit" : "assigned",
+        mode: planMode,
         workerWalletId,
         funding,
         hubWalletId: null,
-        fundingWalletId: resolvedFundingWalletId,
+        fundingWalletId: attributedFundingWalletId,
         workerDestinationId: null,
       };
     }
@@ -833,11 +1108,52 @@ export async function assignAndTopUpExternalSend(
       };
     }
 
-    // ZTR-1289: preferred reserve root is funding W when configured.
-    if (resolvedFundingWalletId !== null) {
+    const lockedPlan = (walletId: string): Plan => ({
+      mode: planMode,
+      workerWalletId,
+      funding,
+      hubWalletId: walletId,
+      fundingWalletId: walletId,
+      workerDestinationId: destId,
+    });
+
+    if (preferredReserveWalletId !== null) {
+      if (preferredReserveWalletId === workerWalletId) {
+        return {
+          mode: "reject",
+          code: "send_rejected",
+          detail: "funding_wallet_cannot_be_send_source",
+        };
+      }
+      const link = await tx.query<{
+        linked: boolean | string;
+        has_links: boolean | string;
+      }>(SELECT_PREFERRED_RESERVE_LINK_SQL, [
+        request.implementerId,
+        preferredReserveWalletId,
+      ]);
+      const linked = pgBool(link.rows[0]?.linked);
+      const hasLinks = pgBool(link.rows[0]?.has_links);
+      const nodeDefault = await readNodeDefaultFundingWalletId(tx);
+      const permitted =
+        linked || (nodeDefault !== null && nodeDefault === preferredReserveWalletId);
+      if (!hasLinks && nodeDefault === null) {
+        return {
+          mode: "reject",
+          code: "insufficient_funding_wallet",
+          detail: "reserve_not_linked",
+        };
+      }
+      if (!permitted) {
+        return {
+          mode: "reject",
+          code: "insufficient_funding_wallet",
+          detail: "reserve_not_linked",
+        };
+      }
       const lockedW = await lockFundingWalletForTopUp(
         tx,
-        resolvedFundingWalletId,
+        preferredReserveWalletId,
         request.nodeId,
         funding.shortfallZkz,
       );
@@ -848,17 +1164,76 @@ export async function assignAndTopUpExternalSend(
           detail: lockedW.reason,
         };
       }
-      return {
-        mode: request.sourceWalletId !== null ? "explicit" : "assigned",
-        workerWalletId,
-        funding,
-        hubWalletId: lockedW.pick.walletId,
-        fundingWalletId: resolvedFundingWalletId,
-        workerDestinationId: destId,
-      };
+      return lockedPlan(lockedW.pick.walletId);
     }
 
-    const hub = await pickHub(tx, request.nodeId, funding.shortfallZkz);
+    // ZTR-1289: explicit request pin locks that wallet only.
+    if (explicitFundingWalletId !== null) {
+      const lockedW = await lockFundingWalletForTopUp(
+        tx,
+        explicitFundingWalletId,
+        request.nodeId,
+        funding.shortfallZkz,
+      );
+      if (!lockedW.ok) {
+        return {
+          mode: "reject",
+          code: "insufficient_funding_wallet",
+          detail: lockedW.reason,
+        };
+      }
+      return lockedPlan(lockedW.pick.walletId);
+    }
+
+    if (linkCount > 0) {
+      const picked = await pickLinkedReserve(
+        tx,
+        request.implementerId,
+        request.nodeId,
+        funding.shortfallZkz,
+      );
+      if (!picked.ok) {
+        return {
+          mode: "reject",
+          code: "insufficient_funding_wallet",
+          detail: picked.reason,
+        };
+      }
+      if (picked.pick.walletId === workerWalletId) {
+        return {
+          mode: "reject",
+          code: "send_rejected",
+          detail: "funding_wallet_cannot_be_send_source",
+        };
+      }
+      return lockedPlan(picked.pick.walletId);
+    }
+
+    if (resolverFundingWalletId !== null) {
+      const lockedW = await lockFundingWalletForTopUp(
+        tx,
+        resolverFundingWalletId,
+        request.nodeId,
+        funding.shortfallZkz,
+      );
+      if (!lockedW.ok) {
+        return {
+          mode: "reject",
+          code: "insufficient_funding_wallet",
+          detail: lockedW.reason,
+        };
+      }
+      return lockedPlan(lockedW.pick.walletId);
+    }
+
+    const nodeDefaultWalletId = await readNodeDefaultFundingWalletId(tx);
+    const hub = await pickHub(
+      tx,
+      request.nodeId,
+      funding.shortfallZkz,
+      request.implementerId,
+      nodeDefaultWalletId,
+    );
     if (hub === null) {
       // Distinguish total absence of hubs vs all busy: count eligible hubs without lock.
       const anyHub = await tx.query<{ n: string }>(
@@ -876,8 +1251,14 @@ export async function assignAndTopUpExternalSend(
             AND w.money_mode = 'INTERNAL_ONLY'
             AND w.allow_external_send IS FALSE
             AND w.allow_internal_move IS TRUE
-            AND bal.b_amount::numeric >= $2::numeric`,
-        [request.nodeId, funding.shortfallZkz],
+            AND bal.b_amount::numeric >= $2::numeric
+${HUB_EXCLUDES_FOREIGN_RESERVE_SQL}`,
+        [
+          request.nodeId,
+          funding.shortfallZkz,
+          request.implementerId,
+          nodeDefaultWalletId,
+        ],
       );
       const n = Number(anyHub.rows[0]?.n ?? "0");
       if (n > 0) {
@@ -895,7 +1276,7 @@ export async function assignAndTopUpExternalSend(
     }
 
     return {
-      mode: request.sourceWalletId !== null ? "explicit" : "assigned",
+      mode: planMode,
       workerWalletId,
       funding,
       hubWalletId: hub.walletId,

@@ -7,6 +7,8 @@ import {
   evaluateFundingWalletForTopUp,
   evaluateTopUpReadiness,
   isTopUpHubEligible,
+  rankLinkedReservesForTopUp,
+  SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL,
   SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
   SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
   SELECT_SEND_WORKER_SQL,
@@ -150,6 +152,9 @@ describe("frozen selection SQL", () => {
     expect(SELECT_TOPUP_HUB_SQL).toContain("allow_external_send IS FALSE");
     expect(SELECT_TOPUP_HUB_SQL).toContain("FOR UPDATE OF w SKIP LOCKED");
     expect(SELECT_TOPUP_HUB_SQL).toContain("ORDER BY w.id ASC");
+    expect(SELECT_TOPUP_HUB_SQL).toContain("implementer_reserve_wallets");
+    expect(SELECT_TOPUP_HUB_SQL).toContain("$3::uuid");
+    expect(SELECT_TOPUP_HUB_SQL).toContain("$4::text");
   });
 
   it("funding wallet lock is by id + node (not INTERNAL_ONLY-only)", () => {
@@ -169,7 +174,12 @@ describe("frozen selection SQL", () => {
     expect(Object.keys(SEND_ASSIGN_SQL).sort()).toEqual(
       [
         "SELECT_BLESSED_DESTINATION_FOR_WALLET",
+        "SELECT_CONNECTOR_RESERVE_COUNT",
+        "SELECT_CONNECTOR_RESERVE_COVERING_COUNT",
+        "SELECT_CONNECTOR_RESERVE_FOR_TOPUP",
         "SELECT_FUNDING_WALLET_FOR_TOPUP",
+        "SELECT_NODE_DEFAULT_FUNDING_WALLET",
+        "SELECT_PREFERRED_RESERVE_LINK",
         "SELECT_SEND_BY_TOPUP_MOVE",
         "SELECT_SEND_TOPUP_READY",
         "SELECT_SEND_WORKER",
@@ -221,5 +231,46 @@ describe("canonicalAssignRequestSha256 (ZTR-1271 idempotency)", () => {
     const a = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
     const b = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
     expect(a).toBe(b);
+  });
+
+  it("preferred reserve id stays out of the fingerprint (ZTR-1327)", () => {
+    const omit = canonicalAssignRequestSha256({ ...base, sourceWalletId: null });
+    const preferred = canonicalAssignRequestSha256({
+      ...base,
+      sourceWalletId: null,
+      preferredReserveWalletId: "c0000000-0000-4000-8000-000000000022",
+    });
+    expect(preferred).toBe(omit);
+  });
+});
+
+describe("rankLinkedReservesForTopUp (ZTR-1327)", () => {
+  it("puts the default link ahead of a lower wallet id", () => {
+    const ranked = rankLinkedReservesForTopUp([
+      {
+        walletId: "c0000000-0000-4000-8000-000000000021",
+        isDefault: false,
+        observedBalanceZkz: "20",
+      },
+      {
+        walletId: "c0000000-0000-4000-8000-000000000022",
+        isDefault: true,
+        observedBalanceZkz: "20",
+      },
+    ]);
+    expect(ranked.map((row) => row.walletId)).toEqual([
+      "c0000000-0000-4000-8000-000000000022",
+      "c0000000-0000-4000-8000-000000000021",
+    ]);
+  });
+});
+
+describe("connector reserve selection SQL (ZTR-1327)", () => {
+  it("locks linked reserves without an INTERNAL_ONLY filter or a sort clause", () => {
+    expect(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL).toContain("implementer_reserve_wallets");
+    expect(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL).toContain("FOR UPDATE OF w SKIP LOCKED");
+    expect(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL).toContain("irw.is_default");
+    expect(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL).not.toContain("money_mode");
+    expect(SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL).not.toContain("ORDER BY");
   });
 });

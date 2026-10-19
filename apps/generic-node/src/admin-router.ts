@@ -1195,6 +1195,110 @@ function parseDefaultFundingWalletBody(
   };
 }
 
+/** PUT /admin/v1/implementers/:id/reserve-wallets — replace the connector binding. */
+function parseSetReserveWalletsBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly wallet_ids: readonly string[];
+      readonly default_wallet_id: string | null;
+    }>
+  | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (!Array.isArray(raw.wallet_ids)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "wallet_ids is required" };
+  }
+  const walletIds: string[] = [];
+  for (const item of raw.wallet_ids) {
+    if (typeof item !== "string" || !LOWER_UUID_RE.test(item)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_scalar",
+        message: "wallet_ids entries must be canonical uuids",
+      };
+    }
+    walletIds.push(item);
+  }
+  let defaultWalletId: string | null = null;
+  if (raw.default_wallet_id !== undefined && raw.default_wallet_id !== null) {
+    if (typeof raw.default_wallet_id !== "string" || !LOWER_UUID_RE.test(raw.default_wallet_id)) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_scalar",
+        message: "default_wallet_id must be a canonical uuid or null",
+      };
+    }
+    defaultWalletId = raw.default_wallet_id;
+  }
+  const known = new Set(["wallet_ids", "default_wallet_id"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { wallet_ids: walletIds, default_wallet_id: defaultWalletId } };
+}
+
+/** PUT /admin/v1/implementers/:id/custom-routing — operator opt-in flag. */
+function parseSetCustomRoutingBody(
+  raw: unknown,
+): ParseOk<{ readonly allow_custom_routing: boolean }> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (typeof raw.allow_custom_routing !== "boolean") {
+    return {
+      ok: false,
+      status: 400,
+      code: "invalid_scalar",
+      message: "allow_custom_routing must be a boolean",
+    };
+  }
+  const known = new Set(["allow_custom_routing"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body: { allow_custom_routing: raw.allow_custom_routing } };
+}
+
+function registryRefusal(reason: string): { readonly status: number; readonly code: string } {
+  if (reason === "implementer_not_found" || reason === "wallet_not_found") {
+    return { status: 404, code: "not_found" };
+  }
+  if (reason === "implementer_retired" || reason === "wallet_retired") {
+    return { status: 409, code: "conflict" };
+  }
+  return { status: 400, code: "validation_error" };
+}
+
+function abortGuardedRegistry(
+  guarded: {
+    readonly reason: string;
+    readonly status: number;
+    readonly code: string;
+    readonly message: string;
+    readonly error?: unknown;
+  },
+  requestId: string,
+) {
+  const err = guarded.reason === "mutation_threw" ? guarded.error : undefined;
+  const record =
+    typeof err === "object" && err !== null ? (err as Record<string, unknown>) : null;
+  const status = typeof record?.status === "number" ? record.status : guarded.status;
+  const code = typeof record?.code === "string" ? record.code : guarded.code;
+  const message = typeof record?.reason === "string" ? record.reason : guarded.message;
+  return {
+    outcome: "abort" as const,
+    response: fail(status, code, message, requestId),
+  };
+}
+
 function parseRevokeApiKeyBody(
   raw: unknown,
 ): ParseOk<Record<string, never>> | ParseFail {
@@ -3794,6 +3898,133 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
         },
       });
+    }
+
+    // PUT /admin/v1/implementers/:id/reserve-wallets and .../custom-routing.
+    // Above the POST-only gate (same zone as the node default funding wallet).
+    // Session + CSRF + fresh TOTP. Empty wallet_ids clears the binding.
+    {
+      const reserveMatch = pathname.match(/^\/admin\/v1\/implementers\/([^/]+)\/reserve-wallets$/);
+      const routingMatch = pathname.match(/^\/admin\/v1\/implementers\/([^/]+)\/custom-routing$/);
+      if (verb === "PUT" && (reserveMatch !== null || routingMatch !== null)) {
+        if (deps.implementerRegistry === undefined) {
+          return fail(503, "service_unavailable", "implementer registry not wired", requestId);
+        }
+        const implementerId = (reserveMatch ?? routingMatch)![1]!;
+        if (!LOWER_UUID_RE.test(implementerId)) {
+          return fail(400, "validation_error", "implementer id must be a canonical uuid", requestId);
+        }
+        let routeBody: unknown;
+        try {
+          routeBody = decodeBody(rawBody);
+        } catch {
+          return fail(400, "validation_error", "invalid JSON body", requestId);
+        }
+        const routeId =
+          reserveMatch !== null
+            ? "admin_implementers_reserve_wallets"
+            : "admin_implementers_custom_routing";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+            if (registry === undefined) {
+              return {
+                outcome: "abort" as const,
+                response: fail(503, "service_unavailable", "implementer registry not wired", requestId),
+              };
+            }
+            if (reserveMatch !== null) {
+              const guarded = await runGuardedAdminMutation({
+                sessions,
+                request: authReq,
+                csrf,
+                totp: labTotpOrNull(totp),
+                userStore: deps.userStore,
+                totpLog,
+                nodeId,
+                rawBody: routeBody,
+                validateBody: parseSetReserveWalletsBody,
+                nowMs: nowMs(),
+                mutate: async ({ body, session }) => {
+                  const outcome = await registry.setReserveWallets({
+                    implementerId,
+                    nodeId,
+                    walletIds: body.wallet_ids,
+                    defaultWalletId: body.default_wallet_id,
+                    actorId: session.sessionId,
+                  });
+                  if (!outcome.ok) {
+                    const mapped = registryRefusal(outcome.reason);
+                    throw Object.assign(new Error(outcome.reason), {
+                      code: mapped.code,
+                      status: mapped.status,
+                      reason: outcome.reason,
+                    });
+                  }
+                  return {
+                    id: outcome.implementer.id,
+                    funding_wallet_id: outcome.implementer.funding_wallet_id,
+                    reserve_wallets: outcome.implementer.reserve_wallets,
+                  };
+                },
+              });
+              if (!guarded.ok) return abortGuardedRegistry(guarded, requestId);
+              return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+            }
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: routeBody,
+              validateBody: parseSetCustomRoutingBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, session }) => {
+                const outcome = await registry.setCustomRouting({
+                  implementerId,
+                  nodeId,
+                  allowCustomRouting: body.allow_custom_routing,
+                  actorId: session.sessionId,
+                });
+                if (!outcome.ok) {
+                  const mapped = registryRefusal(outcome.reason);
+                  throw Object.assign(new Error(outcome.reason), {
+                    code: mapped.code,
+                    status: mapped.status,
+                    reason: outcome.reason,
+                  });
+                }
+                return {
+                  id: outcome.implementer.id,
+                  allow_custom_routing: outcome.implementer.allow_custom_routing,
+                };
+              },
+            });
+            if (!guarded.ok) return abortGuardedRegistry(guarded, requestId);
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
     }
 
     if (verb !== "POST") {

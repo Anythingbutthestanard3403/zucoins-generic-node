@@ -47,6 +47,10 @@ const W_FUNDING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5";
 const W_UNIQUE_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa6";
 const W_UNIQUE_B = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa7";
 const W_BACKFILL = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa8";
+const W_RECEIVE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9";
+const W_SEND = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab";
+const W_PENDING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac";
+const IMPL_INELIGIBLE = "33333333-3333-4333-8333-333333333336";
 
 const PUB_1 = "pub-reserve-w1";
 const PUB_2 = "pub-reserve-w2";
@@ -61,7 +65,13 @@ CREATE TABLE wallets (
   public_key text NOT NULL,
   state text NOT NULL DEFAULT 'ACTIVE',
   retired_at timestamptz NULL,
-  allow_internal_move boolean NOT NULL DEFAULT true
+  allow_internal_move boolean NOT NULL DEFAULT true,
+  money_mode text NOT NULL DEFAULT 'INTERNAL_ONLY'
+);
+CREATE TABLE destinations (
+  id uuid PRIMARY KEY,
+  wallet_id uuid NOT NULL REFERENCES wallets (id) ON DELETE CASCADE,
+  state text NOT NULL
 );
 CREATE TABLE implementers (
   id uuid PRIMARY KEY,
@@ -213,13 +223,24 @@ const insertWallet = (
   nodeId: string,
   publicKey: string,
   extras = "",
+  opts: { readonly moneyMode?: string; readonly destinationState?: string | null } = {},
 ): void => {
+  const mode = opts.moneyMode ?? "INTERNAL_ONLY";
   const inserted = execSql(
     schema,
-    `INSERT INTO wallets (id, node_id, public_key${extras.length > 0 ? ", state, retired_at" : ""})
-     VALUES ('${id}', '${nodeId}', '${publicKey}'${extras})`,
+    `INSERT INTO wallets (id, node_id, public_key, money_mode${extras.length > 0 ? ", state, retired_at" : ""})
+     VALUES ('${id}', '${nodeId}', '${publicKey}', '${mode}'${extras})`,
   );
   if (inserted.status !== 0) throw new Error(inserted.stderr);
+  if (opts.destinationState === null) return;
+  const destinationState = opts.destinationState ?? "BLESSED";
+  const destinationId = `d${id.slice(1)}`;
+  const destination = execSql(
+    schema,
+    `INSERT INTO destinations (id, wallet_id, state)
+     VALUES ('${destinationId}', '${id}', '${destinationState}')`,
+  );
+  if (destination.status !== 0) throw new Error(destination.stderr);
 };
 
 const insertImplementer = (schema: string, id: string, name: string, funding: string | null): void => {
@@ -456,6 +477,52 @@ describe("implementer reserve wallets PG drills (ZTR-1324)", () => {
     const junction = scalar(
       SCHEMA,
       `SELECT count(*) FROM implementer_reserve_wallets WHERE implementer_id = '${IMPL_FUNDING}'`,
+    );
+    expect(junction).toBe("0");
+  });
+
+  it("refuses a worker wallet and a wallet without a BLESSED destination", async () => {
+    if (!ready) return;
+    insertWallet(SCHEMA, W_RECEIVE, NODE, "pub-receive", "", {
+      moneyMode: "RECEIVE_ONLY",
+    });
+    insertWallet(SCHEMA, W_SEND, NODE, "pub-send", "", { moneyMode: "SEND_ONLY" });
+    insertWallet(SCHEMA, W_PENDING, NODE, "pub-pending", "", {
+      moneyMode: "FULL",
+      destinationState: "PENDING",
+    });
+    insertImplementer(SCHEMA, IMPL_INELIGIBLE, "connector-ineligible", null);
+
+    const receiveOnly = await registry.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL_INELIGIBLE,
+      walletIds: [W_RECEIVE],
+      defaultWalletId: W_RECEIVE,
+      actorId: ACTOR,
+    });
+    expect(receiveOnly).toEqual({ ok: false, reason: "wallet_ineligible" });
+
+    const sendOnly = await registry.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL_INELIGIBLE,
+      walletIds: [W_SEND],
+      defaultWalletId: W_SEND,
+      actorId: ACTOR,
+    });
+    expect(sendOnly).toEqual({ ok: false, reason: "wallet_ineligible" });
+
+    const pending = await registry.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL_INELIGIBLE,
+      walletIds: [W_PENDING],
+      defaultWalletId: W_PENDING,
+      actorId: ACTOR,
+    });
+    expect(pending).toEqual({ ok: false, reason: "wallet_ineligible" });
+
+    const junction = scalar(
+      SCHEMA,
+      `SELECT count(*) FROM implementer_reserve_wallets WHERE implementer_id = '${IMPL_INELIGIBLE}'`,
     );
     expect(junction).toBe("0");
   });

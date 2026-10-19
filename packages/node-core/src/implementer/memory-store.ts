@@ -48,6 +48,20 @@ export interface MemoryFundingWalletSeed {
   /** Defaults true so older funding-pin fixtures stay attachable. */
   readonly allow_internal_move?: boolean;
   readonly state?: string;
+  /**
+   * Defaults to INTERNAL_ONLY. RECEIVE_ONLY and SEND_ONLY cannot be bound.
+   * FULL stays eligible.
+   */
+  readonly money_mode?: string;
+  /** Defaults to BLESSED. Any other destination state cannot be bound. */
+  readonly destination_state?: string;
+}
+
+function reserveWalletEligible(wallet: MemoryFundingWalletSeed): boolean {
+  if (wallet.allow_internal_move === false) return false;
+  const mode = wallet.money_mode ?? "INTERNAL_ONLY";
+  if (mode !== "INTERNAL_ONLY" && mode !== "FULL") return false;
+  return (wallet.destination_state ?? "BLESSED") === "BLESSED";
 }
 
 export class InMemoryImplementerRegistry implements ImplementerRegistry {
@@ -286,7 +300,7 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       if (wallet.retired === true || wallet.state === "RETIRED") {
         return { ok: false, reason: "wallet_retired" };
       }
-      if (wallet.allow_internal_move === false) {
+      if (!reserveWalletEligible(wallet)) {
         return { ok: false, reason: "wallet_ineligible" };
       }
       bound.push({

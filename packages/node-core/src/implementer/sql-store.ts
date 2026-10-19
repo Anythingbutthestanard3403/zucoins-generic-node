@@ -249,7 +249,14 @@ const SET_RESERVE_SQL = `WITH locked AS (
   SELECT w.id::text AS wallet_id,
          (w.node_id = $2::uuid) AS same_node,
          (w.retired_at IS NULL AND w.state::text <> 'RETIRED') AS live,
-         (w.allow_internal_move IS TRUE) AS movable
+         (w.allow_internal_move IS TRUE
+          AND w.money_mode::text IN ('INTERNAL_ONLY', 'FULL')
+          AND EXISTS (
+            SELECT 1
+              FROM destinations d
+             WHERE d.wallet_id = w.id
+               AND d.state::text = 'BLESSED'
+          )) AS movable
     FROM wanted q
     JOIN wallets w ON w.id = q.wallet_id
 ), decision AS (

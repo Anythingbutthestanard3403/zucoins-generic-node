@@ -564,6 +564,20 @@ export {
   type QueueExpiredReceive,
 } from "./receive/index.js";
 
+export {
+  BLESS_RESERVE_DESTINATION_SQL,
+  DEFAULT_FUNDING_WALLET_SETTING_KEY,
+  MAIN_RESERVE_DISPLAY_LABEL,
+  ReservePoolCapError,
+  STAMP_RECOVERY_UNDER_VAULT_SQL,
+  SYSTEM_BLESS_DEVICE_KEY_ID,
+  WRITE_MAIN_RESERVE_SETTING_SQL,
+  ensureNodeReserveAndWorkerPool,
+  mintNamedReserveWallet,
+  stampRecoveryUnderVault,
+  type EnsureNodeReserveDeps,
+} from "./receive/index.js";
+
 // The lease-fenced RECEIVE_T0 read and the not-verified branch.
 export {
   RECEIVE_T0_EVIDENCE_ROLE,

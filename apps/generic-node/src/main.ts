@@ -161,6 +161,7 @@ import {
   publicKeyFromEd25519Seed,
   runGenesisBootstrap,
 } from "./bootstrap/genesis.js";
+import { createReservePoolController } from "./bootstrap/reserve-pool.js";
 import {
   composePush,
   requireActivePushSubscriptionOrRefuse,
@@ -918,6 +919,7 @@ async function main(): Promise<void> {
     vaultRootKey: rootKey,
     // Funding wallet CREATE mint (ZTR-1287) seals into the same vault as pool mint.
     walletVault: vaultKeyStore,
+    poolCapTotal: config.POOL_CAP_TOTAL,
     // ZTR-1307 — same post-mint push hook as destination + pool scale-up.
     onWalletsMinted: (walletIds) => onWalletsMintedHolder.current?.(walletIds),
     newRequestId: (): string => randomUUID(),
@@ -1532,6 +1534,14 @@ async function main(): Promise<void> {
         actions: bootActions,
         onInvariantBreach: () => metricsHooks.onInvariantBreach(),
       });
+      logger.info("boot: provisioning main reserve and worker pool");
+      await createReservePoolController({
+        pool,
+        nodeId: config.NODE_ID,
+        poolCapTotal: config.POOL_CAP_TOTAL,
+        vault: vaultKeyStore,
+        onWalletsMinted: (walletIds) => onWalletsMintedHolder.current?.(walletIds),
+      }).ensure();
       return {
         ready: report.ready,
         invariantBreach: report.invariantBreach,
@@ -1605,6 +1615,7 @@ async function main(): Promise<void> {
       moneyWorkers = startMoneyWorkers({
         pool,
         vault: vaultKeyStore,
+        vaultReady: true,
         moneyPathStatementTimeoutMs: moneyPathStatementTimeoutMs,
         config: {
           nodeId: config.NODE_ID,

@@ -31,6 +31,7 @@
     "test/**/*.ts",
     "test/types/**/*.d.ts",
     "../../packages/node-core/test/pg-required-guard.ts",
+    "../../packages/node-core/test/receive/reserve-pool-schema.ts",
     "../../packages/node-core/test/fixtures/**/*.ts",
     "../../packages/generic-node-contracts/src/pool-policy/sizing.ts",
     "../../packages/node-core/src/push/http-ece.d.ts"

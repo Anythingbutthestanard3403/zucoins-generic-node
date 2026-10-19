@@ -113,6 +113,44 @@ describe("insertNodeGeneratedWalletWithPendingDestination", () => {
     expect(params[0]).toEqual([WALLET, NODE, PUB, true, false, true, "RECEIVE_ONLY"]);
     expect(params[1]).toEqual([WALLET, NODE, "", "PENDING", null]);
   });
+
+  it("INTERNAL_ONLY writes INTERNAL_ONLY wallet + PENDING dest", async () => {
+    const params: (readonly unknown[] | undefined)[] = [];
+    const sql = {
+      query: vi.fn(async (_text: string, p?: readonly unknown[]) => {
+        params.push(p);
+        return { rows: [] };
+      }),
+    };
+    await insertNodeGeneratedWalletWithPendingDestination(sql, {
+      walletId: WALLET,
+      nodeId: NODE,
+      publicKey: PUB,
+      role: "INTERNAL_ONLY",
+    });
+    expect(params).toHaveLength(2);
+    expect(params[0]).toEqual([WALLET, NODE, PUB, false, false, true, "INTERNAL_ONLY"]);
+    expect(params[1]).toEqual([WALLET, NODE, "", "PENDING", null]);
+  });
+
+  it("writes display_label only when a label is passed", async () => {
+    const calls: { text: string; params: readonly unknown[] | undefined }[] = [];
+    const sql = {
+      query: vi.fn(async (text: string, params?: readonly unknown[]) => {
+        calls.push({ text, params });
+        return { rows: [] };
+      }),
+    };
+    await insertNodeGeneratedWalletWithPendingDestination(sql, {
+      walletId: WALLET,
+      nodeId: NODE,
+      publicKey: PUB,
+      role: "INTERNAL_ONLY",
+      displayLabel: "Main Reserve",
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[2]!.params).toEqual([WALLET, "Main Reserve"]);
+  });
 });
 
 describe("deleteNodeGeneratedWalletMint", () => {

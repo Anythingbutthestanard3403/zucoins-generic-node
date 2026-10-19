@@ -40,7 +40,7 @@ DELETE FROM destinations WHERE wallet_id = $1::uuid` as const;
 export const DELETE_NODE_GENERATED_WALLET_SQL = `
 DELETE FROM wallets WHERE id = $1::uuid` as const;
 
-export type NodeGeneratedMintRole = "FULL" | "SEND_ONLY" | "RECEIVE_ONLY";
+export type NodeGeneratedMintRole = "FULL" | "SEND_ONLY" | "RECEIVE_ONLY" | "INTERNAL_ONLY";
 
 export interface InsertNodeGeneratedWalletInput {
   readonly walletId: string;
@@ -57,9 +57,18 @@ export interface InsertNodeGeneratedWalletInput {
   /**
    * Default FULL (register / funding). Pool scaler passes SEND_ONLY (WORKER
    * dest, no blessing) or RECEIVE_ONLY (PENDING dest, blessable).
+   * INTERNAL_ONLY stays PENDING here; the reserve provisioner blesses after.
    */
   readonly role?: NodeGeneratedMintRole;
+  /**
+   * wallets.display_label. Omitted leaves the column null and issues no extra
+   * statement. Distinct from destinations.label (`label`).
+   */
+  readonly displayLabel?: string;
 }
+
+export const UPDATE_WALLET_DISPLAY_LABEL_SQL = `
+UPDATE wallets SET display_label = $2 WHERE id = $1::uuid` as const;
 
 const ROLE_INSERT = {
   FULL: {
@@ -81,6 +90,13 @@ const ROLE_INSERT = {
     allowSend: false,
     allowMove: true,
     moneyMode: "RECEIVE_ONLY",
+    destState: "PENDING",
+  },
+  INTERNAL_ONLY: {
+    allowReceive: false,
+    allowSend: false,
+    allowMove: true,
+    moneyMode: "INTERNAL_ONLY",
     destState: "PENDING",
   },
 } as const;
@@ -111,6 +127,9 @@ export async function insertNodeGeneratedWalletWithPendingDestination(
     spec.destState,
     input.idempotencyKey ?? null,
   ]);
+  if (input.displayLabel !== undefined) {
+    await sql.query(UPDATE_WALLET_DISPLAY_LABEL_SQL, [input.walletId, input.displayLabel]);
+  }
 }
 
 /**

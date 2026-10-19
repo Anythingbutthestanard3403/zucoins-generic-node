@@ -83,6 +83,20 @@ export {
 } from "./pool-scaler.js";
 
 export {
+  BLESS_RESERVE_DESTINATION_SQL,
+  DEFAULT_FUNDING_WALLET_SETTING_KEY,
+  MAIN_RESERVE_DISPLAY_LABEL,
+  ReservePoolCapError,
+  STAMP_RECOVERY_UNDER_VAULT_SQL,
+  SYSTEM_BLESS_DEVICE_KEY_ID,
+  WRITE_MAIN_RESERVE_SETTING_SQL,
+  ensureNodeReserveAndWorkerPool,
+  mintNamedReserveWallet,
+  stampRecoveryUnderVault,
+  type EnsureNodeReserveDeps,
+} from "./auto-provision-pool.js";
+
+export {
   ARM_SQL_STATEMENTS,
   type SqlArmInsertEnvelope,
   activeArmTx,

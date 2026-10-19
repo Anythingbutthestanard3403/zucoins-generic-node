@@ -236,6 +236,16 @@ export function isDay0NextStep(value: unknown): value is Day0NextStep {
   return typeof value === "string" && (DAY0_NEXT_STEPS as readonly string[]).includes(value);
 }
 
+export const STREAMLINED_DAY0_STEPS = ["account", "vault", "ready"] as const;
+export type StreamlinedDay0Step = (typeof STREAMLINED_DAY0_STEPS)[number];
+
+export function isStreamlinedDay0Step(value: unknown): value is StreamlinedDay0Step {
+  return (
+    typeof value === "string" &&
+    (STREAMLINED_DAY0_STEPS as readonly string[]).includes(value)
+  );
+}
+
 export interface SetupStateView {
   readonly object: "setup_state";
   readonly current_step: SetupStepId;
@@ -259,6 +269,8 @@ export interface SetupStateView {
    * SPA RequireAuth redirects money routes here via pathForNextStep.
    */
   readonly next_step: Day0NextStep;
+  /** Streamlined 3-step Day-0 funnel stage (account -> vault -> ready). */
+  readonly funnel_step: StreamlinedDay0Step;
   readonly generated_at: string;
 }
 
@@ -693,6 +705,7 @@ export function buildSetupStateView(
 
   const facts = day0Facts(flags, signals, legacy);
   const nextStep = complete ? "home" : resolveNextStep(flags, signals, legacy);
+  const funnelStep = complete ? "ready" : resolveStreamlinedDay0Step(flags, signals, legacy);
 
   return {
     object: "setup_state",
@@ -709,7 +722,76 @@ export function buildSetupStateView(
     recovery_proven: facts.recovery_proven,
     vault_ready: facts.vault_ready,
     next_step: nextStep,
+    funnel_step: funnelStep,
     generated_at: nowIso,
+  };
+}
+
+/**
+ * Resolve the streamlined 3-step Day-0 funnel stage (`account` -> `vault` -> `ready`).
+ */
+export function resolveStreamlinedDay0Step(
+  f: SetupStateFlags,
+  s: SetupLiveSignals,
+  legacy: boolean = isSetupAckWizardLegacyEnabled(),
+): StreamlinedDay0Step {
+  const facts = day0Facts(f, s, legacy);
+  if (!facts.password_ok || !facts.totp_ok) {
+    return "account";
+  }
+  const vaultConfigured = f.w5_vault_ready || s.vaultConfigured === true;
+  const backupAcked = f.w5_offline_backup_ack || facts.recovery_proven;
+  if (!vaultConfigured || !backupAcked) {
+    return "vault";
+  }
+  return "ready";
+}
+
+/**
+ * Complete the streamlined 3-step Day-0 setup after the operator acknowledges
+ * saving their recovery backup (`acknowledged_recovery_backup: true` or
+ * `backupVerified: true`).
+ */
+export function applyStreamlinedSetupComplete(
+  current: SetupStateFlags,
+  signals: SetupLiveSignals,
+  body: Record<string, unknown>,
+  nowIso: string = new Date().toISOString(),
+): SetupStateFlags {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new SetupPatchError("validation_error", "setup complete body must be an object");
+  }
+  const acked =
+    body.acknowledged_recovery_backup === true || body.backupVerified === true;
+  if (!acked) {
+    throw new SetupPatchError(
+      "validation_error",
+      "acknowledged_recovery_backup must be true to complete setup",
+    );
+  }
+  if (signals.mustChangePassword || signals.mustEnrolTotp) {
+    throw new SetupPatchError(
+      "conflict",
+      "account password and authenticator must be configured before completing setup",
+    );
+  }
+  if (!current.w5_vault_ready && signals.vaultConfigured !== true) {
+    throw new SetupPatchError(
+      "conflict",
+      "vault must be initialized before completing setup",
+    );
+  }
+  return {
+    ...current,
+    w0_secure_context_ok: true,
+    pwa_installed_at: current.pwa_installed_at ?? nowIso,
+    pwa_install_evidence: current.pwa_install_evidence ?? "standalone",
+    w3_pwa_ack: true,
+    w4_break_glass_ack:
+      signals.deviceEnrolled === true ? current.w4_break_glass_ack : true,
+    w5_vault_ready: true,
+    w5_offline_backup_ack: true,
+    completed_at: current.completed_at ?? nowIso,
   };
 }
 
@@ -1066,6 +1148,7 @@ const SETUP_SAFE_KEY_NAMES = new Set([
   "recovery_proven",
   "vault_ready",
   "next_step",
+  "funnel_step",
   "pwa_installed",
   "allow_browser_tab_setup",
 ]);

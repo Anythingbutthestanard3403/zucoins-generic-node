@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPwaInstalledEvidence,
   applySetupPatch,
+  applyStreamlinedSetupComplete,
   applyTypedDeviceBreakGlass,
   assertSetupSecretFree,
   buildSetupStateView,
@@ -17,6 +18,8 @@ import {
   isSetupComplete,
   resolveCurrentStep,
   resolveNextStep,
+  resolveStreamlinedDay0Step,
+  STREAMLINED_DAY0_STEPS,
   day0Facts,
   w4Done,
   type SetupLiveSignals,
@@ -521,3 +524,59 @@ describe("durable vault seal bootstrap (restart)", () => {
     expect(state.pendingPlaintext).toBeNull();
   });
 });
+
+describe("streamlined 3-step Day-0 funnel (GN-401: account -> vault -> ready)", () => {
+  it("exposes STREAMLINED_DAY0_STEPS as account -> vault -> ready", () => {
+    expect([...STREAMLINED_DAY0_STEPS]).toEqual(["account", "vault", "ready"]);
+  });
+
+  it("progresses from account to vault to ready and completes with acknowledged_recovery_backup", () => {
+    const accountSignals = baseSignals({ mustChangePassword: true, mustEnrolTotp: true });
+    expect(resolveStreamlinedDay0Step(EMPTY_SETUP_FLAGS, accountSignals)).toBe("account");
+
+    const vaultSignals = baseSignals({ mustChangePassword: false, mustEnrolTotp: false, vaultConfigured: false });
+    expect(resolveStreamlinedDay0Step(EMPTY_SETUP_FLAGS, vaultSignals)).toBe("vault");
+
+    const initializedSignals = baseSignals({
+      mustChangePassword: false,
+      mustEnrolTotp: false,
+      vaultConfigured: true,
+    });
+    const completed = applyStreamlinedSetupComplete(
+      EMPTY_SETUP_FLAGS,
+      initializedSignals,
+      { acknowledged_recovery_backup: true },
+      "2026-10-20T00:00:00.000Z",
+    );
+    expect(resolveStreamlinedDay0Step(completed, initializedSignals)).toBe("ready");
+    expect(completed.completed_at).toBe("2026-10-20T00:00:00.000Z");
+
+    const view = buildSetupStateView(completed, initializedSignals, "2026-10-20T00:00:00.000Z", false);
+    expect(view.funnel_step).toBe("ready");
+    assertSetupSecretFree(view);
+  });
+
+  it("rejects streamlined setup completion without acknowledged_recovery_backup or when account/vault incomplete", () => {
+    const readySignals = baseSignals({ vaultConfigured: true });
+    expect(() =>
+      applyStreamlinedSetupComplete(EMPTY_SETUP_FLAGS, readySignals, {
+        acknowledged_recovery_backup: false,
+      }),
+    ).toThrow(/acknowledged_recovery_backup/i);
+
+    const accountPendingSignals = baseSignals({ mustChangePassword: true, vaultConfigured: true });
+    expect(() =>
+      applyStreamlinedSetupComplete(EMPTY_SETUP_FLAGS, accountPendingSignals, {
+        acknowledged_recovery_backup: true,
+      }),
+    ).toThrow(/account password/i);
+
+    const vaultPendingSignals = baseSignals({ vaultConfigured: false });
+    expect(() =>
+      applyStreamlinedSetupComplete(EMPTY_SETUP_FLAGS, vaultPendingSignals, {
+        acknowledged_recovery_backup: true,
+      }),
+    ).toThrow(/vault must be initialized/i);
+  });
+});
+

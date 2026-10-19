@@ -142,12 +142,107 @@ export function refineNextStep(
 
 export interface SetupStateDay0 {
   readonly complete?: boolean;
+  readonly setupComplete?: boolean;
   readonly next_step?: string;
+  readonly funnel_step?: StreamlinedDay0Step | string;
   readonly password_ok?: boolean;
   readonly totp_ok?: boolean;
+  readonly passkeyEnrolled?: boolean;
   readonly pwa_installed?: boolean;
   readonly device_enrolled?: boolean;
   readonly vault_ready?: boolean;
+  readonly vaultInitialized?: boolean;
   readonly recovery_proven?: boolean;
+  readonly backupAcknowledged?: boolean;
+  readonly backupDownloaded?: boolean;
   readonly allow_browser_tab_setup?: boolean;
 }
+
+/**
+ * Streamlined 3-step Day-0 setup funnel (`account` -> `vault` -> `ready`, GN-401).
+ * Demotes PWA installation and multi-step backup re-upload quiz out of the
+ * blocking setup progression while preserving full backward compatibility with
+ * legacy `/start/*` deep links.
+ */
+export const STREAMLINED_DAY0_STEPS = ["account", "vault", "ready"] as const;
+
+export type StreamlinedDay0Step = (typeof STREAMLINED_DAY0_STEPS)[number];
+
+export function isStreamlinedDay0Step(value: unknown): value is StreamlinedDay0Step {
+  return (
+    typeof value === "string" &&
+    (STREAMLINED_DAY0_STEPS as readonly string[]).includes(value)
+  );
+}
+
+export function streamlinedStepIndex(step: StreamlinedDay0Step): number {
+  return STREAMLINED_DAY0_STEPS.indexOf(step);
+}
+
+export function streamlinedStepForDay0Step(
+  step: Day0Step | string | null | undefined,
+): StreamlinedDay0Step {
+  switch (step) {
+    case "password":
+    case "totp":
+      return "account";
+    case "install":
+    case "device":
+    case "vault":
+    case "backup":
+    case "prove":
+      return "vault";
+    case "home":
+      return "ready";
+    default:
+      return "account";
+  }
+}
+
+export function resolveStreamlinedStep(state: SetupStateDay0): StreamlinedDay0Step {
+  if (
+    state.complete === true ||
+    state.setupComplete === true ||
+    state.funnel_step === "ready" ||
+    state.next_step === "home"
+  ) {
+    return "ready";
+  }
+  if (isStreamlinedDay0Step(state.funnel_step)) {
+    return state.funnel_step;
+  }
+  if (
+    state.passkeyEnrolled === false ||
+    state.password_ok === false ||
+    state.totp_ok === false
+  ) {
+    return "account";
+  }
+  const accountDone =
+    state.passkeyEnrolled === true ||
+    (state.password_ok === true && state.totp_ok === true);
+  const vaultDone = state.vaultInitialized === true || state.vault_ready === true;
+  const backupDone =
+    state.backupAcknowledged === true ||
+    state.backupDownloaded === true ||
+    state.recovery_proven === true;
+  if (accountDone && vaultDone && backupDone) {
+    return "ready";
+  }
+  if (accountDone) {
+    return "vault";
+  }
+  return streamlinedStepForDay0Step(state.next_step);
+}
+
+export function pathForStreamlinedStep(step: StreamlinedDay0Step): string {
+  switch (step) {
+    case "account":
+      return "/setup";
+    case "vault":
+      return "/start/vault";
+    case "ready":
+      return "/";
+  }
+}
+

@@ -55,6 +55,9 @@ describe("money-workers composition", () => {
     expect(workers).toMatch(/NO_ELIGIBLE_WALLET/);
     expect(workers).toMatch(/recovery_verified not stamped here/);
     expect(workers).toMatch(/recovery-verified ceremony/);
+    expect(workers).toMatch(/stampRecoveryUnderVault/);
+    expect(workers).toMatch(/vaultReady === true/);
+    expect(main).toMatch(/vaultReady:\s*true/);
     expect(workers).toMatch(/runUnderLeadership/);
     expect(workers).toMatch(/trackSigningInflight/);
     expect(workers).not.toMatch(/SET\s+recovery_verified_at/);

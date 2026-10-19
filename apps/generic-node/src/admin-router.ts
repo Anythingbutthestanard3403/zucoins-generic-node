@@ -129,6 +129,7 @@ import {
   type DefaultFundingWalletPort,
   type DefaultFundingWalletSnapshot,
   type FundingWalletSetMode,
+  ReservePoolCapError,
 } from "@zucoins/node-core";
 import {
   isWalletMoneyMode,
@@ -1262,6 +1263,24 @@ function toApiKeyIssueResult(
 // POST /admin/v1/reporting-keys body — the node mints the keypair, so the
 // request carries no fields (parity with the empty-body revoke). An explicit unknown field
 // is rejected rather than ignored.
+function parseReserveWalletBody(
+  raw: unknown,
+): ParseOk<{ readonly label: string }> | ParseFail {
+  if (!isRecord(raw) || typeof raw.label !== "string") {
+    return { ok: false, status: 400, code: "validation_error", message: "label is required" };
+  }
+  const label = raw.label.trim();
+  if (label.length < 1 || label.length > 128) {
+    return {
+      ok: false,
+      status: 400,
+      code: "validation_error",
+      message: "label must be 1-128 characters",
+    };
+  }
+  return { ok: true, body: { label } };
+}
+
 function parseIssueReportingKeyBody(
   raw: unknown,
 ): ParseOk<Record<string, never>> | ParseFail {
@@ -1739,6 +1758,21 @@ export interface AdminRouteDeps {
     readonly walletId: string;
     readonly publicKey: string;
   }>;
+  /**
+   * Mint one named INTERNAL_ONLY reserve (GN-102). Does not change the
+   * node-wide default funding wallet. Omitted → 503.
+   */
+  readonly mintNamedReserveWallet?: (input: { readonly displayLabel: string }) => Promise<{
+    readonly walletId: string;
+    readonly moneyMode: "INTERNAL_ONLY";
+    readonly displayLabel: string;
+    readonly destinationState: "BLESSED";
+  }>;
+  /**
+   * Fired after a successful vault-master offline acknowledgement, once the
+   * vault is ready. Boot also provisions; this path is idempotent.
+   */
+  readonly onVaultInitialized?: () => Promise<void>;
   /**
    * Platform integration-request inbox (ZTR-1240). When omitted, list/approve/
    * decline fail closed (503).
@@ -3636,6 +3670,13 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           w5_vault_ready: true,
           w5_offline_backup_ack: true,
         });
+        if (deps.onVaultInitialized !== undefined) {
+          try {
+            await deps.onVaultInitialized();
+          } catch {
+            return fail(503, "service_unavailable", "reserve pool provisioning failed", requestId);
+          }
+        }
         assertSetupSecretFree(result);
         return ok(200, result);
       } catch (ex) {
@@ -5901,6 +5942,91 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
+    // POST /admin/v1/reserve-wallets — one named INTERNAL_ONLY reserve.
+    // Session+CSRF+fresh TOTP. Does not change the node-wide default funding wallet.
+    if (verb === "POST" && pathname === "/admin/v1/reserve-wallets") {
+      if (deps.mintNamedReserveWallet === undefined) {
+        return fail(503, "service_unavailable", "reserve wallet mint not wired", requestId);
+      }
+      const idemKey = headers["idempotency-key"];
+      if (idemKey === undefined || !/^[!-~]{16,255}$/.test(idemKey)) {
+        return fail(
+          400,
+          "invalid_idempotency_key",
+          "Idempotency-Key (16-255 visible ASCII) required",
+          requestId,
+        );
+      }
+      const routeId = "admin_reserve_wallets";
+      if (deps.adminIdempotencyStore !== undefined) {
+        const bodySha = adminIdempotencySha256(Buffer.from(rawBody).toString("utf8"));
+        const completed = await deps.adminIdempotencyStore.findCompleted(nodeId, routeId, idemKey);
+        if (completed !== null) {
+          if (
+            completed.fingerprint.method === verb &&
+            completed.fingerprint.rawTarget === rawPath &&
+            completed.fingerprint.bodySha256 === bodySha
+          ) {
+            return {
+              status: completed.responseStatus,
+              body: completed.responseBytes.toString("utf8"),
+              headers: { ...JSON_HEADERS, "idempotency-replayed": "true" },
+            };
+          }
+          return fail(409, "idempotency_conflict", "Idempotency-Key reused with a different request", requestId);
+        }
+      }
+      const mintNamedReserveWallet = deps.mintNamedReserveWallet;
+      const idemStore = deps.adminIdempotencyStore;
+      const guarded = await runGuardedAdminMutation({
+        sessions,
+        request: authReq,
+        csrf,
+        totp: labTotpOrNull(totp),
+        userStore: deps.userStore,
+        totpLog,
+        nodeId,
+        rawBody: parsedBody,
+        validateBody: parseReserveWalletBody,
+        nowMs: nowMs(),
+        mutate: async ({ body }) => {
+          const minted = await mintNamedReserveWallet({ displayLabel: body.label });
+          return {
+            wallet_id: minted.walletId,
+            money_mode: minted.moneyMode,
+            display_label: minted.displayLabel,
+            destination_state: minted.destinationState,
+          };
+        },
+      });
+      if (!guarded.ok) {
+        if (guarded.reason === "mutation_threw" && guarded.error instanceof ReservePoolCapError) {
+          return fail(409, "conflict", "wallet cap reached", requestId);
+        }
+        return fail(guarded.status, guarded.code, guarded.message, requestId);
+      }
+      if (idemStore !== undefined) {
+        const responseBytes = Buffer.from(JSON.stringify(guarded.result), "utf8");
+        try {
+          await idemStore.recordCompleted({
+            nodeId,
+            routeId,
+            idempotencyKey: idemKey,
+            fingerprint: {
+              method: verb,
+              rawTarget: rawPath,
+              bodySha256: adminIdempotencySha256(Buffer.from(rawBody).toString("utf8")),
+            },
+            responseStatus: 201,
+            responseBytes,
+          });
+        } catch {
+          return fail(409, "idempotency_conflict", "concurrent same-key reserve mint", requestId);
+        }
+      }
+      return ok(201, guarded.result);
+    }
+
     // POST /admin/v1/reporting-keys — node-mint the first ACTIVE reporting
     // credential (first-key ceremony). Session+CSRF+fresh TOTP via
     // runGuardedAdminMutation (parity with api-keys issue). The raw private seed is returned
@@ -6760,6 +6886,8 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly implementerRegistry?: ImplementerRegistry;
   readonly defaultFundingWallet?: DefaultFundingWalletPort;
   readonly mintFundingWallet?: AdminRouteDeps["mintFundingWallet"];
+  readonly mintNamedReserveWallet?: AdminRouteDeps["mintNamedReserveWallet"];
+  readonly onVaultInitialized?: AdminRouteDeps["onVaultInitialized"];
   readonly integrationRequestStore?: IntegrationRequestStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
@@ -6861,6 +6989,8 @@ export function createFailClosedAdminRouteDeps(base: {
     implementerRegistry: base.implementerRegistry,
     defaultFundingWallet: base.defaultFundingWallet,
     mintFundingWallet: base.mintFundingWallet,
+    mintNamedReserveWallet: base.mintNamedReserveWallet,
+    onVaultInitialized: base.onVaultInitialized,
     integrationRequestStore: base.integrationRequestStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,

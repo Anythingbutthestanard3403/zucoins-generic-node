@@ -54,6 +54,11 @@ export interface GenesisDeps {
   readonly adminUserStore: AdminUserStore;
   readonly credentialStore: CredentialStore;
   readonly logger: GenesisLogger;
+  /**
+   * Optional post-genesis hook. Production boot does not pass it: genesis runs
+   * before the vault unlock, so the reserve pool is provisioned later.
+   */
+  readonly provisionUnlockedPool?: () => Promise<void>;
 }
 
 /**
@@ -309,5 +314,8 @@ export async function runGenesisBootstrap(
       },
       deps.logger,
     );
+  }
+  if (deps.provisionUnlockedPool !== undefined) {
+    await deps.provisionUnlockedPool();
   }
 }

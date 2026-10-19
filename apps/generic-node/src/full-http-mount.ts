@@ -23,6 +23,7 @@
 // SSE subscribe uses durable subscription_handles.
 
 import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { createReservePoolController } from "./bootstrap/reserve-pool.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Pool } from "pg";
 
@@ -408,6 +409,11 @@ export interface ProductionSurfaceConfig {
    * mintFundingWallet is not wired and CREATE requires a pre-minted wallet_id.
    */
   readonly walletVault?: EncryptedWalletKeyStore;
+  /**
+   * POOL_CAP_TOTAL. When set together with walletVault, named reserve mint
+   * and the vault-ready provision hook are wired.
+   */
+  readonly poolCapTotal?: number;
   /**
    * ZTR-1307 — post-commit push provision for every mint path that lands in this mount
    * (funding CREATE). Destination register uses the same holder via the key generator
@@ -805,6 +811,16 @@ export function createProductionRouteSurface(
             secret64.fill(0);
           }
         };
+  const reservePool =
+    config.walletVault === undefined || config.poolCapTotal === undefined
+      ? undefined
+      : createReservePoolController({
+          pool: config.pool,
+          nodeId: config.nodeId,
+          poolCapTotal: config.poolCapTotal,
+          vault: config.walletVault,
+          onWalletsMinted: config.onWalletsMinted,
+        });
   // Integration-request operator store (list/approve/decline). Pool-scoped for
   // reads; TX-scoped clone is rebound inside atomicAdminMutation.portsFor.
   const adminIntegrationRequestStore = createSqlIntegrationRequestStore({
@@ -929,6 +945,11 @@ export function createProductionRouteSurface(
     implementerRegistry,
     defaultFundingWallet,
     mintFundingWallet,
+    mintNamedReserveWallet:
+      reservePool === undefined
+        ? undefined
+        : (input: { readonly displayLabel: string }) => reservePool.mintNamed(input.displayLabel),
+    onVaultInitialized: reservePool?.ensure,
     integrationRequestStore: adminIntegrationRequestStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),

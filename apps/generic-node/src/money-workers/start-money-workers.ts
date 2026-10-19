@@ -16,9 +16,9 @@
 //      OBSERVE + landing-proof commit → RECEIVE_LANDED (runReceiveLandingStep,
 //      landing steps 1–4). Read-only — never submits, never releases the receiver lease.
 //
-// Workers MUST NOT invent recovery_verified_at. Freshly minted pool wallets stay
-// recovery-unverified; assign returns NO_ELIGIBLE_WALLET until the operator runs the
-// recovery-verification ceremony (src/ops/run-recovery-ceremony.ts).
+// vaultReady stamps pool mints via stampRecoveryUnderVault after seal. When that
+// flag is omitted, recovery_verified not stamped here and assign returns
+// NO_ELIGIBLE_WALLET until the recovery-verified ceremony runs.
 
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
@@ -35,6 +35,7 @@ import {
   createSqlAutoApprovePolicy,
   insertNodeGeneratedWalletWithPendingDestination,
   deleteNodeGeneratedWalletMint,
+  stampRecoveryUnderVault,
   createSqlSignerAuditLog,
   DEFAULT_SERIALIZATION_RETRY_POLICY,
   evaluateAutoApproveRule,
@@ -213,6 +214,11 @@ export interface StartMoneyWorkersDeps {
    * periodic sweep are the backstop that eventually subscribes anything missed here. // contract-allow:sweep:frozen structural vocabulary
    */
   readonly onWalletsMinted?: (walletIds: readonly string[]) => void;
+  /**
+   * When true, pool mints call stampRecoveryUnderVault after seal. Omitted
+   * keeps the unstamped path (recovery_verified not stamped here).
+   */
+  readonly vaultReady?: boolean;
   /**
    * Push subscription gate. When provided, EXTERNAL receive formation and
    * EXTERNAL send formation check that the wallet has an ACTIVE push subscription before
@@ -405,6 +411,7 @@ function createPoolMint(deps: {
   readonly pool: Pool;
   readonly vault: EncryptedWalletKeyStore;
   readonly nodeId: string;
+  readonly vaultReady?: boolean;
 }): MintWallet {
   return async (_db, _batchIndex, role: PoolMintRole = "RECEIVE_ONLY") => {
     const { privateKey, publicKey: pubObj } = generateKeyPairSync("ed25519");
@@ -427,7 +434,6 @@ function createPoolMint(deps: {
         label: sendOnly ? `send-worker-${walletId.slice(0, 8)}` : "",
         role: sendOnly ? "SEND_ONLY" : "RECEIVE_ONLY",
       });
-      // recovery_verified_at intentionally NULL — workers never stamp recovery verification.
       await deps.vault.seal(
         {
           nodeId: deps.nodeId as Uuid,
@@ -438,6 +444,18 @@ function createPoolMint(deps: {
         },
         secret64,
       );
+      if (deps.vaultReady === true) {
+        const stamped = await stampRecoveryUnderVault(
+          {
+            query: async <R extends Record<string, unknown>>(text: string, params?: readonly unknown[]) => {
+              const result = await deps.pool.query(text, params as never[]);
+              return { rows: result.rows as R[] };
+            },
+          },
+          { nodeId: deps.nodeId, walletId, publicKey },
+        );
+        if (!stamped) throw new Error("pool mint recovery stamp missed");
+      }
       return walletId;
     } catch (err) {
       try {
@@ -1397,6 +1415,7 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
     pool: deps.pool,
     vault: deps.vault,
     nodeId: deps.config.nodeId,
+    vaultReady: deps.vaultReady,
   });
   // Real dual-chain appender, bound per transaction to the READY CAS.
   const events = (tx: SqlTx): ReceiveReadyEventAppender =>
@@ -1504,8 +1523,12 @@ export function startMoneyWorkers(deps: StartMoneyWorkersDeps): MoneyWorkersHand
       const result = await runSharedPoolScaleUp(tx, { limits, mint });
       mintedWalletIds = result.mintedWalletIds;
       if (result.mintedWalletIds.length > 0) {
+        const stampNote =
+          deps.vaultReady === true
+            ? "recovery stamped after seal"
+            : "recovery_verified not stamped here";
         deps.logger.info(
-          `money-workers: pool scale-up minted=${result.mintedWalletIds.length} send=${result.plan.sendMint} receive=${result.plan.receiveMint} capCount=${result.plan.capCount} (recovery_verified not stamped here)`,
+          `money-workers: pool scale-up minted=${result.mintedWalletIds.length} send=${result.plan.sendMint} receive=${result.plan.receiveMint} capCount=${result.plan.capCount} (${stampNote})`,
         );
       }
     });

@@ -115,6 +115,8 @@ export interface MemoryWalletSeed {
       | "holding_operation_type"
     >
   >;
+  /** Operator label. Omitted seeds null (ZTR-1324). */
+  readonly display_label?: string | null;
   /** Money capability override; omitted seeds default FULL (ZTR-1267). */
   readonly money_capability?: Partial<
     Pick<
@@ -192,6 +194,7 @@ function walletItem(seed: MemoryWalletSeed): WalletInventoryItem {
     ...(seed.holding ?? {}),
     ...defaultMoneyCapability(),
     ...(seed.money_capability ?? {}),
+    display_label: seed.display_label ?? null,
   };
 }
 
@@ -437,6 +440,10 @@ function mapWalletRow(
     allow_external_send: Boolean(row.allow_external_send),
     allow_internal_move: Boolean(row.allow_internal_move),
     row_version: Number(row.row_version ?? 1),
+    display_label:
+      row.display_label == null || String(row.display_label).trim() === ""
+        ? null
+        : String(row.display_label),
   };
 }
 
@@ -473,7 +480,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
                 w.created_at, w.retired_at, w.quarantine_reason,
                 w.recovery_verified_at, w.recovery_verification_id,
                 w.money_mode, w.allow_external_receive, w.allow_external_send,
-                w.allow_internal_move, w.row_version,
+                w.allow_internal_move, w.row_version, w.display_label,
                 l.operation_id::text AS holding_operation_id,
                 l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,
@@ -509,7 +516,7 @@ export function createSqlAdminInventoryStore(sql: InventorySqlExecutor): AdminIn
         `SELECT w.id, w.node_id, w.public_key, w.key_origin, w.state, w.created_at, w.retired_at,
                 w.quarantine_reason, w.recovery_verified_at, w.recovery_verification_id,
                 w.money_mode, w.allow_external_receive, w.allow_external_send,
-                w.allow_internal_move, w.row_version,
+                w.allow_internal_move, w.row_version, w.display_label,
                 l.operation_id::text AS holding_operation_id,
                 l.lease_role::text AS holding_lease_role,
                 o.status::text AS holding_operation_status,

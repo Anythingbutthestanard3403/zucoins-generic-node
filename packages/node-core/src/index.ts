@@ -670,6 +670,15 @@ export {
   type SendLandedUnacknowledgedCloseInvariant,
 } from "./schema/send-landed-unacknowledged-close.contract.js";
 
+// ZTR-1324: reserve-wallet labels, junction, and custom-routing flag.
+export {
+  CONNECTOR_RESERVE_WALLETS_EXECUTION_OBLIGATIONS,
+  CONNECTOR_RESERVE_WALLETS_INVARIANTS,
+  CONNECTOR_RESERVE_WALLETS_SCHEMA_FILE,
+  CONNECTOR_RESERVE_WALLETS_SOURCE,
+  type ConnectorReserveWalletsInvariant,
+} from "./schema/connector-reserve-wallets.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

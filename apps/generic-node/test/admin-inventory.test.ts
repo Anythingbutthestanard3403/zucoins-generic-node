@@ -662,6 +662,7 @@ describe("admin inventory HTTP (contract)", () => {
       "allow_external_send",
       "allow_internal_move",
       "row_version",
+      "display_label",
     ]);
   });
 

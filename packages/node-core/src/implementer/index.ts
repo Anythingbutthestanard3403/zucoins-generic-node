@@ -1,6 +1,8 @@
 export {
   IMPLEMENTER_AUDIT_CREATED,
+  IMPLEMENTER_AUDIT_CUSTOM_ROUTING_CHANGED,
   IMPLEMENTER_AUDIT_FUNDING_WALLET_CHANGED,
+  IMPLEMENTER_AUDIT_RESERVE_WALLETS_CHANGED,
   IMPLEMENTER_AUDIT_RETIRED,
   ImplementerRegistryError,
   type FundingWalletSetMode,
@@ -9,8 +11,14 @@ export {
   type ImplementerRegistry,
   type ImplementerRegistryErrorCode,
   type ImplementerRetireInput,
+  type ImplementerReserveWallet,
+  type ImplementerSetCustomRoutingInput,
+  type ImplementerSetCustomRoutingOutcome,
   type ImplementerSetFundingWalletInput,
   type ImplementerSetFundingWalletOutcome,
+  type ImplementerSetReserveWalletsInput,
+  type ImplementerSetReserveWalletsOutcome,
+  type ImplementerSetReserveWalletsReason,
 } from "./types.js";
 
 export { InMemoryImplementerRegistry, type MemoryFundingWalletSeed } from "./memory-store.js";

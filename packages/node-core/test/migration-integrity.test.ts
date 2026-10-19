@@ -238,6 +238,8 @@ const SCHEMA_FILES = [
   "send-proven-not-landed-close.sql",
   // ZTR-1316: SEND_LANDED_UNACKNOWLEDGED_CLOSE lease proof kind. CHECK ALTER only.
   "send-landed-unacknowledged-close.sql",
+  // ZTR-1324: display_label, allow_custom_routing, implementer_reserve_wallets.
+  "connector-reserve-wallets.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -633,6 +635,10 @@ const GREENFIELD: Record<
   "send-landed-unacknowledged-close.sql": {
     applies: false,
     missingFragment: "send-landed-unacknowledged-close requires lease_release_proofs",
+  },
+  "connector-reserve-wallets.sql": {
+    applies: false,
+    missingFragment: "connector-reserve-wallets requires wallets",
   },
 };
 

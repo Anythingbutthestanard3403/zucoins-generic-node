@@ -27,6 +27,24 @@ export interface ImplementerRecord {
    * need the effective key must also resolve the node default setting.
    */
   readonly funding_wallet_public_key: string | null;
+  /**
+   * Operator opt-in. False means incoming RECEIVE_EXTERNAL follows the
+   * connector's default reserve. True allows a caller to name another bound
+   * reserve wallet.
+   */
+  readonly allow_custom_routing: boolean;
+  /**
+   * Reserve wallets bound to this connector. The row with is_default true is
+   * the same wallet as funding_wallet_id (both null when the list is empty).
+   */
+  readonly reserve_wallets: readonly ImplementerReserveWallet[];
+}
+
+export interface ImplementerReserveWallet {
+  readonly wallet_id: string;
+  readonly public_key: string | null;
+  readonly display_label: string | null;
+  readonly is_default: boolean;
 }
 
 export interface ImplementerCreateInput {
@@ -99,7 +117,50 @@ export interface ImplementerRegistry {
   setFundingWallet(
     input: ImplementerSetFundingWalletInput,
   ): Promise<ImplementerSetFundingWalletOutcome>;
+  /**
+   * Replace the connector's reserve bindings. Empty walletIds clears the
+   * junction and funding_wallet_id. A non-empty list requires defaultWalletId
+   * to be one of the ids. The default row and funding_wallet_id move together.
+   */
+  setReserveWallets(
+    input: ImplementerSetReserveWalletsInput,
+  ): Promise<ImplementerSetReserveWalletsOutcome>;
+  /** Operator opt-in for naming a non-default bound reserve on receive. */
+  setCustomRouting(
+    input: ImplementerSetCustomRoutingInput,
+  ): Promise<ImplementerSetCustomRoutingOutcome>;
 }
+
+export interface ImplementerSetReserveWalletsInput {
+  readonly nodeId: string;
+  readonly implementerId: string;
+  readonly walletIds: readonly string[];
+  readonly defaultWalletId: string | null;
+  readonly actorId: string;
+}
+
+export type ImplementerSetReserveWalletsReason =
+  | "implementer_not_found"
+  | "implementer_retired"
+  | "wallet_not_found"
+  | "wallet_retired"
+  | "wallet_ineligible"
+  | "default_mismatch";
+
+export type ImplementerSetReserveWalletsOutcome =
+  | { readonly ok: true; readonly implementer: ImplementerRecord }
+  | { readonly ok: false; readonly reason: ImplementerSetReserveWalletsReason };
+
+export interface ImplementerSetCustomRoutingInput {
+  readonly nodeId: string;
+  readonly implementerId: string;
+  readonly allowCustomRouting: boolean;
+  readonly actorId: string;
+}
+
+export type ImplementerSetCustomRoutingOutcome =
+  | { readonly ok: true; readonly implementer: ImplementerRecord }
+  | { readonly ok: false; readonly reason: "implementer_not_found" | "implementer_retired" };
 
 export type ImplementerRegistryErrorCode =
   | "IMPLEMENTER_NOT_FOUND"
@@ -120,3 +181,7 @@ export const IMPLEMENTER_AUDIT_CREATED = "implementer.created" as const;
 export const IMPLEMENTER_AUDIT_RETIRED = "implementer.retired" as const;
 export const IMPLEMENTER_AUDIT_FUNDING_WALLET_CHANGED =
   "implementer.funding_wallet_changed" as const;
+export const IMPLEMENTER_AUDIT_RESERVE_WALLETS_CHANGED =
+  "implementer.reserve_wallets_changed" as const;
+export const IMPLEMENTER_AUDIT_CUSTOM_ROUTING_CHANGED =
+  "implementer.custom_routing_changed" as const;

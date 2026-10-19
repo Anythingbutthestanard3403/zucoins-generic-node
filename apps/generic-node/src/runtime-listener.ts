@@ -66,6 +66,7 @@ import type { NodeReadiness } from "./boot/readiness.js";
 import { createMetricsMount, type MetricsMount } from "./metrics/routes.js";
 import { resolveAdminSpaDist, tryServeAdminSpa } from "./admin-spa.js";
 import { resolveEmbedDist, tryServeEmbed } from "./embed-spa.js";
+import { tryServePayPage } from "./pay-page.js";
 import {
   loadPublicReceiveInstruction,
   RECEIVE_INSTRUCTION_CORS_HEADERS,
@@ -794,6 +795,13 @@ export function createNodeRuntimeListener(
           merchantFrameAncestors: deps.embedMerchantFrameAncestors,
         })
       ) {
+        return;
+      }
+    }
+
+    // GET /pay/:operation_id — node-hosted minimal transfer instruction page (ZTR-1337)
+    if (pathname.startsWith("/pay/")) {
+      if (tryServePayPage(request, response, receiveInstructionSql)) {
         return;
       }
     }

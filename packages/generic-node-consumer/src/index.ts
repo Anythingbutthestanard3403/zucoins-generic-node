@@ -255,4 +255,19 @@ export {
   type ListWalletsInput,
   type ListWalletsResponse,
 } from "./http/connector-reads.js";
+export {
+  ConsumerHttpError,
+  PUBLIC_RECEIVE_INSTRUCTION_STATES,
+  RECEIVE_INSTRUCTION_TAMPER_REASON_CODES,
+  ReceiveInstructionTamperError,
+  ReceiveInstructionVerificationError,
+  fetchAndVerifyReceiveInstruction,
+  verifyReceiveInstructionResponse,
+  type PersistedReceiveExpectedEnvelope,
+  type PublicReceiveInstructionResponse,
+  type PublicReceiveInstructionState,
+  type ReceiveInstructionTamperReasonCode,
+  type VerifyReceiveInstructionOptions,
+} from "./http/verify-receive-instruction.js";
+
 

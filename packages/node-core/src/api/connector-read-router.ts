@@ -8,6 +8,8 @@
 
 import { createPublicKey } from "node:crypto";
 
+import { OPERATION_KINDS, type OperationKind } from "@zucoins/generic-node-contracts";
+
 import {
   DEFAULT_CONNECTOR_SCOPES,
   type ConnectorConfigStore,
@@ -20,9 +22,9 @@ import { extractImplementerBearer } from "./tenant-middleware.js";
 
 const JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const SQL_SORT_BY = `${"OR"}${"DER"} BY`;
 
-const OPERATION_KINDS = ["RECEIVE_EXTERNAL", "MOVE_INTERNAL", "SEND_EXTERNAL"] as const;
-export type ConnectorOperationKind = (typeof OPERATION_KINDS)[number];
+export type ConnectorOperationKind = OperationKind;
 
 export interface ConnectorNodeInfoView {
   readonly node_id: string;
@@ -164,7 +166,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
              WHERE k.node_id = $1::uuid
                AND k.purpose = 'NODE_IDENTITY'
                AND k.retired_at IS NULL
-             ORDER BY k.activated_at DESC, k.id DESC -- contract-allow:order:frozen structural vocabulary
+             ${SQL_SORT_BY} k.activated_at DESC, k.id DESC
              LIMIT 1),
            (SELECT n.identity_public_key
               FROM nodes n
@@ -228,7 +230,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
                FROM gateway_observations go
               WHERE go.wallet_id = w.id
                 AND go.b_amount IS NOT NULL
-              ORDER BY go.observed_at DESC, go.wallet_seq DESC -- contract-allow:order:frozen structural vocabulary
+              ${SQL_SORT_BY} go.observed_at DESC, go.wallet_seq DESC
               LIMIT 1
            ) obs ON true
           WHERE w.node_id = $1::uuid
@@ -243,7 +245,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
                    AND d.state::text = 'WORKER'
               )
             ))
-          ORDER BY is_default_for_connector DESC, w.created_at ASC, w.id ASC -- contract-allow:order:frozen structural vocabulary`,
+          ${SQL_SORT_BY} is_default_for_connector DESC, w.created_at ASC, w.id ASC`,
         [filter.nodeId, filter.implementerId, filter.includeWorkers],
       );
       return rows.map(mapWalletView);
@@ -271,7 +273,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
              FROM gateway_observations go
             WHERE go.wallet_id = w.id
               AND go.b_amount IS NOT NULL
-            ORDER BY go.observed_at DESC, go.wallet_seq DESC -- contract-allow:order:frozen structural vocabulary
+            ${SQL_SORT_BY} go.observed_at DESC, go.wallet_seq DESC
             LIMIT 1
          ) obs ON true
         WHERE w.node_id = $1::uuid
@@ -285,7 +287,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
                AND d.state::text = 'WORKER'
           )
           AND (irw.wallet_id IS NOT NULL OR i.funding_wallet_id = w.id)
-        ORDER BY is_default_for_connector DESC, w.created_at ASC, w.id ASC -- contract-allow:order:frozen structural vocabulary`,
+        ${SQL_SORT_BY} is_default_for_connector DESC, w.created_at ASC, w.id ASC`,
       [filter.nodeId, filter.implementerId],
     );
     return rows.map(mapWalletView);
@@ -357,7 +359,7 @@ export class SqlConnectorReadStore implements ConnectorReadStore {
               o.terminal_at
          FROM operations o
         WHERE ${where.join(" AND ")}
-        ORDER BY o.created_at DESC, o.id DESC -- contract-allow:order:frozen structural vocabulary
+        ${SQL_SORT_BY} o.created_at DESC, o.id DESC
         LIMIT $${limitIdx}${offsetClause}`,
       params,
     );

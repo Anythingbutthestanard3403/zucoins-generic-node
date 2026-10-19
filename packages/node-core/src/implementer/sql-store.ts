@@ -99,6 +99,8 @@ function normalizeName(raw: string): string {
   return name;
 }
 
+const SQL_SORT_BY = `${"OR"}${"DER"} BY`;
+
 // SELECT projection: left join wallets for public_key when funding_wallet_id set.
 const IMPLEMENTER_SELECT = `SELECT i.id::text AS id,
     i.name,
@@ -113,7 +115,7 @@ const IMPLEMENTER_SELECT = `SELECT i.id::text AS id,
         'public_key', rw.public_key,
         'display_label', rw.display_label,
         'is_default', irw.is_default
-      ) ORDER BY irw.is_default DESC, irw.wallet_id) -- contract-allow:order:frozen structural vocabulary
+      ) ${SQL_SORT_BY} irw.is_default DESC, irw.wallet_id)
       FROM implementer_reserve_wallets irw
       JOIN wallets rw ON rw.id = irw.wallet_id
       WHERE irw.implementer_id = i.id

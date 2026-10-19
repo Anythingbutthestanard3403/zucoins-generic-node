@@ -98,7 +98,7 @@ const SCOPE_AUDIT: readonly ScopeAuditRow[] = [
     docProbe: /\bwebhooks?\b/i,
     // no-callback owns the surface census; drift-audit re-asserts the same forbid against
     // numbered core specs (dispositions.test.ts). Both declare the ban, neither implement it.
-    enforcedIn: ["no-callback", "drift-audit"],
+    enforcedIn: ["no-callback", "drift-audit", "implementer-events"],
   },
   {
     item: "product-finality claims based only on a node assertion",

@@ -67,6 +67,7 @@ function walletFixture(
     allow_external_send: true,
     allow_internal_move: true,
     row_version: 1,
+    display_label: null,
     ...partial,
   };
 }

@@ -12,6 +12,7 @@
     "attention-reason-enum.sql",
     "audit-log.sql",
     "base-enums-domains.sql",
+    "connector-reserve-wallets.sql",
     "custody-eligibility.sql",
     "destination-state-worker.sql",
     "destination-worker-sink.sql",
@@ -2118,7 +2119,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_127",
+      "satisfiedBy": "index:operations_unique_129",
       "ok": true
     },
     {
@@ -2165,7 +2166,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_70",
+      "satisfiedBy": "index:audit_log_unique_72",
       "ok": true
     },
     {

@@ -30,6 +30,7 @@ function base(over: Partial<WalletInventoryItem> = {}): WalletInventoryItem {
     allow_external_send: true,
     allow_internal_move: true,
     row_version: 1,
+    display_label: null,
     ...over,
   } as WalletInventoryItem;
 }

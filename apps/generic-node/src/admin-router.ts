@@ -610,7 +610,12 @@ function parseDualControlPolicyBody(
  */
 function parseWalletMoneyCapabilityBody(
   raw: unknown,
-): ParseOk<{ mode: WalletMoneyMode; expected_row_version: number }> | ParseFail {
+): ParseOk<{
+  mode: WalletMoneyMode;
+  expected_row_version: number;
+  display_label: string | null;
+  update_display_label: boolean;
+}> | ParseFail {
   if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
   }
@@ -634,15 +639,45 @@ function parseWalletMoneyCapabilityBody(
       message: "expected_row_version must be a positive integer",
     };
   }
-  const known = new Set(["mode", "expected_row_version"]);
+  const known = new Set(["mode", "expected_row_version", "display_label"]);
   for (const key of Object.keys(raw)) {
     if (!known.has(key)) {
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
+  let displayLabel: string | null = null;
+  const updateDisplayLabel = Object.prototype.hasOwnProperty.call(raw, "display_label");
+  if (updateDisplayLabel) {
+    if (raw.display_label === null) {
+      displayLabel = null;
+    } else if (typeof raw.display_label === "string") {
+      const trimmed = raw.display_label.trim();
+      if (trimmed.length < 1 || trimmed.length > 128) {
+        return {
+          ok: false,
+          status: 400,
+          code: "invalid_scalar",
+          message: "display_label must be 1-128 characters or null",
+        };
+      }
+      displayLabel = trimmed;
+    } else {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid_scalar",
+        message: "display_label must be 1-128 characters or null",
+      };
+    }
+  }
   return {
     ok: true,
-    body: { mode: raw.mode, expected_row_version: raw.expected_row_version },
+    body: {
+      mode: raw.mode,
+      expected_row_version: raw.expected_row_version,
+      display_label: displayLabel,
+      update_display_label: updateDisplayLabel,
+    },
   };
 }
 
@@ -2634,6 +2669,8 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   expectedRowVersion: body.expected_row_version,
                   actorId: user.id,
                   nodeId,
+                  updateDisplayLabel: body.update_display_label,
+                  displayLabel: body.display_label,
                 });
                 if (!outcome.ok) {
                   const status =

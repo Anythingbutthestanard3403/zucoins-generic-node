@@ -6,15 +6,22 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AuditLogRow } from "../core/audit-writer.js";
 import {
   IMPLEMENTER_AUDIT_CREATED,
+  IMPLEMENTER_AUDIT_CUSTOM_ROUTING_CHANGED,
   IMPLEMENTER_AUDIT_FUNDING_WALLET_CHANGED,
+  IMPLEMENTER_AUDIT_RESERVE_WALLETS_CHANGED,
   IMPLEMENTER_AUDIT_RETIRED,
   ImplementerRegistryError,
   type ImplementerCreateInput,
   type ImplementerRecord,
   type ImplementerRegistry,
+  type ImplementerReserveWallet,
   type ImplementerRetireInput,
+  type ImplementerSetCustomRoutingInput,
+  type ImplementerSetCustomRoutingOutcome,
   type ImplementerSetFundingWalletInput,
   type ImplementerSetFundingWalletOutcome,
+  type ImplementerSetReserveWalletsInput,
+  type ImplementerSetReserveWalletsOutcome,
 } from "./types.js";
 
 function detailsSha256(text: string): string {
@@ -36,6 +43,11 @@ export interface MemoryFundingWalletSeed {
   readonly id: string;
   readonly public_key: string;
   readonly retired?: boolean;
+  readonly nodeId?: string;
+  readonly display_label?: string | null;
+  /** Defaults true so older funding-pin fixtures stay attachable. */
+  readonly allow_internal_move?: boolean;
+  readonly state?: string;
 }
 
 export class InMemoryImplementerRegistry implements ImplementerRegistry {
@@ -51,9 +63,14 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
 
   /** Seed a row without audit (tests / fixtures). Funding fields default null. */
   seed(
-    row: Omit<ImplementerRecord, "funding_wallet_id" | "funding_wallet_public_key"> & {
+    row: Omit<
+      ImplementerRecord,
+      "funding_wallet_id" | "funding_wallet_public_key" | "allow_custom_routing" | "reserve_wallets"
+    > & {
       readonly funding_wallet_id?: string | null;
       readonly funding_wallet_public_key?: string | null;
+      readonly allow_custom_routing?: boolean;
+      readonly reserve_wallets?: readonly ImplementerReserveWallet[];
     },
   ): void {
     this.rows.set(row.id, {
@@ -63,6 +80,8 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       retired_at: row.retired_at,
       funding_wallet_id: row.funding_wallet_id ?? null,
       funding_wallet_public_key: row.funding_wallet_public_key ?? null,
+      allow_custom_routing: row.allow_custom_routing ?? false,
+      reserve_wallets: row.reserve_wallets ?? [],
     });
   }
 
@@ -102,6 +121,8 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       retired_at: null,
       funding_wallet_id: null,
       funding_wallet_public_key: null,
+      allow_custom_routing: false,
+      reserve_wallets: [],
     };
     this.rows.set(row.id, row);
     const detailsText = JSON.stringify({ id: row.id, name: row.name });
@@ -191,10 +212,23 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
     }
 
     const previousId = existing.funding_wallet_id;
+    const wallet = nextWalletId === null ? undefined : this.wallets.get(nextWalletId);
+    const reserveWallets: ImplementerReserveWallet[] =
+      nextWalletId === null
+        ? []
+        : [
+            {
+              wallet_id: nextWalletId,
+              public_key: nextPublicKey,
+              display_label: wallet?.display_label ?? null,
+              is_default: true,
+            },
+          ];
     const row: ImplementerRecord = {
       ...existing,
       funding_wallet_id: nextWalletId,
       funding_wallet_public_key: nextPublicKey,
+      reserve_wallets: reserveWallets,
     };
     this.rows.set(row.id, row);
     const createdAt = this.now().toISOString();
@@ -217,5 +251,117 @@ export class InMemoryImplementerRegistry implements ImplementerRegistry {
       createdAt,
     });
     return { ok: true, implementer: row };
+  }
+
+  async setReserveWallets(
+    input: ImplementerSetReserveWalletsInput,
+  ): Promise<ImplementerSetReserveWalletsOutcome> {
+    const existing = this.rows.get(input.implementerId);
+    if (existing === undefined) return { ok: false, reason: "implementer_not_found" };
+    if (existing.retired_at !== null) return { ok: false, reason: "implementer_retired" };
+
+    const ids = [...new Set(input.walletIds.map((id) => id.trim()).filter((id) => id.length > 0))];
+    if (ids.length === 0) {
+      if (input.defaultWalletId !== null) return { ok: false, reason: "default_mismatch" };
+      const row: ImplementerRecord = {
+        ...existing,
+        funding_wallet_id: null,
+        funding_wallet_public_key: null,
+        reserve_wallets: [],
+      };
+      this.rows.set(row.id, row);
+      this.pushReserveAudit(input, row, existing.funding_wallet_id);
+      return { ok: true, implementer: row };
+    }
+    if (input.defaultWalletId === null || !ids.includes(input.defaultWalletId)) {
+      return { ok: false, reason: "default_mismatch" };
+    }
+
+    const bound: ImplementerReserveWallet[] = [];
+    for (const id of ids) {
+      const wallet = this.wallets.get(id);
+      if (wallet === undefined || (wallet.nodeId !== undefined && wallet.nodeId !== input.nodeId)) {
+        return { ok: false, reason: "wallet_not_found" };
+      }
+      if (wallet.retired === true || wallet.state === "RETIRED") {
+        return { ok: false, reason: "wallet_retired" };
+      }
+      if (wallet.allow_internal_move === false) {
+        return { ok: false, reason: "wallet_ineligible" };
+      }
+      bound.push({
+        wallet_id: wallet.id,
+        public_key: wallet.public_key,
+        display_label: wallet.display_label ?? null,
+        is_default: wallet.id === input.defaultWalletId,
+      });
+    }
+    const def = bound.find((w) => w.is_default);
+    const row: ImplementerRecord = {
+      ...existing,
+      funding_wallet_id: def?.wallet_id ?? null,
+      funding_wallet_public_key: def?.public_key ?? null,
+      reserve_wallets: bound,
+    };
+    this.rows.set(row.id, row);
+    this.pushReserveAudit(input, row, existing.funding_wallet_id);
+    return { ok: true, implementer: row };
+  }
+
+  async setCustomRouting(
+    input: ImplementerSetCustomRoutingInput,
+  ): Promise<ImplementerSetCustomRoutingOutcome> {
+    const existing = this.rows.get(input.implementerId);
+    if (existing === undefined) return { ok: false, reason: "implementer_not_found" };
+    if (existing.retired_at !== null) return { ok: false, reason: "implementer_retired" };
+    const row: ImplementerRecord = {
+      ...existing,
+      allow_custom_routing: input.allowCustomRouting,
+    };
+    this.rows.set(row.id, row);
+    const createdAt = this.now().toISOString();
+    const detailsText = JSON.stringify({
+      implementer_id: row.id,
+      allow_custom_routing: input.allowCustomRouting,
+    });
+    this.audit.push({
+      id: randomUUID(),
+      nodeId: input.nodeId,
+      actorKind: "OPERATOR_SESSION",
+      actorId: input.actorId,
+      action: IMPLEMENTER_AUDIT_CUSTOM_ROUTING_CHANGED,
+      operationId: null,
+      walletId: null,
+      detailsText,
+      detailsSha256: detailsSha256(detailsText),
+      createdAt,
+    });
+    return { ok: true, implementer: row };
+  }
+
+  private pushReserveAudit(
+    input: ImplementerSetReserveWalletsInput,
+    row: ImplementerRecord,
+    previousFundingWalletId: string | null,
+  ): void {
+    const createdAt = this.now().toISOString();
+    const detailsText = JSON.stringify({
+      implementer_id: row.id,
+      previous_funding_wallet_id: previousFundingWalletId,
+      next_funding_wallet_id: row.funding_wallet_id,
+      wallet_ids: row.reserve_wallets.map((w) => w.wallet_id),
+    });
+    this.audit.push({
+      id: randomUUID(),
+      nodeId: input.nodeId,
+      actorKind: "OPERATOR_SESSION",
+      actorId: input.actorId,
+      action: IMPLEMENTER_AUDIT_RESERVE_WALLETS_CHANGED,
+      operationId: null,
+      walletId: row.funding_wallet_id,
+      detailsText,
+      detailsSha256: detailsSha256(detailsText),
+      createdAt,
+    });
   }
 }

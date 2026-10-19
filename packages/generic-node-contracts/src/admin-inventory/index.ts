@@ -160,6 +160,8 @@ export interface WalletInventoryItem {
   readonly allow_internal_move: boolean;
   /** House CAS counter for admin capability mutations (ZTR-1269). */
   readonly row_version: number;
+  /** Operator-facing name. Null until an operator sets one (ZTR-1324). */
+  readonly display_label: string | null;
 }
 
 /** Response field allowlist for wallet inventory — never private keys or secret-class tokens. */
@@ -188,6 +190,7 @@ export const WALLET_INVENTORY_FIELDS = [
   "allow_external_send",
   "allow_internal_move",
   "row_version",
+  "display_label",
 ] as const;
 
 /**

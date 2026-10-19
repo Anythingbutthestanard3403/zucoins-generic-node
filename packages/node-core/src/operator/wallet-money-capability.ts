@@ -64,6 +64,9 @@ export interface WalletMoneyCapabilitySetInput {
   readonly expectedRowVersion: number;
   readonly actorId: string;
   readonly nodeId: string;
+  /** When true, displayLabel replaces wallets.display_label in the same CAS. */
+  readonly updateDisplayLabel?: boolean;
+  readonly displayLabel?: string | null;
 }
 
 /**
@@ -82,6 +85,7 @@ export interface MemoryWalletMoneyCapabilityRow {
   allow_external_send: boolean;
   allow_internal_move: boolean;
   row_version: number;
+  display_label?: string | null;
 }
 
 function detailsSha256(text: string): string {
@@ -156,6 +160,9 @@ export class InMemoryWalletMoneyCapabilityStore implements WalletMoneyCapability
     row.allow_external_receive = nextFlags.allow_external_receive;
     row.allow_external_send = nextFlags.allow_external_send;
     row.allow_internal_move = nextFlags.allow_internal_move;
+    if (input.updateDisplayLabel === true) {
+      row.display_label = input.displayLabel ?? null;
+    }
     row.row_version = row.row_version + 1;
 
     const details =
@@ -268,6 +275,7 @@ export function createSqlWalletMoneyCapabilityStore(
                 allow_external_receive = $4,
                 allow_external_send = $5,
                 allow_internal_move = $6,
+                display_label = CASE WHEN $8::boolean THEN $9 ELSE display_label END,
                 row_version = row_version + 1
           WHERE id = $1::uuid
             AND node_id = $2::uuid
@@ -285,6 +293,8 @@ export function createSqlWalletMoneyCapabilityStore(
           nextFlags.allow_external_send,
           nextFlags.allow_internal_move,
           input.expectedRowVersion,
+          input.updateDisplayLabel === true,
+          input.updateDisplayLabel === true ? (input.displayLabel ?? null) : null,
         ],
       );
       const next = updated.rows[0];

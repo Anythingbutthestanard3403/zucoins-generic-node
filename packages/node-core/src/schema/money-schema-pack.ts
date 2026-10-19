@@ -256,6 +256,10 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // CHECK-constraint ALTER on lease_release_proofs. Requires send-proven-not-landed-close
   // (last prior proof_kind rewrite). Appended only.
   "send-landed-unacknowledged-close",
+  // ZTR-1324: wallet display_label, implementers.allow_custom_routing, and
+  // implementer_reserve_wallets. Requires wallets + implementers + funding_wallet_id
+  // (implementer-funding-wallet). Appended only.
+  "connector-reserve-wallets",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

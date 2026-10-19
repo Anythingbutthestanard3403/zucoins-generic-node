@@ -118,6 +118,124 @@ describe("InMemoryImplementerRegistry setFundingWallet", () => {
   });
 });
 
+describe("InMemoryImplementerRegistry setReserveWallets", () => {
+  const IMPL = "11111111-1111-4111-8111-111111111111";
+
+  function seeded(): InMemoryImplementerRegistry {
+    const reg = new InMemoryImplementerRegistry();
+    reg.seed({
+      id: IMPL,
+      name: "connector",
+      created_at: "2026-01-01T00:00:00.000Z",
+      retired_at: null,
+    });
+    reg.seedWallet({
+      id: WALLET_A,
+      public_key: PUB_A,
+      nodeId: NODE,
+      display_label: "Main Reserve",
+      allow_internal_move: true,
+    });
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: NODE,
+      display_label: "Secondary",
+      allow_internal_move: true,
+    });
+    return reg;
+  }
+
+  it("binds two reserve wallets and pins the default on funding_wallet_id", async () => {
+    const reg = seeded();
+    const bound = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_A, WALLET_B],
+      defaultWalletId: WALLET_A,
+      actorId: ACTOR,
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(bound.implementer.funding_wallet_id).toBe(WALLET_A);
+    expect(bound.implementer.reserve_wallets).toEqual([
+      {
+        wallet_id: WALLET_A,
+        public_key: PUB_A,
+        display_label: "Main Reserve",
+        is_default: true,
+      },
+      {
+        wallet_id: WALLET_B,
+        public_key: PUB_B,
+        display_label: "Secondary",
+        is_default: false,
+      },
+    ]);
+    const listed = await reg.list();
+    expect(listed[0]?.reserve_wallets).toHaveLength(2);
+  });
+
+  it("refuses a retired wallet and leaves the previous pin", async () => {
+    const reg = seeded();
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: NODE,
+      retired: true,
+      state: "RETIRED",
+    });
+    const refused = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_B],
+      defaultWalletId: WALLET_B,
+      actorId: ACTOR,
+    });
+    expect(refused).toEqual({ ok: false, reason: "wallet_retired" });
+    expect((await reg.get(IMPL))?.funding_wallet_id).toBeNull();
+  });
+
+  it("refuses a wallet from another node", async () => {
+    const reg = seeded();
+    reg.seedWallet({
+      id: WALLET_B,
+      public_key: PUB_B,
+      nodeId: "99999999-9999-4999-8999-999999999999",
+    });
+    const refused = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_B],
+      defaultWalletId: WALLET_B,
+      actorId: ACTOR,
+    });
+    expect(refused).toEqual({ ok: false, reason: "wallet_not_found" });
+  });
+
+  it("empty list clears bindings", async () => {
+    const reg = seeded();
+    await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [WALLET_A],
+      defaultWalletId: WALLET_A,
+      actorId: ACTOR,
+    });
+    const cleared = await reg.setReserveWallets({
+      nodeId: NODE,
+      implementerId: IMPL,
+      walletIds: [],
+      defaultWalletId: null,
+      actorId: ACTOR,
+    });
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.implementer.funding_wallet_id).toBeNull();
+    expect(cleared.implementer.reserve_wallets).toEqual([]);
+  });
+});
+
 describe("InMemoryDefaultFundingWallet", () => {
   it("get/set with row_version CAS and clear", async () => {
     const port = new InMemoryDefaultFundingWallet();

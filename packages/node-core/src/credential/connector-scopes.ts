@@ -48,5 +48,13 @@ export function credentialScopesForConnectorScopes(
       add("send:read");
     }
   }
+  if (
+    out.length === 0 &&
+    (scopes.includes("wallets:read_linked") || scopes.includes("ledger:read_all"))
+  ) {
+    add("receive:read");
+    add("send:read");
+  }
   return out;
 }
+

@@ -14,6 +14,7 @@
     "base-enums-domains.sql",
     "connector-configs.sql",
     "connector-reserve-wallets.sql",
+    "connector-rule-requests.sql",
     "custody-eligibility.sql",
     "destination-state-worker.sql",
     "destination-worker-sink.sql",
@@ -84,13 +85,14 @@
     "wallet-money-capability-lease-guard.sql",
     "wallet-money-capability.sql",
     "wallet-settled-ledger-indexes.sql",
-    "wallet-settled-ledger.sql"
+    "wallet-settled-ledger.sql",
+    "webhook-deliveries.sql"
   ],
   "summary": {
     "nounsChecked": 39,
     "nounsOk": 39,
     "nounsFailed": 0,
-    "foreignKeysChecked": 193,
+    "foreignKeysChecked": 196,
     "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
@@ -839,6 +841,20 @@
       "source": "connector_configs(implementer_id)",
       "target": "implementers(id)",
       "onDelete": "CASCADE",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "connector_rule_requests(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "CASCADE",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "connector_rule_requests(reserve_wallet_id)",
+      "target": "wallets(id)",
+      "onDelete": "UNSPECIFIED",
       "onUpdate": "UNSPECIFIED",
       "ok": true
     },
@@ -2108,6 +2124,13 @@
       "onDelete": "UNSPECIFIED",
       "onUpdate": "UNSPECIFIED",
       "ok": true
+    },
+    {
+      "source": "webhook_deliveries(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "CASCADE",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
     }
   ],
   "accessPatterns": [
@@ -2128,7 +2151,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_130",
+      "satisfiedBy": "index:operations_unique_133",
       "ok": true
     },
     {
@@ -2175,7 +2198,7 @@
       "columns": [
         "id"
       ],
-      "satisfiedBy": "index:audit_log_unique_72",
+      "satisfiedBy": "index:audit_log_unique_74",
       "ok": true
     },
     {

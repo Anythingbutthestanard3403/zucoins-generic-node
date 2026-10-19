@@ -21,6 +21,11 @@ import {
   type PipelineRequest,
 } from "./pipeline.js";
 import { findRouteSchema } from "./route-schemas.js";
+import { bindTenant, type CredentialResolver } from "./tenant-middleware.js";
+import {
+  DEFAULT_CONNECTOR_SCOPES,
+  type ConnectorConfigStore,
+} from "../implementer/connector-configs.js";
 import type { ReportingRateLimiter } from "../reporting/store.js";
 import {
   handleCreateReceive,
@@ -46,6 +51,13 @@ export interface OperationRouterDeps {
   readonly auth: OperationAuthBinding;
   readonly newRequestId: PipelineConfig["newRequestId"];
   readonly strictJson?: PipelineConfig["strictJson"];
+  /**
+   * Optional connector config store (ZTR-1332). When provided, resolves
+   * `connector_configs.scopes` (defaulting to DEFAULT_CONNECTOR_SCOPES when no
+   * row exists) and enforces `receives:write` on `POST /v1/receives` and
+   * `sends:write` on `POST /v1/external-sends` with 403 `INSUFFICIENT_CONNECTOR_SCOPE`.
+   */
+  readonly connectorConfigStore?: ConnectorConfigStore;
   /**
    * Request-volume throttle for the three POST create routes, keyed on the
    * AUTHENTICATED implementer. It wraps admission and nothing else: it runs after the
@@ -121,6 +133,23 @@ function errorResponse(error: ApiErrorResponse): RouterResponse {
   return { status: error.status, body: error.body, headers: { ...error.headers } };
 }
 
+function insufficientConnectorScopeResponse(
+  requiredScope: string,
+  requestId: string,
+): RouterResponse {
+  return {
+    status: 403,
+    body: JSON.stringify({
+      error: {
+        code: "INSUFFICIENT_CONNECTOR_SCOPE",
+        message: `Connector lacks required scope "${requiredScope}".`,
+        request_id: requestId,
+      },
+    }),
+    headers: { "content-type": JSON_CONTENT_TYPE, "x-request-id": requestId },
+  };
+}
+
 function parseQuery(querystring: string): Record<string, string | undefined> {
   return Object.fromEntries(new URLSearchParams(querystring));
 }
@@ -160,7 +189,40 @@ export function createOperationRouter(deps: OperationRouterDeps): OperationRoute
   const auth = deps.auth;
   const newRequestId = deps.newRequestId;
   const createThrottle = deps.createThrottle;
+  const connectorConfigStore = deps.connectorConfigStore;
   assertOperationAuthComposition(store, auth);
+
+  const resolvedCredentialResolver: CredentialResolver | undefined =
+    auth.kind === "implementer_bearer"
+      ? connectorConfigStore === undefined
+        ? auth.resolveCredential
+        : {
+            async resolve(bearerKey) {
+              const base = await auth.resolveCredential.resolve(bearerKey);
+              if (base === null) return null;
+              const row = await connectorConfigStore.get(base.implementerId);
+              const connectorScopes = new Set<string>(
+                row !== null ? row.scopes : DEFAULT_CONNECTOR_SCOPES,
+              );
+              const mergedScopes = new Set<string>(base.scopes);
+              if (row !== null) {
+                if (connectorScopes.has("receives:write")) {
+                  mergedScopes.add("receive:create");
+                  mergedScopes.add("receive:read");
+                }
+                if (connectorScopes.has("sends:write")) {
+                  mergedScopes.add("send:create");
+                  mergedScopes.add("send:read");
+                }
+              }
+              return {
+                implementerId: base.implementerId,
+                scopes: [...mergedScopes],
+                connectorScopes,
+              };
+            },
+          }
+      : undefined;
 
   // Production wire: install resolveCredential from implementer-bearer
   // auth so principal / idempotencyTenantId bind into PipelineContext. reject_all
@@ -170,8 +232,8 @@ export function createOperationRouter(deps: OperationRouterDeps): OperationRoute
     strictJson: deps.strictJson,
     authenticate: auth.authenticate,
     authorizeScope: auth.authorizeScope,
-    ...(auth.kind === "implementer_bearer"
-      ? { resolveCredential: auth.resolveCredential }
+    ...(resolvedCredentialResolver !== undefined
+      ? { resolveCredential: resolvedCredentialResolver }
       : {}),
   };
 
@@ -190,6 +252,28 @@ export function createOperationRouter(deps: OperationRouterDeps): OperationRoute
       // Unreachable: every mounted template is registered in ROUTE_SCHEMAS. Treated
       // as a 404 rather than a crash if the two tables ever drift.
       return errorResponse(apiErrorResponse("not_found", newRequestId()));
+    }
+
+    // ZTR-1332: Enforce `receives:write` on POST /v1/receives and `sends:write` on
+    // POST /v1/external-sends when a valid bearer key resolves to a connector lacking
+    // that capability scope (returning 403 INSUFFICIENT_CONNECTOR_SCOPE).
+    if (
+      resolvedCredentialResolver !== undefined &&
+      connectorConfigStore !== undefined &&
+      routeSchema.method === "POST" &&
+      (match.template === "/v1/receives" || match.template === "/v1/external-sends")
+    ) {
+      const precheckReqId = newRequestId();
+      const tenant = await bindTenant(resolvedCredentialResolver, headers, precheckReqId);
+      if (tenant.ok) {
+        const requiredConnectorScope =
+          match.template === "/v1/receives" ? "receives:write" : "sends:write";
+        const connectorScopes =
+          tenant.principal.connectorScopes ?? new Set<string>(DEFAULT_CONNECTOR_SCOPES);
+        if (!connectorScopes.has(requiredConnectorScope)) {
+          return insufficientConnectorScopeResponse(requiredConnectorScope, precheckReqId);
+        }
+      }
     }
 
     const request: PipelineRequest = {

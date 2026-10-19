@@ -680,7 +680,12 @@ async function readRuleReserveWalletId(
   const parsed = parseAutoApprovePolicyStructure(raw);
   if (!parsed.ok) return null;
   const matched = matchAutoApproveRule(parsed.rules, implementerId, ruleId);
-  if (matched === undefined || !matched.enabled || matched.reserve_wallet_id === null) {
+  if (
+    matched === undefined ||
+    !matched.enabled ||
+    matched.reserve_wallet_id === null ||
+    matched.reserve_wallet_id === undefined
+  ) {
     return null;
   }
   try {

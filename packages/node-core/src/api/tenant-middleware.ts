@@ -21,6 +21,7 @@ const BEARER_SCHEME = "bearer";
 export interface AuthPrincipal {
   readonly implementerId: string;
   readonly scopes: readonly string[];
+  readonly connectorScopes?: ReadonlySet<string>;
 }
 
 // Resolves a validated bearer credential to its principal. Credential lookup and

@@ -237,3 +237,22 @@ export {
   SignatureVerificationError,
   verifyWebhookEvent,
 } from "./signing/verify-webhook.js";
+export {
+  CONNECTOR_OPERATIONS_PATH,
+  CONNECTOR_WALLETS_PATH,
+  NODE_INFO_PATH,
+  getNodeInfo,
+  listOperations,
+  listWallets,
+  type ConnectorNodeInfo,
+  type ConnectorOperation,
+  type ConnectorOperationKind,
+  type ConnectorWallet,
+  type GetNodeInfoInput,
+  type ListOperationsInput,
+  type ListOperationsParams,
+  type ListOperationsResponse,
+  type ListWalletsInput,
+  type ListWalletsResponse,
+} from "./http/connector-reads.js";
+

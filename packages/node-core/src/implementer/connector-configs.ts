@@ -2,7 +2,14 @@
 // Capability labels, hook target, and recorded verification posture.
 // The node stores the hook target and does not fetch it.
 
-import { CONNECTOR_SCOPES, type ConnectorScope } from "../credential/connector-scopes.js";
+import {
+  CONNECTOR_SCOPES,
+  DEFAULT_CONNECTOR_SCOPES,
+  isConnectorScope,
+  type ConnectorScope,
+} from "../credential/connector-scopes.js";
+
+export { CONNECTOR_SCOPES, DEFAULT_CONNECTOR_SCOPES, isConnectorScope, type ConnectorScope };
 
 export type ConnectorPolicyMode = "NODE_VERIFIED" | "LEGACY";
 
@@ -170,8 +177,8 @@ export class SqlConnectorConfigStore implements ConnectorConfigStore {
       input.implementerId,
       input.displayName,
       JSON.stringify(scopes),
-      input.webhookUrl,
-      input.webhookEnabled,
+      input.webhookUrl ?? null,
+      input.webhookEnabled ?? false,
       input.policyMode ?? "NODE_VERIFIED",
     ]);
     const row = rows[0];

@@ -352,9 +352,11 @@ export function buildApprovedConnectorRule(
     windowCap,
   });
   if (failure !== null || windowHours < 1 || windowHours > 720) {
-    throw Object.assign(new Error(failure ?? "window_hours must be an integer from 1 to 720"), {
-      code: "INVALID_RULE",
-    });
+    const err = new Error(
+      failure ?? "window_hours must be an integer from 1 to 720",
+    ) as Error & { code?: string };
+    err.code = "INVALID_RULE";
+    throw err;
   }
   return toAutoApproveRule({
     rule_id: record.rule_id,

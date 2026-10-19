@@ -14,6 +14,7 @@ import {
   hashPassword,
   InMemoryAdminSessionStore,
   InMemoryAdminUserStore,
+  ReserveLabelConflictError,
   ReservePoolCapError,
   RUNNING,
   TotpConsumptionLog,
@@ -228,5 +229,30 @@ describe("admin /admin/v1/reserve-wallets", () => {
       },
     );
     expect(res.status).toBe(409);
+  });
+
+  it("maps a duplicate label to 409 conflict", async () => {
+    const { router, userStore } = makeRouter(async () => {
+      throw new ReserveLabelConflictError();
+    });
+    await makeOperator(userStore, "reserve-pass-3");
+    const { cookie, csrf } = await login(router, "reserve-pass-3");
+    const res = await router(
+      "POST",
+      "/admin/v1/reserve-wallets",
+      Buffer.from(JSON.stringify({ label: "Client Holding A" })),
+      {
+        cookie,
+        origin: ORIGIN,
+        "x-csrf-token": csrf,
+        "content-type": "application/json",
+        "idempotency-key": "idem-reserve-wallets-label-00001",
+        "x-zp-totp": generateTotp(SECRET, 1_700_000_030_000),
+      },
+    );
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({
+      error: { code: "conflict", message: "reserve wallet label already exists" },
+    });
   });
 });

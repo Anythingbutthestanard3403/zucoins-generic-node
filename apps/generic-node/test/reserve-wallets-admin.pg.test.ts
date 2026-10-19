@@ -246,4 +246,138 @@ describe("admin reserve wallet mint (real PG)", () => {
     );
     expect(setting.rows).toEqual([]);
   }, 120_000);
+
+  it("refuses a second active label that differs only by case or surrounding space", async () => {
+    if (!live || pool === undefined) return;
+    const db = pool;
+    const vault = {
+      seal: async (_identity: unknown, secret: Uint8Array) => {
+        expect(secret.length).toBe(64);
+      },
+    } as unknown as EncryptedWalletKeyStore;
+    const controller = createReservePoolController({
+      pool: db,
+      nodeId: NODE_ID,
+      poolCapTotal: 50,
+      vault,
+    });
+    const userStore = new InMemoryAdminUserStore();
+    const sessions = createAdminSessionService(
+      { nodeId: NODE_ID },
+      new InMemoryAdminSessionStore(),
+      userStore,
+    );
+    let now = 1_700_000_180_000;
+    const router = createAdminRouter({
+      sessions,
+      userStore,
+      csrf: { allowedOrigins: [ORIGIN] },
+      totp: { secret: SECRET, windowSteps: 1 },
+      totpLog: new TotpConsumptionLog(),
+      nodeId: NODE_ID,
+      challengeStore: {
+        findIssuedByOperation: async () => null,
+        findByNonce: async () => null,
+        insertIssued: async () => {},
+        commitApprovalMutation: async () => {
+          throw new Error("unused");
+        },
+      },
+      loadOperation: async () => null,
+      sendDecisionStore: {
+        rejectCreated: async () => {
+          throw new Error("unused");
+        },
+        approveCreated: async () => {
+          throw new Error("unused");
+        },
+      },
+      deviceStore: null,
+      recoveryStore: {
+        listNeedsAttention: async () => ({ items: [], total: 0, has_more: false, next_cursor: null }),
+        loadRecoveryFacts: async () => null,
+        issueRecoveryNonce: async () => {
+          throw new Error("unused");
+        },
+      },
+      recoveryActionStore: {
+        lookupIdempotency: async () => ({ kind: "miss" }),
+        loadRecoveryFactsLocked: async () => null,
+        commitRecoveryAction: async () => {
+          throw new Error("unused");
+        },
+        storeIdempotency: async () => {},
+      },
+      destinationService: createFailClosedDestinationService(),
+      newRequestId: () => randomUUID(),
+      nowMs: () => now,
+      halt: {
+        gate: createHaltGate(RUNNING),
+        store: createInMemoryOperatorHaltStore(RUNNING),
+        evidence: createInMemoryHaltEvidenceRecorder(),
+      },
+      mintNamedReserveWallet: (input) => controller.mintNamed(input.displayLabel),
+    });
+    const user: AdminUser = {
+      id: randomUUID(),
+      username: "admin-label",
+      passwordHash: await hashPassword("reserve-pg-pass"),
+      role: "admin",
+      mustChangePassword: false,
+      mustEnrolTotp: false,
+      disabledAt: null,
+      createdAt: Date.now(),
+    };
+    await userStore.insert(user);
+    await userStore.setActiveTotpSecret(user.id, encodeBase32(SECRET));
+    const login = await router(
+      "POST",
+      "/admin/v1/login",
+      Buffer.from(JSON.stringify({ username: "admin-label", password: "reserve-pg-pass" })),
+      { "content-type": "application/json" },
+    );
+    expect(login.status).toBe(200);
+    const cookie = cookieFrom(login.headers["set-cookie"]);
+    const csrf = (JSON.parse(login.body) as { csrfToken: string }).csrfToken;
+    const post = async (label: string, idem: string) => {
+      const res = await router(
+        "POST",
+        "/admin/v1/reserve-wallets",
+        Buffer.from(JSON.stringify({ label })),
+        {
+          cookie,
+          origin: ORIGIN,
+          "x-csrf-token": csrf,
+          "content-type": "application/json",
+          "idempotency-key": idem,
+          "x-zp-totp": generateTotp(SECRET, now),
+        },
+      );
+      now += 60_000;
+      return res;
+    };
+    const first = await post("Client Holding B", "idem-reserve-label-holding-b-001");
+    expect(first.status).toBe(201);
+    const folded = await post("  client holding b  ", "idem-reserve-label-holding-b-002");
+    expect(folded.status).toBe(409);
+    expect(JSON.parse(folded.body)).toMatchObject({
+      error: { code: "conflict", message: "reserve wallet label already exists" },
+    });
+    const main = await post("Main Reserve", "idem-reserve-label-main-0000001");
+    expect(main.status).toBe(201);
+    const mainFolded = await post(" main reserve ", "idem-reserve-label-main-0000002");
+    expect(mainFolded.status).toBe(409);
+    expect(JSON.parse(mainFolded.body)).toMatchObject({
+      error: { code: "conflict", message: "reserve wallet label already exists" },
+    });
+    const count = await db.query<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM wallets
+        WHERE node_id = $1::uuid
+          AND retired_at IS NULL
+          AND lower(btrim(display_label)) = lower(btrim($2))`,
+      [NODE_ID, "Client Holding B"],
+    );
+    expect(count.rows[0]?.n).toBe("1");
+  }, 120_000);
 });

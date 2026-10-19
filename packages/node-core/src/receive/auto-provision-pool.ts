@@ -48,6 +48,15 @@ export class ReservePoolCapError extends Error {
   }
 }
 
+export class ReserveLabelConflictError extends Error {
+  readonly code = "conflict" as const;
+
+  constructor() {
+    super("reserve wallet label already exists");
+    this.name = "ReserveLabelConflictError";
+  }
+}
+
 export interface EnsureNodeReserveDeps {
   readonly nodeId: string;
   readonly poolCapTotal: number;
@@ -69,12 +78,24 @@ SELECT setting_value
  WHERE setting_key = $1`;
 
 const READ_RESERVE_SQL = `
-SELECT id::text AS id
+SELECT id::text AS id,
+       (recovery_verified_at IS NOT NULL) AS verified
   FROM wallets
  WHERE display_label = $1
    AND node_id = $2::uuid
    AND money_mode = 'INTERNAL_ONLY'
    AND key_origin = 'node_generated'
+   AND retired_at IS NULL
+   AND state::text <> 'RETIRED'`;
+
+/** Active label match. No sort: any hit is enough to refuse the mint. */
+const RESERVE_LABEL_TAKEN_SQL = `
+SELECT id::text AS id
+  FROM wallets
+ WHERE node_id = $1::uuid
+   AND retired_at IS NULL
+   AND state::text <> 'RETIRED'
+   AND lower(btrim(display_label)) = lower(btrim($2))
  LIMIT 1`;
 
 const READ_DESTINATION_SQL = `
@@ -160,6 +181,8 @@ DELETE FROM node_settings
 type Snapshot = {
   readonly settingValue: string | null;
   readonly reserveWalletId: string | null;
+  /** True only when the chosen Main Reserve row already has a recovery stamp. */
+  readonly reserveVerified: boolean;
   readonly capCount: number;
   readonly sendWalletCount: number;
   readonly receiveWalletCount: number;
@@ -170,6 +193,8 @@ type NextMint = {
   readonly role: NodeGeneratedMintRole;
 } | {
   readonly kind: "repair";
+} | {
+  readonly kind: "replace-orphan";
 } | {
   readonly kind: "done";
 };
@@ -219,6 +244,18 @@ async function lock(sql: NodeGeneratedWalletSqlExecutor): Promise<void> {
   await sql.query(LOCK_SQL, [POOL_SCALE_UP_LOCK_KEY]);
 }
 
+function pickReserve(rows: readonly { id: string; verified: boolean }[]): {
+  readonly id: string | null;
+  readonly verified: boolean;
+} {
+  let orphanId: string | null = null;
+  for (const row of rows) {
+    if (row.verified === true) return { id: row.id, verified: true };
+    if (orphanId === null) orphanId = row.id;
+  }
+  return { id: orphanId, verified: false };
+}
+
 async function readSnapshot(
   sql: NodeGeneratedWalletSqlExecutor,
   nodeId: string,
@@ -226,7 +263,7 @@ async function readSnapshot(
   const setting = await sql.query<{ setting_value: string }>(READ_SETTING_SQL, [
     DEFAULT_FUNDING_WALLET_SETTING_KEY,
   ]);
-  const reserve = await sql.query<{ id: string }>(READ_RESERVE_SQL, [
+  const reserve = await sql.query<{ id: string; verified: boolean }>(READ_RESERVE_SQL, [
     MAIN_RESERVE_DISPLAY_LABEL,
     nodeId,
   ]);
@@ -234,9 +271,11 @@ async function readSnapshot(
   const send = await sql.query<{ n: number }>(POOL_SCALER_STATEMENTS.COUNT_SEND_WALLETS);
   const receive = await sql.query<{ n: number }>(POOL_SCALER_STATEMENTS.COUNT_RECEIVE_WALLETS);
   const settingValue = setting.rows[0]?.setting_value;
+  const picked = pickReserve(reserve.rows);
   return {
     settingValue: settingValue === undefined ? null : settingValue,
-    reserveWalletId: reserve.rows[0]?.id ?? null,
+    reserveWalletId: picked.id,
+    reserveVerified: picked.verified,
     capCount: asInt(cap.rows[0]?.cap_count),
     sendWalletCount: asInt(send.rows[0]?.n),
     receiveWalletCount: asInt(receive.rows[0]?.n),
@@ -249,7 +288,7 @@ function classify(snap: Snapshot, poolCapTotal: number): NextMint {
     return { kind: "mint", role: "INTERNAL_ONLY" };
   }
   if (snap.settingValue === null && snap.reserveWalletId !== null) {
-    return { kind: "repair" };
+    return snap.reserveVerified ? { kind: "repair" } : { kind: "replace-orphan" };
   }
   if (snap.sendWalletCount < SEND_POOL_FLOOR && snap.capCount < poolCapTotal) {
     return { kind: "mint", role: "SEND_ONLY" };
@@ -362,6 +401,7 @@ async function notifyMinted(
 type Step =
   | { readonly kind: "done" }
   | { readonly kind: "repaired" }
+  | { readonly kind: "replaced" }
   | { readonly kind: "raced" }
   | { readonly kind: "minted"; readonly walletId: string };
 
@@ -380,6 +420,24 @@ async function provisionOne(deps: EnsureNodeReserveDeps): Promise<Step> {
       }
     });
     return { kind: "repaired" };
+  }
+  if (preview.kind === "replace-orphan") {
+    // Delete under the lock. The next step mints a fresh sealed reserve.
+    // The lock is not held across seal.
+    await deps.withTx(async (sql) => {
+      await lock(sql);
+      const snap = await readSnapshot(sql, deps.nodeId);
+      if (classify(snap, deps.poolCapTotal).kind !== "replace-orphan") return;
+      const rows = await sql.query<{ id: string; verified: boolean }>(READ_RESERVE_SQL, [
+        MAIN_RESERVE_DISPLAY_LABEL,
+        deps.nodeId,
+      ]);
+      for (const row of rows.rows) {
+        if (row.verified === true) continue;
+        await deleteNodeGeneratedWalletMint(sql, row.id);
+      }
+    });
+    return { kind: "replaced" };
   }
 
   const key = generateCustodyKey();
@@ -468,6 +526,11 @@ export async function mintNamedReserveWallet(
       await lock(sql);
       const snap = await readSnapshot(sql, deps.nodeId);
       if (snap.capCount >= deps.poolCapTotal) throw new ReservePoolCapError();
+      const taken = await sql.query<{ id: string }>(RESERVE_LABEL_TAKEN_SQL, [
+        deps.nodeId,
+        deps.displayLabel,
+      ]);
+      if (taken.rows.length > 0) throw new ReserveLabelConflictError();
       await insertNodeGeneratedWalletWithPendingDestination(sql, {
         walletId,
         nodeId: deps.nodeId,

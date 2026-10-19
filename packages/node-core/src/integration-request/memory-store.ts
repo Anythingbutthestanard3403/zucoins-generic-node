@@ -42,6 +42,13 @@ export class InMemoryIntegrationRequestStore implements IntegrationRequestStore 
       display_name: input.displayName,
       requested_scopes: input.requestedScopes as readonly ImplementerScope[],
       proposed_rule_json: input.proposedRuleJson,
+      requested_rules_json: input.requestedRulesJson ?? "[]",
+      requested_webhook_url: input.requestedWebhookUrl ?? null,
+      requested_connector_scopes: input.requestedConnectorScopes ?? [
+        "receives:write",
+        "sends:write",
+        "wallets:read_linked",
+      ],
       approved_rule_json: null,
       status: "PENDING",
       row_version: 1,

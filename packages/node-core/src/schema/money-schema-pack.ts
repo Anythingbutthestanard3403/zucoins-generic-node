@@ -263,6 +263,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1329: nullable rule_id on send_operations and operations.
   // Requires send-external-create + operations. Appended only.
   "send-operations-rule-id",
+  // ZTR-1330: connector_configs plus integration_requests proposal columns.
+  // Requires implementers + integration_requests. Appended only.
+  "connector-configs",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

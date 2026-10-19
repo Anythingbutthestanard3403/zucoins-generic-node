@@ -9,12 +9,18 @@ import type { ProposedIntegrationRule } from "./types.js";
 
 const RULE_KEYS = new Set([
   "rule_id",
+  "label",
+  "reserve_wallet_id",
+  "total_cap_zkz",
   "per_send_max_zkz",
   "per_send_min_zkz",
   "window_hours",
   "window_cap_zkz",
   "expires_at",
 ]);
+
+const LOWER_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const RFC3339_Z_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
@@ -67,8 +73,46 @@ export function parseProposedIntegrationRule(
     ruleId = raw.rule_id;
   }
 
+  let label: string | null | undefined;
+  if (raw.label !== undefined) {
+    if (raw.label === null) {
+      label = null;
+    } else if (typeof raw.label !== "string") {
+      return null;
+    } else {
+      const trimmed = raw.label.trim();
+      if (trimmed.length < 1 || trimmed.length > 128) return null;
+      label = trimmed;
+    }
+  }
+
+  let reserveWalletId: string | null | undefined;
+  if (raw.reserve_wallet_id !== undefined) {
+    if (raw.reserve_wallet_id === null) {
+      reserveWalletId = null;
+    } else if (
+      typeof raw.reserve_wallet_id !== "string" ||
+      !LOWER_UUID_RE.test(raw.reserve_wallet_id)
+    ) {
+      return null;
+    } else {
+      reserveWalletId = raw.reserve_wallet_id;
+    }
+  }
+
   const perSendMax = parseCanonicalPositiveAmount(raw.per_send_max_zkz);
   if (perSendMax === null) return null;
+
+  let totalCap: string | null | undefined;
+  if (raw.total_cap_zkz !== undefined) {
+    if (raw.total_cap_zkz === null) {
+      totalCap = null;
+    } else {
+      const cap = parseCanonicalPositiveAmount(raw.total_cap_zkz);
+      if (cap === null || compareAmounts(cap, perSendMax) < 0) return null;
+      totalCap = cap;
+    }
+  }
 
   let perSendMin: string | null = null;
   if (raw.per_send_min_zkz !== undefined && raw.per_send_min_zkz !== null) {
@@ -109,9 +153,10 @@ export function parseProposedIntegrationRule(
     window_cap_zkz: windowCap,
     expires_at: expiresAt,
   };
-  if (ruleId !== undefined) {
-    return { ...out, rule_id: ruleId };
-  }
+  if (ruleId !== undefined) Object.assign(out, { rule_id: ruleId });
+  if (label !== undefined) Object.assign(out, { label });
+  if (reserveWalletId !== undefined) Object.assign(out, { reserve_wallet_id: reserveWalletId });
+  if (totalCap !== undefined) Object.assign(out, { total_cap_zkz: totalCap });
   return out;
 }
 
@@ -119,6 +164,9 @@ export function parseProposedIntegrationRule(
 export function serializeProposedRule(rule: ProposedIntegrationRule): string {
   const body: Record<string, unknown> = {};
   if (rule.rule_id !== undefined) body.rule_id = rule.rule_id;
+  if (rule.label !== undefined) body.label = rule.label;
+  if (rule.reserve_wallet_id !== undefined) body.reserve_wallet_id = rule.reserve_wallet_id;
+  if (rule.total_cap_zkz !== undefined) body.total_cap_zkz = rule.total_cap_zkz;
   body.per_send_max_zkz = rule.per_send_max_zkz;
   body.per_send_min_zkz = rule.per_send_min_zkz;
   body.window_hours = rule.window_hours;

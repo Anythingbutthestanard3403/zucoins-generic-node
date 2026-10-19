@@ -242,6 +242,8 @@ const SCHEMA_FILES = [
   "connector-reserve-wallets.sql",
   // ZTR-1329: nullable rule_id on send_operations and operations. ALTER only.
   "send-operations-rule-id.sql",
+  // ZTR-1330: connector_configs plus integration_requests proposal columns.
+  "connector-configs.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -646,6 +648,10 @@ const GREENFIELD: Record<
   "send-operations-rule-id.sql": {
     applies: false,
     missingFragment: "send-operations-rule-id requires send_operations",
+  },
+  "connector-configs.sql": {
+    applies: false,
+    missingFragment: "connector-configs requires implementers",
   },
 };
 

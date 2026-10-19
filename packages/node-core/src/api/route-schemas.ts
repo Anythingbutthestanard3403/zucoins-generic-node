@@ -236,10 +236,10 @@ export type RetireBodyInput = z.infer<typeof RetireBody>;
 export const CreateIntegrationRequestBody = z
   .object({
     display_name: z.string().min(1).max(120),
-    requested_scopes: z
-      .array(z.enum(["send:create", "send:read"]))
-      .min(1),
+    requested_scopes: z.array(z.string().min(1)).min(1),
     proposed_rule: z.record(z.string(), z.unknown()),
+    requested_rules: z.array(z.record(z.string(), z.unknown())).optional(),
+    requested_webhook_url: z.string().min(1).nullable().optional(),
   })
   .strict();
 

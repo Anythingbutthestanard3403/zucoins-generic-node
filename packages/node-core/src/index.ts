@@ -703,6 +703,15 @@ export {
   type SendOperationsRuleIdInvariant,
 } from "./schema/send-operations-rule-id.contract.js";
 
+// ZTR-1330: one connector row per implementer, plus proposal columns.
+export {
+  CONNECTOR_CONFIGS_EXECUTION_OBLIGATIONS,
+  CONNECTOR_CONFIGS_INVARIANTS,
+  CONNECTOR_CONFIGS_SCHEMA_FILE,
+  CONNECTOR_CONFIGS_SOURCE,
+  type ConnectorConfigsInvariant,
+} from "./schema/connector-configs.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

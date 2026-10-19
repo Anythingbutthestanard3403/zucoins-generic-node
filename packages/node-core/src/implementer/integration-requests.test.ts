@@ -21,6 +21,9 @@ function pending(over: Partial<IntegrationRequestRecord> = {}): IntegrationReque
     node_id: NODE,
     display_name: "Platform Alpha",
     requested_scopes: ["send:create", "send:read"],
+    requested_rules: [],
+    requested_webhook_url: null,
+    requested_connector_scopes: ["receives:write", "sends:write", "wallets:read_linked"],
     proposed_rule_json: JSON.stringify({
       rule_id: "r1",
       per_send_max_zkz: "10",

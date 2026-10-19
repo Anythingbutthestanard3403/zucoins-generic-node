@@ -532,7 +532,7 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(leaseIdx).toBeGreaterThanOrEqual(0);
     expect(unackedIdx).toBeGreaterThan(provenIdx);
     expect(unackedIdx).toBeGreaterThan(leaseIdx);
-    expect(unackedIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 2);
+    expect(unackedIdx).toBe(MONEY_SCHEMA_PACK_ORDER.indexOf("connector-reserve-wallets") - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[unackedIdx]!.sql).toContain("send-landed-unacknowledged-close requires lease_release_proofs");
     expect(files[unackedIdx]!.sql).toContain("SEND_LANDED_UNACKNOWLEDGED_CLOSE");
@@ -540,7 +540,7 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(files[unackedIdx]!.sql).toContain("EXTERNAL_SEND_LANDED");
   });
 
-  it("pack lands connector-reserve-wallets last (ZTR-1324)", () => {
+  it("pack lands connector-reserve-wallets before later slices (ZTR-1324)", () => {
     const reserveIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-reserve-wallets");
     const fundingIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("implementer-funding-wallet");
     const capabilityIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("wallet-money-capability");
@@ -548,11 +548,26 @@ CREATE TABLE wallets (id uuid PRIMARY KEY);
     expect(capabilityIdx).toBeGreaterThanOrEqual(0);
     expect(reserveIdx).toBeGreaterThan(fundingIdx);
     expect(reserveIdx).toBeGreaterThan(capabilityIdx);
-    expect(reserveIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    expect(reserveIdx).toBe(MONEY_SCHEMA_PACK_ORDER.indexOf("send-operations-rule-id") - 1);
     const files = loadMoneySchemaMigrations();
     expect(files[reserveIdx]!.sql).toContain("connector-reserve-wallets requires wallets");
     expect(files[reserveIdx]!.sql).toContain("CREATE TABLE implementer_reserve_wallets");
     expect(files[reserveIdx]!.sql).toContain("allow_custom_routing");
+  });
+
+  it("pack lands connector-configs last (ZTR-1330)", () => {
+    const configIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-configs");
+    const ruleIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("send-operations-rule-id");
+    const reserveIdx = MONEY_SCHEMA_PACK_ORDER.indexOf("connector-reserve-wallets");
+    expect(ruleIdx).toBeGreaterThanOrEqual(0);
+    expect(reserveIdx).toBeGreaterThanOrEqual(0);
+    expect(configIdx).toBeGreaterThan(ruleIdx);
+    expect(configIdx).toBeGreaterThan(reserveIdx);
+    expect(configIdx).toBe(MONEY_SCHEMA_PACK_ORDER.length - 1);
+    const files = loadMoneySchemaMigrations();
+    expect(files[configIdx]!.sql).toContain("connector-configs requires implementers");
+    expect(files[configIdx]!.sql).toContain("CREATE TABLE connector_configs");
+    expect(files[configIdx]!.sql).toContain("policy_mode text NOT NULL DEFAULT 'NODE_VERIFIED'");
   });
 
   it("pack includes lineage-path-proofs and verification-acknowledgements after landing-proof-verifications", () => {

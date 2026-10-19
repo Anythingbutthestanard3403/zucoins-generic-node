@@ -85,6 +85,55 @@ describe("integration request public handshake", () => {
     expect(JSON.stringify(row)).not.toContain(body.claim_token);
   });
 
+  it("maps connector labels onto frozen credential scopes and stores the hook target", async () => {
+    const result = await handleCreateIntegrationRequest(
+      ctx(
+        validBody({
+          requested_scopes: ["sends:write", "wallets:read_linked"],
+          requested_rules: [
+            {
+              rule_id: "launch-promo",
+              per_send_max_zkz: "10",
+              per_send_min_zkz: null,
+              window_hours: 24,
+              window_cap_zkz: "100",
+              total_cap_zkz: "500",
+              expires_at: null,
+            },
+          ],
+          requested_webhook_url: "https://hooks.example/promo",
+        }),
+      ),
+      { store, nodeId: NODE, sourceIp: "10.0.0.8" },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const body = JSON.parse(result.body) as { request_id: string };
+    const row = await store.findById(body.request_id);
+    expect(row?.requested_scopes).toEqual(["send:create", "send:read"]);
+    expect(row?.requested_connector_scopes).toEqual(["sends:write", "wallets:read_linked"]);
+    expect(row?.requested_webhook_url).toBe("https://hooks.example/promo");
+    expect(row?.requested_rules_json).toContain("launch-promo");
+  });
+
+  it("rejects an unknown scope label and a non-https hook target", async () => {
+    for (const bad of [
+      validBody({ requested_scopes: ["admin:all"] }),
+      validBody({ requested_webhook_url: "http://127.0.0.1:9000/hook" }),
+    ]) {
+      _resetIntegrationRequestRateLimitForTests();
+      store = new InMemoryIntegrationRequestStore();
+      const result = await handleCreateIntegrationRequest(ctx(bad), {
+        store,
+        nodeId: NODE,
+        sourceIp: "10.0.0.9",
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.status).toBe(400);
+      expect(await store.countPending()).toBe(0);
+    }
+  });
+
   it("rejects invalid rule/scopes/name with nothing stored", async () => {
     for (const bad of [
       validBody({ display_name: "" }),

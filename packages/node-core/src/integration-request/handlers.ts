@@ -7,6 +7,15 @@ import { apiErrorResponse, type ApiErrorResponse } from "../api/error-envelope.j
 import type { PipelineContext } from "../api/pipeline.js";
 import type { RouteHandlerResult } from "../api/routes/operation-routes.js";
 import {
+  DEFAULT_CONNECTOR_SCOPES,
+  credentialScopesForConnectorScopes,
+  isConnectorScope,
+  type ConnectorScope,
+} from "../credential/connector-scopes.js";
+import type { ImplementerScope } from "../credential/types.js";
+import { SsrfError, validateUrl } from "../net/ssrf-guard.js";
+import type { ProposedIntegrationRule } from "./types.js";
+import {
   parseProposedIntegrationRule,
   serializeProposedRule,
 } from "./proposed-rule.js";
@@ -89,30 +98,93 @@ export async function handleCreateIntegrationRequest(
     return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
   }
 
-  // requested_scopes ⊆ {send:create, send:read}, non-empty
+  // requested_scopes: frozen intake pair, or the connector capability labels.
+  // Mixed vocabularies and unknown labels are rejected.
   if (!Array.isArray(rec.requested_scopes) || rec.requested_scopes.length === 0) {
     return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
   }
-  const scopes: IntegrationRequestIntakeScope[] = [];
   const seen = new Set<string>();
+  const rawScopes: string[] = [];
   for (const s of rec.requested_scopes) {
-    if (typeof s !== "string" || !isIntakeScope(s)) {
+    if (typeof s !== "string" || seen.has(s)) {
       return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
     }
-    if (!seen.has(s)) {
-      seen.add(s);
-      scopes.push(s);
+    seen.add(s);
+    rawScopes.push(s);
+  }
+  const allFrozen = rawScopes.every((s) => isIntakeScope(s));
+  const allConnector = rawScopes.every((s) => isConnectorScope(s));
+  if (!allFrozen && !allConnector) {
+    return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+  }
+  let credentialScopes: ImplementerScope[];
+  let connectorScopes: readonly ConnectorScope[];
+  if (allConnector) {
+    connectorScopes = rawScopes as ConnectorScope[];
+    credentialScopes = credentialScopesForConnectorScopes(connectorScopes);
+    if (credentialScopes.length === 0) {
+      return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+    }
+  } else {
+    credentialScopes = rawScopes as IntegrationRequestIntakeScope[];
+    connectorScopes = DEFAULT_CONNECTOR_SCOPES;
+  }
+
+  let requestedRules: ProposedIntegrationRule[] = [];
+  if (rec.requested_rules !== undefined) {
+    if (!Array.isArray(rec.requested_rules)) {
+      return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+    }
+    const seenRuleIds = new Set<string>();
+    for (const item of rec.requested_rules) {
+      const parsed = parseProposedIntegrationRule(item);
+      if (parsed === null) return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+      const ruleId = parsed.rule_id ?? "default";
+      if (seenRuleIds.has(ruleId)) return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+      seenRuleIds.add(ruleId);
+      requestedRules.push(parsed);
     }
   }
 
-  // proposed_rule
-  const rule = parseProposedIntegrationRule(rec.proposed_rule);
+  // proposed_rule stays required for the existing single-rule handshake.
+  // When the caller also sends requested_rules, the first rule may stand in
+  // only if proposed_rule was omitted.
+  const proposedRaw = rec.proposed_rule !== undefined
+    ? rec.proposed_rule
+    : requestedRules.length > 0
+      ? requestedRules[0]
+      : undefined;
+  const rule = parseProposedIntegrationRule(proposedRaw);
   if (rule === null) {
     return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
   }
-  // Reject unknown top-level fields beyond the three intake fields.
+  if (requestedRules.length === 0) requestedRules = [rule];
+
+  let requestedWebhookUrl: string | null = null;
+  if (rec.requested_webhook_url !== undefined && rec.requested_webhook_url !== null) {
+    if (typeof rec.requested_webhook_url !== "string" || rec.requested_webhook_url.length === 0) {
+      return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+    }
+    try {
+      validateUrl(rec.requested_webhook_url);
+    } catch (err) {
+      if (err instanceof SsrfError) {
+        return fail(apiErrorResponse("invalid_scalar", ctx.requestId));
+      }
+      throw err;
+    }
+    requestedWebhookUrl = rec.requested_webhook_url;
+  }
+
+  const allowedKeys = new Set([
+    "display_name",
+    "requested_scopes",
+    "proposed_rule",
+    "requested_rules",
+    "requested_webhook_url",
+  ]);
   for (const key of Object.keys(rec)) {
-    if (key !== "display_name" && key !== "requested_scopes" && key !== "proposed_rule") {
+    if (!allowedKeys.has(key)) {
       return fail(apiErrorResponse("unknown_field", ctx.requestId));
     }
   }
@@ -131,8 +203,13 @@ export async function handleCreateIntegrationRequest(
     const row = await deps.store.insertPending({
       nodeId: deps.nodeId,
       displayName,
-      requestedScopes: scopes,
+      requestedScopes: credentialScopes,
       proposedRuleJson,
+      requestedRulesJson: JSON.stringify(
+        requestedRules.map((item) => JSON.parse(serializeProposedRule(item)) as unknown),
+      ),
+      requestedWebhookUrl,
+      requestedConnectorScopes: connectorScopes,
       claimTokenHash,
       now,
       ttlMs: deps.ttlMs ?? INTEGRATION_REQUEST_TTL_MS,

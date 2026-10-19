@@ -131,6 +131,15 @@ import {
   type FundingWalletSetMode,
   ReserveLabelConflictError,
   ReservePoolCapError,
+  credentialScopesForConnectorScopes,
+  DEFAULT_CONNECTOR_SCOPES,
+  normalizeConnectorScopes,
+  SsrfError,
+  validateUrl,
+  type ConnectorConfigRecord,
+  type ConnectorConfigStore,
+  type ConnectorPolicyMode,
+  type ConnectorScope,
 } from "@zucoins/node-core";
 import {
   isWalletMoneyMode,
@@ -866,20 +875,308 @@ function parseIssueApiKeyBody(
   return { ok: true, body: { scopes, implementer_id: implementerId } };
 }
 
+const PLACEHOLDER_IMPL = "00000000-0000-4000-8000-000000000001";
+
+interface OperatorRuleDraft {
+  readonly rule_id: string;
+  readonly label: string | null;
+  readonly reserve_wallet_id: string | null;
+  readonly total_cap_zkz: string | null;
+  readonly per_send_max_zkz: string;
+  readonly per_send_min_zkz: string | null;
+  readonly window_hours: number;
+  readonly window_cap_zkz: string;
+  readonly expires_at: string | null;
+  readonly enabled: boolean;
+}
+
+function draftFromParsed(rule: AutoApproveRule): OperatorRuleDraft {
+  return {
+    rule_id: rule.rule_id,
+    label: rule.label ?? null,
+    reserve_wallet_id: rule.reserve_wallet_id ?? null,
+    total_cap_zkz: rule.total_cap_zkz ?? null,
+    per_send_max_zkz: rule.per_send_max_zkz,
+    per_send_min_zkz: rule.per_send_min_zkz,
+    window_hours: rule.window_hours,
+    window_cap_zkz: rule.window_cap_zkz,
+    expires_at: rule.expires_at,
+    enabled: rule.enabled,
+  };
+}
+
+function parseOperatorRule(raw: unknown): OperatorRuleDraft | null {
+  if (!isRecord(raw)) return null;
+  const withEnabled = raw.enabled === undefined ? { ...raw, enabled: true } : raw;
+  const ruleForParse = {
+    ...withEnabled,
+    implementer_id:
+      typeof withEnabled.implementer_id === "string" && LOWER_UUID_RE.test(withEnabled.implementer_id)
+        ? withEnabled.implementer_id
+        : PLACEHOLDER_IMPL,
+  };
+  const structured = parseAutoApprovePolicyStructure(
+    JSON.stringify({ enabled: true, rules: [ruleForParse] }),
+  );
+  if (!structured.ok || structured.rules.length !== 1) return null;
+  return draftFromParsed(structured.rules[0]!);
+}
+
+function stampOperatorRule(draft: OperatorRuleDraft, implementerId: string): AutoApproveRule {
+  return {
+    rule_id: draft.rule_id,
+    label: draft.label,
+    implementer_id: implementerId,
+    reserve_wallet_id: draft.reserve_wallet_id,
+    total_cap_zkz: draft.total_cap_zkz,
+    per_send_max_zkz: draft.per_send_max_zkz,
+    per_send_min_zkz: draft.per_send_min_zkz,
+    window_hours: draft.window_hours,
+    window_cap_zkz: draft.window_cap_zkz,
+    expires_at: draft.expires_at,
+    enabled: draft.enabled,
+  };
+}
+
+async function bindConnectorReserves(input: {
+  readonly registry: ImplementerRegistry;
+  readonly funding: DefaultFundingWalletPort | undefined;
+  readonly nodeId: string;
+  readonly implementerId: string;
+  readonly actorId: string;
+  readonly linked?: readonly string[];
+  readonly defaultId?: string | null;
+  readonly allowCustomRouting?: boolean;
+  readonly requireReserve?: boolean;
+}): Promise<void> {
+  const requireReserve = input.requireReserve !== false;
+  let walletIds: readonly string[] | null = null;
+  let defaultWalletId: string | null = null;
+  if (input.linked !== undefined && input.linked.length > 0) {
+    walletIds = input.linked;
+    defaultWalletId =
+      typeof input.defaultId === "string" && input.linked.includes(input.defaultId)
+        ? input.defaultId
+        : input.linked[0]!;
+  } else if (typeof input.defaultId === "string") {
+    walletIds = [input.defaultId];
+    defaultWalletId = input.defaultId;
+  } else if (requireReserve && input.funding !== undefined) {
+    const snap = await input.funding.get();
+    if (snap.wallet_id !== null) {
+      walletIds = [snap.wallet_id];
+      defaultWalletId = snap.wallet_id;
+    }
+  }
+  if (walletIds !== null && defaultWalletId !== null) {
+    const bound = await input.registry.setReserveWallets({
+      nodeId: input.nodeId,
+      implementerId: input.implementerId,
+      walletIds,
+      defaultWalletId,
+      actorId: input.actorId,
+    });
+    if (!bound.ok) {
+      throw Object.assign(new Error(bound.reason), { code: "RESERVE_BIND_FAILED" });
+    }
+  } else if (requireReserve) {
+    throw Object.assign(new Error("main reserve is not provisioned"), {
+      code: "RESERVE_UNAVAILABLE",
+    });
+  }
+  if (input.allowCustomRouting !== undefined) {
+    const routing = await input.registry.setCustomRouting({
+      nodeId: input.nodeId,
+      implementerId: input.implementerId,
+      allowCustomRouting: input.allowCustomRouting,
+      actorId: input.actorId,
+    });
+    if (!routing.ok) {
+      throw Object.assign(new Error(routing.reason), { code: "RESERVE_BIND_FAILED" });
+    }
+  }
+}
+
+function connectorMutationAbort(
+  guarded: {
+    readonly reason: string;
+    readonly status: number;
+    readonly code: string;
+    readonly message: string;
+    readonly error?: unknown;
+  },
+  requestId: string,
+): { readonly outcome: "abort"; readonly response: AdminRouterResponse } {
+  const err = guarded.error;
+  if (guarded.reason === "mutation_threw" && err instanceof ImplementerRegistryError) {
+    if (err.code === "IMPLEMENTER_NAME_INVALID") {
+      return { outcome: "abort", response: fail(400, "invalid_scalar", err.message, requestId) };
+    }
+  }
+  if (guarded.reason === "mutation_threw" && err instanceof Error) {
+    const coded = err as Error & { code?: string; status?: number };
+    if (
+      coded.code === "POLICY_INVALID" ||
+      coded.code === "RESERVE_UNAVAILABLE" ||
+      coded.code === "RESERVE_BIND_FAILED"
+    ) {
+      return { outcome: "abort", response: fail(409, "conflict", err.message, requestId) };
+    }
+    if (coded.code === "INVALID_CONNECTOR_SCOPES") {
+      return { outcome: "abort", response: fail(400, "invalid_scalar", err.message, requestId) };
+    }
+    if (coded.code === "not_found" || coded.status === 404) {
+      return { outcome: "abort", response: fail(404, "not_found", err.message, requestId) };
+    }
+    if (coded.code === "service_unavailable" || coded.status === 503) {
+      return {
+        outcome: "abort",
+        response: fail(503, "service_unavailable", err.message, requestId),
+      };
+    }
+  }
+  return {
+    outcome: "abort",
+    response: fail(guarded.status, guarded.code, guarded.message, requestId),
+  };
+}
+
+async function admitNodeVerifiedImplementer(input: {
+  readonly port: AllowNodeVerifiedPolicyPort | undefined;
+  readonly implementerId: string;
+  readonly actorId: string;
+  readonly nodeId: string;
+}): Promise<void> {
+  const port = input.port;
+  if (port?.setPolicy === undefined) return;
+  const current = await port.getPolicy();
+  if (
+    current.status === "disabled" &&
+    (current.disabledReason === "invalid" || current.disabledReason === "unreadable")
+  ) {
+    throw Object.assign(new Error("fix the node verified policy document first"), {
+      code: "POLICY_INVALID",
+    });
+  }
+  let enabled = true;
+  let entries: AllowNodeVerifiedImplementerEntry[] = [];
+  if (current.status === "enabled") {
+    entries = [...current.implementers];
+  } else if (current.disabledReason === "off") {
+    enabled = false;
+    entries = [...(current.implementers ?? [])];
+  }
+  const next = [
+    ...entries.filter((entry) => entry.implementer_id !== input.implementerId),
+    { implementer_id: input.implementerId, enabled: true },
+  ];
+  await port.setPolicy(serializeAllowNodeVerifiedPolicyDocument(next, enabled), {
+    actorId: input.actorId,
+    nodeId: input.nodeId,
+  });
+}
+
+function policyDocumentFromJson(json: string): AutoApprovePolicyDocument {
+  const parsed = parseAutoApprovePolicyStructure(json);
+  if (!parsed.ok) return { status: "disabled", disabledReason: parsed.reason };
+  if (!parsed.enabled) return { status: "disabled", disabledReason: "off", rules: parsed.rules };
+  return { status: "enabled", rules: parsed.rules };
+}
+
+function parseConnectorScopeField(
+  raw: unknown,
+): { readonly ok: true; readonly scopes: readonly ConnectorScope[] } | ParseFail {
+  if (!Array.isArray(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "scopes must be an array" };
+  }
+  const texts: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "scopes must be strings" };
+    }
+    texts.push(item);
+  }
+  const scopes = normalizeConnectorScopes(texts);
+  if (scopes === null) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "scopes are invalid" };
+  }
+  return { ok: true, scopes };
+}
+
+function parseUuidListField(
+  raw: unknown,
+  field: string,
+): { readonly ok: true; readonly ids: readonly string[] } | ParseFail {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: `${field} must be a non-empty array` };
+  }
+  const ids: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string" || !LOWER_UUID_RE.test(item) || ids.includes(item)) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: `${field} must be unique canonical uuids` };
+    }
+    ids.push(item);
+  }
+  return { ok: true, ids };
+}
+
+function parseOptionalUuid(
+  raw: unknown,
+  field: string,
+): { readonly ok: true; readonly id: string | null } | ParseFail {
+  if (raw === null) return { ok: true, id: null };
+  if (typeof raw !== "string" || !LOWER_UUID_RE.test(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: `${field} must be a canonical uuid` };
+  }
+  return { ok: true, id: raw };
+}
+
+function parseHookTarget(
+  raw: unknown,
+): { readonly ok: true; readonly url: string | null } | ParseFail {
+  if (raw === null) return { ok: true, url: null };
+  if (typeof raw !== "string" || raw.length === 0) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "hook target is invalid" };
+  }
+  try {
+    validateUrl(raw);
+  } catch (err) {
+    if (err instanceof SsrfError) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "hook target is invalid" };
+    }
+    throw err;
+  }
+  return { ok: true, url: raw };
+}
+
+function parsePolicyModeField(
+  raw: unknown,
+): { readonly ok: true; readonly mode: ConnectorPolicyMode } | ParseFail {
+  if (raw !== "NODE_VERIFIED" && raw !== "LEGACY") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "policy_mode is invalid" };
+  }
+  return { ok: true, mode: raw };
+}
+
+interface ApproveOverrides {
+  readonly expected_row_version: number;
+  readonly rule: OperatorRuleDraft;
+  readonly default_reserve_wallet_id?: string | null;
+  readonly linked_reserve_wallet_ids?: readonly string[];
+  readonly allow_custom_routing?: boolean;
+  readonly scopes?: readonly ConnectorScope[];
+  readonly approved_rules?: readonly OperatorRuleDraft[];
+  readonly webhook_enabled?: boolean;
+}
+
 /**
- * Single-rule body for integration-request approve. Operator may edit caps;
+ * Integration-request approve. Operator may edit caps.
  * implementer_id is stamped server-side after create (client value ignored).
- * Shape matches one AutoApproveRule (ZTR-1234 parser).
+ * Optional connector overrides are applied only when a connector store is wired.
  */
 function parseIntegrationRequestApproveBody(
   raw: unknown,
-): ParseOk<{
-  readonly expected_row_version: number;
-  readonly rule: Omit<AutoApproveRule, "implementer_id"> & {
-    readonly implementer_id?: string;
-  };
-  readonly ruleJsonTemplate: Record<string, unknown>;
-}> | ParseFail {
+): ParseOk<ApproveOverrides> | ParseFail {
   if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
   }
@@ -895,21 +1192,8 @@ function parseIntegrationRequestApproveBody(
       message: "expected_row_version must be a positive integer",
     };
   }
-  if (!isRecord(raw.rule)) {
-    return { ok: false, status: 400, code: "invalid_scalar", message: "rule is required" };
-  }
-  // Placeholder implementer_id so structure parse accepts the rule; stamped later.
-  const PLACEHOLDER_IMPL = "00000000-0000-4000-8000-000000000001";
-  const ruleForParse = {
-    ...raw.rule,
-    implementer_id:
-      typeof raw.rule.implementer_id === "string" && LOWER_UUID_RE.test(raw.rule.implementer_id)
-        ? raw.rule.implementer_id
-        : PLACEHOLDER_IMPL,
-  };
-  const documentJson = JSON.stringify({ enabled: true, rules: [ruleForParse] });
-  const structured = parseAutoApprovePolicyStructure(documentJson);
-  if (!structured.ok || structured.rules.length !== 1) {
+  const rule = parseOperatorRule(raw.rule);
+  if (rule === null) {
     return {
       ok: false,
       status: 422,
@@ -917,43 +1201,76 @@ function parseIntegrationRequestApproveBody(
       message: "final rule is invalid",
     };
   }
-  const known = new Set(["expected_row_version", "rule"]);
+  const body: {
+    expected_row_version: number;
+    rule: OperatorRuleDraft;
+    default_reserve_wallet_id?: string | null;
+    linked_reserve_wallet_ids?: readonly string[];
+    allow_custom_routing?: boolean;
+    scopes?: readonly ConnectorScope[];
+    approved_rules?: readonly OperatorRuleDraft[];
+    webhook_enabled?: boolean;
+  } = {
+    expected_row_version: raw.expected_row_version,
+    rule,
+  };
+  if (raw.default_reserve_wallet_id !== undefined) {
+    const parsed = parseOptionalUuid(raw.default_reserve_wallet_id, "default_reserve_wallet_id");
+    if (!parsed.ok) return parsed;
+    body.default_reserve_wallet_id = parsed.id;
+  }
+  if (raw.linked_reserve_wallet_ids !== undefined) {
+    const parsed = parseUuidListField(raw.linked_reserve_wallet_ids, "linked_reserve_wallet_ids");
+    if (!parsed.ok) return parsed;
+    body.linked_reserve_wallet_ids = parsed.ids;
+  }
+  if (raw.allow_custom_routing !== undefined) {
+    if (typeof raw.allow_custom_routing !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "allow_custom_routing must be boolean" };
+    }
+    body.allow_custom_routing = raw.allow_custom_routing;
+  }
+  if (raw.scopes !== undefined) {
+    const parsed = parseConnectorScopeField(raw.scopes);
+    if (!parsed.ok) return parsed;
+    body.scopes = parsed.scopes;
+  }
+  if (raw.approved_rules !== undefined) {
+    if (!Array.isArray(raw.approved_rules)) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "approved_rules must be an array" };
+    }
+    const drafts: OperatorRuleDraft[] = [];
+    for (const item of raw.approved_rules) {
+      const parsed = parseOperatorRule(item);
+      if (parsed === null) {
+        return { ok: false, status: 422, code: "validation_error", message: "approved rule is invalid" };
+      }
+      drafts.push(parsed);
+    }
+    body.approved_rules = drafts;
+  }
+  if (raw.webhook_enabled !== undefined) {
+    if (typeof raw.webhook_enabled !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "webhook_enabled must be boolean" };
+    }
+    body.webhook_enabled = raw.webhook_enabled;
+  }
+  const known = new Set([
+    "expected_row_version",
+    "rule",
+    "default_reserve_wallet_id",
+    "linked_reserve_wallet_ids",
+    "allow_custom_routing",
+    "scopes",
+    "approved_rules",
+    "webhook_enabled",
+  ]);
   for (const key of Object.keys(raw)) {
     if (!known.has(key)) {
       return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
     }
   }
-  const rule = structured.rules[0]!;
-  return {
-    ok: true,
-    body: {
-      expected_row_version: raw.expected_row_version,
-      rule: {
-        rule_id: rule.rule_id,
-        label: rule.label ?? null,
-        reserve_wallet_id: rule.reserve_wallet_id ?? null,
-        total_cap_zkz: rule.total_cap_zkz ?? null,
-        per_send_max_zkz: rule.per_send_max_zkz,
-        per_send_min_zkz: rule.per_send_min_zkz,
-        window_hours: rule.window_hours,
-        window_cap_zkz: rule.window_cap_zkz,
-        expires_at: rule.expires_at,
-        enabled: rule.enabled,
-      },
-      ruleJsonTemplate: {
-        rule_id: rule.rule_id,
-        label: rule.label ?? null,
-        reserve_wallet_id: rule.reserve_wallet_id ?? null,
-        total_cap_zkz: rule.total_cap_zkz ?? null,
-        per_send_max_zkz: rule.per_send_max_zkz,
-        per_send_min_zkz: rule.per_send_min_zkz,
-        window_hours: rule.window_hours,
-        window_cap_zkz: rule.window_cap_zkz,
-        expires_at: rule.expires_at,
-        enabled: rule.enabled,
-      },
-    },
-  };
+  return { ok: true, body };
 }
 
 function parseIntegrationRequestDeclineBody(
@@ -988,6 +1305,9 @@ function toIntegrationRequestListing(row: IntegrationRequestRecord) {
     id: row.id,
     display_name: row.display_name,
     requested_scopes: row.requested_scopes,
+    requested_rules: row.requested_rules,
+    requested_webhook_url: row.requested_webhook_url,
+    requested_connector_scopes: row.requested_connector_scopes,
     proposed_rule_json: row.proposed_rule_json,
     approved_rule_json: row.approved_rule_json,
     status: row.status,
@@ -1104,6 +1424,278 @@ function parseRetireImplementerBody(
     return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
   }
   return { ok: true, body: {} };
+}
+
+function connectorReserveViews(row: ImplementerRecord | null) {
+  const allow = row?.allow_custom_routing ?? false;
+  return (row?.reserve_wallets ?? []).map((wallet) => ({
+    wallet_id: wallet.wallet_id,
+    display_name: wallet.display_label,
+    is_default: wallet.is_default,
+    allow_custom_routing: allow,
+  }));
+}
+
+function activeKeyViews(rows: readonly StoredCredential[]) {
+  return rows
+    .filter((row) => row.status === "ACTIVE" || row.status === "GRACE")
+    .map((row) => ({
+      key_id: row.id,
+      key_prefix: row.public_prefix,
+      created_at: row.issued_at,
+      last_used_at: null,
+    }));
+}
+
+async function spendRulesForImplementer(
+  deps: AdminRouteDeps,
+  implementerId: string,
+) {
+  if (deps.autoApprovePolicy === undefined) return [];
+  const policy = await deps.autoApprovePolicy.getPolicy();
+  const rules =
+    policy.status === "enabled"
+      ? policy.rules
+      : policy.status === "disabled"
+        ? (policy.rules ?? [])
+        : [];
+  const enriched = await enrichAutoApproveRuleViews(
+    rules.filter((rule) => rule.implementer_id === implementerId),
+    deps.queryAutoApproveWindowSpend ?? (async () => "0"),
+    deps.queryAutoApproveLifetimeSpend ?? (async () => "0"),
+  );
+  return enriched;
+}
+
+async function connectorView(
+  deps: AdminRouteDeps,
+  row: ConnectorConfigRecord,
+) {
+  const implementer = deps.implementerRegistry
+    ? await deps.implementerRegistry.get(row.implementer_id)
+    : null;
+  const credentials = deps.credentialService
+    ? await deps.credentialService.list(row.implementer_id)
+    : [];
+  return {
+    implementer_id: row.implementer_id,
+    display_name: row.display_name,
+    policy_mode: row.policy_mode,
+    scopes: row.scopes,
+    linked_reserves: connectorReserveViews(implementer),
+    api_keys: activeKeyViews(credentials),
+    spend_rules: await spendRulesForImplementer(deps, row.implementer_id),
+    webhook_url: row.webhook_url,
+    webhook_enabled: row.webhook_enabled,
+  };
+}
+
+interface CreateConnectorBody {
+  readonly display_name: string;
+  readonly scopes: readonly ConnectorScope[];
+  readonly linked_reserve_wallet_ids?: readonly string[];
+  readonly default_reserve_wallet_id?: string | null;
+  readonly allow_custom_routing: boolean;
+  readonly rules: readonly OperatorRuleDraft[];
+  readonly webhook_url: string | null;
+  readonly webhook_enabled: boolean;
+  readonly policy_mode: ConnectorPolicyMode;
+}
+
+function parseCreateConnectorBody(raw: unknown): ParseOk<CreateConnectorBody> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  if (typeof raw.display_name !== "string") {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "display_name is required" };
+  }
+  const displayName = raw.display_name.trim();
+  if (displayName.length < 1 || displayName.length > 120) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "display_name must be 1-120 characters" };
+  }
+  let scopes: readonly ConnectorScope[] = [...DEFAULT_CONNECTOR_SCOPES];
+  if (raw.scopes !== undefined) {
+    const parsed = parseConnectorScopeField(raw.scopes);
+    if (!parsed.ok) return parsed;
+    scopes = parsed.scopes;
+  }
+  if (credentialScopesForConnectorScopes(scopes).length === 0) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "scopes grant no credential" };
+  }
+  let linked: readonly string[] | undefined;
+  if (raw.linked_reserve_wallet_ids !== undefined) {
+    const parsed = parseUuidListField(raw.linked_reserve_wallet_ids, "linked_reserve_wallet_ids");
+    if (!parsed.ok) return parsed;
+    linked = parsed.ids;
+  }
+  let defaultId: string | null | undefined;
+  if (raw.default_reserve_wallet_id !== undefined) {
+    const parsed = parseOptionalUuid(raw.default_reserve_wallet_id, "default_reserve_wallet_id");
+    if (!parsed.ok) return parsed;
+    defaultId = parsed.id;
+  }
+  let allowCustom = false;
+  if (raw.allow_custom_routing !== undefined) {
+    if (typeof raw.allow_custom_routing !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "allow_custom_routing must be boolean" };
+    }
+    allowCustom = raw.allow_custom_routing;
+  }
+  const rules: OperatorRuleDraft[] = [];
+  if (raw.rules !== undefined) {
+    if (!Array.isArray(raw.rules)) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "rules must be an array" };
+    }
+    for (const item of raw.rules) {
+      const parsed = parseOperatorRule(item);
+      if (parsed === null) {
+        return { ok: false, status: 422, code: "validation_error", message: "rule is invalid" };
+      }
+      rules.push(parsed);
+    }
+  }
+  let webhookUrl: string | null = null;
+  if (raw.webhook_url !== undefined) {
+    const parsed = parseHookTarget(raw.webhook_url);
+    if (!parsed.ok) return parsed;
+    webhookUrl = parsed.url;
+  }
+  let webhookEnabled = webhookUrl !== null;
+  if (raw.webhook_enabled !== undefined) {
+    if (typeof raw.webhook_enabled !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "webhook_enabled must be boolean" };
+    }
+    webhookEnabled = raw.webhook_enabled;
+  }
+  let policyMode: ConnectorPolicyMode = "NODE_VERIFIED";
+  if (raw.policy_mode !== undefined) {
+    const parsed = parsePolicyModeField(raw.policy_mode);
+    if (!parsed.ok) return parsed;
+    policyMode = parsed.mode;
+  }
+  const known = new Set([
+    "display_name",
+    "scopes",
+    "linked_reserve_wallet_ids",
+    "default_reserve_wallet_id",
+    "allow_custom_routing",
+    "rules",
+    "webhook_url",
+    "webhook_enabled",
+    "policy_mode",
+  ]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return {
+    ok: true,
+    body: {
+      display_name: displayName,
+      scopes,
+      ...(linked !== undefined ? { linked_reserve_wallet_ids: linked } : {}),
+      ...(defaultId !== undefined ? { default_reserve_wallet_id: defaultId } : {}),
+      allow_custom_routing: allowCustom,
+      rules,
+      webhook_url: webhookUrl,
+      webhook_enabled: webhookEnabled,
+      policy_mode: policyMode,
+    },
+  };
+}
+
+interface PatchConnectorBody {
+  readonly display_name?: string;
+  readonly scopes?: readonly ConnectorScope[];
+  readonly linked_reserve_wallet_ids?: readonly string[];
+  readonly default_reserve_wallet_id?: string | null;
+  readonly allow_custom_routing?: boolean;
+  readonly webhook_url?: string | null;
+  readonly webhook_enabled?: boolean;
+  readonly policy_mode?: ConnectorPolicyMode;
+}
+
+function parsePatchConnectorBody(raw: unknown): ParseOk<PatchConnectorBody> | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "invalid_scalar", message: "body required" };
+  }
+  const body: {
+    display_name?: string;
+    scopes?: readonly ConnectorScope[];
+    linked_reserve_wallet_ids?: readonly string[];
+    default_reserve_wallet_id?: string | null;
+    allow_custom_routing?: boolean;
+    webhook_url?: string | null;
+    webhook_enabled?: boolean;
+    policy_mode?: ConnectorPolicyMode;
+  } = {};
+  if (raw.display_name !== undefined) {
+    if (typeof raw.display_name !== "string") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "display_name is invalid" };
+    }
+    const displayName = raw.display_name.trim();
+    if (displayName.length < 1 || displayName.length > 120) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "display_name must be 1-120 characters" };
+    }
+    body.display_name = displayName;
+  }
+  if (raw.scopes !== undefined) {
+    const parsed = parseConnectorScopeField(raw.scopes);
+    if (!parsed.ok) return parsed;
+    if (credentialScopesForConnectorScopes(parsed.scopes).length === 0) {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "scopes grant no credential" };
+    }
+    body.scopes = parsed.scopes;
+  }
+  if (raw.linked_reserve_wallet_ids !== undefined) {
+    const parsed = parseUuidListField(raw.linked_reserve_wallet_ids, "linked_reserve_wallet_ids");
+    if (!parsed.ok) return parsed;
+    body.linked_reserve_wallet_ids = parsed.ids;
+  }
+  if (raw.default_reserve_wallet_id !== undefined) {
+    const parsed = parseOptionalUuid(raw.default_reserve_wallet_id, "default_reserve_wallet_id");
+    if (!parsed.ok) return parsed;
+    body.default_reserve_wallet_id = parsed.id;
+  }
+  if (raw.allow_custom_routing !== undefined) {
+    if (typeof raw.allow_custom_routing !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "allow_custom_routing must be boolean" };
+    }
+    body.allow_custom_routing = raw.allow_custom_routing;
+  }
+  if (raw.webhook_url !== undefined) {
+    const parsed = parseHookTarget(raw.webhook_url);
+    if (!parsed.ok) return parsed;
+    body.webhook_url = parsed.url;
+  }
+  if (raw.webhook_enabled !== undefined) {
+    if (typeof raw.webhook_enabled !== "boolean") {
+      return { ok: false, status: 400, code: "invalid_scalar", message: "webhook_enabled must be boolean" };
+    }
+    body.webhook_enabled = raw.webhook_enabled;
+  }
+  if (raw.policy_mode !== undefined) {
+    const parsed = parsePolicyModeField(raw.policy_mode);
+    if (!parsed.ok) return parsed;
+    body.policy_mode = parsed.mode;
+  }
+  const known = new Set([
+    "display_name",
+    "scopes",
+    "linked_reserve_wallet_ids",
+    "default_reserve_wallet_id",
+    "allow_custom_routing",
+    "webhook_url",
+    "webhook_enabled",
+    "policy_mode",
+  ]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      return { ok: false, status: 400, code: "unknown_field", message: `unknown field: ${key}` };
+    }
+  }
+  return { ok: true, body };
 }
 
 function toImplementerListing(row: ImplementerRecord): {
@@ -1933,6 +2525,11 @@ export interface AdminRouteDeps {
    */
   readonly integrationRequestStore?: IntegrationRequestStore;
   /**
+   * API connector row (scopes, hook target, policy mode) keyed by implementer.
+   * When omitted, connector routes fail closed (503) and approve skips the bind.
+   */
+  readonly connectorConfigStore?: ConnectorConfigStore;
+  /**
    * REQUIRED admin-mutation idempotency. Routes check for a completed row before
    * the TOTP burn; the shared executor commits child effects and exact response bytes together.
    * Missing production wiring fails closed with idempotency_unavailable.
@@ -2059,6 +2656,11 @@ export interface AdminMutationTxPorts {
    * MUST use this port so request row + implementer + policy share one TX.
    */
   readonly integrationRequestStore?: IntegrationRequestStore;
+  /**
+   * TX-scoped connector row. Upsert and patch MUST use this port so the connector
+   * row commits with the implementer and the reserve bind.
+   */
+  readonly connectorConfigStore?: ConnectorConfigStore;
   /**
    * TX-scoped device-signature policy (ZTR-1143). Mutation writes MUST use this
    * port so node_settings + audit_log commit/roll back with the admin mutation TX.
@@ -3393,6 +3995,28 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       }
     }
 
+    // GET /admin/v1/connectors — connector rows, linked reserves, active keys, spend rules.
+    // Session+CSRF; no TOTP on reads. last_used_at stays null (no such column).
+    if (verb === "GET" && pathname === "/admin/v1/connectors") {
+      const gate = await gateMoneyMutation(sessions, authReq, {
+        userStore: deps.userStore,
+        csrf,
+        labTotp: labTotpOrNull(totp),
+      });
+      if (!gate.ok) return authFail(gate, requestId);
+      if (deps.connectorConfigStore === undefined) {
+        return fail(503, "service_unavailable", "connector store not wired", requestId);
+      }
+      try {
+        const rows = await deps.connectorConfigStore.list();
+        const connectors = [];
+        for (const row of rows) connectors.push(await connectorView(deps, row));
+        return ok(200, { connectors });
+      } catch {
+        return fail(503, "service_unavailable", "connector list unavailable", requestId);
+      }
+    }
+
     // GET /admin/v1/api-keys — list implementer credentials across all integrations
     // (id/implementer_id/prefix/scopes/status; never the raw key or hash).
     // Optional ?implementer_id= filters to one integration. Session+CSRF; no TOTP on reads.
@@ -4070,6 +4694,139 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         });
       }
     }
+
+    // PATCH /admin/v1/connectors/:implementer_id — above the POST-only gate.
+    {
+      const m = pathname.match(/^\/admin\/v1\/connectors\/([^/]+)$/);
+      if (verb === "PATCH" && m) {
+        if (
+          deps.connectorConfigStore === undefined ||
+          deps.implementerRegistry === undefined
+        ) {
+          return fail(503, "service_unavailable", "connector update not wired", requestId);
+        }
+        const implementerId = m[1]!;
+        if (!LOWER_UUID_RE.test(implementerId)) {
+          return fail(400, "validation_error", "implementer id must be a canonical uuid", requestId);
+        }
+        let connectorPatchBody: unknown;
+        try {
+          connectorPatchBody = decodeBody(rawBody);
+        } catch {
+          return fail(400, "validation_error", "invalid JSON body", requestId);
+        }
+        const routeId = "admin_connectors_patch";
+        const idem = await idempotencyGate({
+          store: deps.adminIdempotencyStore,
+          nodeId,
+          routeId,
+          headers,
+          verb,
+          rawPath,
+          rawBody,
+          requestId,
+        });
+        if (!idem.ok) return idem.response;
+        return runRequiredAdminMutation({
+          deps,
+          nodeId,
+          routeId,
+          idemKey: idem.idemKey,
+          fingerprint: idem.fingerprint,
+          requestId,
+          action: async (ports) => {
+            const guarded = await runGuardedAdminMutation({
+              sessions,
+              request: authReq,
+              csrf,
+              totp: labTotpOrNull(totp),
+              userStore: deps.userStore,
+              totpLog,
+              nodeId,
+              rawBody: connectorPatchBody,
+              validateBody: parsePatchConnectorBody,
+              nowMs: nowMs(),
+              mutate: async ({ body, user, session }) => {
+                const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+                const connectorStore = ports.connectorConfigStore ?? deps.connectorConfigStore;
+                if (registry === undefined || connectorStore === undefined) {
+                  throw Object.assign(new Error("connector update not wired"), {
+                    code: "service_unavailable",
+                    status: 503,
+                  });
+                }
+                const existing = await connectorStore.get(implementerId);
+                if (existing === null) {
+                  throw Object.assign(new Error("connector not found"), {
+                    code: "not_found",
+                    status: 404,
+                  });
+                }
+                const saved = await connectorStore.patch({
+                  implementerId,
+                  ...(body.display_name !== undefined ? { displayName: body.display_name } : {}),
+                  ...(body.scopes !== undefined ? { scopes: body.scopes } : {}),
+                  ...(body.webhook_url !== undefined ? { webhookUrl: body.webhook_url } : {}),
+                  ...(body.webhook_enabled !== undefined
+                    ? { webhookEnabled: body.webhook_enabled }
+                    : {}),
+                  ...(body.policy_mode !== undefined ? { policyMode: body.policy_mode } : {}),
+                });
+                if (saved === null) {
+                  throw Object.assign(new Error("connector not found"), {
+                    code: "not_found",
+                    status: 404,
+                  });
+                }
+                if (
+                  body.linked_reserve_wallet_ids !== undefined ||
+                  body.default_reserve_wallet_id !== undefined ||
+                  body.allow_custom_routing !== undefined
+                ) {
+                  await bindConnectorReserves({
+                    registry,
+                    funding: ports.defaultFundingWallet ?? deps.defaultFundingWallet,
+                    nodeId,
+                    implementerId,
+                    actorId: user.id,
+                    linked: body.linked_reserve_wallet_ids,
+                    defaultId: body.default_reserve_wallet_id,
+                    allowCustomRouting: body.allow_custom_routing,
+                    requireReserve: false,
+                  });
+                }
+                if (body.policy_mode === "NODE_VERIFIED") {
+                  await admitNodeVerifiedImplementer({
+                    port: ports.allowNodeVerifiedPolicy ?? deps.allowNodeVerifiedPolicy,
+                    implementerId,
+                    actorId: user.id,
+                    nodeId,
+                  });
+                }
+                const implementer = await registry.get(implementerId);
+                const credentials = ports.credentialService ?? deps.credentialService;
+                const keys = credentials === undefined ? [] : await credentials.list(implementerId);
+                return {
+                  ...(await connectorView(
+                    {
+                      ...deps,
+                      ...(credentials !== undefined ? { credentialService: credentials } : {}),
+                      implementerRegistry: registry,
+                    },
+                    saved,
+                  )),
+                  linked_reserves: connectorReserveViews(implementer),
+                  api_keys: activeKeyViews(keys),
+                };
+              },
+            });
+            if (!guarded.ok) return connectorMutationAbort(guarded, requestId);
+            return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+          },
+        });
+      }
+    }
+
 
     if (verb !== "POST") {
       return fail(404, "not_found", "admin route not found", requestId);
@@ -5637,29 +6394,119 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   nodeId,
                 });
 
-                const finalRule: AutoApproveRule = {
-                  rule_id: body.rule.rule_id,
-                  label: body.rule.label ?? null,
-                  implementer_id: created.id,
-                  reserve_wallet_id: body.rule.reserve_wallet_id ?? null,
-                  total_cap_zkz: body.rule.total_cap_zkz ?? null,
-                  per_send_max_zkz: body.rule.per_send_max_zkz,
-                  per_send_min_zkz: body.rule.per_send_min_zkz,
-                  window_hours: body.rule.window_hours,
-                  window_cap_zkz: body.rule.window_cap_zkz,
-                  expires_at: body.rule.expires_at,
-                  enabled: body.rule.enabled,
-                };
+                const requestedDrafts: OperatorRuleDraft[] = [];
+                for (const item of pending.requested_rules ?? []) {
+                  const parsed = parseOperatorRule(item);
+                  if (parsed === null) {
+                    throw Object.assign(new Error("stored rule proposal is invalid"), {
+                      code: "POLICY_INVALID",
+                    });
+                  }
+                  requestedDrafts.push(parsed);
+                }
+                const selected =
+                  body.approved_rules !== undefined && body.approved_rules.length > 0
+                    ? body.approved_rules
+                    : requestedDrafts.length > 0
+                      ? requestedDrafts
+                      : [body.rule];
+                const stamped = selected.map((draft) => stampOperatorRule(draft, created.id));
+                const finalRule = stamped[0]!;
                 const approvedRuleJson = JSON.stringify(finalRule);
 
-                const currentPolicy = await policyPort.getPolicy();
-                const merged = mergeRuleIntoAutoApprovePolicy(currentPolicy, finalRule);
-                if (!merged.ok) {
-                  throw Object.assign(new Error(merged.message), {
-                    code: "POLICY_INVALID",
-                  });
+                let currentPolicy = await policyPort.getPolicy();
+                let documentJson = "";
+                for (const rule of stamped) {
+                  const merged = mergeRuleIntoAutoApprovePolicy(currentPolicy, rule);
+                  if (!merged.ok) {
+                    throw Object.assign(new Error(merged.message), {
+                      code: "POLICY_INVALID",
+                    });
+                  }
+                  documentJson = merged.documentJson;
+                  currentPolicy = policyDocumentFromJson(documentJson);
                 }
-                await policyPort.setPolicy!(merged.documentJson, {
+                await policyPort.setPolicy!(documentJson, {
+                  actorId: user.id,
+                  nodeId,
+                });
+
+                const connectorStore = ports.connectorConfigStore ?? deps.connectorConfigStore;
+                if (connectorStore !== undefined) {
+                  const scopeSource = body.scopes ?? pending.requested_connector_scopes ?? [
+                    ...DEFAULT_CONNECTOR_SCOPES,
+                  ];
+                  const connectorScopes = normalizeConnectorScopes([...scopeSource]);
+                  if (connectorScopes === null) {
+                    throw Object.assign(new Error("connector scopes are invalid"), {
+                      code: "INVALID_CONNECTOR_SCOPES",
+                    });
+                  }
+                  const webhookUrl = pending.requested_webhook_url ?? null;
+                  const webhookEnabled = body.webhook_enabled ?? webhookUrl !== null;
+                  await connectorStore.upsert({
+                    implementerId: created.id,
+                    displayName: pending.display_name,
+                    scopes: connectorScopes,
+                    webhookUrl,
+                    webhookEnabled,
+                    policyMode: "NODE_VERIFIED",
+                  });
+                  let walletIds: readonly string[] | null = null;
+                  let defaultWalletId: string | null = null;
+                  if (
+                    body.linked_reserve_wallet_ids !== undefined &&
+                    body.linked_reserve_wallet_ids.length > 0
+                  ) {
+                    walletIds = body.linked_reserve_wallet_ids;
+                    defaultWalletId =
+                      typeof body.default_reserve_wallet_id === "string" &&
+                      walletIds.includes(body.default_reserve_wallet_id)
+                        ? body.default_reserve_wallet_id
+                        : walletIds[0]!;
+                  } else if (typeof body.default_reserve_wallet_id === "string") {
+                    walletIds = [body.default_reserve_wallet_id];
+                    defaultWalletId = body.default_reserve_wallet_id;
+                  } else {
+                    const funding = ports.defaultFundingWallet ?? deps.defaultFundingWallet;
+                    const snap = funding === undefined ? null : await funding.get();
+                    if (snap !== null && snap.wallet_id !== null) {
+                      walletIds = [snap.wallet_id];
+                      defaultWalletId = snap.wallet_id;
+                    }
+                  }
+                  if (walletIds === null || defaultWalletId === null) {
+                    throw Object.assign(new Error("main reserve is not provisioned"), {
+                      code: "RESERVE_UNAVAILABLE",
+                    });
+                  }
+                  const bound = await registry.setReserveWallets({
+                    nodeId,
+                    implementerId: created.id,
+                    walletIds,
+                    defaultWalletId,
+                    actorId: user.id,
+                  });
+                  if (!bound.ok) {
+                    throw Object.assign(new Error(bound.reason), { code: "RESERVE_BIND_FAILED" });
+                  }
+                  if (body.allow_custom_routing !== undefined) {
+                    const routing = await registry.setCustomRouting({
+                      nodeId,
+                      implementerId: created.id,
+                      allowCustomRouting: body.allow_custom_routing,
+                      actorId: user.id,
+                    });
+                    if (!routing.ok) {
+                      throw Object.assign(new Error(routing.reason), {
+                        code: "RESERVE_BIND_FAILED",
+                      });
+                    }
+                  }
+                }
+                await admitNodeVerifiedImplementer({
+                  port: ports.allowNodeVerifiedPolicy ?? deps.allowNodeVerifiedPolicy,
+                  implementerId: created.id,
                   actorId: user.id,
                   nodeId,
                 });
@@ -5677,6 +6524,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                   request: toIntegrationRequestListing(approved),
                   implementer: toImplementerListing(created),
                   rule: finalRule,
+                  rules: stamped,
                 };
               },
             });
@@ -5731,6 +6579,27 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
                     guarded.error.message,
                     requestId,
                   ),
+                };
+              }
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof Error &&
+                ((guarded.error as { code?: string }).code === "RESERVE_UNAVAILABLE" ||
+                  (guarded.error as { code?: string }).code === "RESERVE_BIND_FAILED")
+              ) {
+                return {
+                  outcome: "abort" as const,
+                  response: fail(409, "conflict", guarded.error.message, requestId),
+                };
+              }
+              if (
+                guarded.reason === "mutation_threw" &&
+                guarded.error instanceof Error &&
+                (guarded.error as { code?: string }).code === "INVALID_CONNECTOR_SCOPES"
+              ) {
+                return {
+                  outcome: "abort" as const,
+                  response: fail(400, "invalid_scalar", guarded.error.message, requestId),
                 };
               }
               if (
@@ -6114,6 +6983,146 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           },
         });
       }
+    }
+
+    // POST /admin/v1/connectors — manual connector. Mints ik_ once in this response.
+    if (verb === "POST" && pathname === "/admin/v1/connectors") {
+      if (
+        deps.connectorConfigStore === undefined ||
+        deps.implementerRegistry === undefined ||
+        deps.credentialService === undefined
+      ) {
+        return fail(503, "service_unavailable", "connector create not wired", requestId);
+      }
+      const routeId = "admin_connectors_create";
+      const idem = await idempotencyGate({
+        store: deps.adminIdempotencyStore,
+        nodeId,
+        routeId,
+        headers,
+        verb,
+        rawPath,
+        rawBody,
+        requestId,
+      });
+      if (!idem.ok) return idem.response;
+      return runRequiredAdminMutation({
+        deps,
+        nodeId,
+        routeId,
+        idemKey: idem.idemKey,
+        fingerprint: idem.fingerprint,
+        requestId,
+        action: async (ports) => {
+          const guarded = await runGuardedAdminMutation({
+            sessions,
+            request: authReq,
+            csrf,
+            totp: labTotpOrNull(totp),
+            userStore: deps.userStore,
+            totpLog,
+            nodeId,
+            rawBody: parsedBody,
+            validateBody: parseCreateConnectorBody,
+            nowMs: nowMs(),
+            mutate: async ({ body, user, session }) => {
+              const registry = ports.implementerRegistry ?? deps.implementerRegistry;
+              const connectorStore = ports.connectorConfigStore ?? deps.connectorConfigStore;
+              const credentials = ports.credentialService ?? deps.credentialService;
+              if (registry === undefined || connectorStore === undefined || credentials === undefined) {
+                throw Object.assign(new Error("connector create not wired"), {
+                  code: "service_unavailable",
+                  status: 503,
+                });
+              }
+              const created = await registry.create({
+                name: body.display_name,
+                actorId: session.sessionId,
+                nodeId,
+              });
+              const saved = await connectorStore.upsert({
+                implementerId: created.id,
+                displayName: body.display_name,
+                scopes: body.scopes,
+                webhookUrl: body.webhook_url,
+                webhookEnabled: body.webhook_enabled,
+                policyMode: body.policy_mode,
+              });
+              await bindConnectorReserves({
+                registry,
+                funding: ports.defaultFundingWallet ?? deps.defaultFundingWallet,
+                nodeId,
+                implementerId: created.id,
+                actorId: user.id,
+                linked: body.linked_reserve_wallet_ids,
+                defaultId: body.default_reserve_wallet_id,
+                allowCustomRouting: body.allow_custom_routing,
+              });
+              if (body.rules.length > 0) {
+                const policyPort = ports.autoApprovePolicy ?? deps.autoApprovePolicy;
+                if (policyPort === undefined || policyPort.setPolicy === undefined) {
+                  throw Object.assign(new Error("auto-approve policy not wired"), {
+                    code: "service_unavailable",
+                    status: 503,
+                  });
+                }
+                let currentPolicy = await policyPort.getPolicy();
+                let documentJson = "";
+                for (const draft of body.rules) {
+                  const merged = mergeRuleIntoAutoApprovePolicy(
+                    currentPolicy,
+                    stampOperatorRule(draft, created.id),
+                  );
+                  if (!merged.ok) {
+                    throw Object.assign(new Error(merged.message), { code: "POLICY_INVALID" });
+                  }
+                  documentJson = merged.documentJson;
+                  currentPolicy = policyDocumentFromJson(documentJson);
+                }
+                await policyPort.setPolicy(documentJson, { actorId: user.id, nodeId });
+              }
+              if (body.policy_mode === "NODE_VERIFIED") {
+                await admitNodeVerifiedImplementer({
+                  port: ports.allowNodeVerifiedPolicy ?? deps.allowNodeVerifiedPolicy,
+                  implementerId: created.id,
+                  actorId: user.id,
+                  nodeId,
+                });
+              }
+              const minted = await credentials.create(
+                created.id,
+                credentialScopesForConnectorScopes(body.scopes),
+                null,
+                session.sessionId,
+              );
+              const implementer = await registry.get(created.id);
+              const keys = await credentials.list(created.id);
+              const stamped = body.rules.map((draft) => stampOperatorRule(draft, created.id));
+              return {
+                implementer_id: saved.implementer_id,
+                display_name: saved.display_name,
+                policy_mode: saved.policy_mode,
+                scopes: saved.scopes,
+                linked_reserves: connectorReserveViews(implementer),
+                api_keys: activeKeyViews(keys),
+                spend_rules: stamped.map((rule) => ({
+                  ...rule,
+                  label: rule.label ?? null,
+                  reserve_wallet_id: rule.reserve_wallet_id ?? null,
+                  total_cap_zkz: rule.total_cap_zkz ?? null,
+                  current_window_spend_zkz: "0",
+                  cumulative_total_spend_zkz: "0",
+                })),
+                webhook_url: saved.webhook_url,
+                webhook_enabled: saved.webhook_enabled,
+                api_key: minted.raw_key,
+              };
+            },
+          });
+          if (!guarded.ok) return connectorMutationAbort(guarded, requestId);
+          return { outcome: "commit" as const, status: 200, responseBody: guarded.result };
+        },
+      });
     }
 
     // POST /admin/v1/api-keys — issue a new implementer bearer key.
@@ -7171,6 +8180,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly mintNamedReserveWallet?: AdminRouteDeps["mintNamedReserveWallet"];
   readonly onVaultInitialized?: AdminRouteDeps["onVaultInitialized"];
   readonly integrationRequestStore?: IntegrationRequestStore;
+  readonly connectorConfigStore?: ConnectorConfigStore;
   readonly deviceStore?: DeviceKeyStoreLike | null;
   readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
   readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;
@@ -7278,6 +8288,7 @@ export function createFailClosedAdminRouteDeps(base: {
     mintNamedReserveWallet: base.mintNamedReserveWallet,
     onVaultInitialized: base.onVaultInitialized,
     integrationRequestStore: base.integrationRequestStore,
+    connectorConfigStore: base.connectorConfigStore,
     adminIdempotencyStore: base.adminIdempotencyStore,
     atomicAdminMutation: base.atomicAdminMutation,
     reportingCredentialService: base.reportingCredentialService,
@@ -7318,6 +8329,7 @@ export function createLiveAdminRouteDeps(
     readonly defaultFundingWallet?: DefaultFundingWalletPort;
     readonly mintFundingWallet?: AdminRouteDeps["mintFundingWallet"];
     readonly integrationRequestStore?: IntegrationRequestStore;
+    readonly connectorConfigStore?: ConnectorConfigStore;
     readonly deviceStore?: DeviceKeyStoreLike | null;
     readonly deviceEnrollmentChallengeStore?: EnrollmentChallengeStore | null;
     readonly deviceEnrollmentAuditLog?: EnrollmentAuditLog | null;

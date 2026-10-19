@@ -64,6 +64,15 @@ import type { NodeReadiness } from "./boot/readiness.js";
 import { createMetricsMount, type MetricsMount } from "./metrics/routes.js";
 import { resolveAdminSpaDist, tryServeAdminSpa } from "./admin-spa.js";
 import { resolveEmbedDist, tryServeEmbed } from "./embed-spa.js";
+import {
+  loadPublicReceiveInstruction,
+  RECEIVE_INSTRUCTION_CORS_HEADERS,
+  RECEIVE_INSTRUCTION_RATE_MAX_REQUESTS,
+  RECEIVE_INSTRUCTION_RATE_WINDOW_MS,
+  receiveInstructionJsonHeaders,
+  receiveInstructionNotFoundBody,
+  type ReceiveInstructionSql,
+} from "./public-receive-instruction.js";
 
 /** Structured event for one unexpected /v1 listener failure. */
 export interface RuntimeListenerFailureEvent {
@@ -187,6 +196,11 @@ export interface NodeRuntimeListenerDeps {
   readonly integrationRequestStore?: PublicIntegrationRequestStore;
   /** Spend-rule request store (ZTR-1331). Mounted with nodeId and a credential service. */
   readonly connectorRuleRequestStore?: ConnectorRuleRequestStore;
+  /**
+   * Public receive-instruction read (ZTR-1335). Side route, not a catalog route.
+   * When omitted the path answers 503 so it is never parsed as an operation id.
+   */
+  readonly receiveInstructionSql?: ReceiveInstructionSql;
   readonly adminRouter?: AdminRouter;
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;
@@ -717,6 +731,12 @@ export function createNodeRuntimeListener(
         })
       : null;
 
+  const receiveInstructionSql = deps.receiveInstructionSql;
+  const receiveInstructionLimiter = new InMemoryReportingRateLimiter(
+    RECEIVE_INSTRUCTION_RATE_WINDOW_MS,
+    RECEIVE_INSTRUCTION_RATE_MAX_REQUESTS,
+  );
+
   const adminRouter: AdminRouter | null =
     deps.adminRouter ??
     (deps.adminRouteDeps !== undefined ? createAdminRouter(deps.adminRouteDeps) : null);
@@ -1090,6 +1110,79 @@ export function createNodeRuntimeListener(
     // Destinations (implementer bearer)
     if (pathname === "/v1/destinations" && destinationsRouter !== null) {
       void handleJsonRoute(destinationsRouter, newRequestId, logger, request, response);
+      return;
+    }
+
+    // Public receive instruction (ZTR-1335). Matched before the operation
+    // router so the trailing segment is not parsed as an operation id.
+    // Not a catalog route. CORS on every answer, including denial.
+    const instructionMatch = /^\/v1\/receives\/([^/]+)\/instruction$/.exec(pathname);
+    if (instructionMatch !== null) {
+      const instructionMethod = (request.method ?? "GET").toUpperCase();
+      if (instructionMethod === "OPTIONS") {
+        response.writeHead(204, {
+          ...RECEIVE_INSTRUCTION_CORS_HEADERS,
+          "content-length": "0",
+        });
+        response.end();
+        return;
+      }
+      const peer = request.socket?.remoteAddress ?? "unknown";
+      if (
+        !receiveInstructionLimiter.consume(deps.nodeId ?? "", peer, Date.now())
+      ) {
+        const error = apiErrorResponse("rate_limited", newRequestId(), undefined, 60);
+        writeJson(response, error.status, error.body, {
+          ...error.headers,
+          ...RECEIVE_INSTRUCTION_CORS_HEADERS,
+        });
+        return;
+      }
+      const operationId = instructionMatch[1] ?? "";
+      void (async () => {
+        try {
+          if (instructionMethod !== "GET" || receiveInstructionSql === undefined) {
+            const status = receiveInstructionSql === undefined ? 503 : 404;
+            const body =
+              receiveInstructionSql === undefined
+                ? apiErrorResponse("service_unavailable", newRequestId()).body
+                : receiveInstructionNotFoundBody();
+            writeJson(response, status, body, receiveInstructionJsonHeaders());
+            return;
+          }
+          const loaded = await loadPublicReceiveInstruction(receiveInstructionSql, operationId);
+          if (loaded === null) {
+            writeJson(
+              response,
+              404,
+              receiveInstructionNotFoundBody(),
+              receiveInstructionJsonHeaders(),
+            );
+            return;
+          }
+          writeJson(response, 200, JSON.stringify(loaded), receiveInstructionJsonHeaders());
+        } catch (cause) {
+          const requestId = newRequestId();
+          const { cause_name, cause_message } = sanitizeFailureCause(cause);
+          emitUnexpectedFailure(logger, {
+            event: "operation_listener_unexpected_failure",
+            request_id: requestId,
+            method: instructionMethod,
+            path_class: `${instructionMethod} /v1/receives/:operation_id/instruction`,
+            cause_name,
+            cause_message,
+          });
+          const error = apiErrorResponse("service_unavailable", requestId);
+          try {
+            writeJson(response, error.status, error.body, {
+              ...error.headers,
+              ...RECEIVE_INSTRUCTION_CORS_HEADERS,
+            });
+          } catch {
+            /* committed */
+          }
+        }
+      })();
       return;
     }
 

@@ -26,6 +26,13 @@ export type {
   StateTransition,
 } from "./states.contract.ts";
 
+export { PUBLIC_RECEIVE_INSTRUCTION_STATES } from "./receive-instruction.contract.ts";
+export type {
+  PublicReceiveInstructionState,
+  PersistedReceiveExpectedEnvelope,
+  PublicReceiveInstructionResponse,
+} from "./receive-instruction.contract.ts";
+
 export { OPERATION_STATUS } from "../api-schema/pg-enums.ts";
 
 // Route inventory — consumed by the OpenAPI freeze so the generated document diffs

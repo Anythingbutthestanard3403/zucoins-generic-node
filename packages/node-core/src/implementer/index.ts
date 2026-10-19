@@ -79,3 +79,23 @@ export {
   type ConnectorPolicyMode,
 } from "./connector-configs.js";
 
+export {
+  CONNECTOR_RULE_REQUEST_APPROVED_ACTION,
+  CONNECTOR_RULE_REQUEST_CREATED_ACTION,
+  CONNECTOR_RULE_REQUEST_PENDING_CAP,
+  CONNECTOR_RULE_REQUEST_REJECTED_ACTION,
+  ConnectorRuleRequestStoreError,
+  InMemoryConnectorRuleRequestStore,
+  SqlConnectorRuleRequestStore,
+  createSqlConnectorRuleRequestStore,
+  type ConnectorRuleRequestAudit,
+  type ConnectorRuleRequestCreateInput,
+  type ConnectorRuleRequestDecideInput,
+  type ConnectorRuleRequestListFilter,
+  type ConnectorRuleRequestRecord,
+  type ConnectorRuleRequestSqlExecutor,
+  type ConnectorRuleRequestStatus,
+  type ConnectorRuleRequestStore,
+  type ConnectorRuleRequestStoreErrorCode,
+} from "./connector-rule-requests.js";
+

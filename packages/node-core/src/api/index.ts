@@ -550,3 +550,21 @@ export {
   type ImplementerIdentityLoaders,
 } from "./implementer-identity-router.js";
 
+export {
+  buildApprovedConnectorRule,
+  createConnectorRuleRequestRouter,
+  parseConnectorRuleRequestBody,
+  parseConnectorRuleRequestOverrides,
+  toAutoApproveRule,
+  type ConnectorRuleCredential,
+  type ConnectorRuleDraft,
+  type ConnectorRuleParseFailure,
+  type ConnectorRulePolicyReader,
+  type ConnectorRulePolicyRuleView,
+  type ConnectorRulePolicyView,
+  type ConnectorRuleRequestBody,
+  type ConnectorRuleRequestOverrides,
+  type ConnectorRuleRequestRouter,
+  type ConnectorRuleRequestRouterDeps,
+} from "./connector-rule-requests-router.js";
+

@@ -51,6 +51,7 @@ import {
   createSqlImplementerRegistry,
   createSqlDefaultFundingWallet,
   createSqlConnectorConfigStore,
+  createSqlConnectorRuleRequestStore,
   createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
@@ -491,6 +492,8 @@ export interface ProductionRouteSurface {
   readonly destinationService: DestinationService;
   /** Route 2 public handshake store (ZTR-1239). */
   readonly integrationRequestStore: import("@zucoins/node-core").PublicIntegrationRequestStore;
+  /** Pool-scoped spend-rule request store (ZTR-1331). */
+  readonly connectorRuleRequestStore: import("@zucoins/node-core").ConnectorRuleRequestStore;
   readonly adminRouteDeps: AdminRouteDeps;
   readonly adminUserStore: AdminUserStore;
   readonly adminCsrfAllowedOrigins: readonly string[];
@@ -937,6 +940,7 @@ export function createProductionRouteSurface(
   })();
 
   const adminConnectorConfigStore = createSqlConnectorConfigStore(poolSqlExecutor);
+  const adminConnectorRuleRequestStore = createSqlConnectorRuleRequestStore(poolSqlExecutor);
 
   const baseDeps = {
     sessions,
@@ -961,6 +965,7 @@ export function createProductionRouteSurface(
     onVaultInitialized: reservePool?.ensure,
     integrationRequestStore: adminIntegrationRequestStore,
     connectorConfigStore: adminConnectorConfigStore,
+    connectorRuleRequestStore: adminConnectorRuleRequestStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -1104,6 +1109,15 @@ export function createProductionRouteSurface(
           },
         }),
         connectorConfigStore: createSqlConnectorConfigStore({
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        }),
+        connectorRuleRequestStore: createSqlConnectorRuleRequestStore({
           query: async <R extends Record<string, unknown>>(
             text: string,
             params?: readonly unknown[],
@@ -1291,6 +1305,7 @@ export function createProductionRouteSurface(
   return Object.freeze({
     destinationService,
     integrationRequestStore,
+    connectorRuleRequestStore: adminConnectorRuleRequestStore,
     adminRouteDeps,
     adminUserStore: userStore,
     adminCsrfAllowedOrigins,

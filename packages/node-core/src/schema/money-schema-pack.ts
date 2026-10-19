@@ -266,6 +266,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // ZTR-1330: connector_configs plus integration_requests proposal columns.
   // Requires implementers + integration_requests. Appended only.
   "connector-configs",
+  // ZTR-1331: connector_rule_requests. Requires implementers + wallets.
+  // Appended only.
+  "connector-rule-requests",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

@@ -712,6 +712,15 @@ export {
   type ConnectorConfigsInvariant,
 } from "./schema/connector-configs.contract.js";
 
+// ZTR-1331: platform spend-rule requests, appended after connector-configs.
+export {
+  CONNECTOR_RULE_REQUESTS_EXECUTION_OBLIGATIONS,
+  CONNECTOR_RULE_REQUESTS_INVARIANTS,
+  CONNECTOR_RULE_REQUESTS_SCHEMA_FILE,
+  CONNECTOR_RULE_REQUESTS_SOURCE,
+  type ConnectorRuleRequestsInvariant,
+} from "./schema/connector-rule-requests.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

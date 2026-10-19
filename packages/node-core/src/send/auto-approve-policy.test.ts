@@ -21,7 +21,10 @@ const IMP_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 function validRule(over: Partial<AutoApproveRule> = {}): AutoApproveRule {
   return {
     rule_id: "zukaz-rewards",
+    label: null,
     implementer_id: IMP_A,
+    reserve_wallet_id: null,
+    total_cap_zkz: null,
     per_send_max_zkz: "0.001",
     per_send_min_zkz: null,
     window_hours: 288,
@@ -135,14 +138,62 @@ describe("parseAutoApprovePolicyDocument", () => {
     ).toBe("disabled");
   });
 
-  it("duplicate implementer_id → DISABLED invalid", () => {
+  it("one implementer may carry several rules when rule ids differ", () => {
     const raw = validDoc({
       rules: [validRule({ rule_id: "a" }), validRule({ rule_id: "b" })],
+    });
+    const parsed = parseAutoApprovePolicyDocument(raw);
+    expect(parsed.status).toBe("enabled");
+    if (parsed.status !== "enabled") return;
+    expect(parsed.rules.map((r) => r.rule_id)).toEqual(["a", "b"]);
+  });
+
+  it("duplicate rule_id disables the document", () => {
+    const raw = validDoc({
+      rules: [
+        validRule({ rule_id: "same" }),
+        validRule({ implementer_id: IMP_B, rule_id: "same" }),
+      ],
     });
     expect(parseAutoApprovePolicyDocument(raw)).toEqual({
       status: "disabled",
       disabledReason: "invalid",
     });
+  });
+
+  it("total_cap below per_send_max is invalid", () => {
+    expect(
+      parseAutoApprovePolicyDocument(
+        validDoc({
+          rules: [validRule({ per_send_max_zkz: "25", window_cap_zkz: "500", total_cap_zkz: "20" })],
+        }),
+      ).status,
+    ).toBe("disabled");
+  });
+
+  it("total_cap equal to per_send_max is valid and omitted cap parses null", () => {
+    const equal = parseAutoApprovePolicyDocument(
+      validDoc({
+        rules: [validRule({ per_send_max_zkz: "25", window_cap_zkz: "500", total_cap_zkz: "25" })],
+      }),
+    );
+    expect(equal.status).toBe("enabled");
+    if (equal.status === "enabled") expect(equal.rules[0]?.total_cap_zkz).toBe("25");
+    const omitted = parseAutoApprovePolicyDocument(validDoc());
+    expect(omitted.status).toBe("enabled");
+    if (omitted.status === "enabled") expect(omitted.rules[0]?.total_cap_zkz).toBeNull();
+  });
+
+  it("non-canonical total_cap disables the document", () => {
+    expect(
+      parseAutoApprovePolicyDocument(
+        validDoc({
+          rules: [
+            validRule({ per_send_max_zkz: "25", window_cap_zkz: "500", total_cap_zkz: "50.00000000" }),
+          ],
+        }),
+      ).status,
+    ).toBe("disabled");
   });
 
   it("bad RFC3339 expires_at → DISABLED invalid", () => {
@@ -217,7 +268,7 @@ describe("evaluateAutoApproveRule", () => {
           per_send_min_zkz: "0.001",
           per_send_max_zkz: "1",
           window_cap_zkz: "10",
-          expires_at: "2026-09-01T00:00:00.000Z",
+          expires_at: "2099-01-01T00:00:00.000Z",
         }),
       ],
     }),
@@ -265,7 +316,7 @@ describe("evaluateAutoApproveRule", () => {
     const r = evaluateAutoApproveRule(
       policy,
       { implementerId: IMP_A, amountZkz: "0.5" },
-      { nowMs: Date.parse("2026-09-01T00:00:00.000Z") },
+      { nowMs: Date.parse("2099-01-01T00:00:00.000Z") },
     );
     expect(r).toEqual({ decision: "fall_through", reason: "expired" });
   });
@@ -307,6 +358,107 @@ describe("evaluateAutoApproveRule", () => {
       { windowSpend: "9.0001" },
     );
     expect(over).toEqual({ decision: "fall_through", reason: "window_cap" });
+  });
+
+  it("requested rule_b matches only that rule", () => {
+    const multi = parseAutoApprovePolicyDocument(
+      validDoc({
+        rules: [
+          validRule({ rule_id: "rule_a", per_send_max_zkz: "25", window_cap_zkz: "500", expires_at: null }),
+          validRule({ rule_id: "rule_b", per_send_max_zkz: "50", window_cap_zkz: "500", expires_at: null }),
+        ],
+      }),
+    );
+    const hit = evaluateAutoApproveRule(multi, {
+      implementerId: IMP_A,
+      amountZkz: "25",
+      requestedRuleId: "rule_b",
+    });
+    expect(hit.decision).toBe("approve");
+    if (hit.decision === "approve") expect(hit.rule.rule_id).toBe("rule_b");
+  });
+
+  it("omitted request matches default when several rules exist", () => {
+    const multi = parseAutoApprovePolicyDocument(
+      validDoc({
+        rules: [
+          validRule({ rule_id: "rule_a", per_send_max_zkz: "25", window_cap_zkz: "500", expires_at: null }),
+          validRule({ rule_id: "default", per_send_max_zkz: "25", window_cap_zkz: "500", expires_at: null }),
+        ],
+      }),
+    );
+    const hit = evaluateAutoApproveRule(multi, { implementerId: IMP_A, amountZkz: "1" });
+    expect(hit.decision).toBe("approve");
+    if (hit.decision === "approve") expect(hit.rule.rule_id).toBe("default");
+  });
+
+  it("omitted request with two non-default rules is no_rule", () => {
+    const multi = parseAutoApprovePolicyDocument(
+      validDoc({
+        rules: [
+          validRule({ rule_id: "rule_a", per_send_max_zkz: "25", window_cap_zkz: "500", expires_at: null }),
+          validRule({ rule_id: "rule_b", per_send_max_zkz: "50", window_cap_zkz: "500", expires_at: null }),
+        ],
+      }),
+    );
+    expect(evaluateAutoApproveRule(multi, { implementerId: IMP_A, amountZkz: "1" })).toEqual({
+      decision: "fall_through",
+      reason: "no_rule",
+    });
+  });
+
+  it("omitted request matches the sole non-default rule", () => {
+    const sole = evaluateAutoApproveRule(policy, { implementerId: IMP_A, amountZkz: "1" });
+    expect(sole.decision).toBe("approve");
+    if (sole.decision === "approve") expect(sole.rule.rule_id).toBe("zukaz-rewards");
+  });
+
+  it("unknown requested rule id is no_rule", () => {
+    expect(
+      evaluateAutoApproveRule(policy, {
+        implementerId: IMP_A,
+        amountZkz: "1",
+        requestedRuleId: "missing",
+      }),
+    ).toEqual({ decision: "fall_through", reason: "no_rule" });
+  });
+
+  it("lifetime spend over total_cap falls through", () => {
+    const capped = parseAutoApprovePolicyDocument(
+      validDoc({
+        rules: [
+          validRule({
+            per_send_max_zkz: "25",
+            window_cap_zkz: "500",
+            total_cap_zkz: "50",
+            expires_at: null,
+          }),
+        ],
+      }),
+    );
+    expect(
+      evaluateAutoApproveRule(
+        capped,
+        { implementerId: IMP_A, amountZkz: "25" },
+        { lifetimeSpend: "30" },
+      ),
+    ).toEqual({ decision: "fall_through", reason: "total_cap" });
+    expect(
+      evaluateAutoApproveRule(
+        capped,
+        { implementerId: IMP_A, amountZkz: "25" },
+        { lifetimeSpend: "25" },
+      ).decision,
+    ).toBe("approve");
+  });
+
+  it("a null total_cap ignores lifetime spend", () => {
+    const r = evaluateAutoApproveRule(
+      policy,
+      { implementerId: IMP_A, amountZkz: "1" },
+      { lifetimeSpend: "999" },
+    );
+    expect(r.decision).toBe("approve");
   });
 });
 

@@ -240,6 +240,8 @@ const SCHEMA_FILES = [
   "send-landed-unacknowledged-close.sql",
   // ZTR-1324: display_label, allow_custom_routing, implementer_reserve_wallets.
   "connector-reserve-wallets.sql",
+  // ZTR-1329: nullable rule_id on send_operations and operations. ALTER only.
+  "send-operations-rule-id.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -277,6 +279,7 @@ const NO_TABLE_SCHEMA_FILES = [
   "destinations-idempotency-key.sql",
   "send-proven-not-landed-close.sql",
   "send-landed-unacknowledged-close.sql",
+  "send-operations-rule-id.sql",
 ] as const;
 
 // Role/grant contracts (no CREATE TABLE) live alongside the table slices but are not part of
@@ -639,6 +642,10 @@ const GREENFIELD: Record<
   "connector-reserve-wallets.sql": {
     applies: false,
     missingFragment: "connector-reserve-wallets requires wallets",
+  },
+  "send-operations-rule-id.sql": {
+    applies: false,
+    missingFragment: "send-operations-rule-id requires send_operations",
   },
 };
 

@@ -263,7 +263,7 @@ const insertCreatedOperation = (operationId: string, sourceWalletId: string): st
     lit(null),
     lit(null),
     lit(null),
-  ].join(", ")}, now(), 'INDEPENDENT'); ` +
+  ].join(", ")}, now(), 'INDEPENDENT', NULL); ` +
   `INSERT INTO send_operation_expected_artifacts ` +
   `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
   `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +

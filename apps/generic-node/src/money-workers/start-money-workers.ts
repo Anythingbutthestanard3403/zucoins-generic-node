@@ -851,6 +851,7 @@ async function autoApprovePendingSends(deps: {
       const evalResult = evaluateAutoApproveRule(policy, {
         implementerId: candidate.implementerId,
         amountZkz: candidate.amountZkz,
+        requestedRuleId: candidate.ruleId,
       });
       if (evalResult.decision !== "approve") {
         // Fall-throughs stay in the manual queue — silent per AC.

@@ -23,6 +23,8 @@ export interface CreateExternalSendRequest {
   readonly description?: string;
   /** Optional; omitted → INDEPENDENT. NODE_VERIFIED requires operator policy. */
   readonly verification_mode?: VerificationMode;
+  /** Optional spend-rule id. Omitted matches the connector default rule. */
+  readonly rule_id?: string;
 }
 
 export interface ExternalSendOperationView {

@@ -722,6 +722,41 @@ function parseAutoApprovePolicyBody(
   };
 }
 
+async function enrichAutoApproveRuleViews(
+  rules: readonly AutoApproveRule[],
+  queryWindow: (
+    implementerId: string,
+    windowHours: number,
+    ruleId: string,
+  ) => Promise<string>,
+  queryLifetime: (implementerId: string, ruleId: string) => Promise<string>,
+) {
+  const out = [];
+  for (const rule of rules) {
+    let spend = "0";
+    let lifetime = "0";
+    try {
+      spend = await queryWindow(rule.implementer_id, rule.window_hours, rule.rule_id);
+    } catch {
+      spend = "0";
+    }
+    try {
+      lifetime = await queryLifetime(rule.implementer_id, rule.rule_id);
+    } catch {
+      lifetime = "0";
+    }
+    out.push({
+      ...rule,
+      label: rule.label ?? null,
+      reserve_wallet_id: rule.reserve_wallet_id ?? null,
+      total_cap_zkz: rule.total_cap_zkz ?? null,
+      current_window_spend_zkz: spend,
+      cumulative_total_spend_zkz: lifetime,
+    });
+  }
+  return out;
+}
+
 /**
  * POST /admin/v1/allow-node-verified-policy body — whole-document replace (ZTR-1305).
  * Fail-closed structure parse; invalid documents never stored.
@@ -895,6 +930,9 @@ function parseIntegrationRequestApproveBody(
       expected_row_version: raw.expected_row_version,
       rule: {
         rule_id: rule.rule_id,
+        label: rule.label ?? null,
+        reserve_wallet_id: rule.reserve_wallet_id ?? null,
+        total_cap_zkz: rule.total_cap_zkz ?? null,
         per_send_max_zkz: rule.per_send_max_zkz,
         per_send_min_zkz: rule.per_send_min_zkz,
         window_hours: rule.window_hours,
@@ -904,6 +942,9 @@ function parseIntegrationRequestApproveBody(
       },
       ruleJsonTemplate: {
         rule_id: rule.rule_id,
+        label: rule.label ?? null,
+        reserve_wallet_id: rule.reserve_wallet_id ?? null,
+        total_cap_zkz: rule.total_cap_zkz ?? null,
         per_send_max_zkz: rule.per_send_max_zkz,
         per_send_min_zkz: rule.per_send_min_zkz,
         window_hours: rule.window_hours,
@@ -991,13 +1032,13 @@ export function mergeRuleIntoAutoApprovePolicy(
     }
     // parked (enabled:false) — keep disabled; still attach the rule for later enable.
     const others = current.rules ?? [];
-    const withoutDup = others.filter((r) => r.implementer_id !== rule.implementer_id);
+    const withoutDup = others.filter((r) => r.rule_id !== rule.rule_id);
     return {
       ok: true,
       documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], false),
     };
   }
-  const withoutDup = current.rules.filter((r) => r.implementer_id !== rule.implementer_id);
+  const withoutDup = current.rules.filter((r) => r.rule_id !== rule.rule_id);
   return {
     ok: true,
     documentJson: serializeAutoApprovePolicyDocument([...withoutDup, rule], true),
@@ -1782,6 +1823,14 @@ export interface AdminRouteDeps {
   readonly queryAutoApproveWindowSpend?: (
     implementerId: string,
     windowHours: number,
+    ruleId: string,
+  ) => Promise<string>;
+  /**
+   * Lifetime spend for one rule. When omitted, the view shows "0".
+   */
+  readonly queryAutoApproveLifetimeSpend?: (
+    implementerId: string,
+    ruleId: string,
   ) => Promise<string>;
   /**
    * Additive device-signature policy for external-send approval (doc 07 §17.10).
@@ -3038,16 +3087,10 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       const querySpend =
         deps.queryAutoApproveWindowSpend ??
         (async () => "0");
-      const rules = [];
-      for (const rule of baseRules) {
-        let spend = "0";
-        try {
-          spend = await querySpend(rule.implementer_id, rule.window_hours);
-        } catch {
-          spend = "0";
-        }
-        rules.push({ ...rule, current_window_spend_zkz: spend });
-      }
+      const queryLifetime =
+        deps.queryAutoApproveLifetimeSpend ??
+        (async () => "0");
+      const rules = await enrichAutoApproveRuleViews(baseRules, querySpend, queryLifetime);
       if (policy.status === "disabled") {
         return ok(200, {
           status: "disabled",
@@ -4329,16 +4372,14 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
               const querySpend =
                 deps.queryAutoApproveWindowSpend ??
                 (async () => "0");
-              const rules = [];
-              for (const rule of body.rules) {
-                let spend = "0";
-                try {
-                  spend = await querySpend(rule.implementer_id, rule.window_hours);
-                } catch {
-                  spend = "0";
-                }
-                rules.push({ ...rule, current_window_spend_zkz: spend });
-              }
+              const queryLifetime =
+                deps.queryAutoApproveLifetimeSpend ??
+                (async () => "0");
+              const rules = await enrichAutoApproveRuleViews(
+                body.rules,
+                querySpend,
+                queryLifetime,
+              );
               if (!body.enabled) {
                 return {
                   status: "disabled" as const,
@@ -5598,7 +5639,10 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
 
                 const finalRule: AutoApproveRule = {
                   rule_id: body.rule.rule_id,
+                  label: body.rule.label ?? null,
                   implementer_id: created.id,
+                  reserve_wallet_id: body.rule.reserve_wallet_id ?? null,
+                  total_cap_zkz: body.rule.total_cap_zkz ?? null,
                   per_send_max_zkz: body.rule.per_send_max_zkz,
                   per_send_min_zkz: body.rule.per_send_min_zkz,
                   window_hours: body.rule.window_hours,
@@ -7137,6 +7181,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
   readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
+  readonly queryAutoApproveLifetimeSpend?: AdminRouteDeps["queryAutoApproveLifetimeSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];
@@ -7197,6 +7242,9 @@ export function createFailClosedAdminRouteDeps(base: {
       : {}),
     ...(base.queryAutoApproveWindowSpend !== undefined
       ? { queryAutoApproveWindowSpend: base.queryAutoApproveWindowSpend }
+      : {}),
+    ...(base.queryAutoApproveLifetimeSpend !== undefined
+      ? { queryAutoApproveLifetimeSpend: base.queryAutoApproveLifetimeSpend }
       : {}),
     ...(base.deviceSignaturePolicy !== undefined
       ? { deviceSignaturePolicy: base.deviceSignaturePolicy }
@@ -7280,6 +7328,7 @@ export function createLiveAdminRouteDeps(
   readonly autoApprovePolicy?: AutoApprovePolicyPort;
   readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
   readonly queryAutoApproveWindowSpend?: AdminRouteDeps["queryAutoApproveWindowSpend"];
+  readonly queryAutoApproveLifetimeSpend?: AdminRouteDeps["queryAutoApproveLifetimeSpend"];
   readonly deviceSignaturePolicy?: DeviceSignaturePolicyPort;
   readonly challengeIssuerStore?: ApprovalChallengeIssuerStore;
   readonly secondDeviceEnrol?: AdminRouteDeps["secondDeviceEnrol"];

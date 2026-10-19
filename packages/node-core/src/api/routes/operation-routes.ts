@@ -139,6 +139,8 @@ export interface CreateExternalSendInput {
   readonly description?: string;
   /** Optional; Zod defaults omitted field to INDEPENDENT before the handler. */
   readonly verification_mode?: VerificationMode;
+  /** Optional spend-rule id (ZTR-1329). */
+  readonly rule_id?: string;
   readonly idempotencyKey: string;
   /** Credential-bound tenant — never accepted from the request body. */
   readonly implementerId: string;
@@ -489,6 +491,7 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "invalid_destination_address":
       case "invalid_amount":
       case "invalid_references_operation_id":
+      case "invalid_rule_id":
         return { ok: false, error: apiErrorResponse("invalid_scalar", requestId) };
       case "source_wallet_not_found":
         return { ok: false, error: apiErrorResponse("not_found", requestId) };
@@ -538,7 +541,11 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
         ) {
           return { ok: false, error: apiErrorResponse("protocol_predicate_failed", requestId) };
         }
-        if (nested === "invalid_source_wallet_id" || nested === "invalid_amount") {
+        if (
+          nested === "invalid_source_wallet_id" ||
+          nested === "invalid_amount" ||
+          nested === "invalid_rule_id"
+        ) {
           return { ok: false, error: apiErrorResponse("invalid_scalar", requestId) };
         }
         if (nested === "idempotency_key_reused") {

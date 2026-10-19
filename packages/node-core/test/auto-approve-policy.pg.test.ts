@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   AUTO_APPROVE_APPLIED_ACTION,
   commitAutoApproval,
+  queryLifetimeRuleSpend,
   queryWindowSpend,
   type AutoApproveRule,
 } from "../src/send/auto-approve-policy.js";
@@ -230,11 +231,13 @@ const insertCreatedSend = (
   sourceWalletId: string,
   amount: string,
   idemSuffix: string,
+  ruleId: string | null = null,
+  implementerId: string = IMPLEMENTER_ID,
 ): string => {
   const cols = OPERATION_COLUMNS.join(", ");
   const vals = [
     lit(operationId),
-    lit(IMPLEMENTER_ID),
+    lit(implementerId),
     lit(NODE_ID),
     lit("SEND_EXTERNAL"),
     lit("CREATED"),
@@ -252,9 +255,10 @@ const insertCreatedSend = (
     lit(null),
     lit(null),
   ].join(", ");
+  const ruleSql = ruleId === null ? "NULL" : `'${ruleId}'`;
   return (
     `INSERT INTO operations (id) VALUES ('${operationId}'); ` +
-    `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
+    `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', ${ruleSql}); ` +
     `INSERT INTO send_operation_expected_artifacts ` +
     `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
     `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -266,6 +270,7 @@ const insertAutoApprovalDirect = (
   approvalId: string,
   operationId: string,
   consumedAtSql: string,
+  ruleId: string = "zukaz-rewards",
 ): string =>
   `INSERT INTO operation_approvals (
      id, node_id, operation_id, challenge_id, method, purpose, canonical_version,
@@ -273,6 +278,14 @@ const insertAutoApprovalDirect = (
    ) VALUES (
      '${approvalId}', '${NODE_ID}', '${operationId}', NULL, 'AUTO_POLICY', '${PURPOSE}', 1,
      'preimage-${approvalId}', '${HEX64}', NULL, NULL, NULL, ${consumedAtSql}
+   ); ` +
+  `INSERT INTO audit_log (
+     id, node_id, actor_kind, actor_id, action, operation_id,
+     details_text, details_sha256, created_at
+   ) VALUES (
+     '${randomUUID()}', '${NODE_ID}', 'SYSTEM', 'auto_policy:${ruleId}',
+     '${AUTO_APPROVE_APPLIED_ACTION}', '${operationId}',
+     'seed', '${HEX64}', now()
    );`;
 
 const insertTotpApprovalDirect = (
@@ -355,7 +368,12 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(scratchDb, insertAutoApprovalDirect(randomUUID(), op, "now()"));
     }
 
-    const spendBefore = await queryWindowSpend(sql, IMPLEMENTER_ID, RULE.window_hours);
+    const spendBefore = await queryWindowSpend(
+      sql,
+      IMPLEMENTER_ID,
+      RULE.window_hours,
+      RULE.rule_id,
+    );
     expect(spendBefore).toBe("2");
 
     // Wall-clock nowMs: WINDOW_SPEND_SQL filters consumed_at against SQL now(), and
@@ -488,7 +506,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     psqlMust(
       scratchDb,
       `INSERT INTO operations (id) VALUES ('${operationId}'); ` +
-        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
+        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL); ` +
         `INSERT INTO send_operation_expected_artifacts ` +
         `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
         `VALUES ('${randomUUID()}', '${operationId}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -644,7 +662,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL);`,
       );
       psqlMust(
         scratchDb,
@@ -682,7 +700,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL);`,
       );
       psqlMust(scratchDb, insertTotpApprovalDirect(randomUUID(), op, ch, 42_000 + Math.floor(Math.random() * 1000)));
     }
@@ -716,12 +734,12 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT');`,
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL);`,
       );
       psqlMust(scratchDb, insertAutoApprovalDirect(randomUUID(), op, "now()"));
     }
 
-    const spend = await queryWindowSpend(sql, imp, ruleHours);
+    const spend = await queryWindowSpend(sql, imp, ruleHours, "zukaz-rewards");
     expect(spend).toBe("1.5");
   });
 
@@ -758,7 +776,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
     psqlMust(
       scratchDb,
       `INSERT INTO operations (id) VALUES ('${op}'); ` +
-        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
+        `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL); ` +
         `INSERT INTO send_operation_expected_artifacts ` +
         `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
         `VALUES ('${randomUUID()}', '${op}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -836,7 +854,7 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
       psqlMust(
         scratchDb,
         `INSERT INTO operations (id) VALUES ('${op}'); ` +
-          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT'); ` +
+          `INSERT INTO send_operations (${cols}) VALUES (${vals}, now(), 'INDEPENDENT', NULL); ` +
           `INSERT INTO send_operation_expected_artifacts ` +
           `(artifact_id, operation_id, purpose, canonical_version, signing_key_id, preimage_text, preimage_sha256, signature) ` +
           `VALUES ('${randomUUID()}', '${op}', 'zp-send-external-expected-v1', 1, '${SIGNING_KEY_ID}', ` +
@@ -920,6 +938,147 @@ describeIfPg("auto-approve-policy real-PG drills", { timeout: 180_000 }, () => {
         expect(orphans).toBe("0");
       }
     }
+  });
+
+  it("one implementer, two rules: each send increments only that rule", async () => {
+    const imp = "a2000000-0000-4000-8000-0000000000a1";
+    const ruleA: AutoApproveRule = {
+      ...RULE,
+      rule_id: "rule_a",
+      implementer_id: imp,
+      per_send_max_zkz: "25",
+      window_cap_zkz: "500",
+      total_cap_zkz: "50",
+    };
+    const ruleB: AutoApproveRule = {
+      ...RULE,
+      rule_id: "rule_b",
+      implementer_id: imp,
+      per_send_max_zkz: "50",
+      window_cap_zkz: "500",
+      total_cap_zkz: "100",
+    };
+    const seedTagged = (ruleId: string, amount: string): string => {
+      const walletId = randomUUID();
+      const operationId = randomUUID();
+      psqlMust(scratchDb, seedWallet(walletId));
+      psqlMust(
+        scratchDb,
+        insertCreatedSend(operationId, walletId, amount, `${ruleId}-${operationId}`, ruleId, imp),
+      );
+      return operationId;
+    };
+    const opA = seedTagged("rule_a", "25");
+    const opB = seedTagged("rule_b", "50");
+    const { withTx } = sessionWithTx(dbUrl);
+    const sql = new AutocommitPsql(scratchDb);
+    const nowMs = () => Date.now();
+    const approvedA = await commitAutoApproval(
+      { operationId: opA, rule: ruleA },
+      { sql, withTx, nowMs },
+    );
+    const approvedB = await commitAutoApproval(
+      { operationId: opB, rule: ruleB },
+      { sql, withTx, nowMs },
+    );
+    expect(approvedA.decision).toBe("approve");
+    expect(approvedB.decision).toBe("approve");
+    expect(await queryLifetimeRuleSpend(sql, imp, "rule_a")).toBe("25");
+    expect(await queryLifetimeRuleSpend(sql, imp, "rule_b")).toBe("50");
+    expect(await queryWindowSpend(sql, imp, ruleA.window_hours, "rule_a")).toBe("25");
+    expect(await queryWindowSpend(sql, imp, ruleB.window_hours, "rule_b")).toBe("50");
+  });
+
+  it("lifetime total_cap falls through and leaves the send CREATED", async () => {
+    const imp = "a2000000-0000-4000-8000-0000000000a2";
+    const rule: AutoApproveRule = {
+      ...RULE,
+      rule_id: "rule_a",
+      implementer_id: imp,
+      per_send_max_zkz: "25",
+      window_cap_zkz: "500",
+      total_cap_zkz: "50",
+    };
+    const seedTagged = (amount: string, suffix: string): string => {
+      const walletId = randomUUID();
+      const operationId = randomUUID();
+      psqlMust(scratchDb, seedWallet(walletId));
+      psqlMust(
+        scratchDb,
+        insertCreatedSend(operationId, walletId, amount, `${suffix}-${operationId}`, "rule_a", imp),
+      );
+      return operationId;
+    };
+    const first = seedTagged("25", "cap1");
+    const second = seedTagged("25", "cap2");
+    const third = seedTagged("1", "cap3");
+    const { withTx } = sessionWithTx(dbUrl);
+    const sql = new AutocommitPsql(scratchDb);
+    const nowMs = () => Date.now();
+    expect(
+      (await commitAutoApproval({ operationId: first, rule }, { sql, withTx, nowMs })).decision,
+    ).toBe("approve");
+    expect(
+      (await commitAutoApproval({ operationId: second, rule }, { sql, withTx, nowMs })).decision,
+    ).toBe("approve");
+    expect(await queryLifetimeRuleSpend(sql, imp, "rule_a")).toBe("50");
+    const blocked = await commitAutoApproval(
+      { operationId: third, rule },
+      { sql, withTx, nowMs },
+    );
+    expect(blocked).toEqual({ decision: "fall_through", reason: "total_cap" });
+    const status = psqlMust(
+      scratchDb,
+      `SELECT status FROM send_operations WHERE operation_id = '${third}';`,
+    ).trim();
+    expect(status).toBe("CREATED");
+  });
+
+  it("five concurrent sends respect a lifetime total_cap of 50", async () => {
+    const imp = "a2000000-0000-4000-8000-0000000000a3";
+    const rule: AutoApproveRule = {
+      ...RULE,
+      rule_id: "rule_a",
+      implementer_id: imp,
+      per_send_max_zkz: "20",
+      window_cap_zkz: "500",
+      total_cap_zkz: "50",
+    };
+    const opIds: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const walletId = randomUUID();
+      const operationId = randomUUID();
+      psqlMust(scratchDb, seedWallet(walletId));
+      psqlMust(
+        scratchDb,
+        insertCreatedSend(operationId, walletId, "20", `race-${i}-${operationId}`, "rule_a", imp),
+      );
+      opIds.push(operationId);
+    }
+    const sql = new AutocommitPsql(scratchDb);
+    const nowMs = () => Date.now();
+    const sessions = opIds.map(() => sessionWithTx(dbUrl));
+    const results = await Promise.all(
+      opIds.map((operationId, i) =>
+        commitAutoApproval(
+          { operationId, rule },
+          { sql, withTx: sessions[i]!.withTx, nowMs },
+        ),
+      ),
+    );
+    const approved = results.filter((r) => r.decision === "approve").length;
+    const blocked = results.filter(
+      (r) => r.decision === "fall_through" && r.reason === "total_cap",
+    ).length;
+    expect(approved).toBe(2);
+    expect(blocked).toBe(3);
+    const counts = psqlMust(
+      scratchDb,
+      `SELECT count(*) FILTER (WHERE status = 'APPROVED')::text || ' ' || ` +
+        `count(*) FILTER (WHERE status = 'CREATED')::text ` +
+        `FROM send_operations WHERE operation_id IN (${opIds.map((id) => `'${id}'`).join(", ")});`,
+    ).trim();
+    expect(counts).toBe("2 3");
   });
 });
 

@@ -54,6 +54,7 @@ import {
 import {
   canonicalRequestSha256,
   createExternalSend,
+  SEND_RULE_ID_RE,
   SEND_CANONICAL_ROUTE,
   SEND_HTTP_METHOD,
   type SendArtifactSigner,
@@ -500,6 +501,11 @@ export interface AssignAndTopUpRequest {
    * only. Top-up MOVE_INTERNAL is always NODE_VERIFIED (node-owned); never inherits this.
    */
   readonly verificationMode?: import("@zucoins/generic-node-contracts/operations").VerificationMode;
+  /**
+   * Optional spend-rule id (ZTR-1329). Included in the idempotency fingerprint
+   * only when set. Omitted from preferred-reserve handling.
+   */
+  readonly ruleId?: string | null;
 }
 
 export interface AssignAndTopUpDeps {
@@ -847,6 +853,7 @@ export function canonicalAssignRequestSha256(request: AssignAndTopUpRequest): st
     ...(request.verificationMode !== undefined
       ? { verificationMode: request.verificationMode }
       : {}),
+    ...(request.ruleId !== undefined ? { ruleId: request.ruleId } : {}),
   };
   return canonicalRequestSha256(fingerprint);
 }
@@ -871,6 +878,9 @@ export async function assignAndTopUpExternalSend(
     parseWalletPublicKey(request.destinationAddress);
   } catch {
     return { outcome: "REJECTED", code: "invalid_destination_address" };
+  }
+  if (request.ruleId != null && !SEND_RULE_ID_RE.test(request.ruleId)) {
+    return { outcome: "REJECTED", code: "send_rejected", detail: "invalid_rule_id" };
   }
   if (request.sourceWalletId !== null) {
     try {
@@ -1389,6 +1399,7 @@ ${HUB_EXCLUDES_FOREIGN_RESERVE_SQL}`,
       ...(request.verificationMode !== undefined
         ? { verificationMode: request.verificationMode }
         : {}),
+      ...(request.ruleId !== undefined ? { ruleId: request.ruleId } : {}),
     },
     deps.sendCreateConfig ?? { generateId: deps.generateId, now: deps.now },
   );

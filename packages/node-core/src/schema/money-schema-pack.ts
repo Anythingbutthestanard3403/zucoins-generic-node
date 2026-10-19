@@ -260,6 +260,9 @@ export const MONEY_SCHEMA_PACK_ORDER = [
   // implementer_reserve_wallets. Requires wallets + implementers + funding_wallet_id
   // (implementer-funding-wallet). Appended only.
   "connector-reserve-wallets",
+  // ZTR-1329: nullable rule_id on send_operations and operations.
+  // Requires send-external-create + operations. Appended only.
+  "send-operations-rule-id",
 ] as const;
 
 export type MoneySchemaPackSlice = (typeof MONEY_SCHEMA_PACK_ORDER)[number];

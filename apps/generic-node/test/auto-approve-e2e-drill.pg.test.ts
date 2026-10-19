@@ -23,6 +23,7 @@ import {
   AUTO_APPROVE_APPLIED_ACTION,
   AUTO_APPROVE_SETTING_KEY,
   CredentialService,
+  commitAutoApproval,
   createExternalSend,
   createSqlAutoApprovePolicy,
   createSqlImplementerRegistry,
@@ -38,6 +39,7 @@ import {
   InMemoryVaultAccessAuditLog,
   migrateLeaseFoundation,
   PublicSqlIntegrationRequestStore,
+  queryLifetimeRuleSpend,
   serializeAutoApprovePolicyDocument,
   SqlCredentialStore,
   SqlSendCreateStore,
@@ -491,6 +493,7 @@ describe.skipIf(!PG_AVAILABLE)("auto-approve e2e drill (disposable PG)", () => {
       readonly amountZkz: string;
       readonly idemSuffix: string;
       readonly sourceWalletId?: string;
+      readonly ruleId?: string;
     }) {
       const sourceWalletId = input.sourceWalletId ?? (await pickSourceWallet());
       return createExternalSend(
@@ -506,9 +509,35 @@ describe.skipIf(!PG_AVAILABLE)("auto-approve e2e drill (disposable PG)", () => {
           clientReference: `e2e-${input.idemSuffix}`,
           description: null,
           idempotencyKey: `e2e-send-${input.idemSuffix}-${randomUUID()}`,
+          ...(input.ruleId !== undefined ? { ruleId: input.ruleId } : {}),
         },
         { generateId: () => randomUUID(), now: () => Date.now() },
       );
+    }
+
+    async function withTx<T>(
+      body: (tx: {
+        query: <R>(text: string, params?: readonly unknown[]) => Promise<{ rows: R[] }>;
+      }) => Promise<T>,
+    ): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const tx = {
+          query: async <R>(text: string, params: readonly unknown[] = []) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        };
+        const out = await body(tx);
+        await client.query("COMMIT");
+        return out;
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
     }
 
     async function sendStatus(operationId: string): Promise<{
@@ -615,6 +644,8 @@ describe.skipIf(!PG_AVAILABLE)("auto-approve e2e drill (disposable PG)", () => {
         haltBlocksSend = v;
       },
       createSend,
+      withTx,
+      sql: sqlExec,
       pickSourceWallet,
       sendStatus,
       autoApprovalRow,
@@ -1000,6 +1031,113 @@ describe.skipIf(!PG_AVAILABLE)("auto-approve e2e drill (disposable PG)", () => {
         );
         expect(setting.rows[0]?.setting_value).toContain(impl.id);
         expect(setting.rows[0]?.setting_value).toContain("route1-direct");
+      } finally {
+        fx.stop();
+      }
+    },
+    PG_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "multi-rule lifetime cap: worker isolates rules, over-cap stays CREATED, concurrent commits stop at two",
+    async () => {
+      const fx = await seedArmedNode("multirule");
+      try {
+        const impl = await fx.implementerRegistry.create({
+          name: "Multi Rule Integration",
+          actorId: randomUUID(),
+          nodeId: fx.nodeId,
+        });
+        const ruleA: AutoApproveRule = {
+          rule_id: "rule_a",
+          implementer_id: impl.id,
+          per_send_max_zkz: "25",
+          per_send_min_zkz: null,
+          window_hours: 24,
+          window_cap_zkz: "500",
+          total_cap_zkz: "50",
+          expires_at: null,
+          enabled: true,
+        };
+        const ruleB: AutoApproveRule = {
+          rule_id: "rule_b",
+          implementer_id: impl.id,
+          per_send_max_zkz: "50",
+          per_send_min_zkz: null,
+          window_hours: 24,
+          window_cap_zkz: "500",
+          total_cap_zkz: "100",
+          expires_at: null,
+          enabled: true,
+        };
+        await fx.policyPort.setPolicy!(
+          serializeAutoApprovePolicyDocument([ruleA, ruleB], true),
+          { actorId: randomUUID(), nodeId: fx.nodeId },
+        );
+
+        const sendA = await fx.createSend({
+          implementerId: impl.id,
+          amountZkz: "25",
+          idemSuffix: "rule-a",
+          ruleId: "rule_a",
+        });
+        const sendB = await fx.createSend({
+          implementerId: impl.id,
+          amountZkz: "50",
+          idemSuffix: "rule-b",
+          ruleId: "rule_b",
+        });
+        expect(sendA.outcome).toBe("CREATED");
+        expect(sendB.outcome).toBe("CREATED");
+        if (sendA.outcome !== "CREATED" || sendB.outcome !== "CREATED") return;
+        await fx.awaitAwaitingRedemption(sendA.operation.operationId);
+        await fx.awaitAwaitingRedemption(sendB.operation.operationId);
+        expect(await queryLifetimeRuleSpend(fx.sql, impl.id, "rule_a")).toBe("25");
+        expect(await queryLifetimeRuleSpend(fx.sql, impl.id, "rule_b")).toBe("50");
+
+        const another = await fx.createSend({
+          implementerId: impl.id,
+          amountZkz: "25",
+          idemSuffix: "rule-a-fill",
+          ruleId: "rule_a",
+        });
+        const over = await fx.createSend({
+          implementerId: impl.id,
+          amountZkz: "1",
+          idemSuffix: "rule-a-over",
+          ruleId: "rule_a",
+        });
+        expect(another.outcome).toBe("CREATED");
+        expect(over.outcome).toBe("CREATED");
+        if (another.outcome !== "CREATED" || over.outcome !== "CREATED") return;
+        await fx.awaitAwaitingRedemption(another.operation.operationId);
+        await fx.handle.tickOnce();
+        expect((await fx.sendStatus(over.operation.operationId)).status).toBe("CREATED");
+        expect(await queryLifetimeRuleSpend(fx.sql, impl.id, "rule_a")).toBe("50");
+
+        const raced: string[] = [];
+        for (let i = 0; i < 5; i += 1) {
+          const created = await fx.createSend({
+            implementerId: impl.id,
+            amountZkz: "20",
+            idemSuffix: `race-${i}`,
+            ruleId: "rule_b",
+          });
+          expect(created.outcome).toBe("CREATED");
+          if (created.outcome === "CREATED") raced.push(created.operation.operationId);
+        }
+        const results = await Promise.all(
+          raced.map((operationId) =>
+            commitAutoApproval(
+              { operationId, rule: ruleB },
+              { sql: fx.sql, withTx: fx.withTx, nowMs: () => Date.now() },
+            ),
+          ),
+        );
+        expect(results.filter((r) => r.decision === "approve")).toHaveLength(2);
+        expect(
+          results.filter((r) => r.decision === "fall_through" && r.reason === "total_cap"),
+        ).toHaveLength(3);
       } finally {
         fx.stop();
       }

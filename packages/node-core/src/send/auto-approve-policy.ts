@@ -3,9 +3,10 @@
 // Bound, operator-configured rules let a single leader-gated worker (ZTR-1235)
 // commit CREATED→APPROVED without a per-send human TOTP factor. Fail closed:
 // the safe state is OFF. Absent key, unreadable store, invalid JSON, unknown
-// fields, bad types, non-canonical amounts, or duplicate implementer ids all
+// fields, bad types, non-canonical amounts, or a repeated rule id all
 // resolve the entire policy to DISABLED — every send then falls through to the
-// manual approval queue. Auto-approve never rejects a send.
+// manual approval queue. Auto-approve never rejects a send. One connector may
+// carry several rules when each rule_id is unique.
 //
 // Window spend is derived from existing AUTO_POLICY approval rows (no counter
 // table). Spend counts at approval time and is never released — an approved-
@@ -47,7 +48,10 @@ export type AutoApproveDisabledReason = "absent" | "unreadable" | "invalid" | "o
 
 export interface AutoApproveRule {
   readonly rule_id: string;
+  readonly label?: string | null;
   readonly implementer_id: string;
+  readonly reserve_wallet_id?: string | null;
+  readonly total_cap_zkz?: string | null;
   readonly per_send_max_zkz: string;
   readonly per_send_min_zkz: string | null;
   readonly window_hours: number;
@@ -73,6 +77,7 @@ export type AutoApproveFallThroughReason =
   | "below_min"
   | "above_max"
   | "window_cap"
+  | "total_cap"
   | "missing_implementer"
   | "operation_not_created"
   | "operation_missing"
@@ -85,6 +90,12 @@ export type AutoApproveEvalResult =
 export interface AutoApproveSendFacts {
   readonly implementerId: string | null | undefined;
   readonly amountZkz: string;
+  /**
+   * Spend rule the send asked for. Null or omitted matches rule_id "default"
+   * for that connector, or the sole rule when the connector has exactly one.
+   * Several non-default rules and no requested id fall through "no_rule".
+   */
+  readonly requestedRuleId?: string | null;
 }
 
 export interface AutoApprovePolicySetMeta {
@@ -108,7 +119,10 @@ export interface AutoApprovePolicyPort {
 
 const RULE_KEYS = new Set([
   "rule_id",
+  "label",
   "implementer_id",
+  "reserve_wallet_id",
+  "total_cap_zkz",
   "per_send_max_zkz",
   "per_send_min_zkz",
   "window_hours",
@@ -166,6 +180,11 @@ function parseRule(raw: unknown): AutoApproveRule | null {
   if (typeof raw.rule_id !== "string" || !RULE_ID_PATTERN.test(raw.rule_id)) {
     return null;
   }
+  let label: string | null = null;
+  if (raw.label !== undefined) {
+    if (raw.label !== null && typeof raw.label !== "string") return null;
+    label = raw.label;
+  }
   if (typeof raw.implementer_id !== "string" || !UUID_PATTERN.test(raw.implementer_id)) {
     return null;
   }
@@ -176,8 +195,29 @@ function parseRule(raw: unknown): AutoApproveRule | null {
     return null;
   }
 
+  let reserveWalletId: string | null = null;
+  if (raw.reserve_wallet_id !== undefined && raw.reserve_wallet_id !== null) {
+    if (typeof raw.reserve_wallet_id !== "string" || !UUID_PATTERN.test(raw.reserve_wallet_id)) {
+      return null;
+    }
+    try {
+      parseUuid(raw.reserve_wallet_id);
+    } catch {
+      return null;
+    }
+    reserveWalletId = raw.reserve_wallet_id;
+  }
+
   const perSendMax = parseCanonicalPositiveAmount(raw.per_send_max_zkz);
   if (perSendMax === null) return null;
+
+  let totalCap: string | null = null;
+  if (raw.total_cap_zkz !== undefined && raw.total_cap_zkz !== null) {
+    const cap = parseCanonicalPositiveAmount(raw.total_cap_zkz);
+    if (cap === null) return null;
+    if (compareAmounts(cap, perSendMax) < 0) return null;
+    totalCap = cap;
+  }
 
   let perSendMin: string | null = null;
   if (raw.per_send_min_zkz !== undefined && raw.per_send_min_zkz !== null) {
@@ -217,7 +257,10 @@ function parseRule(raw: unknown): AutoApproveRule | null {
 
   return {
     rule_id: raw.rule_id,
+    label,
     implementer_id: raw.implementer_id,
+    reserve_wallet_id: reserveWalletId,
+    total_cap_zkz: totalCap,
     per_send_max_zkz: perSendMax,
     per_send_min_zkz: perSendMin,
     window_hours: raw.window_hours,
@@ -267,16 +310,19 @@ export function parseAutoApprovePolicyStructure(
   }
 
   const rules: AutoApproveRule[] = [];
-  const seenImplementers = new Set<string>();
+  const seenRuleIds = new Set<string>();
+  const seenPairs = new Set<string>();
   for (const entry of parsed.rules) {
     const rule = parseRule(entry);
     if (rule === null) {
       return { ok: false, reason: "invalid" };
     }
-    if (seenImplementers.has(rule.implementer_id)) {
+    const pair = `${rule.implementer_id}\0${rule.rule_id}`;
+    if (seenRuleIds.has(rule.rule_id) || seenPairs.has(pair)) {
       return { ok: false, reason: "invalid" };
     }
-    seenImplementers.add(rule.implementer_id);
+    seenRuleIds.add(rule.rule_id);
+    seenPairs.add(pair);
     rules.push(rule);
   }
 
@@ -312,7 +358,10 @@ export function serializeAutoApprovePolicyDocument(
     enabled,
     rules: rules.map((r) => ({
       rule_id: r.rule_id,
+      label: r.label ?? null,
       implementer_id: r.implementer_id,
+      reserve_wallet_id: r.reserve_wallet_id ?? null,
+      total_cap_zkz: r.total_cap_zkz ?? null,
       per_send_max_zkz: r.per_send_max_zkz,
       per_send_min_zkz: r.per_send_min_zkz,
       window_hours: r.window_hours,
@@ -339,6 +388,7 @@ export function evaluateAutoApproveRule(
   opts?: {
     readonly nowMs?: number;
     readonly windowSpend?: string;
+    readonly lifetimeSpend?: string;
   },
 ): AutoApproveEvalResult {
   if (policy.status !== "enabled") {
@@ -361,7 +411,7 @@ export function evaluateAutoApproveRule(
     return { decision: "fall_through", reason: "above_max" };
   }
 
-  const rule = policy.rules.find((r) => r.implementer_id === implementerId);
+  const rule = matchAutoApproveRule(policy.rules, implementerId, send.requestedRuleId);
   if (rule === undefined) {
     return { decision: "fall_through", reason: "no_rule" };
   }
@@ -396,7 +446,32 @@ export function evaluateAutoApproveRule(
     }
   }
 
+  if (rule.total_cap_zkz != null && opts?.lifetimeSpend !== undefined) {
+    let projected: string;
+    try {
+      projected = addAmounts(opts.lifetimeSpend, amount);
+    } catch {
+      return { decision: "fall_through", reason: "total_cap" };
+    }
+    if (compareAmounts(projected, rule.total_cap_zkz) > 0) {
+      return { decision: "fall_through", reason: "total_cap" };
+    }
+  }
+
   return { decision: "approve", rule };
+}
+
+function matchAutoApproveRule(
+  rules: readonly AutoApproveRule[],
+  implementerId: string,
+  requestedRuleId: string | null | undefined,
+): AutoApproveRule | undefined {
+  const mine = rules.filter((r) => r.implementer_id === implementerId);
+  if (requestedRuleId !== undefined && requestedRuleId !== null) {
+    return mine.find((r) => r.rule_id === requestedRuleId);
+  }
+  if (mine.length === 1) return mine[0];
+  return mine.find((r) => r.rule_id === "default");
 }
 
 // ─── ports ─────────────────────────────────────────────────────────────────
@@ -554,13 +629,32 @@ export function createSqlAutoApprovePolicy(
 export const LOCK_AUTO_APPROVE_WINDOW_SQL =
   "SELECT pg_advisory_xact_lock(hashtextextended(('auto-approve-window:' || $1::text), 0))";
 
+const RULE_ACTOR_MATCH_SQL =
+  "EXISTS (" +
+  "SELECT 1 FROM audit_log g " +
+  "WHERE g.operation_id = a.operation_id " +
+  "  AND g.action = 'send.auto_approved' " +
+  "  AND g.actor_id = ('auto_policy:' || $RULE::text)" +
+  ")";
+
 export const WINDOW_SPEND_SQL =
   "SELECT COALESCE(SUM(o.amount_zkz::numeric), 0)::text AS spend " +
   "FROM operation_approvals a " +
   "JOIN send_operations o ON o.operation_id = a.operation_id " +
   "WHERE a.method = 'AUTO_POLICY' " +
   "  AND o.implementer_id = $1::uuid " +
-  "  AND a.consumed_at >= now() - make_interval(hours => $2::int)";
+  "  AND a.consumed_at >= now() - make_interval(hours => $2::int) " +
+  "  AND " +
+  RULE_ACTOR_MATCH_SQL.replace("$RULE", "$3");
+
+export const LIFETIME_RULE_SPEND_SQL =
+  "SELECT COALESCE(SUM(o.amount_zkz::numeric), 0)::text AS spend " +
+  "FROM operation_approvals a " +
+  "JOIN send_operations o ON o.operation_id = a.operation_id " +
+  "WHERE a.method = 'AUTO_POLICY' " +
+  "  AND o.implementer_id = $1::uuid " +
+  "  AND " +
+  RULE_ACTOR_MATCH_SQL.replace("$RULE", "$2");
 
 export async function lockAutoApproveWindow(
   sql: SqlExecutor,
@@ -569,20 +663,38 @@ export async function lockAutoApproveWindow(
   await sql.query(LOCK_AUTO_APPROVE_WINDOW_SQL, [implementerId]);
 }
 
+function canonicalSpend(raw: string | undefined): string {
+  const text = (raw ?? "0").trim();
+  // PG numeric::text may be "0" / "0.0" / "1.1000". addAmounts re-emits canonical
+  // fixed-point text via the contracts emitter.
+  if (text === "" || text === "0") return "0";
+  return addAmounts(text, "0");
+}
+
 export async function queryWindowSpend(
   sql: SqlExecutor,
   implementerId: string,
   windowHours: number,
+  ruleId: string,
 ): Promise<string> {
   const result = await sql.query<{ spend: string }>(WINDOW_SPEND_SQL, [
     implementerId,
     windowHours,
+    ruleId,
   ]);
-  const raw = (result.rows[0]?.spend ?? "0").trim();
-  // PG numeric::text may be "0" / "0.0" / "1.1000". addAmounts re-emits canonical
-  // fixed-point text via the contracts emitter.
-  if (raw === "" || raw === "0") return "0";
-  return addAmounts(raw, "0");
+  return canonicalSpend(result.rows[0]?.spend);
+}
+
+export async function queryLifetimeRuleSpend(
+  sql: SqlExecutor,
+  implementerId: string,
+  ruleId: string,
+): Promise<string> {
+  const result = await sql.query<{ spend: string }>(LIFETIME_RULE_SPEND_SQL, [
+    implementerId,
+    ruleId,
+  ]);
+  return canonicalSpend(result.rows[0]?.spend);
 }
 
 // ─── commitAutoApproval ────────────────────────────────────────────────────
@@ -624,12 +736,13 @@ interface LockedSendRow {
   readonly amount_zkz: string;
   readonly references_operation_id: string | null;
   readonly source_pubkey: string;
+  readonly rule_id: string | null;
 }
 
 const LOCK_SEND_SQL =
   "SELECT o.operation_id, o.implementer_id, o.node_id, o.status, o.row_version, " +
   "o.source_wallet_id, o.destination_address, o.amount_zkz, o.references_operation_id, " +
-  "w.public_key AS source_pubkey " +
+  "w.public_key AS source_pubkey, o.rule_id " +
   "FROM send_operations o " +
   "JOIN wallets w ON w.id = o.source_wallet_id " +
   "WHERE o.operation_id = $1 " +
@@ -688,18 +801,35 @@ export async function commitAutoApproval(
     // Re-evaluate pure bounds under the locks (amount / implementer may not match rule).
     const bound = evaluateAutoApproveRule(
       { status: "enabled", rules: [rule] },
-      { implementerId: row.implementer_id, amountZkz: row.amount_zkz },
+      {
+        implementerId: row.implementer_id,
+        amountZkz: row.amount_zkz,
+        requestedRuleId: row.rule_id,
+      },
       { nowMs },
     );
     if (bound.decision === "fall_through") {
       return bound;
     }
 
-    const spend = await queryWindowSpend(tx, row.implementer_id, rule.window_hours);
+    const spend = await queryWindowSpend(
+      tx,
+      row.implementer_id,
+      rule.window_hours,
+      rule.rule_id,
+    );
     const amount = parsePositiveZkzAmount(row.amount_zkz);
     const projected = addAmounts(spend, amount);
     if (compareAmounts(projected, rule.window_cap_zkz) > 0) {
       return { decision: "fall_through", reason: "window_cap" };
+    }
+
+    if (rule.total_cap_zkz != null) {
+      const lifetime = await queryLifetimeRuleSpend(tx, row.implementer_id, rule.rule_id);
+      const projectedLifetime = addAmounts(lifetime, amount);
+      if (compareAmounts(projectedLifetime, rule.total_cap_zkz) > 0) {
+        return { decision: "fall_through", reason: "total_cap" };
+      }
     }
 
     const nonce = newId();

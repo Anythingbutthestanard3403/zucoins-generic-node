@@ -244,6 +244,7 @@ const executeInsert = (args: InsertArgs): string =>
     lit(null),
     lit(1700000000000),
     lit("INDEPENDENT"),
+    lit(null),
     lit(args.artifactId),
     lit("zp-send-external-expected-v1"),
     lit(1),
@@ -275,7 +276,7 @@ const rawOperationInsert = (args: InsertArgs): string =>
     lit(args.referencesOperationId ?? null),
     lit(null),
     lit(null),
-  ].join(", ")}, now(), 'INDEPENDENT');`;
+  ].join(", ")}, now(), 'INDEPENDENT', NULL);`;
 
 const rawArtifactInsert = (artifactId: string, operationId: string): string =>
   `INSERT INTO send_operation_expected_artifacts ` +

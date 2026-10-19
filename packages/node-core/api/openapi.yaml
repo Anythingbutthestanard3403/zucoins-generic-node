@@ -748,6 +748,10 @@ paths:
                     - INDEPENDENT
                     - NODE_VERIFIED
                   description: Per-operation verification mode. Omitted defaults to INDEPENDENT. NODE_VERIFIED requires operator policy ops.allow_node_verified for the calling implementer; otherwise 422 verification_mode_not_allowed.
+                rule_id:
+                  type: string
+                  pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+                  description: "Optional spend-rule id. Omitted matches the connector default rule, or its sole rule."
       responses:
         "201":
           description: SEND_EXTERNAL created

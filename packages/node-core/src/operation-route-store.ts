@@ -465,6 +465,7 @@ export function createSqlOperationRouteStore(
             ...(input.verification_mode !== undefined
               ? { verificationMode: input.verification_mode }
               : {}),
+            ...(input.rule_id !== undefined ? { ruleId: input.rule_id } : {}),
           },
           {
             generateId,
@@ -511,6 +512,7 @@ export function createSqlOperationRouteStore(
         ...(input.verification_mode !== undefined
           ? { verificationMode: input.verification_mode }
           : {}),
+        ...(input.rule_id !== undefined ? { ruleId: input.rule_id } : {}),
       });
 
       if (composed.outcome === "REJECTED") {

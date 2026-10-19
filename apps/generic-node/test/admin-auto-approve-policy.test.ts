@@ -244,6 +244,9 @@ describe("auto-approve policy admin routes (ZTR-1237)", () => {
     expect(body.rules).toHaveLength(1);
     expect(body.rules[0]?.rule_id).toBe("r1");
     expect(body.rules[0]?.current_window_spend_zkz).toBe("37.2");
+    expect(
+      (body.rules[0] as { cumulative_total_spend_zkz?: string }).cumulative_total_spend_zkz,
+    ).toBe("0");
     expect(typeof body.server_time).toBe("string");
   });
 

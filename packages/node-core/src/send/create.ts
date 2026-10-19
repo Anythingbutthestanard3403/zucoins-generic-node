@@ -96,6 +96,11 @@ export interface SendCreateRequest {
    * hash must stay client-stable (ZTR-1271).
    */
   readonly idempotencyReferencesOperationId?: string | null;
+  /**
+   * Optional spend-rule id (ZTR-1329). Omitted or null stays out of the
+   * idempotency fingerprint. A present value must match the rule id grammar.
+   */
+  readonly ruleId?: string | null;
 }
 
 export interface SendOperation {
@@ -120,6 +125,8 @@ export interface SendOperation {
   readonly createdAt: number;
   /** Immutable after admission (ZTR-1301 / schema ZTR-1300). */
   readonly verificationMode: VerificationMode;
+  /** Spend rule the client named. Null when the request omitted it. */
+  readonly ruleId?: string | null;
 }
 
 // A-canonical-fields: the exact artifact envelope. `keyId` is the wire name of the
@@ -154,6 +161,7 @@ export type SendRejectionCode =
   | "invalid_destination_address"
   | "invalid_amount"
   | "invalid_references_operation_id"
+  | "invalid_rule_id"
   | "source_wallet_not_found"
   | "source_wallet_not_eligible"
   | "destination_is_internal"
@@ -221,6 +229,8 @@ export interface SendArtifactSigner {
 
 // Frozen API grammar (api/scalars.ts): idempotency key 16–255 visible ASCII.
 const IDEMPOTENCY_KEY_RE = /^[\x20-\x7E]{16,255}$/;
+/** Same grammar as ops.auto_approve_sends rule ids. Duplicated so create stays free of the policy module. */
+export const SEND_RULE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 // origin conjunct: an imported-origin wallet never sources a node operation.
 // Step 2 requires node-generated AND controlled by this node; a
@@ -277,6 +287,9 @@ export function validateSendCreateRequest(
       return { ok: false, code: "invalid_references_operation_id" };
     }
   }
+  if (request.ruleId != null && !SEND_RULE_ID_RE.test(request.ruleId)) {
+    return { ok: false, code: "invalid_rule_id" };
+  }
   return { ok: true };
 }
 
@@ -304,10 +317,12 @@ export function canonicalRequestSha256(request: SendCreateRequest): string {
     client_reference: request.clientReference,
     description: request.description,
   };
+  const withRule =
+    request.ruleId != null ? { ...base, rule_id: request.ruleId } : base;
   const canonical =
     mode === DEFAULT_VERIFICATION_MODE
-      ? JSON.stringify(base)
-      : JSON.stringify({ ...base, verification_mode: mode });
+      ? JSON.stringify(withRule)
+      : JSON.stringify({ ...withRule, verification_mode: mode });
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
@@ -464,6 +479,7 @@ export async function createExternalSend(
     requestSha256,
     createdAt: now(),
     verificationMode,
+    ruleId: request.ruleId ?? null,
   };
 
   // Step 3 — one DB-TX creates the operation row and its one artifact, or neither. The

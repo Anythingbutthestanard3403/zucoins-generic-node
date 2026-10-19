@@ -14,6 +14,14 @@ const SLICE_SQL = readFileSync(
   "utf-8",
 );
 
+// Disposable drills that INSERT through OPERATION_COLUMNS stop after the
+// verification-mode fixture. The production column list now includes rule_id,
+// so the same fixture applies that later slice once the stub tables exist.
+const RULE_ID_SQL = readFileSync(
+  new URL("../src/schema/send-operations-rule-id.sql", import.meta.url),
+  "utf-8",
+);
+
 /** Missing-relation stubs + receive_release_status so the slice CHECK rewrite is valid. */
 export const VERIFICATION_MODE_FIXTURE_PREREQ_SQL = `
 CREATE TABLE IF NOT EXISTS operations (id uuid PRIMARY KEY);
@@ -39,5 +47,5 @@ $vm_fixture_release$;
 
 /** Prerequisite stubs + frozen verification-mode.sql. Apply after the pack's table DDLs. */
 export function verificationModeFixtureSql(): string {
-  return `${VERIFICATION_MODE_FIXTURE_PREREQ_SQL}\n${SLICE_SQL}\n`;
+  return `${VERIFICATION_MODE_FIXTURE_PREREQ_SQL}\n${SLICE_SQL}\n${RULE_ID_SQL}\n`;
 }

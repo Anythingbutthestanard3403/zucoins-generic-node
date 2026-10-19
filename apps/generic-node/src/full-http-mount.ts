@@ -112,6 +112,7 @@ import {
   createSqlWalletMoneyCapabilityStore,
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
+  queryLifetimeRuleSpend,
   toBase64UrlPadded,
   insertNodeGeneratedWalletWithPendingDestination,
   deleteNodeGeneratedWalletMint,
@@ -884,7 +885,12 @@ export function createProductionRouteSurface(
   const queryAutoApproveWindowSpend = async (
     implementerId: string,
     windowHours: number,
-  ): Promise<string> => queryWindowSpend(config.pool, implementerId, windowHours);
+    ruleId: string,
+  ): Promise<string> => queryWindowSpend(config.pool, implementerId, windowHours, ruleId);
+  const queryAutoApproveLifetimeSpend = async (
+    implementerId: string,
+    ruleId: string,
+  ): Promise<string> => queryLifetimeRuleSpend(config.pool, implementerId, ruleId);
   const challengeIssuerStore = new InMemoryApprovalChallengeIssuerStore();
   const operatorPushStore = new InMemoryOperatorPushSubscriptionStore();
   // Real sealed auth (not length-only discard). Env OPERATOR_PUSH_SEAL_KEY preferred;
@@ -1006,6 +1012,7 @@ export function createProductionRouteSurface(
     autoApprovePolicy,
     allowNodeVerifiedPolicy,
     queryAutoApproveWindowSpend,
+    queryAutoApproveLifetimeSpend,
     challengeIssuerStore,
     secondDeviceEnrol: {
       enrollmentChallengeStore: deviceEnrollmentChallengeStore,

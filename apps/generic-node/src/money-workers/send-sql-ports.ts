@@ -178,6 +178,7 @@ export interface ApprovalPendingSendCandidate {
   readonly operationId: string;
   readonly implementerId: string;
   readonly amountZkz: string;
+  readonly ruleId: string | null;
 }
 
 const AUTO_APPROVE_PENDING_BATCH = 100;
@@ -190,10 +191,12 @@ export async function loadApprovalPendingSendCandidates(
     operation_id: string;
     implementer_id: string;
     amount_zkz: string;
+    rule_id: string | null;
   }>(
     `SELECT s.operation_id::text AS operation_id,
             s.implementer_id::text AS implementer_id,
-            s.amount_zkz::text AS amount_zkz
+            s.amount_zkz::text AS amount_zkz,
+            s.rule_id
        FROM send_operations s
       WHERE s.status = 'CREATED'
         AND s.formation_state = 'APPROVAL_PENDING'
@@ -214,6 +217,7 @@ export async function loadApprovalPendingSendCandidates(
     operationId: r.operation_id,
     implementerId: r.implementer_id,
     amountZkz: r.amount_zkz,
+    ruleId: r.rule_id,
   }));
 }
 

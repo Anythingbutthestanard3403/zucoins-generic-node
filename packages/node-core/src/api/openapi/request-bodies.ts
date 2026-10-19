@@ -213,6 +213,12 @@ export const CREATE_EXTERNAL_SEND_BODY: JsonSchema = {
     client_reference: { type: "string", maxLength: 256 },
     description: { type: "string", maxLength: 512 },
     verification_mode: verificationMode,
+    rule_id: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      description:
+        "Optional spend-rule id. Omitted matches the connector default rule, or its sole rule.",
+    },
   },
 };
 

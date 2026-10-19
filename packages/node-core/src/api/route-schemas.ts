@@ -87,6 +87,8 @@ export const CreateExternalSendBody = z.object({
   description: z.string().max(512).optional(),
   /** Optional; defaults to INDEPENDENT. NODE_VERIFIED requires ops.allow_node_verified. */
   verification_mode: VerificationModeField,
+  /** Optional spend-rule id (ZTR-1329). Omitted matches the connector default rule. */
+  rule_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/).optional(),
 }).strict();
 
 // --- Destinations --

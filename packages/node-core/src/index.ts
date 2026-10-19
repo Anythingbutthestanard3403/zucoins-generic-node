@@ -694,6 +694,15 @@ export {
   type ConnectorReserveWalletsInvariant,
 } from "./schema/connector-reserve-wallets.contract.js";
 
+// ZTR-1329: nullable rule_id on send_operations and the operations mirror.
+export {
+  SEND_OPERATIONS_RULE_ID_EXECUTION_OBLIGATIONS,
+  SEND_OPERATIONS_RULE_ID_INVARIANTS,
+  SEND_OPERATIONS_RULE_ID_SCHEMA_FILE,
+  SEND_OPERATIONS_RULE_ID_SOURCE,
+  type SendOperationsRuleIdInvariant,
+} from "./schema/send-operations-rule-id.contract.js";
+
 // verification_mode column + RELEASED_NODE_VERIFIED + policy home (ZTR-1300).
 export {
   ALLOW_NODE_VERIFIED_POLICY_CHANGED_ACTION,

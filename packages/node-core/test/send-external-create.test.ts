@@ -381,6 +381,9 @@ describe("idempotency", () => {
     ] as const) {
       expect(canonicalRequestSha256(request(overrides)), JSON.stringify(overrides)).not.toBe(base);
     }
+    expect(canonicalRequestSha256(request({ ruleId: null }))).toBe(base);
+    expect(canonicalRequestSha256(request({ ruleId: undefined }))).toBe(base);
+    expect(canonicalRequestSha256(request({ ruleId: "rule_a" }))).not.toBe(base);
   });
 
   it("client-visible idempotency overrides keep fingerprint stable when resolved fields differ (ZTR-1271)", () => {

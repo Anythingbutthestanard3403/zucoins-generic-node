@@ -97,6 +97,7 @@ export const OPERATION_COLUMNS = [
   "description",
   "created_at",
   "verification_mode",
+  "rule_id",
 ] as const;
 
 export const ARTIFACT_COLUMNS = [
@@ -155,14 +156,14 @@ export const STATEMENTS = {
     `source_wallet_id, destination_address, ` +
     `references_operation_id, client_reference, description, ` +
     `idempotency_key, request_sha256, formation_state, ` +
-    `verification_mode` +
+    `verification_mode, rule_id` +
     `) VALUES (` +
     `$1::uuid, $2::uuid, $3::uuid, 'SEND_EXTERNAL'::operation_kind, ` +
     `$4::operation_status, $5, ` +
     `$6::uuid, $7, ` +
     `$8::uuid, $9, $10, ` +
     `$11, $12, $13::external_formation_state, ` +
-    `$14` +
+    `$14, $15` +
     `) ON CONFLICT (id) DO NOTHING`,
   SELECT_BY_IDEMPOTENCY: `SELECT ${SELECT_OPERATION_COLUMNS} FROM send_operations WHERE implementer_id = $1 AND http_method = $2 AND route = $3 AND idempotency_key = $4`,
   SELECT_BY_OPERATION_ID: `SELECT o.${OPERATION_COLUMNS.join(
@@ -197,6 +198,7 @@ interface OperationRow {
   readonly description: string | null;
   readonly created_at: string | Date;
   readonly verification_mode?: string | null;
+  readonly rule_id?: string | null;
   readonly completed_at: string | Date | null;
   readonly response_status: number | null;
   readonly response_body: string | null;
@@ -252,6 +254,7 @@ function toStoredOperation(row: OperationRow): StoredSendOperation {
     requestSha256: row.request_sha256,
     createdAt: epochMs(row.created_at),
     verificationMode: asVerificationMode(row.verification_mode),
+    ruleId: row.rule_id ?? null,
     responseStatus: row.response_status === null ? null : Number(row.response_status),
     responseBody: row.response_body,
   };
@@ -367,6 +370,7 @@ export class SqlSendCreateStore implements SendCreateStore {
       operation.description,
       operation.createdAt,
       operation.verificationMode,
+      operation.ruleId ?? null,
       // ARTIFACT_COLUMNS sequence, minus operation_id which the statement takes from the CTE.
       artifact.artifactId,
       artifact.purpose,
@@ -403,6 +407,7 @@ export class SqlSendCreateStore implements SendCreateStore {
           operation.requestSha256,
           operation.formationState,
           operation.verificationMode,
+          operation.ruleId ?? null,
         ]);
         if (this.appendCreatedEvent !== undefined) {
           await this.appendCreatedEvent(tx, {

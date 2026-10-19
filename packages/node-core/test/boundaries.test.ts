@@ -34,6 +34,7 @@ const PRODUCTION_MODULES = [
   "credential",
   "implementer",
   "integration-request",
+  "events",
   "vault",
   "verification",
   "totp",
@@ -128,6 +129,8 @@ const ALLOWED_INTERNAL_IMPORTS: Readonly<Record<ModuleName, readonly ModuleName[
   // this module — composition root wires the router.
   // Hook-target checks use the existing URL classifier in net/.
   "integration-request": ["api", "credential", "protocol", "reporting", "schema", "net"],
+  // Signed hook delivery. The URL classifier lives in net/. The signer is injected.
+  events: ["net"],
   vault: [],
   // verification-complete acknowledgement: reuses the reporting SHA-256 helper for
   // the evidence-set digest and declares its own SqlExecutor port, like every other

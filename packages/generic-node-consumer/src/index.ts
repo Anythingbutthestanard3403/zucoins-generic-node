@@ -233,3 +233,7 @@ export {
   type ImplementerIdentityDocument,
   type NodeIdentityDocument,
 } from "./http/discovery.js";
+export {
+  SignatureVerificationError,
+  verifyWebhookEvent,
+} from "./signing/verify-webhook.js";

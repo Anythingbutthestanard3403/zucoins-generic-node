@@ -246,6 +246,8 @@ const SCHEMA_FILES = [
   "connector-configs.sql",
   // ZTR-1331: connector_rule_requests. Requires implementers + wallets.
   "connector-rule-requests.sql",
+  // ZTR-1333: webhook_deliveries. Requires implementers.
+  "webhook-deliveries.sql",
 ] as const;
 
 // SCHEMA_FILES that deliberately contain no CREATE TABLE: ALTER statements on a table owned
@@ -658,6 +660,10 @@ const GREENFIELD: Record<
   "connector-rule-requests.sql": {
     applies: false,
     missingFragment: "connector-rule-requests requires implementers",
+  },
+  "webhook-deliveries.sql": {
+    applies: false,
+    missingFragment: "webhook-deliveries requires implementers",
   },
 };
 

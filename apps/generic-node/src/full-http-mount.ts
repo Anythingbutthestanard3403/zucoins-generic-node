@@ -52,6 +52,7 @@ import {
   createSqlDefaultFundingWallet,
   createSqlConnectorConfigStore,
   createSqlConnectorRuleRequestStore,
+  createSqlWebhookDeliveryStore,
   createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
@@ -941,6 +942,7 @@ export function createProductionRouteSurface(
 
   const adminConnectorConfigStore = createSqlConnectorConfigStore(poolSqlExecutor);
   const adminConnectorRuleRequestStore = createSqlConnectorRuleRequestStore(poolSqlExecutor);
+  const adminWebhookDeliveryStore = createSqlWebhookDeliveryStore(poolSqlExecutor);
 
   const baseDeps = {
     sessions,
@@ -966,6 +968,7 @@ export function createProductionRouteSurface(
     integrationRequestStore: adminIntegrationRequestStore,
     connectorConfigStore: adminConnectorConfigStore,
     connectorRuleRequestStore: adminConnectorRuleRequestStore,
+    webhookDeliveryStore: adminWebhookDeliveryStore,
     deviceEnrollmentChallengeStore,
     deviceEnrollmentAuditLog: createSqlEnrollmentAuditLog(deviceSql),
     deviceRevocationAuditLog: createSqlDeviceRevocationAuditLog(deviceSql),
@@ -1118,6 +1121,15 @@ export function createProductionRouteSurface(
           },
         }),
         connectorRuleRequestStore: createSqlConnectorRuleRequestStore({
+          query: async <R extends Record<string, unknown>>(
+            text: string,
+            params?: readonly unknown[],
+          ) => {
+            const result = await client.query(text, params as never);
+            return { rows: result.rows as R[] };
+          },
+        }),
+        webhookDeliveryStore: createSqlWebhookDeliveryStore({
           query: async <R extends Record<string, unknown>>(
             text: string,
             params?: readonly unknown[],

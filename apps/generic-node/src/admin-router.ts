@@ -129,6 +129,7 @@ import {
   type DefaultFundingWalletPort,
   type DefaultFundingWalletSnapshot,
   type FundingWalletSetMode,
+  ReserveLabelConflictError,
   ReservePoolCapError,
 } from "@zucoins/node-core";
 import {
@@ -6233,6 +6234,12 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       if (!guarded.ok) {
         if (guarded.reason === "mutation_threw" && guarded.error instanceof ReservePoolCapError) {
           return fail(409, "conflict", "wallet cap reached", requestId);
+        }
+        if (
+          guarded.reason === "mutation_threw" &&
+          guarded.error instanceof ReserveLabelConflictError
+        ) {
+          return fail(409, "conflict", "reserve wallet label already exists", requestId);
         }
         return fail(guarded.status, guarded.code, guarded.message, requestId);
       }

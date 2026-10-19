@@ -174,6 +174,100 @@ describe("GN-102 automatic reserve and worker pool (real PG)", () => {
     expect(left.length + right.length).toBe(11);
   }, 180_000);
 
+  it("replaces an unstamped Main Reserve and records the fresh wallet", async () => {
+    if (!live) return;
+    const url = clone();
+    const orphanId = "b0000000-0000-4000-8000-000000000266";
+    const pub = `${"D".repeat(43)}=`;
+    psqlMust(
+      url,
+      `INSERT INTO wallets (
+         id, node_id, public_key, key_origin, state,
+         allow_external_receive, allow_external_send, allow_internal_move, money_mode,
+         display_label
+       ) VALUES (
+         '${orphanId}', '${NODE}', '${pub}', 'node_generated', 'AVAILABLE',
+         false, false, true, 'INTERNAL_ONLY', 'Main Reserve'
+       );
+       INSERT INTO destinations (id, node_id, wallet_id, label, state)
+       VALUES (
+         'b0000000-0000-4000-8000-000000000267', '${NODE}', '${orphanId}',
+         'Main Reserve', 'PENDING'
+       )`,
+    );
+    const seals: string[] = [];
+    await ensureNodeReserveAndWorkerPool(depsFor(url, 50, seals));
+    const wallets = await loadWallets(url);
+    expect(wallets.find((row) => row.id === orphanId)).toBeUndefined();
+    const reserve = wallets.filter(
+      (row) => row.money_mode === "INTERNAL_ONLY" && row.display_label === "Main Reserve",
+    );
+    expect(reserve).toHaveLength(1);
+    expect(reserve[0]?.stamped).toBe(true);
+    expect(reserve[0]?.dest_state).toBe("BLESSED");
+    expect(seals).toHaveLength(11);
+    expect(seals).not.toContain(orphanId);
+    const db = new PsqlExecutor(url);
+    const setting = await db.query<{ setting_value: string }>(`
+      SELECT setting_value
+        FROM node_settings
+       WHERE setting_key = 'integration.default_funding_wallet_id'
+    `);
+    expect(setting.rows.map((row) => row.setting_value)).toEqual([reserve[0]?.id]);
+  }, 180_000);
+
+  it("keeps a stamped Main Reserve and records that wallet", async () => {
+    if (!live) return;
+    const url = clone();
+    const reserveId = "b0000000-0000-4000-8000-000000000268";
+    const verifId = "b0000000-0000-4000-8000-000000000269";
+    const pub = `${"E".repeat(43)}=`;
+    const digest = "ab".repeat(32);
+    psqlMust(
+      url,
+      `INSERT INTO wallets (
+         id, node_id, public_key, key_origin, state,
+         allow_external_receive, allow_external_send, allow_internal_move, money_mode,
+         display_label
+       ) VALUES (
+         '${reserveId}', '${NODE}', '${pub}', 'node_generated', 'AVAILABLE',
+         false, false, true, 'INTERNAL_ONLY', 'Main Reserve'
+       );
+       INSERT INTO wallet_recovery_verifications (
+         id, wallet_id, method, public_key, export_sha256, audit_event_id,
+         verified_at, verifier_identity
+       ) VALUES (
+         '${verifId}', '${reserveId}', 'AUDITED_EXPORT', '${pub}', '${digest}',
+         'b0000000-0000-4000-8000-00000000026a', now(), 'SYSTEM'
+       );
+       UPDATE wallets
+          SET recovery_verified_at = now(),
+              recovery_verification_id = '${verifId}'
+        WHERE id = '${reserveId}';
+       INSERT INTO destinations (id, node_id, wallet_id, label, state)
+       VALUES (
+         'b0000000-0000-4000-8000-00000000026b', '${NODE}', '${reserveId}',
+         'Main Reserve', 'PENDING'
+       )`,
+    );
+    const seals: string[] = [];
+    await ensureNodeReserveAndWorkerPool(depsFor(url, 50, seals));
+    const wallets = await loadWallets(url);
+    const reserve = wallets.filter((row) => row.id === reserveId);
+    expect(reserve).toHaveLength(1);
+    expect(reserve[0]?.stamped).toBe(true);
+    expect(reserve[0]?.dest_state).toBe("PENDING");
+    expect(seals).toHaveLength(10);
+    expect(seals).not.toContain(reserveId);
+    const db = new PsqlExecutor(url);
+    const setting = await db.query<{ setting_value: string }>(`
+      SELECT setting_value
+        FROM node_settings
+       WHERE setting_key = 'integration.default_funding_wallet_id'
+    `);
+    expect(setting.rows.map((row) => row.setting_value)).toEqual([reserveId]);
+  }, 180_000);
+
   it("a cap of 6 stops at the reserve plus five send workers", async () => {
     if (!live) return;
     const url = clone();

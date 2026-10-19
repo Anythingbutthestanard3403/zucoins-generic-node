@@ -22,7 +22,7 @@ $connector_configs_prereq$;
 CREATE TABLE connector_configs (
   implementer_id uuid PRIMARY KEY REFERENCES implementers (id) ON DELETE CASCADE,
   display_name text NOT NULL CHECK (char_length(display_name) BETWEEN 1 AND 120),
-  scopes jsonb NOT NULL DEFAULT '["receives:write","sends:write","wallets:read_linked"]'::jsonb,
+  scopes text NOT NULL DEFAULT ('["receives:write","sends:write","wallets:read_linked"]'),
   webhook_url text NULL,
   webhook_enabled boolean NOT NULL DEFAULT false,
   policy_mode text NOT NULL DEFAULT 'NODE_VERIFIED',
@@ -32,9 +32,9 @@ CREATE TABLE connector_configs (
     policy_mode IN ('NODE_VERIFIED', 'LEGACY')
   ),
   CONSTRAINT connector_configs_scopes_chk CHECK (
-    jsonb_typeof(scopes) = 'array'
-    AND jsonb_array_length(scopes) > 0
-    AND scopes <@ '["receives:write","sends:write","wallets:read_linked","ledger:read_all"]'::jsonb
+    jsonb_typeof(scopes::jsonb) = 'array'
+    AND jsonb_array_length(scopes::jsonb) > 0
+    AND scopes::jsonb <@ '["receives:write","sends:write","wallets:read_linked","ledger:read_all"]'::jsonb
   )
 );
 

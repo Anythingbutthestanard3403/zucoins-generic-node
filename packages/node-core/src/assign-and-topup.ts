@@ -66,6 +66,11 @@ import {
   type SendOperation,
   IDEMPOTENCY_IN_PROGRESS_RETRY_AFTER_SECONDS,
 } from "./send/create.js";
+import {
+  AUTO_APPROVE_SETTING_KEY,
+  matchAutoApproveRule,
+  parseAutoApprovePolicyStructure,
+} from "./send/auto-approve-policy.js";
 
 // ─── frozen SQL (exported for PG text + concurrency drills) ─────────────────
 
@@ -661,6 +666,31 @@ async function readNodeDefaultFundingWalletId(
   return value;
 }
 
+async function readRuleReserveWalletId(
+  tx: AssignSqlExecutor,
+  implementerId: string,
+  ruleId: string | null | undefined,
+): Promise<string | null> {
+  const result = await tx.query<{ setting_value: string | null }>(
+    SELECT_NODE_DEFAULT_FUNDING_WALLET_SQL,
+    [AUTO_APPROVE_SETTING_KEY],
+  );
+  const raw = result.rows[0]?.setting_value ?? null;
+  if (raw === null || raw.length === 0) return null;
+  const parsed = parseAutoApprovePolicyStructure(raw);
+  if (!parsed.ok) return null;
+  const matched = matchAutoApproveRule(parsed.rules, implementerId, ruleId);
+  if (matched === undefined || !matched.enabled || matched.reserve_wallet_id === null) {
+    return null;
+  }
+  try {
+    parseUuid(matched.reserve_wallet_id);
+  } catch {
+    return null;
+  }
+  return matched.reserve_wallet_id;
+}
+
 async function countConnectorReserves(
   tx: AssignSqlExecutor,
   implementerId: string,
@@ -1052,10 +1082,17 @@ export async function assignAndTopUpExternalSend(
 
     const planMode = request.sourceWalletId !== null ? "explicit" : "assigned";
 
+    const ruleReserveWalletId =
+      preferredReserveWalletId === null && explicitFundingWalletId === null
+        ? await readRuleReserveWalletId(tx, request.implementerId, request.ruleId)
+        : null;
+    const effectivePreferredReserveWalletId =
+      preferredReserveWalletId ?? ruleReserveWalletId;
+
     // Explicit pin must not be the external-send source. Preferred and the
     // resolver pin are checked on the path that would actually use them.
     if (
-      preferredReserveWalletId === null &&
+      effectivePreferredReserveWalletId === null &&
       explicitFundingWalletId !== null &&
       workerWalletId === explicitFundingWalletId
     ) {
@@ -1068,7 +1105,7 @@ export async function assignAndTopUpExternalSend(
 
     let linkCount = 0;
     let resolverFundingWalletId: string | null = null;
-    if (preferredReserveWalletId === null && explicitFundingWalletId === null) {
+    if (effectivePreferredReserveWalletId === null && explicitFundingWalletId === null) {
       linkCount = await countConnectorReserves(tx, request.implementerId);
       if (linkCount === 0 && deps.resolveFundingWalletId !== undefined) {
         resolverFundingWalletId = await deps.resolveFundingWalletId(request.implementerId);
@@ -1127,8 +1164,8 @@ export async function assignAndTopUpExternalSend(
       workerDestinationId: destId,
     });
 
-    if (preferredReserveWalletId !== null) {
-      if (preferredReserveWalletId === workerWalletId) {
+    if (effectivePreferredReserveWalletId !== null) {
+      if (effectivePreferredReserveWalletId === workerWalletId) {
         return {
           mode: "reject",
           code: "send_rejected",
@@ -1140,13 +1177,13 @@ export async function assignAndTopUpExternalSend(
         has_links: boolean | string;
       }>(SELECT_PREFERRED_RESERVE_LINK_SQL, [
         request.implementerId,
-        preferredReserveWalletId,
+        effectivePreferredReserveWalletId,
       ]);
       const linked = pgBool(link.rows[0]?.linked);
       const hasLinks = pgBool(link.rows[0]?.has_links);
       const nodeDefault = await readNodeDefaultFundingWalletId(tx);
       const permitted =
-        linked || (nodeDefault !== null && nodeDefault === preferredReserveWalletId);
+        linked || (nodeDefault !== null && nodeDefault === effectivePreferredReserveWalletId);
       if (!hasLinks && nodeDefault === null) {
         return {
           mode: "reject",
@@ -1163,7 +1200,7 @@ export async function assignAndTopUpExternalSend(
       }
       const lockedW = await lockFundingWalletForTopUp(
         tx,
-        preferredReserveWalletId,
+        effectivePreferredReserveWalletId,
         request.nodeId,
         funding.shortfallZkz,
       );

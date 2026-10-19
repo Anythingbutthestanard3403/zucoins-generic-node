@@ -461,7 +461,7 @@ export function evaluateAutoApproveRule(
   return { decision: "approve", rule };
 }
 
-function matchAutoApproveRule(
+export function matchAutoApproveRule(
   rules: readonly AutoApproveRule[],
   implementerId: string,
   requestedRuleId: string | null | undefined,

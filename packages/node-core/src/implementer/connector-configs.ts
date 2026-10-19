@@ -67,9 +67,17 @@ function toIso(value: unknown): string {
 }
 
 function scopesOf(raw: unknown): readonly ConnectorScope[] {
-  if (!Array.isArray(raw)) return [];
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
   const out: ConnectorScope[] = [];
-  for (const item of raw) {
+  for (const item of parsed) {
     if (typeof item === "string" && SCOPE_SET.has(item)) out.push(item as ConnectorScope);
   }
   return out;
@@ -119,7 +127,7 @@ const GET_SQL = `SELECT ${SELECT_COLS}
 const UPSERT_SQL = `INSERT INTO connector_configs (
   implementer_id, display_name, scopes, webhook_url, webhook_enabled, policy_mode, created_at, updated_at
 ) VALUES (
-  $1::uuid, $2, $3::jsonb, $4, $5, $6, now(), now()
+  $1::uuid, $2, $3::text, $4, $5, $6, now(), now()
 )
 ON CONFLICT (implementer_id) DO UPDATE SET
   display_name = EXCLUDED.display_name,
@@ -132,7 +140,7 @@ RETURNING ${SELECT_COLS}`;
 
 const PATCH_SQL = `UPDATE connector_configs SET
   display_name = COALESCE($2, display_name),
-  scopes = COALESCE($3::jsonb, scopes),
+  scopes = COALESCE($3::text, scopes),
   webhook_url = CASE WHEN $4::boolean THEN $5 ELSE webhook_url END,
   webhook_enabled = COALESCE($6, webhook_enabled),
   policy_mode = COALESCE($7, policy_mode),

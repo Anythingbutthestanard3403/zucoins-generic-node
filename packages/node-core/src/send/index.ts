@@ -175,6 +175,7 @@ export {
   parseAutoApprovePolicyStructure,
   serializeAutoApprovePolicyDocument,
   evaluateAutoApproveRule,
+  matchAutoApproveRule,
   fixedAutoApprovePolicy,
   InMemoryAutoApprovePolicy,
   createSqlAutoApprovePolicy,

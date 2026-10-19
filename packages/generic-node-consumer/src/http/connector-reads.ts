@@ -3,6 +3,8 @@
 //   - listWallets()      -> GET /v1/wallets
 //   - listOperations()   -> GET /v1/operations
 
+import type { OperationKind as ConnectorOperationKind } from "@zucoins/generic-node-contracts/operations";
+
 import { assertOk } from "./errors.js";
 import { resolveFetch, resolveUrl, type NodeClientConfig } from "./client-types.js";
 
@@ -10,7 +12,7 @@ export const NODE_INFO_PATH = "/v1/node-info" as const;
 export const CONNECTOR_WALLETS_PATH = "/v1/wallets" as const;
 export const CONNECTOR_OPERATIONS_PATH = "/v1/operations" as const;
 
-export type ConnectorOperationKind = "RECEIVE_EXTERNAL" | "MOVE_INTERNAL" | "SEND_EXTERNAL";
+export type { ConnectorOperationKind };
 
 export interface ConnectorNodeInfo {
   readonly node_id: string;

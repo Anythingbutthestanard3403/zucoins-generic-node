@@ -738,13 +738,12 @@ export function createNodeRuntimeListener(
         })
       : null;
 
-<<<<<<< HEAD
   const receiveInstructionSql = deps.receiveInstructionSql;
   const receiveInstructionLimiter = new InMemoryReportingRateLimiter(
     RECEIVE_INSTRUCTION_RATE_WINDOW_MS,
     RECEIVE_INSTRUCTION_RATE_MAX_REQUESTS,
   );
-=======
+
   const connectorReadRouter =
     deps.connectorReadStore !== undefined &&
     deps.nodeId !== undefined &&
@@ -767,7 +766,6 @@ export function createNodeRuntimeListener(
           newRequestId,
         })
       : null;
->>>>>>> 55b876e28 (feat(api): add scoped connector read endpoints and write scope enforcement (ZTR-1332))
 
   const adminRouter: AdminRouter | null =
     deps.adminRouter ??

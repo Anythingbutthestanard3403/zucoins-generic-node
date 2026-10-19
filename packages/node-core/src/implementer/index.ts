@@ -67,9 +67,12 @@ export {
 } from "./integration-requests.js";
 
 export {
+  CONNECTOR_SCOPES,
+  DEFAULT_CONNECTOR_SCOPES,
   InMemoryConnectorConfigStore,
   SqlConnectorConfigStore,
   createSqlConnectorConfigStore,
+  isConnectorScope,
   normalizeConnectorScopes,
   type ConnectorConfigPatchInput,
   type ConnectorConfigRecord,
@@ -77,6 +80,7 @@ export {
   type ConnectorConfigStore,
   type ConnectorConfigUpsertInput,
   type ConnectorPolicyMode,
+  type ConnectorScope,
 } from "./connector-configs.js";
 
 export {

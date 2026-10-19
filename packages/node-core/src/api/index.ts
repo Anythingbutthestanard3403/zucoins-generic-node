@@ -568,3 +568,25 @@ export {
   type ConnectorRuleRequestRouterDeps,
 } from "./connector-rule-requests-router.js";
 
+export {
+  SqlConnectorReadStore,
+  createConnectorReadRouter,
+  createSqlConnectorReadStore,
+  ed25519PublicKeyToPem,
+  type ConnectorListOperationsFilter,
+  type ConnectorListWalletsFilter,
+  type ConnectorNodeInfoStoreRecord,
+  type ConnectorNodeInfoView,
+  type ConnectorOperationKind,
+  type ConnectorOperationView,
+  type ConnectorOperationsListResponse,
+  type ConnectorReadCredential,
+  type ConnectorReadRouter,
+  type ConnectorReadRouterDeps,
+  type ConnectorReadSqlExecutor,
+  type ConnectorReadStore,
+  type ConnectorWalletView,
+  type ConnectorWalletsListResponse,
+} from "./connector-read-router.js";
+
+

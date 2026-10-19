@@ -53,6 +53,7 @@ import {
   createSqlConnectorConfigStore,
   createSqlConnectorRuleRequestStore,
   createSqlWebhookDeliveryStore,
+  createSqlConnectorReadStore,
   createSqlIntegrationRequestStore,
   DEFAULT_MAX_BODY_BYTES,
   InMemoryReportingRateLimiter,
@@ -495,6 +496,8 @@ export interface ProductionRouteSurface {
   readonly integrationRequestStore: import("@zucoins/node-core").PublicIntegrationRequestStore;
   /** Pool-scoped spend-rule request store (ZTR-1331). */
   readonly connectorRuleRequestStore: import("@zucoins/node-core").ConnectorRuleRequestStore;
+  /** Pool-scoped connector read store (ZTR-1332). */
+  readonly connectorReadStore: import("@zucoins/node-core").ConnectorReadStore;
   readonly adminRouteDeps: AdminRouteDeps;
   readonly adminUserStore: AdminUserStore;
   readonly adminCsrfAllowedOrigins: readonly string[];
@@ -943,6 +946,7 @@ export function createProductionRouteSurface(
   const adminConnectorConfigStore = createSqlConnectorConfigStore(poolSqlExecutor);
   const adminConnectorRuleRequestStore = createSqlConnectorRuleRequestStore(poolSqlExecutor);
   const adminWebhookDeliveryStore = createSqlWebhookDeliveryStore(poolSqlExecutor);
+  const connectorReadStore = createSqlConnectorReadStore(poolSqlExecutor);
 
   const baseDeps = {
     sessions,
@@ -1318,6 +1322,7 @@ export function createProductionRouteSurface(
     destinationService,
     integrationRequestStore,
     connectorRuleRequestStore: adminConnectorRuleRequestStore,
+    connectorReadStore,
     adminRouteDeps,
     adminUserStore: userStore,
     adminCsrfAllowedOrigins,

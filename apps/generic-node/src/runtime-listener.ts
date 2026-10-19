@@ -27,8 +27,10 @@ import {
   type ImplementerIdentityLoaders,
   createIntegrationRequestRouter,
   createConnectorRuleRequestRouter,
+  createConnectorReadRouter,
   type PublicIntegrationRequestStore,
   type ConnectorRuleRequestStore,
+  type ConnectorReadStore,
   createOperationRouter,
   DEFAULT_MAX_BODY_BYTES,
   enforceTransportGuards,
@@ -201,6 +203,8 @@ export interface NodeRuntimeListenerDeps {
    * When omitted the path answers 503 so it is never parsed as an operation id.
    */
   readonly receiveInstructionSql?: ReceiveInstructionSql;
+  /** Scoped connector read store (ZTR-1332). Mounted with nodeId and a credential service. */
+  readonly connectorReadStore?: ConnectorReadStore;
   readonly adminRouter?: AdminRouter;
   /** Optional factory when adminRouter not prebuilt — ignored if adminRouter set. */
   readonly adminRouteDeps?: AdminRouteDeps;
@@ -663,6 +667,9 @@ export function createNodeRuntimeListener(
   const operationRouter: OperationRouter = createOperationRouter({
     store: operationStore,
     auth: operationAuth,
+    ...(deps.adminRouteDeps?.connectorConfigStore !== undefined
+      ? { connectorConfigStore: deps.adminRouteDeps.connectorConfigStore }
+      : {}),
     newRequestId,
     createThrottle: {
       limiter: new InMemoryReportingRateLimiter(
@@ -731,11 +738,36 @@ export function createNodeRuntimeListener(
         })
       : null;
 
+<<<<<<< HEAD
   const receiveInstructionSql = deps.receiveInstructionSql;
   const receiveInstructionLimiter = new InMemoryReportingRateLimiter(
     RECEIVE_INSTRUCTION_RATE_WINDOW_MS,
     RECEIVE_INSTRUCTION_RATE_MAX_REQUESTS,
   );
+=======
+  const connectorReadRouter =
+    deps.connectorReadStore !== undefined &&
+    deps.nodeId !== undefined &&
+    ruleRequestCredentials !== undefined
+      ? createConnectorReadRouter({
+          store: deps.connectorReadStore,
+          ...(deps.adminRouteDeps?.connectorConfigStore !== undefined
+            ? { connectorConfigStore: deps.adminRouteDeps.connectorConfigStore }
+            : {}),
+          nodeId: deps.nodeId,
+          validateCredential: async (rawKey) => {
+            try {
+              const hit = await ruleRequestCredentials.validate(rawKey);
+              return { implementer_id: hit.implementer_id, scopes: hit.scopes };
+            } catch (error) {
+              if (error instanceof Error && error.name === "CredentialAuthError") return null;
+              throw error;
+            }
+          },
+          newRequestId,
+        })
+      : null;
+>>>>>>> 55b876e28 (feat(api): add scoped connector read endpoints and write scope enforcement (ZTR-1332))
 
   const adminRouter: AdminRouter | null =
     deps.adminRouter ??
@@ -1031,6 +1063,46 @@ export function createNodeRuntimeListener(
           const result = await connectorRuleRequestRouter(
             request.method ?? "GET",
             pathname,
+            bodyBytes,
+            headers,
+          );
+          writeJson(response, result.status, result.body, { ...result.headers });
+        } catch (cause) {
+          const requestId = newRequestId();
+          const { cause_name, cause_message } = sanitizeFailureCause(cause);
+          emitUnexpectedFailure(logger, {
+            event: "operation_listener_unexpected_failure",
+            request_id: requestId,
+            method: (request.method ?? "UNKNOWN").toUpperCase(),
+            path_class: operationPathClass(request.method ?? "GET", rawUrl),
+            cause_name,
+            cause_message,
+          });
+          const error = apiErrorResponse("service_unavailable", requestId);
+          try {
+            writeJson(response, error.status, error.body, { ...error.headers });
+          } catch {
+            /* committed */
+          }
+        }
+      })();
+      return;
+    }
+
+    // Scoped connector read endpoints (ZTR-1332). Side router; not a catalog route.
+    if (
+      connectorReadRouter !== null &&
+      (pathname === "/v1/node-info" ||
+        pathname === "/v1/wallets" ||
+        pathname === "/v1/operations")
+    ) {
+      void (async () => {
+        try {
+          const bodyBytes = await readBoundedBody(request, DEFAULT_MAX_BODY_BYTES);
+          const headers = normalizeHeaders(request.rawHeaders);
+          const result = await connectorReadRouter(
+            request.method ?? "GET",
+            rawUrl,
             bodyBytes,
             headers,
           );

@@ -353,6 +353,7 @@ class ScenarioWorld {
   readonly wallets: WorldWallet[] = [];
   readonly links: { implementerId: string; walletId: string; isDefault: boolean }[] = [];
   nodeDefaultWalletId: string | null = null;
+  autoApprovePolicyJson: string | null = null;
   readonly sendStore = new SendStore();
   readonly moveStore = new MoveStore();
   private seq = 0;
@@ -425,6 +426,7 @@ class ScenarioWorld {
     const wallets = this.wallets;
     const links = this.links;
     const nodeDefaultWalletId = this.nodeDefaultWalletId;
+    const autoApprovePolicyJson = this.autoApprovePolicyJson;
     const moveStore = this.moveStore;
     const exclusivelyForeign = (walletId: string, implementerId: string): boolean => {
       const bound = links.filter((link) => link.walletId === walletId);
@@ -436,6 +438,10 @@ class ScenarioWorld {
         const sql = text.replace(/\s+/g, " ");
 
         if (sql.includes("FROM node_settings") && sql.includes("setting_key")) {
+          if (params[0] === "ops.auto_approve_sends") {
+            if (autoApprovePolicyJson === null) return { rows: [] as R[] };
+            return { rows: [{ setting_value: autoApprovePolicyJson } as R] };
+          }
           if (nodeDefaultWalletId === null) return { rows: [] as R[] };
           return { rows: [{ setting_value: nodeDefaultWalletId } as R] };
         }
@@ -677,6 +683,7 @@ function compose(
     halt?: boolean;
     fundingWalletId?: string | null;
     preferredReserveWalletId?: string | null;
+    ruleId?: string | null;
     resolveFundingWalletId?: (implementerId: string) => Promise<string | null>;
   } = {},
 ) {
@@ -709,6 +716,7 @@ function compose(
       ...(opts.preferredReserveWalletId !== undefined
         ? { preferredReserveWalletId: opts.preferredReserveWalletId }
         : {}),
+      ...(opts.ruleId !== undefined ? { ruleId: opts.ruleId } : {}),
       idempotencyKey: opts.idempotencyKey ?? `idem-accept-${Date.now()}-${Math.random()}`.slice(0, 40),
       referencesOperationId: null,
     },
@@ -1268,6 +1276,82 @@ describe("ZTR-1327 connector reserve funding", () => {
       code: "insufficient_funding_wallet",
       detail: "funding_wallet_busy",
     });
+  });
+
+  it("resolves rule.reserve_wallet_id as preferredReserveWalletId when ruleId matches an enabled rule", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: false },
+    );
+    world.autoApprovePolicyJson = JSON.stringify({
+      enabled: true,
+      rules: [
+        {
+          rule_id: "promo-b",
+          implementer_id: IMPLEMENTER_ID,
+          label: "Promo B",
+          reserve_wallet_id: r2,
+          total_cap_zkz: "500",
+          per_send_max_zkz: "50",
+          per_send_min_zkz: null,
+          window_hours: 24,
+          window_cap_zkz: "200",
+          expires_at: null,
+          enabled: true,
+        },
+      ],
+    });
+    const out = await compose(world, {
+      amountZkz: "10",
+      ruleId: "promo-b",
+      idempotencyKey: "idem-ztr-1329-rule-res",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.move?.sourceWalletId).toBe(r2);
+    expect(out.fundingWalletId).toBe(r2);
+    expect(out.send.ruleId).toBe("promo-b");
+  });
+
+  it("refuses without falling back to default reserve when rule.reserve_wallet_id is short on funds", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "3", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: false },
+    );
+    world.autoApprovePolicyJson = JSON.stringify({
+      enabled: true,
+      rules: [
+        {
+          rule_id: "promo-b",
+          implementer_id: IMPLEMENTER_ID,
+          label: "Promo B",
+          reserve_wallet_id: r2,
+          total_cap_zkz: "500",
+          per_send_max_zkz: "50",
+          per_send_min_zkz: null,
+          window_hours: 24,
+          window_cap_zkz: "200",
+          expires_at: null,
+          enabled: true,
+        },
+      ],
+    });
+    const out = await compose(world, {
+      amountZkz: "10",
+      ruleId: "promo-b",
+      idempotencyKey: "idem-ztr-1329-rule-dry",
+    });
+    expect(out).toMatchObject({
+      outcome: "REJECTED",
+      code: "insufficient_funding_wallet",
+    });
+    expect(world.moveStore.operations.size).toBe(0);
   });
 });
 

@@ -146,18 +146,17 @@ export function parseProposedIntegrationRule(
     expiresAt = exp;
   }
 
-  const out: ProposedIntegrationRule = {
+  return {
+    ...(ruleId !== undefined ? { rule_id: ruleId } : {}),
+    ...(label !== undefined ? { label } : {}),
+    ...(reserveWalletId !== undefined ? { reserve_wallet_id: reserveWalletId } : {}),
+    ...(totalCap !== undefined ? { total_cap_zkz: totalCap } : {}),
     per_send_max_zkz: perSendMax,
     per_send_min_zkz: perSendMin,
     window_hours: raw.window_hours,
     window_cap_zkz: windowCap,
     expires_at: expiresAt,
   };
-  if (ruleId !== undefined) Object.assign(out, { rule_id: ruleId });
-  if (label !== undefined) Object.assign(out, { label });
-  if (reserveWalletId !== undefined) Object.assign(out, { reserve_wallet_id: reserveWalletId });
-  if (totalCap !== undefined) Object.assign(out, { total_cap_zkz: totalCap });
-  return out;
 }
 
 /** Canonical JSON form stored on insert (stable key sequence). */

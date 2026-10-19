@@ -12,6 +12,7 @@
     "attention-reason-enum.sql",
     "audit-log.sql",
     "base-enums-domains.sql",
+    "connector-configs.sql",
     "connector-reserve-wallets.sql",
     "custody-eligibility.sql",
     "destination-state-worker.sql",
@@ -66,6 +67,7 @@
     "send-external-expiry.sql",
     "send-external-landing.sql",
     "send-landed-unacknowledged-close.sql",
+    "send-operations-rule-id.sql",
     "send-proven-not-landed-close.sql",
     "session-subscription-stores.sql",
     "signer-support.sql",
@@ -88,7 +90,7 @@
     "nounsChecked": 39,
     "nounsOk": 39,
     "nounsFailed": 0,
-    "foreignKeysChecked": 192,
+    "foreignKeysChecked": 193,
     "accessPatternsChecked": 18,
     "failureCount": 0,
     "byClass": {
@@ -830,6 +832,13 @@
       "source": "audit_log(wallet_id)",
       "target": "wallets(id)",
       "onDelete": "UNSPECIFIED",
+      "onUpdate": "UNSPECIFIED",
+      "ok": true
+    },
+    {
+      "source": "connector_configs(implementer_id)",
+      "target": "implementers(id)",
+      "onDelete": "CASCADE",
       "onUpdate": "UNSPECIFIED",
       "ok": true
     },
@@ -2119,7 +2128,7 @@
         "kind",
         "idempotency_key"
       ],
-      "satisfiedBy": "index:operations_unique_129",
+      "satisfiedBy": "index:operations_unique_130",
       "ok": true
     },
     {

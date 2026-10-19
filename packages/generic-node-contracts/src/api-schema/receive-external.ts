@@ -41,7 +41,8 @@ export const ReceiveExternalRequestSchema = z
     amount_zkz: PositiveZkzAmountSchema,
     anchor: AnchorSchema,
     expires_in_seconds: z.number().int().positive().safe().optional(),
-    after_landing: AfterLandingSchema,
+    /** Omitted: the node applies the connector default reserve destination, or HOLD. */
+    after_landing: AfterLandingSchema.optional(),
     /** Optional; defaults to INDEPENDENT when omitted. */
     verification_mode: z.enum(VERIFICATION_MODES).default(DEFAULT_VERIFICATION_MODE),
   })

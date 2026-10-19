@@ -36,7 +36,11 @@ export interface CreateReceiveRequest {
   /** Opaque to the node; must match ^[A-Za-z0-9_-]{1,96}$. */
   readonly anchor: string;
   readonly expires_in_seconds?: number;
-  readonly after_landing: AfterLanding;
+  /**
+   * Omitted on the wire so the node applies its default reserve destination.
+   * JSON.stringify drops an undefined field.
+   */
+  readonly after_landing?: AfterLanding;
   /** Optional; omitted → INDEPENDENT. NODE_VERIFIED requires operator policy. */
   readonly verification_mode?: VerificationMode;
 }

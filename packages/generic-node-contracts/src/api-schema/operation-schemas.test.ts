@@ -183,6 +183,14 @@ describe("the named concern RECEIVE_EXTERNAL strict schemas", () => {
     ).toBe(false);
   });
 
+  it("accepts a request that omits after_landing (ZTR-1326)", () => {
+    const { after_landing: _omitted, ...rest } = RECEIVE_REQUEST;
+    const result = ReceiveExternalRequestSchema.safeParse(rest);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).not.toHaveProperty("after_landing");
+  });
+
   it("rejects callback_url and every other unknown request field (the no-callback rule)", () => {
     const result = ReceiveExternalRequestSchema.safeParse({
       ...RECEIVE_REQUEST,

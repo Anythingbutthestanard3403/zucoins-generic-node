@@ -119,7 +119,8 @@ export interface SqlOperationRouteStoreConfig {
 
 function wireAfterLanding(
   wire: CreateReceiveInput["after_landing"],
-): AfterLanding {
+): AfterLanding | undefined {
+  if (wire === undefined) return undefined;
   if (wire.kind === "INTERNAL_MOVE") {
     if (typeof wire.destination_id !== "string" || wire.destination_id.length === 0) {
       throw new ReceiveAdmissionError("invalid_after_landing", "destination_id required");

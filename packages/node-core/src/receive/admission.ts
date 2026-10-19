@@ -93,7 +93,12 @@ export interface ReceiveRequest {
   readonly amountZkz: string;
   readonly anchor: string;
   readonly ttlMs: number;
-  readonly afterLanding: AfterLanding;
+  /**
+   * Omitted means the connector default reserve destination (or HOLD when none
+   * is configured). The idempotency fingerprint uses the caller shape, not the
+   * resolved value.
+   */
+  readonly afterLanding?: AfterLanding;
   readonly idempotencyKey: string;
   /**
    * Optional admission-time verification mode (ZTR-1301). Omitted → INDEPENDENT.
@@ -168,7 +173,24 @@ export type ReceiveRejectionCode =
   | "idempotency_key_reused"
   | "idempotency_in_progress"
   | "receive_queue_full"
-  | "verification_mode_not_allowed";
+  | "verification_mode_not_allowed"
+  | "custom_routing_not_allowed";
+
+/** Wire detail for an explicit after_landing the connector is not allowed to choose. */
+export const CUSTOM_ROUTING_NOT_ALLOWED_DETAIL =
+  "Connector is not permitted to override default reserve routing.";
+
+export interface ConnectorRoutingPolicy {
+  readonly allowCustomRouting: boolean;
+  /** Resolved connector default, else the node funding-wallet destination, else null (HOLD). */
+  readonly defaultReserveDestinationId: string | null;
+  /**
+   * Destination ids whose wallets are linked on implementer_reserve_wallets.
+   * Empty means the junction has no rows, so a permitted custom INTERNAL_MOVE
+   * may name any blessed destination.
+   */
+  readonly allowedReserveDestinationIds: ReadonlySet<string>;
+}
 
 export type ReceiveAdmissionOutcome =
   | {
@@ -244,6 +266,14 @@ export interface ReceiveAdmissionStore {
   // Depth of this node's unassigned CREATED queue. Observability
   // tests only — admit decisions go through insertQueuedIfCapAllows so the cap is hard.
   countQueuedReceives(nodeId: string): Promise<number>;
+  /**
+   * Connector custom-routing flag, linked reserve destinations, and the
+   * default reserve destination (connector default, else node funding wallet).
+   */
+  resolveConnectorRoutingPolicy(
+    nodeId: string,
+    implementerId: string,
+  ): Promise<ConnectorRoutingPolicy>;
 }
 
 // Frozen API grammars (api/scalars.ts): anchor ^[A-Za-z0-9_-]{1,96}$,
@@ -296,7 +326,7 @@ export function validateReceiveRequest(
   if (!Number.isInteger(request.ttlMs) || request.ttlMs < MIN_TTL_MS || request.ttlMs > MAX_TTL_MS) {
     return { ok: false, code: "invalid_ttl", detail: `ttl_ms must be an integer in [${MIN_TTL_MS}, ${MAX_TTL_MS}]` };
   }
-  if (!validateAfterLanding(request.afterLanding)) {
+  if (request.afterLanding !== undefined && !validateAfterLanding(request.afterLanding)) {
     return {
       ok: false,
       code: "invalid_after_landing",
@@ -315,17 +345,26 @@ export function canonicalRequestSha256(request: ReceiveRequest): string {
   // Include only when non-default so pre-1301 five-field fingerprints stay stable for
   // omitted / INDEPENDENT creates (Review-B style omit-null upgrade).
   const mode = resolveVerificationMode(request.verificationMode);
+  // Omitted after_landing fingerprints as the literal token DEFAULT so two
+  // omitted retries match, and an explicit after_landing stays a distinct
+  // preimage. An explicit value keeps the historical object shape.
+  const afterLanding =
+    request.afterLanding === undefined
+      ? "DEFAULT"
+      : {
+          kind: request.afterLanding.kind,
+          destination_id:
+            request.afterLanding.kind === "INTERNAL_MOVE"
+              ? request.afterLanding.destinationId
+              : null,
+        };
   const base = {
     implementer_id: request.implementerId,
     node_id: request.nodeId,
     amount_zkz: request.amountZkz,
     anchor: request.anchor,
     ttl_ms: request.ttlMs,
-    after_landing: {
-      kind: request.afterLanding.kind,
-      destination_id:
-        request.afterLanding.kind === "INTERNAL_MOVE" ? request.afterLanding.destinationId : null,
-    },
+    after_landing: afterLanding,
   };
   const canonical =
     mode === DEFAULT_VERIFICATION_MODE
@@ -377,6 +416,49 @@ export interface ReceiveAdmissionConfig {
   readonly allowNodeVerifiedPolicy?: AllowNodeVerifiedPolicyPort;
 }
 
+function resolveEffectiveAfterLanding(
+  caller: AfterLanding | undefined,
+  policy: ConnectorRoutingPolicy,
+):
+  | { readonly ok: true; readonly afterLanding: AfterLanding }
+  | { readonly ok: false; readonly code: ReceiveRejectionCode; readonly detail?: string } {
+  if (caller === undefined) {
+    if (policy.defaultReserveDestinationId === null) {
+      return { ok: true, afterLanding: { kind: "HOLD", destinationId: null } };
+    }
+    return {
+      ok: true,
+      afterLanding: {
+        kind: "INTERNAL_MOVE",
+        destinationId: policy.defaultReserveDestinationId,
+      },
+    };
+  }
+  const matchesDefault =
+    caller.kind === "INTERNAL_MOVE" &&
+    policy.defaultReserveDestinationId !== null &&
+    caller.destinationId === policy.defaultReserveDestinationId;
+  if (!matchesDefault && !policy.allowCustomRouting) {
+    return {
+      ok: false,
+      code: "custom_routing_not_allowed",
+      detail: CUSTOM_ROUTING_NOT_ALLOWED_DETAIL,
+    };
+  }
+  if (
+    caller.kind === "INTERNAL_MOVE" &&
+    !matchesDefault &&
+    policy.allowedReserveDestinationIds.size > 0 &&
+    !policy.allowedReserveDestinationIds.has(caller.destinationId)
+  ) {
+    return { ok: false, code: "destination_not_eligible" };
+  }
+  if (caller.kind === "HOLD") {
+    return { ok: true, afterLanding: { kind: "HOLD", destinationId: null } };
+  }
+  return { ok: true, afterLanding: caller };
+}
+
 export async function admitReceiveExternal(
   store: ReceiveAdmissionStore,
   request: ReceiveRequest,
@@ -419,11 +501,24 @@ export async function admitReceiveExternal(
     }
   }
 
+  // Caller shape is already fingerprinted. Persist the effective routing:
+  // omitted after_landing becomes the connector default reserve destination,
+  // or HOLD when none is configured.
+  const routingPolicy = await store.resolveConnectorRoutingPolicy(
+    request.nodeId,
+    request.implementerId,
+  );
+  const routed = resolveEffectiveAfterLanding(request.afterLanding, routingPolicy);
+  if (!routed.ok) {
+    return { outcome: "REJECTED", code: routed.code, detail: routed.detail };
+  }
+  const afterLanding = routed.afterLanding;
+
   // Resolve and gate the INTERNAL_MOVE destination. This is a read; it creates
   // nothing, so idempotency is still resolved (step 4) before anything exists.
   let destinationWalletId: string | null = null;
-  if (request.afterLanding.kind === "INTERNAL_MOVE") {
-    const destination = await store.findDestination(request.afterLanding.destinationId);
+  if (afterLanding.kind === "INTERNAL_MOVE") {
+    const destination = await store.findDestination(afterLanding.destinationId);
     if (destination === null) {
       return { outcome: "REJECTED", code: "destination_not_found" };
     }
@@ -444,7 +539,7 @@ export async function admitReceiveExternal(
     amountZkz: request.amountZkz,
     anchor: request.anchor,
     ttlMs: request.ttlMs,
-    afterLanding: request.afterLanding,
+    afterLanding,
     idempotencyKey: request.idempotencyKey,
     requestSha256,
     destinationWalletId,

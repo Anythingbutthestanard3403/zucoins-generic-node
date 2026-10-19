@@ -385,6 +385,8 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
     applyDdl(scratchDb, MONEY_CAPABILITY_DDL);
+    applyDdl(scratchDb, readSchema("implementer-funding-wallet.sql"));
+    applyDdl(scratchDb, readSchema("connector-reserve-wallets.sql"));
     applyDdl(scratchDb, RECEIVE_DDL);
     applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     applyDdl(scratchDb, operationsDdl);
@@ -401,7 +403,7 @@ describeIfPg("OperationRouteStore — offline PG create+query (no live ZKZ)", ()
     );
     psqlMust(
       scratchDb,
-      `INSERT INTO implementers (id, name) VALUES ('${IMPLEMENTER_A}', 'a'), ('${IMPLEMENTER_B}', 'b');`,
+      `INSERT INTO implementers (id, name, allow_custom_routing) VALUES ('${IMPLEMENTER_A}', 'a', true), ('${IMPLEMENTER_B}', 'b', true);`,
     );
     // Source wallet for move/send — public key matches golden-compatible pad.
     psqlMust(

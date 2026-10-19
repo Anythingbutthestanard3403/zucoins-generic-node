@@ -104,7 +104,8 @@ export interface CreateReceiveInput {
   readonly amount_zkz: string;
   readonly anchor: string;
   readonly expires_in_seconds?: number;
-  readonly after_landing: { readonly kind: "HOLD" | "INTERNAL_MOVE"; readonly destination_id: string | null };
+  /** Omitted: server applies the connector default reserve destination, or HOLD. */
+  readonly after_landing?: { readonly kind: "HOLD" | "INTERNAL_MOVE"; readonly destination_id: string | null };
   /** Optional; Zod defaults omitted field to INDEPENDENT before the handler. */
   readonly verification_mode?: VerificationMode;
   readonly idempotencyKey: string;
@@ -456,6 +457,15 @@ function mapStoreError(err: unknown, requestId: string): RouteHandlerResult {
       case "invalid_ttl":
       case "invalid_after_landing":
         return { ok: false, error: apiErrorResponse("invalid_scalar", requestId) };
+      case "custom_routing_not_allowed":
+        return {
+          ok: false,
+          error: apiErrorResponse(
+            "custom_routing_not_allowed",
+            requestId,
+            err.detail ?? "Connector is not permitted to override default reserve routing.",
+          ),
+        };
       case "verification_mode_not_allowed":
         return {
           ok: false,

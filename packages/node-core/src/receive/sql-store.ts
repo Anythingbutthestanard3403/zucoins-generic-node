@@ -26,6 +26,7 @@ import { INSERT_SUBSCRIPTION_HANDLE } from "../api/sql-subscription-handle-store
 import { DEFAULT_VERIFICATION_MODE } from "../verification/allow-node-verified-policy.js";
 import type { VerificationMode } from "../verification/allow-node-verified-policy.js";
 import type {
+  ConnectorRoutingPolicy,
   ReceiveAdmissionStore,
   ReceiveDestinationRecord,
   ReceiveDestinationState,
@@ -141,6 +142,12 @@ export const STATEMENTS = {
   LEFT JOIN receive_codes c ON c.operation_id = r.operation_id
   WHERE r.operation_id = $1 AND r.implementer_id = $2`,
   SELECT_DESTINATION: `SELECT d.id AS destination_id, d.state AS destination_state, w.id AS wallet_id, w.node_id, w.public_key, w.key_origin, w.state AS wallet_state, w.recovery_verified_at, w.allow_external_receive, w.allow_internal_move FROM destinations d JOIN wallets w ON w.id = d.wallet_id WHERE d.id = $1`,
+  // Connector flag + linked reserve destinations. Duplicate the setting-key
+  // literal locally (receive must not import the implementer module).
+  // $1 node id, $2 implementer id. No sort clause: is_default is unique per connector.
+  SELECT_CONNECTOR_ROUTING: `SELECT i.allow_custom_routing, d.id AS destination_id, irw.is_default FROM implementers i LEFT JOIN implementer_reserve_wallets irw ON irw.implementer_id = i.id LEFT JOIN destinations d ON d.wallet_id = irw.wallet_id AND d.node_id = $1 WHERE i.id = $2`,
+  // Node-wide funding wallet destination. $1 setting key, $2 node id.
+  SELECT_NODE_DEFAULT_DESTINATION: `SELECT d.id AS destination_id FROM node_settings ns JOIN destinations d ON d.wallet_id::text = ns.setting_value AND d.node_id = $2 WHERE ns.setting_key = $1`,
   COMPLETE_OPERATION: `UPDATE receive_operations SET completed_at = now(), response_status = $2, response_body = $3 WHERE operation_id = $1 AND completed_at IS NULL RETURNING operation_id`,
   // "maximum unassigned CREATED receives", per node. `wallet_id IS NULL`
   // is stated rather than inferred from the no-receiver-while-CREATED CHECK, so the depth
@@ -284,6 +291,21 @@ function pgBool(value: unknown): boolean {
   return value === true || value === "t" || value === "true" || value === "1";
 }
 
+/** Local copy. receive must not import the implementer module for this literal. */
+const DEFAULT_FUNDING_WALLET_SETTING_KEY = "integration.default_funding_wallet_id";
+
+/**
+ * Junction row whose wallet has no destination on this node. Keeps the allowed
+ * set non-empty so a populated junction cannot fall open to every blessed destination.
+ */
+const UNRESOLVED_RESERVE_LINK = "unresolved-reserve-link";
+
+interface ConnectorRoutingRow {
+  readonly allow_custom_routing: boolean | string | null;
+  readonly destination_id: string | null;
+  readonly is_default: boolean | string | null;
+}
+
 function toDestination(row: DestinationRow): ReceiveDestinationRecord {
   return {
     destinationId: row.destination_id,
@@ -333,6 +355,42 @@ export class SqlReceiveAdmissionStore implements ReceiveAdmissionStore {
     ]);
     const row = result.rows[0];
     return row === undefined ? null : toDestination(row);
+  }
+
+  async resolveConnectorRoutingPolicy(
+    nodeId: string,
+    implementerId: string,
+  ): Promise<ConnectorRoutingPolicy> {
+    const linked = await this.sql.query<ConnectorRoutingRow>(STATEMENTS.SELECT_CONNECTOR_ROUTING, [
+      nodeId,
+      implementerId,
+    ]);
+    const allowed = new Set<string>();
+    let defaultReserveDestinationId: string | null = null;
+    const allowCustomRouting =
+      linked.rows.length === 0 ? false : pgBool(linked.rows[0]?.allow_custom_routing);
+    for (const row of linked.rows) {
+      if (row.is_default === null || row.is_default === undefined) continue;
+      if (typeof row.destination_id === "string" && row.destination_id.length > 0) {
+        allowed.add(row.destination_id);
+        if (pgBool(row.is_default)) defaultReserveDestinationId = row.destination_id;
+      } else {
+        allowed.add(UNRESOLVED_RESERVE_LINK);
+      }
+    }
+    if (defaultReserveDestinationId === null) {
+      const fallback = await this.sql.query<{ destination_id: string }>(
+        STATEMENTS.SELECT_NODE_DEFAULT_DESTINATION,
+        [DEFAULT_FUNDING_WALLET_SETTING_KEY, nodeId],
+      );
+      const id = fallback.rows[0]?.destination_id;
+      if (typeof id === "string" && id.length > 0) defaultReserveDestinationId = id;
+    }
+    return {
+      allowCustomRouting,
+      defaultReserveDestinationId,
+      allowedReserveDestinationIds: allowed,
+    };
   }
 
   private operationInsertParams(operation: ReceiveOperation): unknown[] {

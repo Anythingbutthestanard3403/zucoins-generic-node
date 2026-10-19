@@ -87,6 +87,13 @@ function receiveStore(): {
     },
     findByOperationId: async (id) => ops.get(id) ?? null,
     countQueuedReceives: async () => ops.size,
+    async resolveConnectorRoutingPolicy() {
+      return {
+        allowCustomRouting: true,
+        defaultReserveDestinationId: null,
+        allowedReserveDestinationIds: new Set<string>(),
+      };
+    },
   };
   return { store, ops };
 }

@@ -138,10 +138,11 @@ const prerequisiteDdl = ((): string => {
   const base = readSchema("base-enums-domains.sql");
   const registry = readSchema("node-implementer-registry.sql");
   const nodes = /^CREATE TABLE nodes \([\s\S]*?^\);$/m.exec(registry);
-  if (nodes === null) {
-    throw new Error("node-implementer-registry.sql: CREATE TABLE nodes block not found");
+  const implementers = /^CREATE TABLE implementers \([\s\S]*?^\);$/m.exec(registry);
+  if (nodes === null || implementers === null) {
+    throw new Error("node-implementer-registry.sql: nodes/implementers blocks not found");
   }
-  return `${base}\n${nodes[0]}\n`;
+  return `${base}\n${nodes[0]}\n${implementers[0]}\n`;
 })();
 
 const CUSTODY_DDL = readSchema("custody-eligibility.sql");
@@ -284,10 +285,18 @@ describeIfPg("receive admission — real frozen DDL against real PostgreSQL", ()
     // + subscription_handles (minted in the same admit TX — ZTR-1142).
     applyDdl(scratchDb, prerequisiteDdl);
     applyDdl(scratchDb, CUSTODY_DDL);
+    applyDdl(scratchDb, readSchema("implementer-funding-wallet.sql"));
+    applyDdl(scratchDb, readSchema("connector-reserve-wallets.sql"));
     applyDdl(scratchDb, RECEIVE_DDL);
     applyDdl(scratchDb, SUBSCRIPTION_HANDLES_DDL);
     applyDdl(scratchDb, verificationModeFixtureSql());
     psqlMust(scratchDb, seedNode());
+    // Explicit HOLD in the queue-cap race is not a custom-routing drill.
+    // The column default is false; this row opts in so the race still admits.
+    psqlMust(
+      scratchDb,
+      `INSERT INTO implementers (id, name, allow_custom_routing) VALUES ('${IMPLEMENTER_ID}', 'receive-admission', true);`,
+    );
     psqlMust(scratchDb, seedVerifiedWallet(DEST_WALLET, RECOVERY_ID, pubkey("DEST")));
     psqlMust(scratchDb, seedVerifiedWallet(RECEIVER_WALLET, RECOVERY_ID_2, pubkey("RCVR")));
     psqlMust(scratchDb, seedBlessedDestination());

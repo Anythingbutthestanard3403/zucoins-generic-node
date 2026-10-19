@@ -57,7 +57,8 @@ export const CreateReceiveBody = z.object({
     .min(1)
     .max(SPLITCHAIN_FUTURE_TIME_CEILING_SECS)
     .optional(),
-  after_landing: AfterLanding,
+  /** Omitted: the node applies the connector default reserve destination, or HOLD. */
+  after_landing: AfterLanding.optional(),
   /** Optional; defaults to INDEPENDENT. NODE_VERIFIED requires ops.allow_node_verified. */
   verification_mode: VerificationModeField,
 }).strict();

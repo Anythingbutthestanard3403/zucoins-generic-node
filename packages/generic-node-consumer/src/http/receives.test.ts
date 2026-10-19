@@ -76,6 +76,44 @@ describe("createReceive", () => {
     expect(result.code_status).toBe("AWAITING_ARM");
   });
 
+  it("omits after_landing from the JSON body when the caller leaves it unset", async () => {
+    const fetchImpl = vi.fn<FetchLike>(async () =>
+      jsonResponse(202, {
+        operation: {
+          operation_id: OP_ID,
+          operation_type: "RECEIVE_EXTERNAL",
+          state: "CREATED",
+          amount_zkz: "1",
+          row_version: 1,
+          attention_required: false,
+          attention_reason: null,
+          created_at: "2026-07-18T12:00:00.000Z",
+          updated_at: "2026-07-18T12:00:00.000Z",
+          terminal_at: null,
+          verification_material_available_until: null,
+        },
+        receiver_pubkey: null,
+        discriminator: OP_ID,
+        expires_at: null,
+        after_landing: { kind: "HOLD", destination_id: null },
+        code_status: "NOT_CREATED",
+        transfer_code: null,
+        expected_artifact: null,
+        t0: null,
+        subscription_handle: "sh_secret",
+      }),
+    );
+    await createReceive({
+      config: { ...CONFIG, fetchImpl },
+      bearerKey: "ik_test",
+      idempotencyKey: "idem-omit-1",
+      request: { amount_zkz: "1", anchor: "ord_01J2" },
+    });
+    const sent = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(sent).toEqual({ amount_zkz: "1", anchor: "ord_01J2" });
+    expect(sent).not.toHaveProperty("after_landing");
+  });
+
   it("forwards verification_mode NODE_VERIFIED on create", async () => {
     const fetchImpl = vi.fn<FetchLike>(async (_url, init) => {
       const sent = JSON.parse(init!.body as string) as { verification_mode?: string };

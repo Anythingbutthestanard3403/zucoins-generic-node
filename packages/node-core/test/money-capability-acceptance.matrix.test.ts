@@ -351,6 +351,8 @@ function modeFlags(mode: WalletMoneyMode) {
 
 class ScenarioWorld {
   readonly wallets: WorldWallet[] = [];
+  readonly links: { implementerId: string; walletId: string; isDefault: boolean }[] = [];
+  nodeDefaultWalletId: string | null = null;
   readonly sendStore = new SendStore();
   readonly moveStore = new MoveStore();
   private seq = 0;
@@ -421,10 +423,96 @@ class ScenarioWorld {
 
   sql = (): AssignSqlExecutor => {
     const wallets = this.wallets;
+    const links = this.links;
+    const nodeDefaultWalletId = this.nodeDefaultWalletId;
     const moveStore = this.moveStore;
+    const exclusivelyForeign = (walletId: string, implementerId: string): boolean => {
+      const bound = links.filter((link) => link.walletId === walletId);
+      if (bound.length === 0) return false;
+      return !bound.some((link) => link.implementerId === implementerId);
+    };
     return {
       query: async <R>(text: string, params: readonly unknown[] = []): Promise<{ rows: R[] }> => {
         const sql = text.replace(/\s+/g, " ");
+
+        if (sql.includes("FROM node_settings") && sql.includes("setting_key")) {
+          if (nodeDefaultWalletId === null) return { rows: [] as R[] };
+          return { rows: [{ setting_value: nodeDefaultWalletId } as R] };
+        }
+
+        if (sql.includes("AS linked") && sql.includes("AS has_links")) {
+          const implementerId = String(params[0]);
+          const walletId = String(params[1]);
+          return {
+            rows: [
+              {
+                linked: links.some(
+                  (link) => link.implementerId === implementerId && link.walletId === walletId,
+                ),
+                has_links: links.some((link) => link.implementerId === implementerId),
+              } as R,
+            ],
+          };
+        }
+
+        if (
+          sql.includes("implementer_reserve_wallets") &&
+          sql.includes("count(*)::text AS n") &&
+          !sql.includes("money_mode") &&
+          !sql.includes("gateway_observations")
+        ) {
+          const implementerId = String(params[0]);
+          const n = links.filter((link) => link.implementerId === implementerId).length;
+          return { rows: [{ n: String(n) } as R] };
+        }
+
+        if (
+          sql.includes("implementer_reserve_wallets") &&
+          sql.includes("count(*)::text AS n") &&
+          sql.includes("gateway_observations") &&
+          !sql.includes("money_mode")
+        ) {
+          const implementerId = String(params[0]);
+          const shortfall = Number(params[2] ?? "0");
+          const n = links.filter((link) => {
+            if (link.implementerId !== implementerId) return false;
+            const w = wallets.find((row) => row.id === link.walletId);
+            return (
+              w !== undefined &&
+              w.balance !== null &&
+              Number(w.balance) >= shortfall &&
+              w.state === "AVAILABLE"
+            );
+          }).length;
+          return { rows: [{ n: String(n) } as R] };
+        }
+
+        // Linked-reserve pick. Must run before the hub matcher, which also locks w.
+        if (
+          sql.includes("implementer_reserve_wallets") &&
+          sql.includes("FOR UPDATE OF w") &&
+          !sql.includes("money_mode")
+        ) {
+          const implementerId = String(params[0]);
+          const shortfall = Number(params[2] ?? "0");
+          const rows = links
+            .filter((link) => link.implementerId === implementerId)
+            .flatMap((link) => {
+              const w = wallets.find((row) => row.id === link.walletId);
+              if (w === undefined || w.balance === null) return [];
+              if (w.state !== "AVAILABLE") return [];
+              if (Number(w.balance) < shortfall) return [];
+              if (moveStore.activeLeases.has(w.id)) return [];
+              return [
+                {
+                  wallet_id: w.id,
+                  is_default: link.isDefault,
+                  observed_balance_zkz: w.balance,
+                },
+              ];
+            });
+          return { rows: rows as R[] };
+        }
 
         // Explicit source lock (composition plan path)
         if (
@@ -508,6 +596,9 @@ class ScenarioWorld {
         // Hub select
         if (sql.includes("money_mode = 'INTERNAL_ONLY'") && sql.includes("FOR UPDATE OF w")) {
           const shortfall = Number(params[1] ?? "0");
+          const implementerId = String(params[2] ?? "");
+          const defaultId =
+            params[3] === null || params[3] === undefined ? null : String(params[3]);
           const hubs = wallets
             .filter((w) => {
               const f = modeFlags(w.mode);
@@ -518,7 +609,8 @@ class ScenarioWorld {
                 f.allow_internal_move === true &&
                 w.balance !== null &&
                 Number(w.balance) >= shortfall &&
-                !moveStore.activeLeases.has(w.id)
+                !moveStore.activeLeases.has(w.id) &&
+                !(exclusivelyForeign(w.id, implementerId) && w.id !== defaultId)
               );
             })
             .sort((a, b) => a.id.localeCompare(b.id));
@@ -537,6 +629,9 @@ class ScenarioWorld {
         // Hub liquidity count (busy vs none)
         if (sql.includes("count(*)::text AS n") && sql.includes("money_mode = 'INTERNAL_ONLY'")) {
           const shortfall = Number(params[1] ?? "0");
+          const implementerId = String(params[2] ?? "");
+          const defaultId =
+            params[3] === null || params[3] === undefined ? null : String(params[3]);
           const n = wallets.filter((w) => {
             const f = modeFlags(w.mode);
             return (
@@ -544,7 +639,8 @@ class ScenarioWorld {
               f.allow_external_send === false &&
               f.allow_internal_move === true &&
               w.balance !== null &&
-              Number(w.balance) >= shortfall
+              Number(w.balance) >= shortfall &&
+              !(exclusivelyForeign(w.id, implementerId) && w.id !== defaultId)
             );
           }).length;
           return { rows: [{ n: String(n) } as R] };
@@ -580,6 +676,8 @@ function compose(
     idempotencyKey?: string;
     halt?: boolean;
     fundingWalletId?: string | null;
+    preferredReserveWalletId?: string | null;
+    resolveFundingWalletId?: (implementerId: string) => Promise<string | null>;
   } = {},
 ) {
   const halt = opts.halt === true;
@@ -591,6 +689,7 @@ function compose(
       sendSigner: signer,
       generateId: idGen(),
       now: () => FIXED_NOW,
+      resolveFundingWalletId: opts.resolveFundingWalletId,
       assertHaltAdmitsKind: halt
         ? () => {
             throw new Error("operations halted");
@@ -607,6 +706,9 @@ function compose(
       description: null,
       fundingWalletId:
         opts.fundingWalletId === undefined ? null : opts.fundingWalletId,
+      ...(opts.preferredReserveWalletId !== undefined
+        ? { preferredReserveWalletId: opts.preferredReserveWalletId }
+        : {}),
       idempotencyKey: opts.idempotencyKey ?? `idem-accept-${Date.now()}-${Math.random()}`.slice(0, 40),
       referencesOperationId: null,
     },
@@ -1053,6 +1155,119 @@ describe("ZTR-1273 funding decision pins", () => {
       shortfallZkz: "10",
     });
     expect(decideWorkerFunding("10", "10")).toEqual({ kind: "funded", balanceZkz: "10" });
+  });
+});
+
+describe("ZTR-1327 connector reserve funding", () => {
+  const workerId = "c0000000-0000-4000-8000-000000000710";
+  const r1 = "c0000000-0000-4000-8000-000000000721";
+  const r2 = "c0000000-0000-4000-8000-000000000722";
+  const seg = "c0000000-0000-4000-8000-000000000701";
+  const otherImpl = "33333333-3333-4333-8333-333333333333";
+
+  function baseWorld(): ScenarioWorld {
+    const world = new ScenarioWorld();
+    world.addWallet("SEND_ONLY", {
+      balance: null,
+      workerSink: true,
+      id: workerId,
+      publicKey: WORKER_PUB,
+    });
+    return world;
+  }
+
+  it("uses the covering linked reserve when the default cannot cover", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "2", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "20", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: false },
+    );
+    const out = await compose(world, {
+      amountZkz: "10",
+      idempotencyKey: "idem-ztr-1327-failover!!",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.move?.sourceWalletId).toBe(r2);
+    expect(out.fundingWalletId).toBe(r2);
+    expect(out.send.sourceWalletId).toBe(workerId);
+  });
+
+  it("keeps a default link when both linked reserves cover", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: false },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: true },
+    );
+    const out = await compose(world, {
+      amountZkz: "10",
+      idempotencyKey: "idem-ztr-1327-default!!",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.move?.sourceWalletId).toBe(r2);
+  });
+
+  it("refuses when the only linked reserve is short and leaves another connector untouched", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "0", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "500", id: seg, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: otherImpl, walletId: seg, isDefault: true },
+    );
+    const out = await compose(world, {
+      amountZkz: "10",
+      idempotencyKey: "idem-ztr-1327-isolate!!",
+    });
+    expect(out).toMatchObject({
+      outcome: "REJECTED",
+      code: "insufficient_funding_wallet",
+    });
+    expect(world.moveStore.operations.size).toBe(0);
+  });
+
+  it("sources a preferred reserve even when another linked reserve also covers", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "100", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: false },
+    );
+    const out = await compose(world, {
+      amountZkz: "10",
+      preferredReserveWalletId: r2,
+      idempotencyKey: "idem-ztr-1327-prefer!!",
+    });
+    expect(out.outcome).toBe("CREATED");
+    if (out.outcome !== "CREATED") return;
+    expect(out.move?.sourceWalletId).toBe(r2);
+    expect(out.fundingWalletId).toBe(r2);
+  });
+
+  it("treats a leased covering reserve as busy", async () => {
+    const world = baseWorld();
+    world.addWallet("INTERNAL_ONLY", { balance: "2", id: r1, publicKey: HUB_PUB });
+    world.addWallet("INTERNAL_ONLY", { balance: "20", id: r2, publicKey: OTHER_PUB });
+    world.links.push(
+      { implementerId: IMPLEMENTER_ID, walletId: r1, isDefault: true },
+      { implementerId: IMPLEMENTER_ID, walletId: r2, isDefault: false },
+    );
+    world.moveStore.activeLeases.add(r2);
+    const out = await compose(world, {
+      amountZkz: "10",
+      idempotencyKey: "idem-ztr-1327-busy!!!!",
+    });
+    expect(out).toMatchObject({
+      outcome: "REJECTED",
+      code: "insufficient_funding_wallet",
+      detail: "funding_wallet_busy",
+    });
   });
 });
 

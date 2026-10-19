@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   SELECT_BLESSED_DESTINATION_FOR_WALLET_SQL,
+  SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL,
   SELECT_FUNDING_WALLET_FOR_TOPUP_SQL,
   SELECT_SEND_BY_TOPUP_MOVE_SQL,
   SELECT_SEND_TOPUP_READY_SQL,
@@ -49,6 +50,26 @@ const uuid = (n: number): string => {
   const hex = n.toString(16).padStart(12, "0");
   return `c0000000-0000-4000-8000-${hex}`;
 };
+
+const bindHubSql = (
+  nodeId: string,
+  amount: string,
+  implementerId = "00000000-0000-4000-8000-000000000099",
+  nodeDefaultWalletId: string | null = null,
+): string => {
+  const defaultSql =
+    nodeDefaultWalletId === null ? "NULL::text" : `'${nodeDefaultWalletId}'::text`;
+  return SELECT_TOPUP_HUB_SQL.replace(/\$1::uuid/g, `'${nodeId}'::uuid`)
+    .replace(/\$3::uuid/g, `'${implementerId}'::uuid`)
+    .replace(/\$4::text/g, defaultSql)
+    .replace(/\$2::numeric/g, `${amount}::numeric`)
+    .replace(/\$2/g, `'${amount}'`);
+};
+
+const bindReserveSql = (implementerId: string, nodeId: string, amount: string): string =>
+  SELECT_CONNECTOR_RESERVE_FOR_TOPUP_SQL.replace(/\$1::uuid/g, `'${implementerId}'::uuid`)
+    .replace(/\$2::uuid/g, `'${nodeId}'::uuid`)
+    .replace(/\$3::numeric/g, `${amount}::numeric`);
 
 const pub = (n: number): string => {
   const ch = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"[n % 64]!;
@@ -163,6 +184,8 @@ CREATE TABLE IF NOT EXISTS operations (
     implementers?.[0] ?? "",
     custody,
     cap,
+    readSchema("implementer-funding-wallet.sql"),
+    readSchema("connector-reserve-wallets.sql"),
     slimObs,
     sendOps,
     ops,
@@ -385,9 +408,7 @@ describe.skipIf(!TEST_DATABASE_URL)("send assign + multi-hub top-up (real PG)", 
     const amount = "50";
     const hubLow = await seedWallet("INTERNAL_ONLY", { balance: "5", nodeId: nodeB });
     const hubHigh = await seedWallet("INTERNAL_ONLY", { balance: "100", nodeId: nodeB });
-    const sql = SELECT_TOPUP_HUB_SQL.replace(/\$1::uuid/g, `'${nodeB}'::uuid`)
-      .replace(/\$2::numeric/g, `${amount}::numeric`)
-      .replace(/\$2/g, `'${amount}'`);
+    const sql = bindHubSql(nodeB, amount);
     const picked = await must(`BEGIN; ${sql}; ROLLBACK;`);
     expect(picked).toContain(hubHigh.walletId);
     expect(picked).not.toContain(hubLow.walletId);
@@ -412,18 +433,14 @@ describe.skipIf(!TEST_DATABASE_URL)("send assign + multi-hub top-up (real PG)", 
     const hubA = await seedWallet("INTERNAL_ONLY", { balance: "20", nodeId: nodeC });
     const hubB = await seedWallet("INTERNAL_ONLY", { balance: "20", nodeId: nodeC });
     await pinBusy(hubA.walletId);
-    const sql = SELECT_TOPUP_HUB_SQL.replace(/\$1::uuid/g, `'${nodeC}'::uuid`)
-      .replace(/\$2::numeric/g, `10::numeric`)
-      .replace(/\$2/g, `'10'`);
+    const sql = bindHubSql(nodeC, "10");
     const picked = await must(`BEGIN; ${sql}; ROLLBACK;`);
     expect(picked).not.toContain(hubA.walletId);
     expect(picked).toContain(hubB.walletId);
   });
 
   it("no hub liquidity → empty pick", async () => {
-    const sql = SELECT_TOPUP_HUB_SQL.replace(/\$1::uuid/g, `'${NODE_ID}'::uuid`)
-      .replace(/\$2::numeric/g, `99999999::numeric`)
-      .replace(/\$2/g, `'99999999'`);
+    const sql = bindHubSql(NODE_ID, "99999999");
     const picked = await must(
       `BEGIN; SELECT coalesce((SELECT wallet_id FROM (${sql}) q), 'NONE'); ROLLBACK;`,
     );
@@ -526,5 +543,65 @@ describe.skipIf(!TEST_DATABASE_URL)("send assign + multi-hub top-up (real PG)", 
       SELECT_SEND_TOPUP_READY_SQL.replace(/\$1::uuid/g, `'${sendId}'::uuid`),
     );
     expect(ready).toContain(sendId);
+  });
+
+  it("ZTR-1327: short default reserve falls through to the covering linked reserve", async () => {
+    const node = "a0000000-0000-4000-8000-0000000000d1";
+    const impl = "b0000000-0000-4000-8000-0000000000d1";
+    await must(
+      `INSERT INTO nodes (id, display_name, identity_public_key) VALUES
+         ('${node}', 'reserve-failover', '${pub(71)}') ON CONFLICT (id) DO NOTHING;
+       INSERT INTO implementers (id, name) VALUES ('${impl}', 'reserve-failover')
+         ON CONFLICT (id) DO NOTHING`,
+    );
+    const r1 = await seedWallet("INTERNAL_ONLY", { balance: "2", nodeId: node });
+    const r2 = await seedWallet("FULL", { balance: "20", nodeId: node });
+    await must(
+      `INSERT INTO implementer_reserve_wallets (implementer_id, wallet_id, is_default) VALUES
+         ('${impl}', '${r1.walletId}', true),
+         ('${impl}', '${r2.walletId}', false)`,
+    );
+    const picked = await must(`BEGIN; ${bindReserveSql(impl, node, "10")}; ROLLBACK;`);
+    expect(picked).toContain(r2.walletId);
+    expect(picked).not.toContain(r1.walletId);
+  });
+
+  it("ZTR-1327: hub pick skips a wallet linked only to another connector", async () => {
+    const node = "a0000000-0000-4000-8000-0000000000d2";
+    const implB = "b0000000-0000-4000-8000-0000000000d2";
+    const implC = "b0000000-0000-4000-8000-0000000000d3";
+    await must(
+      `INSERT INTO nodes (id, display_name, identity_public_key) VALUES
+         ('${node}', 'reserve-isolation', '${pub(72)}') ON CONFLICT (id) DO NOTHING;
+       INSERT INTO implementers (id, name) VALUES
+         ('${implB}', 'connector-b'),
+         ('${implC}', 'connector-c')
+         ON CONFLICT (id) DO NOTHING`,
+    );
+    // Lower id, so id ASC would choose it if the exclusion were missing.
+    const segregated = await seedWallet("INTERNAL_ONLY", { balance: "500", nodeId: node });
+    const openHub = await seedWallet("INTERNAL_ONLY", { balance: "40", nodeId: node });
+    const main = await seedWallet("INTERNAL_ONLY", { balance: "0", nodeId: node });
+    await must(
+      `INSERT INTO implementer_reserve_wallets (implementer_id, wallet_id, is_default) VALUES
+         ('${implC}', '${segregated.walletId}', true),
+         ('${implB}', '${main.walletId}', true)`,
+    );
+    const reservePick = await must(
+      `BEGIN;
+       SELECT coalesce((SELECT wallet_id FROM (${bindReserveSql(implB, node, "10")}) q), 'NONE');
+       ROLLBACK;`,
+    );
+    expect(reservePick).toContain("NONE");
+    expect(reservePick).not.toContain(segregated.walletId);
+
+    const hubPick = await must(`BEGIN; ${bindHubSql(node, "10", implB)}; ROLLBACK;`);
+    expect(hubPick).toContain(openHub.walletId);
+    expect(hubPick).not.toContain(segregated.walletId);
+
+    const asDefault = await must(
+      `BEGIN; ${bindHubSql(node, "10", implB, segregated.walletId)}; ROLLBACK;`,
+    );
+    expect(asDefault).toContain(segregated.walletId);
   });
 });

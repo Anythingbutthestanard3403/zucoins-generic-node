@@ -92,6 +92,8 @@ const bindWorkerSql = (nodeId: string, amount: string): string =>
 
 const bindHubSql = (nodeId: string, amount: string): string =>
   SELECT_TOPUP_HUB_SQL.replace(/\$1::uuid/g, `'${nodeId}'::uuid`)
+    .replace(/\$3::uuid/g, `'00000000-0000-4000-8000-000000000099'::uuid`)
+    .replace(/\$4::text/g, `NULL::text`)
     .replace(/\$2::numeric/g, `${amount}::numeric`)
     .replace(/\$2/g, `'${amount}'`);
 
@@ -150,6 +152,8 @@ CREATE UNIQUE INDEX send_operations_one_unsettled_per_source_wallet
     implementers?.[0] ?? "",
     custody,
     cap,
+    readSchema("implementer-funding-wallet.sql"),
+    readSchema("connector-reserve-wallets.sql"),
     slimObs,
     sendOps,
     verificationModeFixtureSql(),

@@ -263,6 +263,7 @@ import {
 import {
   applyPwaInstalledEvidence,
   applySetupPatch,
+  applyStreamlinedSetupComplete,
   applyTypedDeviceBreakGlass,
   assertSetupSecretFree,
   buildSetupStateView,
@@ -271,6 +272,7 @@ import {
   isDeviceBreakGlassActive,
   isSetupAckWizardLegacyEnabled,
   mirrorDeviceEnrolledFlag,
+  resolveStreamlinedDay0Step,
   SetupPatchError,
   type SetupLiveSignals,
 } from "./setup-wizard.js";
@@ -4511,6 +4513,114 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
           return fail(status, ex.code, ex.message, requestId);
         }
         return fail(400, "validation_error", "invalid device-break-glass body", requestId);
+      }
+    }
+
+    // Streamlined 3-step Day-0 setup status & completion (GN-401: account -> vault -> ready).
+    if (verb === "GET" && pathname === "/admin/v1/setup/status") {
+      const gate = await gateSetupSession(authReq, verb);
+      if (!gate.ok) return fail(401, "invalid_credentials", "authentication required", requestId);
+      try {
+        await ensureVaultSealHydrated();
+        const user = gate.user;
+        const stored = await setupStateStore.get(nodeId);
+        const signals = await resolveSetupSignals(
+          {
+            mustChangePassword: user.mustChangePassword,
+            mustEnrolTotp: user.mustEnrolTotp,
+          },
+          stored,
+        );
+        const merged = mirrorDeviceEnrolledFlag(stored, Boolean(signals.deviceEnrolled));
+        const view = buildSetupStateView(
+          merged,
+          signals,
+          new Date(nowMs()).toISOString(),
+          isSetupAckWizardLegacyEnabled(),
+        );
+        let mainReserveWalletId: string | null = null;
+        let mainReserveAddress: string | null = null;
+        if (deps.defaultFundingWallet !== undefined) {
+          const snap = await deps.defaultFundingWallet.get();
+          mainReserveWalletId = snap.wallet_id;
+          mainReserveAddress = snap.public_key;
+        }
+        const statusOut = {
+          setupComplete: view.complete,
+          passkeyEnrolled: !user.mustChangePassword && !user.mustEnrolTotp,
+          vaultInitialized: Boolean(signals.vaultConfigured || merged.w5_vault_ready),
+          mainReserveWalletId,
+          mainReserveAddress,
+          backupDownloaded: Boolean(merged.w5_offline_backup_ack),
+          funnel_step: resolveStreamlinedDay0Step(merged, signals),
+          next_step: view.next_step,
+        };
+        assertSetupSecretFree(statusOut);
+        return ok(200, statusOut);
+      } catch {
+        return fail(503, "service_unavailable", "setup status unavailable", requestId);
+      }
+    }
+
+    if (
+      verb === "POST" &&
+      (pathname === "/admin/v1/setup-state/complete" || pathname === "/admin/v1/setup/complete")
+    ) {
+      const gate = await gateSetupSession(authReq, verb);
+      if (!gate.ok) return fail(401, "invalid_credentials", "authentication required", requestId);
+      try {
+        await ensureVaultSealHydrated();
+        const body = decodeBody(rawBody) as {
+          acknowledged_recovery_backup?: unknown;
+          backupVerified?: unknown;
+        };
+        if (body === null || typeof body !== "object" || Array.isArray(body)) {
+          return fail(400, "validation_error", "setup complete body must be an object", requestId);
+        }
+        const user = gate.user;
+        const current = await setupStateStore.get(nodeId);
+        const signals = await resolveSetupSignals(
+          {
+            mustChangePassword: user.mustChangePassword,
+            mustEnrolTotp: user.mustEnrolTotp,
+          },
+          current,
+        );
+        const nowIso = new Date(nowMs()).toISOString();
+        const next = applyStreamlinedSetupComplete(current, signals, body, nowIso);
+        await setupStateStore.put(nodeId, next);
+        if (deps.onVaultInitialized !== undefined) {
+          try {
+            await deps.onVaultInitialized();
+          } catch {
+            return fail(503, "service_unavailable", "reserve pool provisioning failed", requestId);
+          }
+        }
+        const updatedSignals = await resolveSetupSignals(
+          {
+            mustChangePassword: user.mustChangePassword,
+            mustEnrolTotp: user.mustEnrolTotp,
+          },
+          next,
+        );
+        const view = buildSetupStateView(
+          next,
+          updatedSignals,
+          nowIso,
+          isSetupAckWizardLegacyEnabled(),
+        );
+        const out = {
+          ...view,
+          device_break_glass_active: isDeviceBreakGlassActive(next, updatedSignals),
+        };
+        assertSetupSecretFree(out);
+        return ok(200, out);
+      } catch (ex) {
+        if (ex instanceof SetupPatchError) {
+          const status = ex.code === "conflict" ? 409 : 400;
+          return fail(status, ex.code, ex.message, requestId);
+        }
+        return fail(400, "validation_error", "invalid setup complete body", requestId);
       }
     }
 

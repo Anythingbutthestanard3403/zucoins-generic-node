@@ -4,11 +4,17 @@ import {
   DAY0_STEPS,
   hasPackCreateMarker,
   isMoneyOrAppPath,
+  isStreamlinedDay0Step,
   markPackCreated,
   pathForNextStep,
+  pathForStreamlinedStep,
   redirectForFunnelPath,
   refineNextStep,
+  resolveStreamlinedStep,
   stepFromPath,
+  STREAMLINED_DAY0_STEPS,
+  streamlinedStepForDay0Step,
+  streamlinedStepIndex,
 } from "./day0.js";
 
 describe("day0 funnel path map", () => {
@@ -90,8 +96,57 @@ describe("day0 redirect matrix", () => {
       "home",
     ]);
   });
+
+  it("supports streamlined 3-step Day-0 progression (account -> vault -> ready)", () => {
+    expect([...STREAMLINED_DAY0_STEPS]).toEqual(["account", "vault", "ready"]);
+    expect(isStreamlinedDay0Step("account")).toBe(true);
+    expect(isStreamlinedDay0Step("vault")).toBe(true);
+    expect(isStreamlinedDay0Step("ready")).toBe(true);
+    expect(isStreamlinedDay0Step("install")).toBe(false);
+
+    expect(streamlinedStepIndex("account")).toBe(0);
+    expect(streamlinedStepIndex("vault")).toBe(1);
+    expect(streamlinedStepIndex("ready")).toBe(2);
+
+    expect(streamlinedStepForDay0Step("password")).toBe("account");
+    expect(streamlinedStepForDay0Step("totp")).toBe("account");
+    expect(streamlinedStepForDay0Step("install")).toBe("vault");
+    expect(streamlinedStepForDay0Step("vault")).toBe("vault");
+    expect(streamlinedStepForDay0Step("backup")).toBe("vault");
+    expect(streamlinedStepForDay0Step("home")).toBe("ready");
+
+    expect(
+      resolveStreamlinedStep({
+        passkeyEnrolled: false,
+        vaultInitialized: false,
+        backupAcknowledged: false,
+        setupComplete: false,
+      }),
+    ).toBe("account");
+    expect(
+      resolveStreamlinedStep({
+        passkeyEnrolled: true,
+        vaultInitialized: true,
+        backupAcknowledged: false,
+        setupComplete: false,
+      }),
+    ).toBe("vault");
+    expect(
+      resolveStreamlinedStep({
+        passkeyEnrolled: true,
+        vaultInitialized: true,
+        backupAcknowledged: true,
+        setupComplete: false,
+      }),
+    ).toBe("ready");
+
+    expect(pathForStreamlinedStep("account")).toBe("/setup");
+    expect(pathForStreamlinedStep("vault")).toBe("/start/vault");
+    expect(pathForStreamlinedStep("ready")).toBe("/");
+  });
 });
 
 afterEach(() => {
   /* no env */
 });
+

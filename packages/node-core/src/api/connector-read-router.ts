@@ -8,7 +8,7 @@
 
 import { createPublicKey } from "node:crypto";
 
-import { OPERATION_KINDS, type OperationKind } from "@zucoins/generic-node-contracts";
+import { OPERATION_KINDS, type OperationKind } from "@zucoins/generic-node-contracts/operations";
 
 import {
   DEFAULT_CONNECTOR_SCOPES,

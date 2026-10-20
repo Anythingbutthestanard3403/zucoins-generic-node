@@ -62,6 +62,7 @@ interface SetupStateView {
   recovery_proven?: boolean;
   vault_ready?: boolean;
   next_step?: Day0Step | string;
+  funnel_step?: "account" | "vault" | "ready" | string;
   flags: Record<string, boolean | string | null>;
   steps: readonly {
     id: SetupStepId;
@@ -156,7 +157,7 @@ function SetupPageInner() {
   /** After auth, bounce /setup → /start/* for the server next_step. */
   const maybeRedirectFunnel = useCallback(
     (view: SetupStateView) => {
-      if (view.complete === true || view.next_step === "home") {
+      if (view.complete === true || view.next_step === "home" || view.funnel_step === "ready") {
         nav("/", { replace: true });
         return;
       }
@@ -399,6 +400,38 @@ function SetupPageInner() {
     }
   }
 
+  async function onCompleteStreamlinedSetup() {
+    setBusy(true);
+    setErr(null);
+    try {
+      if (
+        (shownMasterKey ||
+          vaultStatus?.plaintext_pending_ack ||
+          vaultStatus?.phase === "configured") &&
+        !vaultStatus?.offline_backup_acked
+      ) {
+        await apiJson("/admin/v1/vault-master/ack-offline", {
+          method: "POST",
+          csrf,
+          body: JSON.stringify({ offline_backup_ack: true }),
+        });
+        setShownMasterKey(null);
+        setOfflineAckChecked(false);
+      }
+      const view = await apiJson<SetupStateView>("/admin/v1/setup/complete", {
+        method: "POST",
+        csrf,
+        body: JSON.stringify({ acknowledged_recovery_backup: true }),
+      });
+      setSetup(view);
+      nav("/", { replace: true });
+      setBusy(false);
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Could not complete setup");
+      setBusy(false);
+    }
+  }
+
   const showPassword = mustPw;
   const showEnrol = !mustPw && mustTotp && totpPhase === "idle";
   const showConfirm = !mustPw && mustTotp && totpPhase === "pending";
@@ -406,6 +439,14 @@ function SetupPageInner() {
 
   const step = setup?.current_step;
   const showWizard = authDone && setup !== null && !setup.complete;
+  const hasStreamlinedFunnel = Boolean(setup?.funnel_step);
+  const vaultConfiguredForStreamlined = Boolean(
+    setup?.vault_ready ||
+      vaultStatus?.phase === "configured" ||
+      vaultStatus?.phase === "sealed" ||
+      vaultStatus?.offline_backup_acked ||
+      shownMasterKey,
+  );
 
   return (
     <div className="auth-shell">
@@ -413,6 +454,83 @@ function SetupPageInner() {
         <div className="auth-card">
           <h1>Setup</h1>
           <p className="err">{loadErr}</p>
+        </div>
+      ) : null}
+
+      {showWizard && hasStreamlinedFunnel ? (
+        <div
+          className="auth-card"
+          data-testid="setup-streamlined-banner"
+          style={{ marginBottom: 16 }}
+        >
+          <p className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+            3-Step Day-0 Setup · Stage:{" "}
+            <strong className="mono">{String(setup?.funnel_step ?? "vault").toUpperCase()}</strong>
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 8,
+              fontSize: 12.5,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <strong>1. Account</strong>
+              <div className="muted">{authDone ? "Complete ✓" : "In progress"}</div>
+            </div>
+            <div>
+              <strong>2. Vault &amp; Key</strong>
+              <div className="muted">
+                {vaultConfiguredForStreamlined ? "Configured ✓" : "Generate key"}
+              </div>
+            </div>
+            <div>
+              <strong>3. Ready</strong>
+              <div className="muted">
+                {setup?.funnel_step === "ready" || setup?.complete ? "Ready ✓" : "Open console"}
+              </div>
+            </div>
+          </div>
+          {!vaultConfiguredForStreamlined && vaultStatus?.can_generate ? (
+            <button
+              className="btn-block"
+              type="button"
+              disabled={busy}
+              data-testid="setup-streamlined-generate-vault-btn"
+              onClick={() => void onGenerateMaster()}
+            >
+              {busy ? "Generating…" : "Generate Vault Master Key"}
+            </button>
+          ) : null}
+          {shownMasterKey && step !== "W5" ? (
+            <div className="field" style={{ marginTop: 10 }}>
+              <label htmlFor="streamlined-vault-master-once">
+                Vault master key (shown once — store offline)
+              </label>
+              <textarea
+                id="streamlined-vault-master-once"
+                className="mono"
+                readOnly
+                rows={3}
+                value={shownMasterKey}
+                style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </div>
+          ) : null}
+          {vaultConfiguredForStreamlined ? (
+            <button
+              className="btn-block"
+              type="button"
+              disabled={busy}
+              data-testid="setup-complete-streamlined-btn"
+              onClick={() => void onCompleteStreamlinedSetup()}
+            >
+              {busy ? "Completing setup…" : "Complete 3-Step Setup & Open Console"}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

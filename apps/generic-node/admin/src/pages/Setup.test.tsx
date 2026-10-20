@@ -522,5 +522,67 @@ describe("SetupPage wizard W4 Device #1", () => {
     expect(screen.queryByRole("button", { name: /Acknowledge break-glass/i })).toBeNull();
     expect(screen.queryByText("home")).toBeNull();
   });
+
+  it("supports streamlined 3-step setup completion via POST /admin/v1/setup/complete (GN-401)", async () => {
+    useAuth.setState({ user: authUser() });
+    let completed = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.endsWith("/admin/v1/setup-state")) {
+        return new Response(
+          JSON.stringify({
+            object: "setup_state",
+            current_step: completed ? "W12" : "W5",
+            complete: completed,
+            ceremony_master_key_blocked: true,
+            vault_ready: true,
+            funnel_step: completed ? "ready" : "vault",
+            flags: {},
+            steps: [],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/admin/v1/vault-master") && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            phase: "configured",
+            can_generate: false,
+            plaintext_pending_ack: false,
+            offline_backup_acked: true,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/admin/v1/setup/complete") && method === "POST") {
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          acknowledged_recovery_backup: true,
+        });
+        completed = true;
+        return new Response(
+          JSON.stringify({
+            object: "setup_state",
+            current_step: "W12",
+            complete: true,
+            ceremony_master_key_blocked: true,
+            vault_ready: true,
+            funnel_step: "ready",
+            next_step: "home",
+            flags: {},
+            steps: [],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSetup();
+    await waitFor(() => expect(screen.getByTestId("setup-streamlined-banner")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("setup-complete-streamlined-btn"));
+    await waitFor(() => expect(screen.getByTestId("stub-home")).toBeInTheDocument());
+  });
 });
 

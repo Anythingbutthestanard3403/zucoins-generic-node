@@ -138,7 +138,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
           return;
         }
         const body = (await res.json()) as SetupStateDay0;
-        if (body.complete === true || body.next_step === "home") {
+        if (body.complete === true || body.next_step === "home" || body.funnel_step === "ready") {
           setGate({ kind: "ok" });
           return;
         }
@@ -210,7 +210,7 @@ function RequireFunnel({ children }: { children: ReactNode }) {
           return;
         }
         const body = (await res.json()) as SetupStateDay0;
-        if (body.complete === true) {
+        if (body.complete === true || body.next_step === "home" || body.funnel_step === "ready") {
           setNext("home");
           return;
         }

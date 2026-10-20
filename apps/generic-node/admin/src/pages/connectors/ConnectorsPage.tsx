@@ -155,7 +155,12 @@ export function computeCapProgressPercent(
   const cap = parseUnits(capZkz);
   if (cap <= 0n) return 0;
   if (used >= cap) return 100;
-  return Number((used * 100n) / cap);
+  const pct = (used * 100n) / cap;
+  let out = 0;
+  while (BigInt(out) < pct && out < 100) {
+    out += 1;
+  }
+  return out;
 }
 
 function walletOptionLabel(w: WalletInventoryItem): string {

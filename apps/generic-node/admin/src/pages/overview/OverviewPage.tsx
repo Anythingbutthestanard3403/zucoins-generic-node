@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
+import { CopyButton } from "../../components/CopyButton.js";
 import { StatusTag } from "../../components/StatusTag.js";
 import { VerificationModeBadge } from "../../components/VerificationModeBadge.js";
 import { WalletHoldCause } from "../../components/WalletHoldCause.js";
@@ -584,6 +585,9 @@ export function OverviewPage() {
             >
               ⇄ Move Between Reserves
             </button>
+            <Link to="/connectors" className="mini-btn" data-testid="quick-action-connect-platform-btn">
+              + Connect Platform
+            </Link>
             <Link to="/lab/receive" className="mini-btn">Lab receive</Link>
             <Link to="/approve" className="mini-btn primary">Approve inbox</Link>
             <Link to="/wallets" className="mini-btn">View wallets</Link>
@@ -893,22 +897,45 @@ export function OverviewPage() {
             {recvResult ? (
               <div data-testid="operator-receive-result">
                 <p>Receive operation armed and ready for incoming transfer:</p>
-                <div className="mono" style={{ marginBottom: 8 }}>
-                  Address: <strong>{recvResult.recipient_wallet_address}</strong>
-                </div>
-                <div className="mono" style={{ marginBottom: 8 }}>
-                  Transfer code: <strong>{recvResult.transfer_code}</strong>
-                </div>
-                <div className="mono" style={{ marginBottom: 12 }}>
-                  Shareable link: <strong>{recvResult.pay_url}</strong>
-                </div>
-                <button
-                  type="button"
-                  className="mini-btn primary"
-                  onClick={() => setActiveOperatorModal(null)}
+                <div
+                  className="mono"
+                  style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
                 >
-                  Done
-                </button>
+                  <span>Address: <strong>{recvResult.recipient_wallet_address}</strong></span>
+                  <CopyButton value={recvResult.recipient_wallet_address} />
+                </div>
+                <div
+                  className="mono"
+                  style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
+                >
+                  <span>Transfer code: <strong>{recvResult.transfer_code}</strong></span>
+                  <CopyButton value={recvResult.transfer_code} />
+                </div>
+                <div
+                  className="mono"
+                  style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
+                >
+                  <span>Shareable link: <strong>{recvResult.pay_url}</strong></span>
+                  <CopyButton value={recvResult.pay_url} />
+                </div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <a
+                    href={recvResult.pay_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mini-btn"
+                    data-testid="operator-receive-open-pay-url"
+                  >
+                    Open Payment Page ↗
+                  </a>
+                  <button
+                    type="button"
+                    className="mini-btn primary"
+                    onClick={() => setActiveOperatorModal(null)}
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             ) : (
               <form onSubmit={(e) => void handleOperatorReceive(e)}>
@@ -932,11 +959,20 @@ export function OverviewPage() {
                     onChange={(e) => setRecvTargetReserve(e.target.value)}
                   >
                     <option value="">Main Reserve (default)</option>
-                    {reserveWallets.map((rw) => (
-                      <option key={rw.wallet_id} value={rw.wallet_id}>
-                        {(rw as { display_label?: string | null }).display_label ?? rw.wallet_id}
-                      </option>
-                    ))}
+                    {reserveWallets.map((rw, idx) => {
+                      const rawLabel = (rw as { display_label?: string | null }).display_label;
+                      const friendly =
+                        rawLabel && rawLabel.trim().length > 0
+                          ? rawLabel
+                          : idx === 0
+                            ? "Main Reserve"
+                            : `Reserve #${idx + 1}`;
+                      return (
+                        <option key={rw.wallet_id} value={rw.wallet_id}>
+                          {friendly} ({rw.wallet_id.slice(0, 8)})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div style={{ marginBottom: 12 }}>
@@ -1011,11 +1047,20 @@ export function OverviewPage() {
                     onChange={(e) => setSendSourceReserve(e.target.value)}
                   >
                     <option value="">Main Reserve (default)</option>
-                    {reserveWallets.map((rw) => (
-                      <option key={rw.wallet_id} value={rw.wallet_id}>
-                        {(rw as { display_label?: string | null }).display_label ?? rw.wallet_id}
-                      </option>
-                    ))}
+                    {reserveWallets.map((rw, idx) => {
+                      const rawLabel = (rw as { display_label?: string | null }).display_label;
+                      const friendly =
+                        rawLabel && rawLabel.trim().length > 0
+                          ? rawLabel
+                          : idx === 0
+                            ? "Main Reserve"
+                            : `Reserve #${idx + 1}`;
+                      return (
+                        <option key={rw.wallet_id} value={rw.wallet_id}>
+                          {friendly} ({rw.wallet_id.slice(0, 8)})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div style={{ marginBottom: 12 }}>
@@ -1104,11 +1149,28 @@ export function OverviewPage() {
               </div>
             ) : (
               <form onSubmit={(e) => void handleOperatorMove(e)}>
+                <datalist id="reserve-wallet-options">
+                  {reserveWallets.map((rw, idx) => {
+                    const rawLabel = (rw as { display_label?: string | null }).display_label;
+                    const friendly =
+                      rawLabel && rawLabel.trim().length > 0
+                        ? rawLabel
+                        : idx === 0
+                          ? "Main Reserve"
+                          : `Reserve #${idx + 1}`;
+                    return (
+                      <option key={rw.wallet_id} value={rw.wallet_id}>
+                        {friendly}
+                      </option>
+                    );
+                  })}
+                </datalist>
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="op-move-src">Source Reserve Wallet ID</label>
                   <input
                     id="op-move-src"
                     className="mono"
+                    list="reserve-wallet-options"
                     data-testid="operator-move-source-input"
                     value={moveSourceReserve}
                     onChange={(e) => setMoveSourceReserve(e.target.value)}
@@ -1121,6 +1183,7 @@ export function OverviewPage() {
                   <input
                     id="op-move-dest"
                     className="mono"
+                    list="reserve-wallet-options"
                     data-testid="operator-move-dest-input"
                     value={moveDestReserve}
                     onChange={(e) => setMoveDestReserve(e.target.value)}

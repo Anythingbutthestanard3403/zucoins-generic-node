@@ -214,15 +214,26 @@ export function OperationsPage() {
     <div className="page">
       <div className="page-title-row">
         <h1>Operations</h1>
-        <span className="muted" style={{ fontSize: 12.5 }}>
-          {loading
-              ? "Loading…"
-              : attentionQ.isFetching
-                ? "Refreshing…"
-                : live && !attentionQ.isError
-                  ? "Live"
-                  : "Unavailable"}
-        </span>
+        <div className="toolbar">
+          <Link to="/approve" className="filter-btn" data-testid="activity-link-approve">
+            Approve Inbox
+          </Link>
+          <Link to="/transfers" className="filter-btn" data-testid="activity-link-transfers">
+            Outgoing Transfers
+          </Link>
+          <Link to="/audit" className="filter-btn" data-testid="activity-link-audit">
+            Audit Log
+          </Link>
+          <span className="muted" style={{ fontSize: 12.5 }}>
+            {loading
+                ? "Loading…"
+                : attentionQ.isFetching
+                  ? "Refreshing…"
+                  : live && !attentionQ.isError
+                    ? "Live"
+                    : "Unavailable"}
+          </span>
+        </div>
       </div>
 
       <div className="tabs" style={{ marginBottom: 4 }}>

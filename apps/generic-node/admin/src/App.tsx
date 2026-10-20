@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import {
-  IconAlert, IconArrow, IconClipboard, IconFile, IconGrid,
-  IconKey, IconLock, IconLogo, IconLogout, IconMoon, IconPin,
-  IconTarget, IconWallet, IconBell, IconSettings,
+  IconClipboard, IconGrid,
+  IconKey, IconLogo, IconLogout, IconMoon, IconPin,
+  IconWallet, IconBell, IconSettings,
 } from "./icons.js";
 import { useApproveInboxBadgeCount } from "./lib/approve-inbox-count.js";
 import { fetchEffectiveConfig } from "./pages/settings/SettingsPage.js";

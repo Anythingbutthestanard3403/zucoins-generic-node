@@ -89,6 +89,9 @@ export function WalletsPage() {
           >
             + New Reserve Wallet
           </button>
+          <Link to="/destinations" className="filter-btn" data-testid="wallets-link-destinations">
+            Blessed Destinations
+          </Link>
           <span className="filter-btn" style={{ pointerEvents: "none" }}>
             {loading
                 ? "Loading…"
@@ -123,9 +126,14 @@ export function WalletsPage() {
               gap: 12,
             }}
           >
-            {reserveWallets.map((rw) => {
+            {reserveWallets.map((rw, idx) => {
+              const rawLabel = (rw as { display_label?: string | null }).display_label;
               const label =
-                (rw as { display_label?: string | null }).display_label ?? rw.wallet_id;
+                rawLabel && rawLabel.trim().length > 0
+                  ? rawLabel
+                  : idx === 0
+                    ? "Main Reserve"
+                    : `Reserve Wallet #${idx + 1}`;
               return (
                 <div
                   key={rw.wallet_id}
@@ -136,8 +144,26 @@ export function WalletsPage() {
                     <strong>{label}</strong>
                     <span className="mono">{rw.state}</span>
                   </div>
-                  <div className="mono muted" style={{ fontSize: "0.8rem", marginTop: 4 }}>
-                    {truncatePubkey(rw.public_key, 12, 6)}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginTop: 6,
+                      gap: 8,
+                    }}
+                  >
+                    <Link
+                      to={`/wallets/${encodeURIComponent(rw.public_key)}`}
+                      className="linkish mono"
+                      style={{ fontSize: "0.8rem" }}
+                    >
+                      {truncatePubkey(rw.public_key, 12, 6)}
+                    </Link>
+                    <CopyButton value={rw.public_key} />
+                  </div>
+                  <div className="mono muted" style={{ fontSize: "0.75rem", marginTop: 4 }}>
+                    ID: {rw.wallet_id}
                   </div>
                   <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between" }}>
                     <span className="muted">Balance</span>

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { ApiErrorNote } from "../../components/ApiErrorNote.js";
 import { StatusTag } from "../../components/StatusTag.js";
@@ -8,6 +8,7 @@ import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import {
   IconArrow, IconHalt, IconMark, IconRefresh,
 } from "../../icons.js";
+import { api, ApiError } from "../../lib/api.js";
 import { truncatePubkey } from "../../lib/format.js";
 import { deriveNodeHealthUiState, fetchNodeReadiness, type NodeHealthUiState } from "../../lib/health.js";
 import {
@@ -262,6 +263,120 @@ export function OverviewPage() {
   });
   const deviceBreakGlassActive = setupBreakGlassQ.data === true;
 
+  // Direct Operator Action modals (GN-404)
+  const reserveWallets = wallets.filter((w) => w.money_mode === "INTERNAL_ONLY");
+  const [activeOperatorModal, setActiveOperatorModal] = useState<"receive" | "send" | "move" | null>(null);
+  const [opModalBusy, setOpModalBusy] = useState(false);
+  const [opModalError, setOpModalError] = useState<string | null>(null);
+
+  // Receive modal state
+  const [recvAmount, setRecvAmount] = useState("");
+  const [recvTargetReserve, setRecvTargetReserve] = useState("");
+  const [recvTotp, setRecvTotp] = useState("");
+  const [recvResult, setRecvResult] = useState<{
+    operation_id: string;
+    recipient_wallet_address: string;
+    transfer_code: string;
+    pay_url: string;
+  } | null>(null);
+
+  // Send modal state
+  const [sendSourceReserve, setSendSourceReserve] = useState("");
+  const [sendRecipient, setSendRecipient] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [sendTotp, setSendTotp] = useState("");
+  const [sendResult, setSendResult] = useState<{ operation_id: string; status: string } | null>(null);
+
+  // Move modal state
+  const [moveSourceReserve, setMoveSourceReserve] = useState("");
+  const [moveDestReserve, setMoveDestReserve] = useState("");
+  const [moveAmount, setMoveAmount] = useState("");
+  const [moveTotp, setMoveTotp] = useState("");
+  const [moveResult, setMoveResult] = useState<{ operation_id: string; status: string } | null>(null);
+
+  function makeIdemKey(prefix: string): string {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+
+  async function handleOperatorReceive(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    setOpModalBusy(true);
+    setOpModalError(null);
+    try {
+      const res = await api<{
+        operation_id: string;
+        recipient_wallet_address: string;
+        transfer_code: string;
+        pay_url: string;
+      }>("/operations/receives", {
+        method: "POST",
+        totp: recvTotp.trim(),
+        idempotencyKey: makeIdemKey("op-recv"),
+        body: JSON.stringify({
+          expected_amount_zkz: recvAmount.trim(),
+          target_reserve_wallet_id: recvTargetReserve.trim() || null,
+          totp_code: recvTotp.trim(),
+        }),
+      });
+      setRecvResult(res);
+      void opsQ.refetch();
+    } catch (err) {
+      setOpModalError(err instanceof ApiError ? err.message : "Could not create receive");
+    } finally {
+      setOpModalBusy(false);
+    }
+  }
+
+  async function handleOperatorSend(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    setOpModalBusy(true);
+    setOpModalError(null);
+    try {
+      const res = await api<{ operation_id: string; status: string }>("/operations/sends", {
+        method: "POST",
+        totp: sendTotp.trim(),
+        idempotencyKey: makeIdemKey("op-send"),
+        body: JSON.stringify({
+          source_reserve_wallet_id: sendSourceReserve.trim() || null,
+          recipient_wallet_address: sendRecipient.trim(),
+          amount_zkz: sendAmount.trim(),
+          totp_code: sendTotp.trim(),
+        }),
+      });
+      setSendResult(res);
+      void opsQ.refetch();
+    } catch (err) {
+      setOpModalError(err instanceof ApiError ? err.message : "Could not submit external send");
+    } finally {
+      setOpModalBusy(false);
+    }
+  }
+
+  async function handleOperatorMove(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    setOpModalBusy(true);
+    setOpModalError(null);
+    try {
+      const res = await api<{ operation_id: string; status: string }>("/operations/moves", {
+        method: "POST",
+        totp: moveTotp.trim(),
+        idempotencyKey: makeIdemKey("op-move"),
+        body: JSON.stringify({
+          source_reserve_wallet_id: moveSourceReserve.trim(),
+          destination_reserve_wallet_id: moveDestReserve.trim(),
+          amount_zkz: moveAmount.trim(),
+          totp_code: moveTotp.trim(),
+        }),
+      });
+      setMoveResult(res);
+      void opsQ.refetch();
+    } catch (err) {
+      setOpModalError(err instanceof ApiError ? err.message : "Could not submit internal transfer");
+    } finally {
+      setOpModalBusy(false);
+    }
+  }
+
 
   return (
     <div className="page">
@@ -433,6 +548,42 @@ export function OverviewPage() {
           </div>
           {!walletsLive ? <ApiErrorNote error={walletsQ.data?.error} /> : null}
           <div className="mini-actions">
+            <button
+              type="button"
+              className="mini-btn primary"
+              data-testid="quick-action-receive-btn"
+              onClick={() => {
+                setOpModalError(null);
+                setRecvResult(null);
+                setActiveOperatorModal("receive");
+              }}
+            >
+              + Receive Funds
+            </button>
+            <button
+              type="button"
+              className="mini-btn"
+              data-testid="quick-action-send-btn"
+              onClick={() => {
+                setOpModalError(null);
+                setSendResult(null);
+                setActiveOperatorModal("send");
+              }}
+            >
+              + Send Funds
+            </button>
+            <button
+              type="button"
+              className="mini-btn"
+              data-testid="quick-action-move-btn"
+              onClick={() => {
+                setOpModalError(null);
+                setMoveResult(null);
+                setActiveOperatorModal("move");
+              }}
+            >
+              ⇄ Move Between Reserves
+            </button>
             <Link to="/lab/receive" className="mini-btn">Lab receive</Link>
             <Link to="/approve" className="mini-btn primary">Approve inbox</Link>
             <Link to="/wallets" className="mini-btn">View wallets</Link>
@@ -723,6 +874,308 @@ export function OverviewPage() {
           </tbody>
         </table>
       </div>
+
+      {activeOperatorModal === "receive" ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Receive Funds"
+          data-testid="operator-receive-modal"
+        >
+          <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
+            <h2 style={{ marginTop: 0 }}>+ Receive Funds</h2>
+            {opModalError ? (
+              <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
+                {opModalError}
+              </div>
+            ) : null}
+            {recvResult ? (
+              <div data-testid="operator-receive-result">
+                <p>Receive operation armed and ready for incoming transfer:</p>
+                <div className="mono" style={{ marginBottom: 8 }}>
+                  Address: <strong>{recvResult.recipient_wallet_address}</strong>
+                </div>
+                <div className="mono" style={{ marginBottom: 8 }}>
+                  Transfer code: <strong>{recvResult.transfer_code}</strong>
+                </div>
+                <div className="mono" style={{ marginBottom: 12 }}>
+                  Shareable link: <strong>{recvResult.pay_url}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="mini-btn primary"
+                  onClick={() => setActiveOperatorModal(null)}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={(e) => void handleOperatorReceive(e)}>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-recv-amount">Expected Amount (ZKZ)</label>
+                  <input
+                    id="op-recv-amount"
+                    data-testid="operator-receive-amount-input"
+                    value={recvAmount}
+                    onChange={(e) => setRecvAmount(e.target.value)}
+                    placeholder="25.00"
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-recv-reserve">Target Reserve Wallet</label>
+                  <select
+                    id="op-recv-reserve"
+                    data-testid="operator-receive-reserve-select"
+                    value={recvTargetReserve}
+                    onChange={(e) => setRecvTargetReserve(e.target.value)}
+                  >
+                    <option value="">Main Reserve (default)</option>
+                    {reserveWallets.map((rw) => (
+                      <option key={rw.wallet_id} value={rw.wallet_id}>
+                        {(rw as { display_label?: string | null }).display_label ?? rw.wallet_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-recv-totp">Authenticator 6-Digit Code</label>
+                  <input
+                    id="op-recv-totp"
+                    className="mono"
+                    data-testid="operator-receive-totp-input"
+                    value={recvTotp}
+                    onChange={(e) => setRecvTotp(e.target.value)}
+                    placeholder="123456"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+                <div className="form-actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button type="button" className="mini-btn" onClick={() => setActiveOperatorModal(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="mini-btn primary"
+                    data-testid="operator-receive-submit-btn"
+                    disabled={opModalBusy || !recvAmount.trim() || !recvTotp.trim()}
+                  >
+                    {opModalBusy ? "Creating…" : "Create Receive"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {activeOperatorModal === "send" ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Send Funds"
+          data-testid="operator-send-modal"
+        >
+          <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
+            <h2 style={{ marginTop: 0 }}>+ Send Funds</h2>
+            {opModalError ? (
+              <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
+                {opModalError}
+              </div>
+            ) : null}
+            {sendResult ? (
+              <div data-testid="operator-send-result">
+                <p>
+                  External send <strong>{sendResult.operation_id}</strong> submitted with status{" "}
+                  <strong>{sendResult.status}</strong>.
+                </p>
+                <button
+                  type="button"
+                  className="mini-btn primary"
+                  onClick={() => setActiveOperatorModal(null)}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={(e) => void handleOperatorSend(e)}>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-send-reserve">Source Reserve Wallet</label>
+                  <select
+                    id="op-send-reserve"
+                    data-testid="operator-send-reserve-select"
+                    value={sendSourceReserve}
+                    onChange={(e) => setSendSourceReserve(e.target.value)}
+                  >
+                    <option value="">Main Reserve (default)</option>
+                    {reserveWallets.map((rw) => (
+                      <option key={rw.wallet_id} value={rw.wallet_id}>
+                        {(rw as { display_label?: string | null }).display_label ?? rw.wallet_id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-send-recipient">Recipient Wallet Address</label>
+                  <input
+                    id="op-send-recipient"
+                    className="mono"
+                    data-testid="operator-send-recipient-input"
+                    value={sendRecipient}
+                    onChange={(e) => setSendRecipient(e.target.value)}
+                    placeholder="0xRecipient..."
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-send-amount">Amount (ZKZ)</label>
+                  <input
+                    id="op-send-amount"
+                    data-testid="operator-send-amount-input"
+                    value={sendAmount}
+                    onChange={(e) => setSendAmount(e.target.value)}
+                    placeholder="10.00"
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-send-totp">Authenticator 6-Digit Code</label>
+                  <input
+                    id="op-send-totp"
+                    className="mono"
+                    data-testid="operator-send-totp-input"
+                    value={sendTotp}
+                    onChange={(e) => setSendTotp(e.target.value)}
+                    placeholder="123456"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+                <div className="form-actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button type="button" className="mini-btn" onClick={() => setActiveOperatorModal(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="mini-btn primary"
+                    data-testid="operator-send-submit-btn"
+                    disabled={opModalBusy || !sendRecipient.trim() || !sendAmount.trim() || !sendTotp.trim()}
+                  >
+                    {opModalBusy ? "Sending…" : "Approve & Send"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {activeOperatorModal === "move" ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Move Between Reserves"
+          data-testid="operator-move-modal"
+        >
+          <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
+            <h2 style={{ marginTop: 0 }}>⇄ Move Between Reserves</h2>
+            {opModalError ? (
+              <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
+                {opModalError}
+              </div>
+            ) : null}
+            {moveResult ? (
+              <div data-testid="operator-move-result">
+                <p>
+                  Internal transfer <strong>{moveResult.operation_id}</strong> submitted with status{" "}
+                  <strong>{moveResult.status}</strong>.
+                </p>
+                <button
+                  type="button"
+                  className="mini-btn primary"
+                  onClick={() => setActiveOperatorModal(null)}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={(e) => void handleOperatorMove(e)}>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-move-src">Source Reserve Wallet ID</label>
+                  <input
+                    id="op-move-src"
+                    className="mono"
+                    data-testid="operator-move-source-input"
+                    value={moveSourceReserve}
+                    onChange={(e) => setMoveSourceReserve(e.target.value)}
+                    placeholder="w-reserve-main"
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-move-dest">Destination Reserve Wallet ID</label>
+                  <input
+                    id="op-move-dest"
+                    className="mono"
+                    data-testid="operator-move-dest-input"
+                    value={moveDestReserve}
+                    onChange={(e) => setMoveDestReserve(e.target.value)}
+                    placeholder="w-reserve-savings"
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-move-amount">Amount (ZKZ)</label>
+                  <input
+                    id="op-move-amount"
+                    data-testid="operator-move-amount-input"
+                    value={moveAmount}
+                    onChange={(e) => setMoveAmount(e.target.value)}
+                    placeholder="50.00"
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label htmlFor="op-move-totp">Authenticator 6-Digit Code</label>
+                  <input
+                    id="op-move-totp"
+                    className="mono"
+                    data-testid="operator-move-totp-input"
+                    value={moveTotp}
+                    onChange={(e) => setMoveTotp(e.target.value)}
+                    placeholder="123456"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+                <div className="form-actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button type="button" className="mini-btn" onClick={() => setActiveOperatorModal(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="mini-btn primary"
+                    data-testid="operator-move-submit-btn"
+                    disabled={
+                      opModalBusy ||
+                      !moveSourceReserve.trim() ||
+                      !moveDestReserve.trim() ||
+                      !moveAmount.trim() ||
+                      !moveTotp.trim()
+                    }
+                  >
+                    {opModalBusy ? "Moving…" : "Move Funds"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -785,4 +785,85 @@ describe("OverviewPage pack checklist", () => {
     expect(section.textContent).not.toMatch(/\bSweeps\b/);
     expect(section.textContent).not.toMatch(/\bOrders\b/);
   });
+
+  test("Direct operator actions open modals and submit receive, send, and move (GN-404)", async () => {
+    const postCalls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === "POST" && url.includes("/admin/v1/operations/receives")) {
+          postCalls.push({ url, body: JSON.parse(String(init.body ?? "{}")) });
+          return new Response(
+            JSON.stringify({
+              operation_id: "op-recv-1",
+              status: "ARMED",
+              recipient_wallet_address: "0xRecvWorker1",
+              transfer_code: "TC-1234",
+              pay_url: "/pay/op-recv-1",
+            }),
+            { status: 201 },
+          );
+        }
+        if (init?.method === "POST" && url.includes("/admin/v1/operations/sends")) {
+          postCalls.push({ url, body: JSON.parse(String(init.body ?? "{}")) });
+          return new Response(
+            JSON.stringify({
+              operation_id: "op-send-1",
+              status: "APPROVED",
+            }),
+            { status: 201 },
+          );
+        }
+        if (init?.method === "POST" && url.includes("/admin/v1/operations/moves")) {
+          postCalls.push({ url, body: JSON.parse(String(init.body ?? "{}")) });
+          return new Response(
+            JSON.stringify({
+              operation_id: "op-move-1",
+              status: "APPROVED",
+            }),
+            { status: 201 },
+          );
+        }
+        return new Response(JSON.stringify({ ready: true }), { status: 200 });
+      }),
+    );
+
+    renderOverview();
+
+    // 1. + Receive Funds modal
+    fireEvent.click(screen.getByTestId("quick-action-receive-btn"));
+    expect(await screen.findByTestId("operator-receive-modal")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("operator-receive-amount-input"), { target: { value: "25.00" } });
+    fireEvent.change(screen.getByTestId("operator-receive-totp-input"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByTestId("operator-receive-submit-btn"));
+    expect(await screen.findByTestId("operator-receive-result")).toHaveTextContent("0xRecvWorker1");
+
+    // 2. + Send Funds modal
+    fireEvent.click(screen.getByTestId("quick-action-send-btn"));
+    expect(await screen.findByTestId("operator-send-modal")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("operator-send-recipient-input"), {
+      target: { value: "0xExternalDest99" },
+    });
+    fireEvent.change(screen.getByTestId("operator-send-amount-input"), { target: { value: "10.00" } });
+    fireEvent.change(screen.getByTestId("operator-send-totp-input"), { target: { value: "654321" } });
+    fireEvent.click(screen.getByTestId("operator-send-submit-btn"));
+    expect(await screen.findByTestId("operator-send-result")).toHaveTextContent("op-send-1");
+
+    // 3. Move Between Reserves modal
+    fireEvent.click(screen.getByTestId("quick-action-move-btn"));
+    expect(await screen.findByTestId("operator-move-modal")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("operator-move-source-input"), {
+      target: { value: "w-reserve-main" },
+    });
+    fireEvent.change(screen.getByTestId("operator-move-dest-input"), {
+      target: { value: "w-reserve-savings" },
+    });
+    fireEvent.change(screen.getByTestId("operator-move-amount-input"), { target: { value: "50.00" } });
+    fireEvent.change(screen.getByTestId("operator-move-totp-input"), { target: { value: "112233" } });
+    fireEvent.click(screen.getByTestId("operator-move-submit-btn"));
+    expect(await screen.findByTestId("operator-move-result")).toHaveTextContent("op-move-1");
+
+    expect(postCalls).toHaveLength(3);
+  });
 });

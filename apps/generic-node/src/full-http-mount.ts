@@ -113,6 +113,8 @@ import {
   createSqlDualControlPolicy,
   createSqlAutoApprovePolicy,
   createSqlAllowNodeVerifiedPolicy,
+  serializeAllowNodeVerifiedPolicyDocument,
+  type AllowNodeVerifiedImplementerEntry,
   createSqlWalletMoneyCapabilityStore,
   PublicSqlIntegrationRequestStore,
   queryWindowSpend,
@@ -951,16 +953,42 @@ export function createProductionRouteSurface(
   const connectorReadStore = createSqlConnectorReadStore(poolSqlExecutor);
 
   const resolveOrCreateOperatorImplementerId = async (): Promise<string> => {
-    const existing = await resolveImplementerId();
-    if (existing !== null) return existing;
-    const genesis = await implementerRegistry.resolveGenesisId();
-    if (genesis !== null) return genesis;
-    const created = await implementerRegistry.create({
-      name: "operator-console",
+    let impId = await resolveImplementerId();
+    if (impId === null) {
+      impId = await implementerRegistry.resolveGenesisId();
+    }
+    if (impId === null) {
+      const created = await implementerRegistry.create({
+        name: "operator-console",
+        nodeId: config.nodeId,
+        actorId: "operator-console",
+      });
+      impId = created.id;
+    }
+    await implementerRegistry.setCustomRouting({
+      implementerId: impId,
       nodeId: config.nodeId,
       actorId: "operator-console",
+      allowCustomRouting: true,
     });
-    return created.id;
+    if (allowNodeVerifiedPolicy.setPolicy !== undefined) {
+      const current = await allowNodeVerifiedPolicy.getPolicy();
+      const existingEntries: AllowNodeVerifiedImplementerEntry[] =
+        current.status === "enabled"
+          ? [...current.implementers]
+          : current.disabledReason === "off"
+            ? [...(current.implementers ?? [])]
+            : [];
+      const nextEntries = [
+        ...existingEntries.filter((e) => e.implementer_id !== impId),
+        { implementer_id: impId, enabled: true },
+      ];
+      await allowNodeVerifiedPolicy.setPolicy(
+        serializeAllowNodeVerifiedPolicyDocument(nextEntries, true),
+        { actorId: "operator-console", nodeId: config.nodeId },
+      );
+    }
+    return impId;
   };
 
   const liveOperatorOperationStore: AdminRouteDeps["operatorOperationStore"] =
@@ -971,10 +999,12 @@ export function createProductionRouteSurface(
           createReceive: async (input) => {
             try {
               const implementerId = await resolveOrCreateOperatorImplementerId();
-              let afterLanding: {
-                readonly kind: "HOLD" | "INTERNAL_MOVE";
-                readonly destination_id: string | null;
-              } = { kind: "HOLD", destination_id: null };
+              let afterLanding:
+                | {
+                    readonly kind: "HOLD" | "INTERNAL_MOVE";
+                    readonly destination_id: string | null;
+                  }
+                | undefined = undefined;
               if (input.targetReserveWalletId !== null && input.targetReserveWalletId.length > 0) {
                 const destRes = await config.pool.query<{ id: string }>(
                   `SELECT id::text AS id FROM destinations WHERE node_id = $1::uuid AND wallet_id = $2::uuid AND state = 'BLESSED' LIMIT 1`,
@@ -993,7 +1023,7 @@ export function createProductionRouteSurface(
                 amount_zkz: input.expectedAmountZkz,
                 anchor: `op-recv-${nowMs().toString(36)}-${randomUUID().slice(0, 8)}`,
                 expires_in_seconds: expiresInSeconds,
-                after_landing: afterLanding,
+                ...(afterLanding !== undefined ? { after_landing: afterLanding } : {}),
                 verification_mode: "NODE_VERIFIED",
                 idempotencyKey: input.idempotencyKey,
                 implementerId,

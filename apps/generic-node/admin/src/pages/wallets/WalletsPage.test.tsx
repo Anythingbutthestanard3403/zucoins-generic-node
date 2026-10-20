@@ -1,5 +1,7 @@
+/** @vitest-environment jsdom */
+import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletsPage } from "./WalletsPage.js";
@@ -307,4 +309,110 @@ describe("WalletsPage honesty", () => {
     const holdLinks = screen.getAllByTestId("wallet-hold-op-link");
     expect(holdLinks.length).toBeGreaterThan(0);
     expect(holdLinks[0]).toHaveAttribute("href", "/operations/4fc07a73-0000-4000-8000-000000000001");
+  });
+
+  it("renders Reserve Wallets section, expands the Worker Pool drawer, and creates a new Reserve Wallet (GN-404)", async () => {
+    cleanup();
+    liveSession();
+    const postCalls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (init?.method === "POST" && url.includes("/admin/v1/reserve-wallets")) {
+          postCalls.push({ url, body: JSON.parse(String(init.body ?? "{}")) });
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                wallet_id: "w-reserve-2",
+                money_mode: "INTERNAL_ONLY",
+                display_label: "Savings Vault",
+                destination_state: "BLESSED",
+              }),
+              { status: 201 },
+            ),
+          );
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              object: "list",
+              data: [
+                {
+                  wallet_id: "w-reserve-1",
+                  public_key: "zkz1qreservemain",
+                  display_label: "Main Reserve",
+                  state: "AVAILABLE",
+                  key_origin: "node_generated",
+                  recovery_verified: true,
+                  observed_balance_zkz: "500.00",
+                  holding_operation_id: null,
+                  holding_operation_status: null,
+                  holding_operation_expiry_unix_time_secs: null,
+                  holding_operation_attention_required: false,
+                  holding_operation_terminal_at: null,
+                  holding_lease_role: null,
+                  holding_operation_type: null,
+                  money_mode: "INTERNAL_ONLY",
+                  allow_external_receive: false,
+                  allow_external_send: false,
+                  allow_internal_move: true,
+                  row_version: 1,
+                },
+                {
+                  wallet_id: "w-recv-1",
+                  public_key: "zkz1qrecvworker1",
+                  state: "AVAILABLE",
+                  key_origin: "node_generated",
+                  recovery_verified: true,
+                  observed_balance_zkz: "0",
+                  holding_operation_id: null,
+                  holding_operation_status: null,
+                  holding_operation_expiry_unix_time_secs: null,
+                  holding_operation_attention_required: false,
+                  holding_operation_terminal_at: null,
+                  holding_lease_role: null,
+                  holding_operation_type: null,
+                  money_mode: "RECEIVE_ONLY",
+                  allow_external_receive: true,
+                  allow_external_send: false,
+                  allow_internal_move: true,
+                  row_version: 1,
+                },
+              ],
+              has_more: false,
+              next_cursor: null,
+            }),
+            { status: 200 },
+          ),
+        );
+      }),
+    );
+
+    renderPage();
+
+    const card = await screen.findByTestId("reserve-wallet-card-w-reserve-1");
+    expect(card).toHaveTextContent("Main Reserve");
+    expect(card).toHaveTextContent("500.00 ZKZ");
+
+    // Expand Worker Pool Drawer
+    expect(screen.queryByTestId("worker-pool-details")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("worker-pool-toggle"));
+    expect(await screen.findByTestId("worker-pool-details")).toHaveTextContent("Receive Worker Pool:");
+
+    // Open New Reserve Wallet Modal and submit
+    fireEvent.click(screen.getByTestId("new-reserve-wallet-btn"));
+    expect(await screen.findByTestId("new-reserve-wallet-modal")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("reserve-wallet-name-input"), { target: { value: "Savings Vault" } });
+    fireEvent.change(screen.getByTestId("reserve-wallet-totp-input"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByTestId("reserve-wallet-submit-btn"));
+
+    await waitFor(() => {
+      expect(postCalls).toHaveLength(1);
+    });
+    expect(postCalls[0]!.body).toMatchObject({
+      label: "Savings Vault",
+      display_name: "Savings Vault",
+      totp_code: "123456",
+    });
+    cleanup();
   });

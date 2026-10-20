@@ -2093,10 +2093,19 @@ function toApiKeyIssueResult(
 function parseReserveWalletBody(
   raw: unknown,
 ): ParseOk<{ readonly label: string }> | ParseFail {
-  if (!isRecord(raw) || typeof raw.label !== "string") {
+  if (!isRecord(raw)) {
     return { ok: false, status: 400, code: "validation_error", message: "label is required" };
   }
-  const label = raw.label.trim();
+  const rawLabel =
+    typeof raw.label === "string"
+      ? raw.label
+      : typeof raw.display_name === "string"
+        ? raw.display_name
+        : null;
+  if (rawLabel === null) {
+    return { ok: false, status: 400, code: "validation_error", message: "label is required" };
+  }
+  const label = rawLabel.trim();
   if (label.length < 1 || label.length > 128) {
     return {
       ok: false,
@@ -2106,6 +2115,110 @@ function parseReserveWalletBody(
     };
   }
   return { ok: true, body: { label } };
+}
+
+function parseOperatorReceiveBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly expected_amount_zkz: string;
+      readonly target_reserve_wallet_id: string | null;
+      readonly expires_in_seconds: number;
+    }>
+  | ParseFail {
+  if (!isRecord(raw) || typeof raw.expected_amount_zkz !== "string" || raw.expected_amount_zkz.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "expected_amount_zkz is required" };
+  }
+  const targetReserveWalletId =
+    typeof raw.target_reserve_wallet_id === "string" && raw.target_reserve_wallet_id.trim() !== ""
+      ? raw.target_reserve_wallet_id.trim()
+      : null;
+  const expiresInSeconds =
+    typeof raw.expires_in_seconds === "number" &&
+    Number.isInteger(raw.expires_in_seconds) &&
+    raw.expires_in_seconds >= 60 &&
+    raw.expires_in_seconds <= 86400
+      ? raw.expires_in_seconds
+      : 3600;
+  return {
+    ok: true,
+    body: {
+      expected_amount_zkz: raw.expected_amount_zkz.trim(),
+      target_reserve_wallet_id: targetReserveWalletId,
+      expires_in_seconds: expiresInSeconds,
+    },
+  };
+}
+
+function parseOperatorSendBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly source_reserve_wallet_id: string | null;
+      readonly recipient_wallet_address: string;
+      readonly amount_zkz: string;
+    }>
+  | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "validation_error", message: "request body must be an object" };
+  }
+  if (typeof raw.recipient_wallet_address !== "string" || raw.recipient_wallet_address.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "recipient_wallet_address is required" };
+  }
+  if (typeof raw.amount_zkz !== "string" || raw.amount_zkz.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "amount_zkz is required" };
+  }
+  const sourceReserveWalletId =
+    typeof raw.source_reserve_wallet_id === "string" && raw.source_reserve_wallet_id.trim() !== ""
+      ? raw.source_reserve_wallet_id.trim()
+      : null;
+  return {
+    ok: true,
+    body: {
+      source_reserve_wallet_id: sourceReserveWalletId,
+      recipient_wallet_address: raw.recipient_wallet_address.trim(),
+      amount_zkz: raw.amount_zkz.trim(),
+    },
+  };
+}
+
+function parseOperatorMoveBody(
+  raw: unknown,
+):
+  | ParseOk<{
+      readonly source_reserve_wallet_id: string;
+      readonly destination_reserve_wallet_id: string;
+      readonly amount_zkz: string;
+    }>
+  | ParseFail {
+  if (!isRecord(raw)) {
+    return { ok: false, status: 400, code: "validation_error", message: "request body must be an object" };
+  }
+  if (typeof raw.source_reserve_wallet_id !== "string" || raw.source_reserve_wallet_id.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "source_reserve_wallet_id is required" };
+  }
+  if (typeof raw.destination_reserve_wallet_id !== "string" || raw.destination_reserve_wallet_id.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "destination_reserve_wallet_id is required" };
+  }
+  if (raw.source_reserve_wallet_id.trim() === raw.destination_reserve_wallet_id.trim()) {
+    return {
+      ok: false,
+      status: 400,
+      code: "validation_error",
+      message: "source_reserve_wallet_id and destination_reserve_wallet_id must differ",
+    };
+  }
+  if (typeof raw.amount_zkz !== "string" || raw.amount_zkz.trim() === "") {
+    return { ok: false, status: 400, code: "validation_error", message: "amount_zkz is required" };
+  }
+  return {
+    ok: true,
+    body: {
+      source_reserve_wallet_id: raw.source_reserve_wallet_id.trim(),
+      destination_reserve_wallet_id: raw.destination_reserve_wallet_id.trim(),
+      amount_zkz: raw.amount_zkz.trim(),
+    },
+  };
 }
 
 function parseIssueReportingKeyBody(
@@ -2460,6 +2573,60 @@ function parseCeremonyStartBody(
   };
 }
 
+export interface OperatorActionRecord {
+  readonly operation_id: string;
+  readonly status: string;
+  readonly recipient_wallet_address: string | null;
+  readonly expected_amount_zkz: string | null;
+  readonly amount_zkz: string | null;
+  readonly transfer_code: string | null;
+  readonly expires_at: string | null;
+}
+
+export interface OperatorActionsStore {
+  createReceive(input: {
+    readonly nodeId: string;
+    readonly implementerId: string;
+    readonly idempotencyKey: string;
+    readonly expectedAmountZkz: string;
+    readonly expiresAt: string;
+    readonly targetReserveWalletId: string | null;
+  }): Promise<
+    | { readonly ok: true; readonly replayed?: boolean; readonly record: OperatorActionRecord }
+    | { readonly ok: false; readonly message: string }
+  >;
+  armReceive?(input: {
+    readonly nodeId: string;
+    readonly implementerId: string;
+    readonly operationId: string;
+  }): Promise<
+    | { readonly ok: true; readonly record: OperatorActionRecord }
+    | { readonly ok: false; readonly message: string }
+  >;
+  createExternalSend(input: {
+    readonly nodeId: string;
+    readonly implementerId: string;
+    readonly idempotencyKey: string;
+    readonly recipientAddress: string;
+    readonly amountZkz: string;
+    readonly sourceReserveWalletId: string | null;
+  }): Promise<
+    | { readonly ok: true; readonly replayed?: boolean; readonly record: OperatorActionRecord }
+    | { readonly ok: false; readonly message: string }
+  >;
+  createInternalTransfer(input: {
+    readonly nodeId: string;
+    readonly implementerId: string;
+    readonly idempotencyKey: string;
+    readonly destinationWalletId: string;
+    readonly recipientAddress: string;
+    readonly amountZkz: string;
+  }): Promise<
+    | { readonly ok: true; readonly replayed?: boolean; readonly record: OperatorActionRecord }
+    | { readonly ok: false; readonly message: string }
+  >;
+}
+
 export interface AdminRouteDeps {
   readonly sessions: AdminSessionService;
   readonly userStore: AdminUserStore;
@@ -2674,6 +2841,11 @@ export interface AdminRouteDeps {
    * fails closed (503). Never bypasses readiness gates.
    */
   readonly labReceive?: Pick<LabReceivePorts, "operationStore" | "reportingHandle" | "readyWaitMs" | "readyPollMs">;
+  /**
+   * Direct operator actions from the admin console (receives, sends, moves).
+   * When omitted, POST /admin/v1/operations/{receives,sends,moves} fail closed (503).
+   */
+  readonly operatorOperationStore?: OperatorActionsStore;
   /**
    * Mode A in-process recovery ceremony. When omitted,
    * POST/GET recovery-ceremony routes fail closed (503). Master key never
@@ -3486,6 +3658,71 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         return ok(200, page);
       } catch {
         return fail(503, "service_unavailable", "wallet inventory unavailable", requestId);
+      }
+    }
+
+    if (verb === "GET" && pathname === "/admin/v1/wallets/reserves") {
+      const gate = await gateMoneyMutation(sessions, authReq, { csrf, labTotp: labTotpOrNull(totp) });
+      if (!gate.ok) return authFail(gate, requestId);
+      try {
+        const page = await inventory.listWallets(nodeId, { limit: 200 });
+        const implementers =
+          deps.implementerRegistry !== undefined
+            ? await deps.implementerRegistry.list()
+            : [];
+        const reserves = page.data
+          .filter((w) => w.money_mode === "INTERNAL_ONLY")
+          .map((w) => {
+            const linked = implementers
+              .filter(
+                (c) =>
+                  c.funding_wallet_id === w.wallet_id ||
+                  (
+                    (c as { linked_reserve_wallet_ids?: readonly string[] }).linked_reserve_wallet_ids ?? []
+                  ).includes(w.wallet_id),
+              )
+              .map((c) => ({
+                implementer_id: c.id,
+                display_name: c.name,
+              }));
+            const label =
+              (w as { display_label?: string | null }).display_label ?? w.wallet_id;
+            return {
+              ...w,
+              display_name: label,
+              wallet_role: "RESERVE" as const,
+              linked_connectors: linked,
+            };
+          });
+        return ok(200, { data: reserves, has_more: false, next_cursor: null });
+      } catch {
+        return fail(503, "service_unavailable", "reserve wallet inventory unavailable", requestId);
+      }
+    }
+
+    if (verb === "GET" && pathname === "/admin/v1/wallets/worker-pool") {
+      const gate = await gateMoneyMutation(sessions, authReq, { csrf, labTotp: labTotpOrNull(totp) });
+      if (!gate.ok) return authFail(gate, requestId);
+      try {
+        const page = await inventory.listWallets(nodeId, { limit: 200 });
+        const workers = page.data.filter((w) => w.money_mode !== "INTERNAL_ONLY");
+        const receiveWorkers = workers.filter((w) => w.money_mode === "RECEIVE_ONLY");
+        const sendWorkers = workers.filter((w) => w.money_mode === "SEND_ONLY");
+        return ok(200, {
+          receive_workers: {
+            total: receiveWorkers.length,
+            available: receiveWorkers.filter((w) => w.state === "AVAILABLE").length,
+            assigned: receiveWorkers.filter((w) => w.state === "PINNED").length,
+          },
+          send_workers: {
+            total: sendWorkers.length,
+            available: sendWorkers.filter((w) => w.state === "AVAILABLE").length,
+            assigned: sendWorkers.filter((w) => w.state === "PINNED").length,
+          },
+          data: workers,
+        });
+      } catch {
+        return fail(503, "service_unavailable", "worker pool inventory unavailable", requestId);
       }
     }
 
@@ -7732,9 +7969,12 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
       });
     }
 
-    // POST /admin/v1/reserve-wallets — one named INTERNAL_ONLY reserve.
+    // POST /admin/v1/reserve-wallets (or /admin/v1/wallets/reserves) — one named INTERNAL_ONLY reserve.
     // Session+CSRF+fresh TOTP. Does not change the node-wide default funding wallet.
-    if (verb === "POST" && pathname === "/admin/v1/reserve-wallets") {
+    if (
+      verb === "POST" &&
+      (pathname === "/admin/v1/reserve-wallets" || pathname === "/admin/v1/wallets/reserves")
+    ) {
       if (deps.mintNamedReserveWallet === undefined) {
         return fail(503, "service_unavailable", "reserve wallet mint not wired", requestId);
       }
@@ -7819,6 +8059,202 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
         } catch {
           return fail(409, "idempotency_conflict", "concurrent same-key reserve mint", requestId);
         }
+      }
+      return ok(201, guarded.result);
+    }
+
+    // POST /admin/v1/operations/receives — direct operator receive from Admin Console.
+    if (verb === "POST" && pathname === "/admin/v1/operations/receives") {
+      const opStore = deps.operatorOperationStore;
+      if (opStore === undefined) {
+        return fail(503, "service_unavailable", "operator receive store not wired", requestId);
+      }
+      const idemKey = headers["idempotency-key"];
+      if (idemKey === undefined || !/^[!-~]{16,255}$/.test(idemKey)) {
+        return fail(
+          400,
+          "invalid_idempotency_key",
+          "Idempotency-Key (16-255 visible ASCII) required",
+          requestId,
+        );
+      }
+      const guarded = await runGuardedAdminMutation({
+        sessions,
+        request: authReq,
+        csrf,
+        totp: labTotpOrNull(totp),
+        userStore: deps.userStore,
+        totpLog,
+        nodeId,
+        rawBody: parsedBody,
+        validateBody: parseOperatorReceiveBody,
+        nowMs: nowMs(),
+        mutate: async ({ body }) => {
+          const expiresAt = new Date(nowMs() + body.expires_in_seconds * 1000).toISOString();
+          const created = await opStore.createReceive({
+            nodeId,
+            implementerId: "operator-console",
+            idempotencyKey: idemKey,
+            expectedAmountZkz: body.expected_amount_zkz,
+            expiresAt,
+            targetReserveWalletId: body.target_reserve_wallet_id,
+          });
+          if (!created.ok) {
+            throw new Error(created.message);
+          }
+          const armed =
+            opStore.armReceive !== undefined
+              ? await opStore.armReceive({
+                  nodeId,
+                  implementerId: "operator-console",
+                  operationId: created.record.operation_id,
+                })
+              : null;
+          const record = armed !== null && armed.ok ? armed.record : created.record;
+          return {
+            operation_id: record.operation_id,
+            status: record.status,
+            expected_amount_zkz: record.expected_amount_zkz,
+            recipient_wallet_address: record.recipient_wallet_address,
+            transfer_code: record.transfer_code,
+            expires_at: record.expires_at,
+            target_reserve_wallet_id: body.target_reserve_wallet_id,
+            pay_url: `/pay/${record.operation_id}`,
+          };
+        },
+      });
+      if (!guarded.ok) {
+        return fail(guarded.status, guarded.code, guarded.message, requestId);
+      }
+      return ok(201, guarded.result);
+    }
+
+    // POST /admin/v1/operations/sends — direct operator external send from Admin Console.
+    // Because the operator is already authenticated with session + CSRF + fresh TOTP,
+    // the operation is created and immediately approved.
+    if (verb === "POST" && pathname === "/admin/v1/operations/sends") {
+      const opStore = deps.operatorOperationStore;
+      if (opStore === undefined) {
+        return fail(503, "service_unavailable", "operator send store not wired", requestId);
+      }
+      const idemKey = headers["idempotency-key"];
+      if (idemKey === undefined || !/^[!-~]{16,255}$/.test(idemKey)) {
+        return fail(
+          400,
+          "invalid_idempotency_key",
+          "Idempotency-Key (16-255 visible ASCII) required",
+          requestId,
+        );
+      }
+      const guarded = await runGuardedAdminMutation({
+        sessions,
+        request: authReq,
+        csrf,
+        totp: labTotpOrNull(totp),
+        userStore: deps.userStore,
+        totpLog,
+        nodeId,
+        rawBody: parsedBody,
+        validateBody: parseOperatorSendBody,
+        nowMs: nowMs(),
+        mutate: async ({ body, user }) => {
+          const created = await opStore.createExternalSend({
+            nodeId,
+            implementerId: "operator-console",
+            idempotencyKey: idemKey,
+            recipientAddress: body.recipient_wallet_address,
+            amountZkz: body.amount_zkz,
+            sourceReserveWalletId: body.source_reserve_wallet_id,
+          });
+          if (!created.ok) {
+            throw new Error(created.message);
+          }
+          let status = created.record.status;
+          try {
+            const approved = await deps.sendDecisionStore.approveCreated({
+              operationId: created.record.operation_id,
+              actorUserId: user.id,
+              totpVerifiedAt: new Date(nowMs()),
+              idempotencyKey: `${idemKey}:approve`,
+              now: new Date(nowMs()),
+            } as unknown as Parameters<typeof deps.sendDecisionStore.approveCreated>[0]);
+            if (approved !== null) {
+              status = "APPROVED";
+            }
+          } catch {
+            // If sendDecisionStore is fail-closed in a minimal test rig, keep created status.
+          }
+          return {
+            operation_id: created.record.operation_id,
+            status,
+            recipient_wallet_address: created.record.recipient_wallet_address,
+            amount_zkz: created.record.amount_zkz,
+            source_reserve_wallet_id: body.source_reserve_wallet_id,
+          };
+        },
+      });
+      if (!guarded.ok) {
+        return fail(guarded.status, guarded.code, guarded.message, requestId);
+      }
+      return ok(201, guarded.result);
+    }
+
+    // POST /admin/v1/operations/moves — direct internal transfer between two Reserve Wallets.
+    if (verb === "POST" && pathname === "/admin/v1/operations/moves") {
+      const opStore = deps.operatorOperationStore;
+      if (opStore === undefined) {
+        return fail(503, "service_unavailable", "operator move store not wired", requestId);
+      }
+      const idemKey = headers["idempotency-key"];
+      if (idemKey === undefined || !/^[!-~]{16,255}$/.test(idemKey)) {
+        return fail(
+          400,
+          "invalid_idempotency_key",
+          "Idempotency-Key (16-255 visible ASCII) required",
+          requestId,
+        );
+      }
+      const guarded = await runGuardedAdminMutation({
+        sessions,
+        request: authReq,
+        csrf,
+        totp: labTotpOrNull(totp),
+        userStore: deps.userStore,
+        totpLog,
+        nodeId,
+        rawBody: parsedBody,
+        validateBody: parseOperatorMoveBody,
+        nowMs: nowMs(),
+        mutate: async ({ body }) => {
+          const destWallet = await inventory.getWallet(nodeId, body.destination_reserve_wallet_id);
+          if (destWallet === null || destWallet.money_mode !== "INTERNAL_ONLY") {
+            throw new Error("destination reserve wallet not found");
+          }
+          const destAddress =
+            (destWallet as { address?: string }).address ?? destWallet.public_key;
+          const created = await opStore.createInternalTransfer({
+            nodeId,
+            implementerId: "operator-console",
+            idempotencyKey: idemKey,
+            destinationWalletId: destWallet.wallet_id,
+            recipientAddress: destAddress,
+            amountZkz: body.amount_zkz,
+          });
+          if (!created.ok) {
+            throw new Error(created.message);
+          }
+          return {
+            operation_id: created.record.operation_id,
+            status: created.record.status,
+            source_reserve_wallet_id: body.source_reserve_wallet_id,
+            destination_reserve_wallet_id: destWallet.wallet_id,
+            recipient_wallet_address: destAddress,
+            amount_zkz: created.record.amount_zkz,
+          };
+        },
+      });
+      if (!guarded.ok) {
+        return fail(guarded.status, guarded.code, guarded.message, requestId);
       }
       return ok(201, guarded.result);
     }
@@ -8715,6 +9151,7 @@ export function createFailClosedAdminRouteDeps(base: {
   readonly reportingCredentialService?: ReportingCredentialService;
   readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
   readonly labReceive?: AdminRouteDeps["labReceive"];
+  readonly operatorOperationStore?: AdminRouteDeps["operatorOperationStore"];
   readonly effectiveConfig?: AdminRouteDeps["effectiveConfig"];
   readonly recoveryCeremonyRunner?: AdminRouteDeps["recoveryCeremonyRunner"];
   readonly recoveryPackLockoutStore?: RecoveryPackLockoutStore;
@@ -8812,6 +9249,7 @@ export function createFailClosedAdminRouteDeps(base: {
     backupMasterKey: base.backupMasterKey,
     setupSignals: base.setupSignals,
     labReceive: base.labReceive,
+    operatorOperationStore: base.operatorOperationStore,
   };
 }
 
@@ -8863,6 +9301,7 @@ export function createLiveAdminRouteDeps(
     readonly reportingCredentialService?: ReportingCredentialService;
     readonly readinessProbe?: AdminRouteDeps["readinessProbe"];
     readonly labReceive?: AdminRouteDeps["labReceive"];
+    readonly operatorOperationStore?: AdminRouteDeps["operatorOperationStore"];
     readonly effectiveConfig?: AdminRouteDeps["effectiveConfig"];
     readonly recoveryCeremonyRunner?: AdminRouteDeps["recoveryCeremonyRunner"];
     readonly recoveryPackLockoutStore?: RecoveryPackLockoutStore;

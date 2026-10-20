@@ -372,6 +372,15 @@ export const SIGN_CALL_SITE_CATALOGUE: readonly CallSiteRecord[] = [
     countedBy: "one EVENT_SIGNING signature per durable event per chain",
   },
   {
+    file: "events/webhook-dispatcher.ts",
+    token: "sign(",
+    // WebhookSigner.sign decl + one node-identity signature per enqueued webhook payload
+    // (zp-webhook-event-v1). Never a SplitChain transaction.
+    occurrences: 2,
+    role: "NON_TRANSACTION_SIGNER",
+    countedBy: "one node-identity signature per enqueued webhook payload",
+  },
+  {
     file: "operator/halt-gate.ts",
     token: "sign(",
     // SignRequest seam decl + delegate.sign call

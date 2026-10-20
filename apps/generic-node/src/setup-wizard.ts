@@ -1159,8 +1159,13 @@ export function collectSetupSecretLeaks(value: unknown, path = "$"): string[] {
   if (typeof value === "string") {
     if (/(?:^|[^a-z])ik_[a-z0-9_-]{8,}/i.test(value)) hits.push(`${path}=ik_prefix`);
     if (/(?:^|[^a-z])sh_[a-z0-9_-]{8,}/i.test(value)) hits.push(`${path}=sh_prefix`);
-    // Long high-entropy strings that look like raw keys (not fingerprints/ISO dates).
-    if (value.length >= 32 && /^[A-Za-z0-9+/=_-]{32,}$/.test(value) && !/^[0-9a-f]{12,64}$/i.test(value)) {
+    // Long high-entropy strings that look like raw keys (not fingerprints/ISO dates/public wallet addresses).
+    if (
+      path !== "$.mainReserveAddress" &&
+      value.length >= 32 &&
+      /^[A-Za-z0-9+/=_-]{32,}$/.test(value) &&
+      !/^[0-9a-f]{12,64}$/i.test(value)
+    ) {
       // Allow ISO timestamps and short digests already covered.
       if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) {
         hits.push(`${path}=long_secret_shaped_string`);

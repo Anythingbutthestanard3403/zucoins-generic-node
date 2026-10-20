@@ -58,6 +58,9 @@ const ApiKeysPage = lazy(() => import("./pages/api-keys/ApiKeysPage.js").then((m
 const IntegrationsPage = lazy(() =>
   import("./pages/integrations/IntegrationsPage.js").then((m) => ({ default: m.IntegrationsPage })),
 );
+const ConnectorsPage = lazy(() =>
+  import("./pages/connectors/ConnectorsPage.js").then((m) => ({ default: m.ConnectorsPage })),
+);
 const AutoApprovePolicyPage = lazy(() =>
   import("./pages/auto-approve/AutoApprovePolicyPage.js").then((m) => ({
     default: m.AutoApprovePolicyPage,
@@ -310,7 +313,7 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="/operations/:id" element={<OperationDetailPage />} />
                   <Route path="/wallets" element={<WalletsPage />} />
                   <Route path="/wallets/:pubkey" element={<WalletDetailPage />} />
-                  <Route path="/connectors" element={<IntegrationsPage />} />
+                  <Route path="/connectors" element={<ConnectorsPage />} />
                   <Route path="/transfers" element={<TransfersPage />} />
                   <Route path="/transfers/:id" element={<TransferDetailPage />} />
                   <Route path="/audit" element={<AuditPage />} />

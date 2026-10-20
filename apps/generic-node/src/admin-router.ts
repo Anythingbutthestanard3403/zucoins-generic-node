@@ -2618,6 +2618,7 @@ export interface OperatorActionsStore {
     readonly nodeId: string;
     readonly implementerId: string;
     readonly idempotencyKey: string;
+    readonly sourceReserveWalletId?: string | null;
     readonly destinationWalletId: string;
     readonly recipientAddress: string;
     readonly amountZkz: string;
@@ -8236,6 +8237,7 @@ export function createAdminRouter(deps: AdminRouteDeps): AdminRouter {
             nodeId,
             implementerId: "operator-console",
             idempotencyKey: idemKey,
+            sourceReserveWalletId: body.source_reserve_wallet_id,
             destinationWalletId: destWallet.wallet_id,
             recipientAddress: destAddress,
             amountZkz: body.amount_zkz,

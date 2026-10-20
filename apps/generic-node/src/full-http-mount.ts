@@ -464,6 +464,8 @@ export interface ProductionSurfaceConfig {
   readonly effectiveConfig?: AdminRouteDeps["effectiveConfig"];
   /** Lab receive ports — operation store + reporting ARM handle. */
   readonly labReceive?: AdminRouteDeps["labReceive"];
+  /** Direct operator actions store (GN-404). Defaults to labReceive.operationStore adapter. */
+  readonly operatorOperationStore?: AdminRouteDeps["operatorOperationStore"];
 }
 
 /**
@@ -948,6 +950,177 @@ export function createProductionRouteSurface(
   const adminWebhookDeliveryStore = createSqlWebhookDeliveryStore(poolSqlExecutor);
   const connectorReadStore = createSqlConnectorReadStore(poolSqlExecutor);
 
+  const resolveOrCreateOperatorImplementerId = async (): Promise<string> => {
+    const existing = await resolveImplementerId();
+    if (existing !== null) return existing;
+    const genesis = await implementerRegistry.resolveGenesisId();
+    if (genesis !== null) return genesis;
+    const created = await implementerRegistry.create({
+      name: "operator-console",
+      nodeId: config.nodeId,
+      actorId: "operator-console",
+    });
+    return created.id;
+  };
+
+  const liveOperatorOperationStore: AdminRouteDeps["operatorOperationStore"] =
+    config.operatorOperationStore ??
+    (config.labReceive === undefined
+      ? undefined
+      : {
+          createReceive: async (input) => {
+            try {
+              const implementerId = await resolveOrCreateOperatorImplementerId();
+              let afterLanding: {
+                readonly kind: "HOLD" | "INTERNAL_MOVE";
+                readonly destination_id: string | null;
+              } = { kind: "HOLD", destination_id: null };
+              if (input.targetReserveWalletId !== null && input.targetReserveWalletId.length > 0) {
+                const destRes = await config.pool.query<{ id: string }>(
+                  `SELECT id::text AS id FROM destinations WHERE node_id = $1::uuid AND wallet_id = $2::uuid AND state = 'BLESSED' LIMIT 1`,
+                  [config.nodeId, input.targetReserveWalletId],
+                );
+                const destId = destRes.rows[0]?.id ?? null;
+                if (destId !== null) {
+                  afterLanding = { kind: "INTERNAL_MOVE", destination_id: destId };
+                }
+              }
+              const parsedExpiryMs = Date.parse(input.expiresAt);
+              const expiresInSeconds = Number.isFinite(parsedExpiryMs)
+                ? Math.max(60, Math.min(86_400, Math.round((parsedExpiryMs - nowMs()) / 1000)))
+                : 900;
+              const created = await config.labReceive!.operationStore.createReceive({
+                amount_zkz: input.expectedAmountZkz,
+                anchor: `op-recv-${nowMs().toString(36)}-${randomUUID().slice(0, 8)}`,
+                expires_in_seconds: expiresInSeconds,
+                after_landing: afterLanding,
+                verification_mode: "NODE_VERIFIED",
+                idempotencyKey: input.idempotencyKey,
+                implementerId,
+              });
+              let body = created.body;
+              const deadline = nowMs() + 2500;
+              while (
+                (body.receiver_pubkey === null || body.transfer_code === null) &&
+                nowMs() < deadline
+              ) {
+                await new Promise((r) => setTimeout(r, 150));
+                const latest = await config.labReceive!.operationStore.getReceive(
+                  body.operation.operation_id,
+                  implementerId,
+                );
+                if (latest !== null) body = latest;
+              }
+              return {
+                ok: true as const,
+                replayed: created.idempotentReplay === true,
+                record: {
+                  operation_id: body.operation.operation_id,
+                  status: body.operation.state,
+                  recipient_wallet_address: body.receiver_pubkey,
+                  expected_amount_zkz: body.operation.amount_zkz,
+                  amount_zkz: null,
+                  transfer_code: body.transfer_code,
+                  expires_at: body.expires_at,
+                },
+              };
+            } catch (err) {
+              return {
+                ok: false as const,
+                message: err instanceof Error ? err.message : "operator receive create failed",
+              };
+            }
+          },
+          createExternalSend: async (input) => {
+            try {
+              const implementerId = await resolveOrCreateOperatorImplementerId();
+              if (input.sourceReserveWalletId !== null && input.sourceReserveWalletId.length > 0) {
+                await implementerRegistry.setFundingWallet({
+                  implementerId,
+                  nodeId: config.nodeId,
+                  actorId: "operator-console",
+                  mode: "WALLET_ID",
+                  walletId: input.sourceReserveWalletId,
+                });
+              }
+              const created = await config.labReceive!.operationStore.createExternalSend({
+                destination_address: input.recipientAddress,
+                amount_zkz: input.amountZkz,
+                verification_mode: "NODE_VERIFIED",
+                idempotencyKey: input.idempotencyKey,
+                implementerId,
+              });
+              return {
+                ok: true as const,
+                replayed: created.idempotentReplay === true,
+                record: {
+                  operation_id: created.body.operation.operation_id,
+                  status: created.body.operation.state,
+                  recipient_wallet_address: created.body.destination_address,
+                  expected_amount_zkz: null,
+                  amount_zkz: created.body.operation.amount_zkz,
+                  transfer_code: created.body.transfer_code,
+                  expires_at: created.body.available_until,
+                },
+              };
+            } catch (err) {
+              return {
+                ok: false as const,
+                message: err instanceof Error ? err.message : "operator external send failed",
+              };
+            }
+          },
+          createInternalTransfer: async (input) => {
+            try {
+              const implementerId = await resolveOrCreateOperatorImplementerId();
+              const destRes = await config.pool.query<{ id: string }>(
+                `SELECT id::text AS id FROM destinations WHERE node_id = $1::uuid AND wallet_id = $2::uuid AND state = 'BLESSED' LIMIT 1`,
+                [config.nodeId, input.destinationWalletId],
+              );
+              const destinationId = destRes.rows[0]?.id ?? null;
+              if (destinationId === null) {
+                return {
+                  ok: false as const,
+                  message: "destination reserve wallet has no blessed destination",
+                };
+              }
+              const sourceWalletId = input.sourceReserveWalletId ?? "";
+              if (sourceWalletId.length === 0) {
+                return {
+                  ok: false as const,
+                  message: "source_reserve_wallet_id is required",
+                };
+              }
+              const created = await config.labReceive!.operationStore.createInternalMove({
+                source_wallet_id: sourceWalletId,
+                destination_id: destinationId,
+                amount_zkz: input.amountZkz,
+                verification_mode: "NODE_VERIFIED",
+                idempotencyKey: input.idempotencyKey,
+                implementerId,
+              });
+              return {
+                ok: true as const,
+                replayed: created.idempotentReplay === true,
+                record: {
+                  operation_id: created.body.operation.operation_id,
+                  status: created.body.operation.state,
+                  recipient_wallet_address: input.recipientAddress,
+                  expected_amount_zkz: null,
+                  amount_zkz: created.body.operation.amount_zkz,
+                  transfer_code: null,
+                  expires_at: null,
+                },
+              };
+            } catch (err) {
+              return {
+                ok: false as const,
+                message: err instanceof Error ? err.message : "operator internal transfer failed",
+              };
+            }
+          },
+        });
+
   const baseDeps = {
     sessions,
     userStore,
@@ -986,6 +1159,7 @@ export function createProductionRouteSurface(
     readinessProbe: config.readinessProbe,
     effectiveConfig: config.effectiveConfig,
     labReceive: config.labReceive,
+    operatorOperationStore: liveOperatorOperationStore,
     recoveryCeremonyRunner:
       config.databaseUrl !== undefined && config.databaseUrl.length > 0
         ? { databaseUrl: config.databaseUrl, liveSql: config.pool }

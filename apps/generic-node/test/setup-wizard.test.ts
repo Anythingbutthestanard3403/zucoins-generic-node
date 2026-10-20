@@ -578,5 +578,20 @@ describe("streamlined 3-step Day-0 funnel (GN-401: account -> vault -> ready)", 
       }),
     ).toThrow(/vault must be initialized/i);
   });
+
+  it("allows canonical UUID mainReserveWalletId and public key mainReserveAddress in /admin/v1/setup/status", () => {
+    const statusPayload = {
+      setupComplete: true,
+      passkeyEnrolled: true,
+      vaultInitialized: true,
+      mainReserveWalletId: "c682e46f-9464-4806-b62c-03516f51fd0a",
+      mainReserveAddress: "t1_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCdEf",
+      backupDownloaded: true,
+      funnel_step: "ready",
+      next_step: "home",
+    };
+    expect(collectSetupSecretLeaks(statusPayload)).toEqual([]);
+    assertSetupSecretFree(statusPayload);
+  });
 });
 

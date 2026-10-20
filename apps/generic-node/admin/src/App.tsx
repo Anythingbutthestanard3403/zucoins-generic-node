@@ -45,49 +45,45 @@ const HEALTH_TEXT_CLASS: Record<NodeHealthUiState, string> = {
   offline: "danger",
 };
 
-/** Production shell sections — Approve inbox / Operations / money rails / vault. */
-export function buildSections(approveBadge: number | undefined): NavSec[] {
+/** Production shell sections — 5 consolidated task-oriented sections (GN-402 / ZTR-1340). */
+export function buildSections(
+  approveBadge: number | undefined,
+  connectorBadge?: number,
+): NavSec[] {
   return [
     {
-      title: "Command",
+      title: "Console",
       items: [
-        { to: "/", label: "Overview", icon: <IconGrid />, end: true },
         {
-          to: "/approve",
-          label: "Approve",
-          icon: <IconClipboard />,
+          to: "/",
+          label: "Overview",
+          icon: <IconGrid />,
+          end: true,
           badge: approveBadge !== undefined && approveBadge > 0 ? approveBadge : undefined,
           badgeHot: approveBadge !== undefined && approveBadge > 0,
         },
         {
-          to: "/operations",
-          label: "Operations",
-          icon: <IconAlert />,
+          to: "/wallets",
+          label: "Wallets",
+          icon: <IconWallet />,
         },
-      ],
-    },
-    {
-      title: "Custody",
-      items: [
-        { to: "/wallets", label: "Wallets", icon: <IconWallet /> },
-        { to: "/transfers", label: "Transfers", icon: <IconArrow /> },
-        { to: "/destinations", label: "Destinations", icon: <IconTarget /> },
-      ],
-    },
-    {
-      title: "Vault",
-      items: [
-        { to: "/backup", label: "Backup", icon: <IconLock /> },
-        { to: "/recovery-ceremony", label: "Recovery", icon: <IconKey /> },
-        { to: "/api-keys", label: "Keys", icon: <IconKey /> },
-        { to: "/integrations", label: "Integrations", icon: <IconGrid /> },
-        { to: "/auto-approve", label: "Auto-approve", icon: <IconClipboard /> },
-        { to: "/verification-mode", label: "Node-verified", icon: <IconClipboard /> },
-        { to: "/devices", label: "Devices", icon: <IconLock /> },
-        { to: "/reporting-keys", label: "Reporting", icon: <IconBell /> },
-        { to: "/integration", label: "Connect", icon: <IconFile /> },
-        { to: "/audit", label: "Audit", icon: <IconFile /> },
-        { to: "/settings", label: "Settings", icon: <IconSettings /> },
+        {
+          to: "/connectors",
+          label: "Connectors",
+          icon: <IconKey />,
+          badge: connectorBadge !== undefined && connectorBadge > 0 ? connectorBadge : undefined,
+          badgeHot: connectorBadge !== undefined && connectorBadge > 0,
+        },
+        {
+          to: "/activity",
+          label: "Activity",
+          icon: <IconClipboard />,
+        },
+        {
+          to: "/settings",
+          label: "Settings",
+          icon: <IconSettings />,
+        },
       ],
     },
   ];

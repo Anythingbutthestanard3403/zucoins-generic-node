@@ -305,10 +305,12 @@ createRoot(document.getElementById("root")!).render(
                 <Route element={<RequireAuth><App /></RequireAuth>}>
                   <Route path="/" element={<OverviewPage />} />
                   <Route path="/approve" element={<ApproveInboxPage />} />
+                  <Route path="/activity" element={<OperationsPage />} />
                   <Route path="/operations" element={<OperationsPage />} />
                   <Route path="/operations/:id" element={<OperationDetailPage />} />
                   <Route path="/wallets" element={<WalletsPage />} />
                   <Route path="/wallets/:pubkey" element={<WalletDetailPage />} />
+                  <Route path="/connectors" element={<IntegrationsPage />} />
                   <Route path="/transfers" element={<TransfersPage />} />
                   <Route path="/transfers/:id" element={<TransferDetailPage />} />
                   <Route path="/audit" element={<AuditPage />} />

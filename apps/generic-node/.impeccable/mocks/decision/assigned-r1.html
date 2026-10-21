@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0}body{width:1440px;height:900px;overflow:hidden;background:#FAFAF7;color:#1B1B1B;font:14px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:228px 1fr;font-variant-numeric:tabular-nums}
+.rail{background:#6E1E2A;color:#F6ECEE;padding:22px 12px;display:flex;flex-direction:column;gap:2px}
+.mark{font-weight:800;font-size:22px;letter-spacing:-.01em;margin:0 10px 28px}.mark span{font-weight:400;opacity:.7}
+.nav{display:flex;align-items:center;gap:10px;padding:10px;font-weight:600;font-size:15px;color:#E9CDD2}.nav i{width:4px;height:18px;background:var(--h)}
+.nav.on{background:#FAFAF7;color:#6E1E2A}.c{margin-left:auto;background:#B7791F;color:#fff;font-size:12px;font-weight:700;padding:1px 7px}
+.rf{margin-top:auto;font-size:12px;color:#E9CDD2;border-top:1px solid #ffffff33;padding:12px 10px}
+.top{height:58px;display:flex;align-items:center;gap:16px;padding:0 30px;border-bottom:1px solid #E1DDD6}
+.body{padding:24px 30px;display:grid;grid-template-columns:1fr 340px;gap:24px;align-content:start}
+h1{font-size:28px;font-weight:750;letter-spacing:-.02em}h2{font-size:17px;font-weight:700}
+.hr{border-top:3px solid #6E1E2A;padding-top:10px;display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+table{width:100%;border-collapse:collapse}th{text-align:left;font-size:12px;font-weight:600;color:#6B6660;border-bottom:1px solid #1B1B1B;padding:7px 8px}
+td{padding:11px 8px;border-bottom:1px solid #E1DDD6;font-size:14px}td.n{text-align:right;font-weight:600}
+sup{font-size:10px;font-weight:700;margin-left:2px;color:#B7791F}sup.v{color:#2D6A4F}
+.fn{font-size:12px;color:#6B6660;padding-top:8px;border-top:1px solid #1B1B1B}
+.btn{font-weight:700;padding:8px 14px;background:#1B1B1B;color:#fff;display:inline-block}.btn.o{background:none;border:1px solid #1B1B1B;color:#1B1B1B}
+.bar{height:6px;background:#F3DDE0}.bar b{display:block;height:6px;background:#6E1E2A}
+.halt{border:2px solid #1B1B1B;padding:18px}.halt .btn{background:#9B1C1C;margin-top:14px;display:block;text-align:center}
+.fig{grid-column:1/-1;display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;border-top:3px solid #6E1E2A;border-bottom:1px solid #1B1B1B}
+.fig>div{padding:14px 16px;border-right:1px solid #E1DDD6}.k{font-size:12px;color:#6B6660;font-weight:600}.big{font-size:40px;font-weight:750;letter-spacing:-.03em;margin-top:4px}.mid{font-size:28px;font-weight:700;margin-top:4px}
+</style></head><body>
+<aside class="rail"><div class="mark">Zu <span>Node</span></div>
+<div class="nav on" style="--h:#6E1E2A"><i></i>Overview<span class="c">3</span></div><div class="nav" style="--h:#D9A441"><i></i>Wallets</div><div class="nav" style="--h:#7FB7A4"><i></i>Connectors</div><div class="nav" style="--h:#8FA8D8"><i></i>Activity</div><div class="nav" style="--h:#C9C3BA"><i></i>Settings</div>
+<div class="rf">Node ready · v0.9.4<br>Last chain read 03:14:07</div></aside>
+<div><header class="top"><b>node-eu1.zucoins.net</b><span style="color:#2D6A4F;font-weight:600">● Healthy</span><span style="flex:1"></span><span>riley</span></header>
+<div class="body">
+<section><div class="hr"><h1>Waiting on you</h1><span class="btn o">Open approve inbox</span></div>
+<table><thead><tr><th>Operation</th><th>Wallet</th><th>Counterparty</th><th style="text-align:right">Amount</th><th>Elapsed</th><th></th></tr></thead><tbody>
+<tr><td><b>Send external</b></td><td>RES-1</td><td>7XQ4…M2PA</td><td class="n">1,250.00<sup>p</sup></td><td><div class="bar"><b style="width:30%"></b></div></td><td><span class="btn">Review</span></td></tr>
+<tr><td><b>Send external</b></td><td>RES-1</td><td>9KD1…ZZ03</td><td class="n">84.20<sup>p</sup></td><td><div class="bar"><b style="width:45%"></b></div></td><td><span class="btn">Review</span></td></tr>
+<tr><td><b>Move internal</b></td><td>HUB-A</td><td>RES-2</td><td class="n">5,000.00<sup>p</sup></td><td><div class="bar"><b style="width:80%"></b></div></td><td><span class="btn">Review</span></td></tr>
+</tbody></table><p class="fn">p provisional: filed, not yet read from chain · v verified by fresh chain read</p></section>
+<aside class="halt"><h2>Money halt is clear</h2><p style="color:#6B6660;margin-top:6px">Engaging halt stops every signer on this node. Requires TOTP.</p><span class="btn">Engage halt</span></aside>
+<div class="fig"><div><div class="k">Reserve balance</div><div class="big">482,913.40<sup class="v">v</sup></div><div class="k">read 03:14:07</div></div>
+<div><div class="k">Receive · 24h</div><div class="mid">12</div><div class="k">8 settled<sup class="v">v</sup></div></div>
+<div><div class="k">Move · 24h</div><div class="mid">4</div><div class="k">2 in flight<sup>p</sup></div></div>
+<div><div class="k">Send · 24h</div><div class="mid">7</div><div class="k" style="color:#9B1C1C">1 indeterminate</div></div></div>
+</div></div></body></html>

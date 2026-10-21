@@ -1,0 +1,973 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T07:13:18+00:00",
+  "title": "Design System: Zu Node",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "#0f1013",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242528",
+          "#414245",
+          "#606165",
+          "#818286",
+          "#a4a5a8",
+          "#c8c9cb",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(17.3% 0.006 271)"
+      },
+      "ground-soft": {
+        "role": "neutral",
+        "displayName": "Ground Soft",
+        "canonical": "#131417",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242527",
+          "#414245",
+          "#606165",
+          "#818286",
+          "#a4a5a8",
+          "#c8c9cb",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(19.1% 0.006 271)"
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail",
+        "canonical": "#0c0d10",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242528",
+          "#414245",
+          "#606165",
+          "#818286",
+          "#a4a5a8",
+          "#c8c9cb",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(15.9% 0.007 271)"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#17181c",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242528",
+          "#414246",
+          "#606166",
+          "#818287",
+          "#a4a5a9",
+          "#c8c9cc",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(21.0% 0.008 275)"
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface Raised",
+        "canonical": "#1e1f24",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242529",
+          "#414247",
+          "#606167",
+          "#818288",
+          "#a4a5aa",
+          "#c8c9cd",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(24.0% 0.010 277)"
+      },
+      "surface-high": {
+        "role": "neutral",
+        "displayName": "Surface High",
+        "canonical": "#27282e",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#242529",
+          "#404248",
+          "#5f6168",
+          "#818289",
+          "#a3a5ab",
+          "#c8c9cd",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(27.8% 0.011 278)"
+      },
+      "hover-wash": {
+        "role": "neutral",
+        "displayName": "Hover Wash",
+        "canonical": "rgba(255, 255, 255, .035)",
+        "theme": "dark"
+      },
+      "press-wash": {
+        "role": "neutral",
+        "displayName": "Press Wash",
+        "canonical": "rgba(255, 255, 255, .06)",
+        "theme": "dark"
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(255, 255, 255, .07)",
+        "theme": "dark"
+      },
+      "hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "rgba(255, 255, 255, .11)",
+        "theme": "dark"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#edeef0",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#242526",
+          "#414243",
+          "#606163",
+          "#818284",
+          "#a4a5a6",
+          "#c8c9ca",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(94.9% 0.003 265)"
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#b0b2ba",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#24252a",
+          "#404248",
+          "#5f6168",
+          "#808289",
+          "#a3a5ab",
+          "#c8c9cd",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(76.4% 0.012 275)"
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#8a8d97",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#23252b",
+          "#3f424a",
+          "#5e616a",
+          "#7f828b",
+          "#a2a5ad",
+          "#c7c9cf",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(64.4% 0.015 273)"
+      },
+      "ink-4": {
+        "role": "neutral",
+        "displayName": "Ink 4",
+        "canonical": "#62656f",
+        "theme": "dark",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#23252b",
+          "#3f424a",
+          "#5e616b",
+          "#7f828c",
+          "#a2a5ad",
+          "#c7c9cf",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(50.8% 0.016 272)"
+      },
+      "signal-teal": {
+        "role": "primary",
+        "displayName": "Signal Teal",
+        "canonical": "#3dd6c6",
+        "theme": "dark",
+        "tonalRamp": [
+          "#00120f",
+          "#00322b",
+          "#00544a",
+          "#00776a",
+          "#00998b",
+          "#4cbaad",
+          "#95d8cf",
+          "#def4f0"
+        ],
+        "oklch": "oklch(79.4% 0.126 185)"
+      },
+      "signal-teal-hover": {
+        "role": "primary",
+        "displayName": "Signal Teal Hover",
+        "canonical": "#5fe2d4",
+        "theme": "dark",
+        "tonalRamp": [
+          "#00120f",
+          "#00322b",
+          "#00534a",
+          "#00756b",
+          "#00978c",
+          "#56b8ad",
+          "#99d7cf",
+          "#dff4f0"
+        ],
+        "oklch": "oklch(83.6% 0.117 186)"
+      },
+      "signal-teal-ink": {
+        "role": "primary",
+        "displayName": "Signal Teal Ink",
+        "canonical": "#03201c",
+        "theme": "dark",
+        "tonalRamp": [
+          "#030e0c",
+          "#152a26",
+          "#2d4843",
+          "#4a6863",
+          "#6c8984",
+          "#92aba6",
+          "#bcceca",
+          "#eaf0ef"
+        ],
+        "oklch": "oklch(22.0% 0.036 182)"
+      },
+      "signal-teal-text": {
+        "role": "primary",
+        "displayName": "Signal Teal Text",
+        "canonical": "#5fe2d4",
+        "theme": "dark",
+        "tonalRamp": [
+          "#00120f",
+          "#00322b",
+          "#00534a",
+          "#00756b",
+          "#00978c",
+          "#56b8ad",
+          "#99d7cf",
+          "#dff4f0"
+        ],
+        "oklch": "oklch(83.6% 0.117 186)"
+      },
+      "signal-teal-soft": {
+        "role": "primary",
+        "displayName": "Signal Teal Soft",
+        "canonical": "rgba(61, 214, 198, .12)",
+        "theme": "dark"
+      },
+      "signal-teal-ring": {
+        "role": "primary",
+        "displayName": "Signal Teal Ring",
+        "canonical": "rgba(61, 214, 198, .34)",
+        "theme": "dark"
+      },
+      "state-ok": {
+        "role": "secondary",
+        "displayName": "State Ok",
+        "canonical": "#4cc98e",
+        "theme": "dark",
+        "tonalRamp": [
+          "#001302",
+          "#00330f",
+          "#005526",
+          "#007843",
+          "#139a65",
+          "#5ebb8c",
+          "#9dd9b7",
+          "#e0f4e8"
+        ],
+        "oklch": "oklch(75.1% 0.141 159)"
+      },
+      "state-ok-soft": {
+        "role": "secondary",
+        "displayName": "State Ok Soft",
+        "canonical": "rgba(76, 201, 142, .12)",
+        "theme": "dark"
+      },
+      "state-warn": {
+        "role": "secondary",
+        "displayName": "State Warn",
+        "canonical": "#e6b84f",
+        "theme": "dark",
+        "tonalRamp": [
+          "#180700",
+          "#3b1d00",
+          "#5f3900",
+          "#835900",
+          "#a57b00",
+          "#c3a051",
+          "#dfc693",
+          "#f6eedc"
+        ],
+        "oklch": "oklch(80.5% 0.132 85)"
+      },
+      "state-warn-soft": {
+        "role": "secondary",
+        "displayName": "State Warn Soft",
+        "canonical": "rgba(230, 184, 79, .12)",
+        "theme": "dark"
+      },
+      "state-danger": {
+        "role": "secondary",
+        "displayName": "State Danger",
+        "canonical": "#f2767d",
+        "theme": "dark",
+        "tonalRamp": [
+          "#230001",
+          "#50000c",
+          "#7d0b23",
+          "#a6313f",
+          "#ca5860",
+          "#e88487",
+          "#fbb4b4",
+          "#ffe7e7"
+        ],
+        "oklch": "oklch(71.2% 0.153 18)"
+      },
+      "state-danger-soft": {
+        "role": "secondary",
+        "displayName": "State Danger Soft",
+        "canonical": "rgba(242, 118, 125, .12)",
+        "theme": "dark"
+      },
+      "state-info": {
+        "role": "secondary",
+        "displayName": "State Info",
+        "canonical": "#86a9ff",
+        "theme": "dark",
+        "tonalRamp": [
+          "#020727",
+          "#0e1f55",
+          "#243c82",
+          "#3f5cab",
+          "#607fcd",
+          "#87a3e8",
+          "#b4c9f9",
+          "#e7efff"
+        ],
+        "oklch": "oklch(74.4% 0.131 266)"
+      },
+      "state-info-soft": {
+        "role": "secondary",
+        "displayName": "State Info Soft",
+        "canonical": "rgba(134, 169, 255, .12)",
+        "theme": "dark"
+      },
+      "overlay": {
+        "role": "neutral",
+        "displayName": "Overlay",
+        "canonical": "rgba(4, 5, 7, .66)",
+        "theme": "dark"
+      },
+      "light-ground": {
+        "role": "neutral",
+        "displayName": "Ground (light)",
+        "canonical": "#f6f6f7",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424243",
+          "#616162",
+          "#828283",
+          "#a5a5a6",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "oklch": "oklch(97.3% 0.001 286)"
+      },
+      "light-ground-soft": {
+        "role": "neutral",
+        "displayName": "Ground Soft (light)",
+        "canonical": "#f1f1f3",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#252526",
+          "#424243",
+          "#616163",
+          "#828284",
+          "#a5a5a6",
+          "#c9c9ca",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(95.9% 0.003 286)"
+      },
+      "light-rail": {
+        "role": "neutral",
+        "displayName": "Rail (light)",
+        "canonical": "#fbfbfc",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424243",
+          "#616162",
+          "#828283",
+          "#a5a5a6",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "oklch": "oklch(98.8% 0.001 286)"
+      },
+      "light-surface": {
+        "role": "neutral",
+        "displayName": "Surface (light)",
+        "canonical": "#ffffff",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "oklch": "oklch(100.0% 0.000 90)"
+      },
+      "light-surface-raised": {
+        "role": "neutral",
+        "displayName": "Surface Raised (light)",
+        "canonical": "#f5f5f7",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#252526",
+          "#424243",
+          "#616163",
+          "#828284",
+          "#a5a5a6",
+          "#c9c9ca",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(97.1% 0.003 286)"
+      },
+      "light-surface-high": {
+        "role": "neutral",
+        "displayName": "Surface High (light)",
+        "canonical": "#ececef",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0c",
+          "#252526",
+          "#424244",
+          "#616163",
+          "#828284",
+          "#a5a5a7",
+          "#c9c9ca",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(94.4% 0.004 286)"
+      },
+      "light-hairline": {
+        "role": "neutral",
+        "displayName": "Hairline (light)",
+        "canonical": "rgba(17, 18, 22, .08)",
+        "theme": "light"
+      },
+      "light-hairline-strong": {
+        "role": "neutral",
+        "displayName": "Hairline Strong (light)",
+        "canonical": "rgba(17, 18, 22, .13)",
+        "theme": "light"
+      },
+      "light-ink": {
+        "role": "neutral",
+        "displayName": "Ink (light)",
+        "canonical": "#121317",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0d",
+          "#242528",
+          "#414246",
+          "#606166",
+          "#818287",
+          "#a4a5a9",
+          "#c8c9cc",
+          "#eeeeef"
+        ],
+        "oklch": "oklch(18.7% 0.008 274)"
+      },
+      "light-ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2 (light)",
+        "canonical": "#464953",
+        "theme": "light",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#23252c",
+          "#3f424b",
+          "#5e616b",
+          "#7f828c",
+          "#a2a5ae",
+          "#c7c9cf",
+          "#eeeef1"
+        ],
+        "oklch": "oklch(40.6% 0.017 272)"
+      },
+      "light-ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3 (light)",
+        "canonical": "#686b75",
+        "theme": "light",
+        "tonalRamp": [
+          "#0a0b0f",
+          "#23252b",
+          "#3f424a",
+          "#5e616b",
+          "#7f828c",
+          "#a2a5ad",
+          "#c7c9cf",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(52.9% 0.016 273)"
+      },
+      "light-ink-4": {
+        "role": "neutral",
+        "displayName": "Ink 4 (light)",
+        "canonical": "#9a9ca5",
+        "theme": "light",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#24252a",
+          "#404249",
+          "#5f6169",
+          "#80828a",
+          "#a3a5ac",
+          "#c8c9ce",
+          "#eeeef0"
+        ],
+        "oklch": "oklch(69.4% 0.013 276)"
+      },
+      "light-signal-teal": {
+        "role": "primary",
+        "displayName": "Signal Teal (light)",
+        "canonical": "#0b7f74",
+        "theme": "light",
+        "tonalRamp": [
+          "#00110d",
+          "#002f29",
+          "#005047",
+          "#007267",
+          "#369488",
+          "#6cb5aa",
+          "#a5d5cd",
+          "#e2f3f0"
+        ],
+        "oklch": "oklch(53.7% 0.093 184)"
+      },
+      "light-signal-teal-hover": {
+        "role": "primary",
+        "displayName": "Signal Teal Hover (light)",
+        "canonical": "#096c63",
+        "theme": "light",
+        "tonalRamp": [
+          "#00100d",
+          "#002e29",
+          "#004f47",
+          "#127067",
+          "#449288",
+          "#74b3aa",
+          "#a9d3cd",
+          "#e4f2f0"
+        ],
+        "oklch": "oklch(47.9% 0.082 185)"
+      },
+      "light-signal-teal-ink": {
+        "role": "primary",
+        "displayName": "Signal Teal Ink (light)",
+        "canonical": "#ffffff",
+        "theme": "light",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "oklch": "oklch(100.0% 0.000 90)"
+      },
+      "light-signal-teal-text": {
+        "role": "primary",
+        "displayName": "Signal Teal Text (light)",
+        "canonical": "#0a7268",
+        "theme": "light",
+        "tonalRamp": [
+          "#00110d",
+          "#002f29",
+          "#004f47",
+          "#077167",
+          "#409288",
+          "#72b4aa",
+          "#a8d4cd",
+          "#e3f2f0"
+        ],
+        "oklch": "oklch(49.7% 0.086 184)"
+      },
+      "light-state-ok": {
+        "role": "secondary",
+        "displayName": "State Ok (light)",
+        "canonical": "#13804f",
+        "theme": "light",
+        "tonalRamp": [
+          "#001202",
+          "#003111",
+          "#005328",
+          "#007545",
+          "#3b9766",
+          "#6fb88d",
+          "#a6d7b8",
+          "#e3f3e8"
+        ],
+        "oklch": "oklch(53.0% 0.120 157)"
+      },
+      "light-state-warn": {
+        "role": "secondary",
+        "displayName": "State Warn (light)",
+        "canonical": "#9a6400",
+        "theme": "light",
+        "tonalRamp": [
+          "#190500",
+          "#3e1a00",
+          "#643500",
+          "#895400",
+          "#ab762a",
+          "#c99c60",
+          "#e4c39b",
+          "#f8eddf"
+        ],
+        "oklch": "oklch(54.8% 0.117 73)"
+      },
+      "light-state-danger": {
+        "role": "secondary",
+        "displayName": "State Danger (light)",
+        "canonical": "#c4282f",
+        "theme": "light",
+        "tonalRamp": [
+          "#280000",
+          "#590000",
+          "#890001",
+          "#b51222",
+          "#da4847",
+          "#f67a74",
+          "#ffaea7",
+          "#ffe6e2"
+        ],
+        "oklch": "oklch(53.6% 0.191 25)"
+      },
+      "light-state-info": {
+        "role": "secondary",
+        "displayName": "State Info (light)",
+        "canonical": "#2556d0",
+        "theme": "light",
+        "tonalRamp": [
+          "#000134",
+          "#00136d",
+          "#0931a2",
+          "#2454ce",
+          "#467af1",
+          "#72a1ff",
+          "#a5c9ff",
+          "#e2efff"
+        ],
+        "oklch": "oklch(49.8% 0.196 264)"
+      },
+      "light-overlay": {
+        "role": "neutral",
+        "displayName": "Overlay (light)",
+        "canonical": "rgba(18, 19, 23, .38)",
+        "theme": "light"
+      }
+    },
+    "typographyMeta": {
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The one lead balance; 34px under 720px. Muted fraction, 15px unit."
+      },
+      "stat-figure": {
+        "displayName": "Stat Figure",
+        "purpose": "Three-ops counts and halt state; 24px under 720px. Approve-card lead amount uses 26px."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page title, one per page; 22px under 720px and on auth cards."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel, card and section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default text; descriptions cap at 72ch."
+      },
+      "row": {
+        "displayName": "Row",
+        "purpose": "Table cells, attention rows, banners."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, table headers, buttons (13px), chips (11.5px)."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Addresses, operation codes, row amounts, code."
+      }
+    },
+    "themes": {
+      "selector": {
+        "dark": ":root, [data-theme=\"dark\"]",
+        "light": "[data-theme=\"light\"]"
+      },
+      "note": "Every colour and shadow role is redefined per theme; light-* frontmatter keys are the light values of the same roles."
+    },
+    "shadows": [
+      {
+        "name": "card",
+        "value": "none",
+        "valueLight": "0 1px 2px rgba(17, 18, 22, .04)",
+        "purpose": "Resting panels, tables, approve cards."
+      },
+      {
+        "name": "pop",
+        "value": "0 1px 0 rgba(255, 255, 255, .04) inset, 0 24px 48px -12px rgba(0, 0, 0, .6)",
+        "valueLight": "0 24px 48px -16px rgba(17, 18, 22, .22), 0 0 0 1px rgba(17, 18, 22, .06)",
+        "purpose": "Modals, TOTP card, auth card."
+      },
+      {
+        "name": "rail",
+        "value": "12px 0 32px rgba(0, 0, 0, .45)",
+        "valueLight": "12px 0 32px rgba(17, 18, 22, .1)",
+        "purpose": "Sidebar while it overlays content."
+      },
+      {
+        "name": "focus-ring",
+        "value": "outline: 2px solid var(--accent); outline-offset: 2px",
+        "purpose": "Global keyboard focus (tested)."
+      },
+      {
+        "name": "input-focus",
+        "value": "0 0 0 3px var(--accent-soft)",
+        "purpose": "Input focus halo with border var(--accent-ring)."
+      },
+      {
+        "name": "live-halo",
+        "value": "0 0 0 3px <state>-soft",
+        "purpose": "Halo around 8px status dots."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "All state transitions."
+      },
+      {
+        "name": "fast",
+        "value": "140ms",
+        "purpose": "Hover, colour, border, press nudge, label fades."
+      },
+      {
+        "name": "med",
+        "value": "220ms",
+        "purpose": "Rail width/expansion and the modal rise."
+      },
+      {
+        "name": "rise",
+        "value": "from opacity .4, translateY(8px) scale(.985) to rest",
+        "purpose": "Modal and TOTP entrance."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "1ms durations",
+        "purpose": "prefers-reduced-motion collapses all animation and transition."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "rail-compact",
+        "value": "420px",
+        "purpose": "Rail narrows to 56px."
+      },
+      {
+        "name": "phone",
+        "value": "720px",
+        "purpose": "Single column, 44px actions, pin overlays, sticky approve bar, wrapping top bar."
+      },
+      {
+        "name": "split",
+        "value": "980px",
+        "purpose": "Two-up splits collapse; body padding tightens."
+      },
+      {
+        "name": "stats",
+        "value": "1100px",
+        "purpose": "Three-ops strip goes two-by-two."
+      }
+    ],
+    "layout": {
+      "rail": "64px",
+      "railOpen": "240px",
+      "content": "1240px",
+      "topBar": "60px"
+    }
+  },
+  "components": [
+    {
+      "name": "Neutral Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Default action; raised neutral fill, 8px radius.",
+      "html": "<button class=\"ds-btn\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M23 4v6h-6\"/><path d=\"M1 20v-6h6\"/><path d=\"M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15\"/></svg>Refresh</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:var(--radius-xs);font:550 13px/1 var(--font);color:var(--text);background:var(--surface-2);border:1px solid var(--line-2);cursor:pointer;transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease),transform var(--fast) var(--ease)}.ds-btn:hover{background:var(--surface-3);border-color:color-mix(in srgb,var(--text) 18%,transparent)}.ds-btn:active{transform:translateY(1px)}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The page's one primary action; Signal Teal fill.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12h14\"/><path d=\"M12 5l7 7-7 7\"/></svg>Approve inbox</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:var(--radius-xs);font:550 13px/1 var(--font);color:var(--accent-fg);background:var(--accent);border:1px solid transparent;cursor:pointer;transition:background var(--fast) var(--ease),transform var(--fast) var(--ease)}.ds-btn-primary:hover{background:var(--accent-hover)}.ds-btn-primary:active{transform:translateY(1px)}.ds-btn-primary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Halt and destructive steps; danger text on its soft tint.",
+      "html": "<button class=\"ds-btn-danger\">Engage halt</button>",
+      "css": ".ds-btn-danger{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:var(--radius-xs);font:550 13px/1 var(--font);color:var(--danger);background:var(--danger-soft);border:1px solid color-mix(in srgb,var(--danger) 28%,transparent);cursor:pointer}.ds-btn-danger:hover{background:color-mix(in srgb,var(--danger) 18%,transparent);border-color:color-mix(in srgb,var(--danger) 42%,transparent)}.ds-btn-danger:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled field; inset ground fill, teal ring on focus.",
+      "html": "<label class=\"ds-field\"><span>Username</span><input class=\"ds-input\" value=\"admin\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:6px;font:550 13px var(--font);color:var(--text-2)}.ds-input{font:400 14px var(--font);color:var(--text);background:var(--bg);border:1px solid var(--line-2);border-radius:var(--radius-xs);min-height:38px;padding:0 12px;transition:border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}.ds-input:hover{border-color:color-mix(in srgb,var(--text) 22%,transparent)}.ds-input:focus{outline:none;border-color:var(--accent-ring);box-shadow:0 0 0 3px var(--accent-soft)}"
+    },
+    {
+      "name": "Rail Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Sidebar items; active is a raised neutral fill, only the icon turns teal.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item on\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1.5\"/></svg>Overview<span class=\"ds-count\">1</span></a><a class=\"ds-nav-item\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\"><path d=\"M21 12V7H5a2 2 0 010-4h14v4\"/><path d=\"M3 5v14a2 2 0 002 2h16v-5\"/><path d=\"M18 12a2 2 0 000 4h4v-4h-4z\"/></svg>Wallets</a></nav>",
+      "css": ".ds-nav{display:flex;flex-direction:column;gap:4px;width:240px;padding:10px;background:var(--sidebar)}.ds-nav-item{display:flex;align-items:center;gap:12px;height:38px;padding:0 11px;border-radius:var(--radius-xs);font:500 14px var(--font);color:var(--text-2);text-decoration:none;transition:background var(--fast) var(--ease),color var(--fast) var(--ease)}.ds-nav-item:hover{background:var(--hover);color:var(--text)}.ds-nav-item.on{background:var(--surface-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}.ds-nav-item.on svg{color:var(--accent-text)}.ds-nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.ds-count{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;display:inline-grid;place-items:center;font:650 11px var(--font);background:var(--warn-soft);color:var(--warn)}"
+    },
+    {
+      "name": "Status Tags",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "State as a small dot-led tinted chip.",
+      "html": "<span class=\"ds-tag ok\">Available</span> <span class=\"ds-tag warn\">Pinned</span> <span class=\"ds-tag danger\">Quarantined</span> <span class=\"ds-tag\">Idle</span>",
+      "css": ".ds-tag{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:6px;font:550 11.5px var(--font);background:var(--surface-3);color:var(--text-2)}.ds-tag::before{content:\"\";width:6px;height:6px;border-radius:50%;background:currentColor}.ds-tag.ok{background:var(--ok-soft);color:var(--ok)}.ds-tag.warn{background:var(--warn-soft);color:var(--warn)}.ds-tag.danger{background:var(--danger-soft);color:var(--danger)}"
+    },
+    {
+      "name": "Balance Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Signature lead panel: quiet 44px figure, muted fraction, pill quick actions.",
+      "html": "<section class=\"ds-balance\"><div class=\"ds-bal-top\"><span class=\"ds-bal-label\">Custody equity</span><span class=\"ds-bal-pill\">Observed</span></div><div class=\"ds-amount\">1258<span class=\"frac\">.4200</span><span class=\"unit\">ZKZ</span></div><p class=\"ds-delta\"><strong>Observed on gateway</strong> · 4 wallets</p><div class=\"ds-actions\"><button class=\"ds-quick\">Receive Funds</button><button class=\"ds-quick\">Send Funds</button></div></section>",
+      "css": ".ds-balance{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:24px 26px 22px;font-family:var(--font);color:var(--text)}.ds-bal-top{display:flex;justify-content:space-between;align-items:center}.ds-bal-label{font:550 14px var(--font);color:var(--text-2)}.ds-bal-pill{font-size:12.5px;color:var(--text-3);padding:4px 10px;border:1px solid var(--line);border-radius:999px}.ds-amount{margin-top:18px;font-size:44px;font-weight:450;letter-spacing:-.035em;line-height:1.05;font-variant-numeric:tabular-nums}.ds-amount .frac{color:var(--text-3)}.ds-amount .unit{font-size:15px;font-weight:550;color:var(--text-3);letter-spacing:0;margin-left:10px}.ds-delta{margin-top:10px;font-size:13px;color:var(--text-3)}.ds-delta strong{color:var(--ok);font-weight:600}.ds-actions{display:flex;gap:8px;margin-top:26px}.ds-quick{height:38px;padding:0 16px;border-radius:999px;font:550 13.5px var(--font);color:var(--text);background:var(--surface-2);border:1px solid var(--line-2);cursor:pointer}.ds-quick:hover{background:var(--surface-3)}.ds-quick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Three-Ops Strip",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "Signature divided panel: one cell per money operation plus halt.",
+      "html": "<div class=\"ds-stats\"><div class=\"ds-stat\"><div class=\"k\">Incoming</div><div class=\"c\">RECEIVE_EXTERNAL</div><div class=\"v\">0</div><div class=\"h\">0 landed today</div></div><div class=\"ds-stat\"><div class=\"k\">Outgoing</div><div class=\"c\">SEND_EXTERNAL</div><div class=\"v\">1</div><div class=\"h\">0 landed today</div></div><div class=\"ds-stat\"><div class=\"k\">Halt</div><div class=\"v\">Clear</div><div class=\"h\">Money rails open</div></div></div>",
+      "css": ".ds-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-family:var(--font);color:var(--text)}.ds-stat{padding:18px 22px 20px;border-left:1px solid var(--line)}.ds-stat:first-child{border-left:0}.ds-stat .k{font-size:13.5px;font-weight:550;color:var(--text-2)}.ds-stat .c{margin-top:1px;font:11px var(--mono);color:var(--text-4);letter-spacing:.02em}.ds-stat .v{margin-top:12px;font-size:30px;font-weight:450;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}.ds-stat .h{margin-top:4px;font-size:12.5px;color:var(--text-3)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Ledger",
+    "overview": "The category-standard dark fintech console, played straight at Mercury's craft bar. A near-black neutral ground carries a stack of surfaces that differ only by small lightness steps and 1px hairlines; nothing glows, nothing is textured, and the single teal accent is spent sparingly. The console reads like a well-kept ledger at 3am: one balance leads, what waits on the operator comes second, and everything else is quiet reference rows.\n\nDensity is moderate and even. Body copy sits at 14px, rows at 13.5px, labels at 12.5px, and the only large type is numerals: the balance figure and the three-ops counts, set in regular weight with muted fractional digits so the number reads as a measurement rather than a headline. State is spoken in small marks (8px dots with a soft halo, 22px tinted chips) rather than in colored panels. Light theme is a full peer, not an inversion: every role has its own tuned value under `[data-theme=\"light\"]`.\n\nThe system is constrained by the node's CSP: system font stacks only, no remote assets, every icon an inline 24-unit stroke SVG.",
+    "keyCharacteristics": [
+      "Near-black neutral ground; depth by lightness steps and hairlines, not shadow.",
+      "One teal accent for primary action, focus, and the active mark.",
+      "Large panel radii (14px) against tighter control radii (8px).",
+      "Big figures in regular weight (450) with muted fractions and tabular numerals.",
+      "State colour as dots and soft chips, never as filled surfaces.",
+      "Dark and light themes tokenised as equal peers."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Teal is reserved for primary action, focus, and the active mark. Active navigation is a raised neutral fill with a hairline inset; only its icon turns teal. Never wash a row, nav item, or panel in accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Small State Rule",
+        "body": "State hues appear at full strength only as dots, chip text, or icon glyphs, always over their own soft tint. A whole panel never turns green, amber, or red; banners carry state as a tinted line of truth, not a coloured block.",
+        "section": "colors"
+      },
+      {
+        "name": "The Reading Ink Rule",
+        "body": "Ink 4 is for placeholders, disabled controls, and keyboard hints. Text an operator must read uses Ink 3 or stronger.",
+        "section": "colors"
+      },
+      {
+        "name": "The Quiet Figure Rule",
+        "body": "Large numbers are set in regular weight (450) with tabular numerals and a muted fraction. Never bold a figure to make it important; size and position already do that.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Labels, buttons, chips and headings are sentence case at normal tracking. Machine identifiers (operation codes, addresses) appear in mono as data, beneath their human label, never as a decorative line above a heading.",
+        "section": "typography"
+      },
+      {
+        "name": "The Lead and Reference Rule",
+        "body": "One element leads each page (on Overview, the full-width balance panel). What needs the operator sits next; everything else is rows inside panels, not a wall of equal tiles.",
+        "section": "layout"
+      },
+      {
+        "name": "The Lightness Ladder Rule",
+        "body": "Depth on the page is ground, then surface, then raised, then high. Reach for the next step before reaching for a shadow; shadows belong only to layers that float.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Two Radii Rule",
+        "body": "A container rounds at 14px, the control inside it at 8px. Do not shrink panels toward control radii or round controls toward panels.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do separate surfaces with a lightness step and a 1px hairline before considering a shadow.",
+      "Do spend Signal Teal only on primary action, focus, and the active nav icon.",
+      "Do set figures at weight 450 with tabular numerals and a muted fraction.",
+      "Do carry state as an 8px dot or a 22px tinted chip, in the state hue over its 12% tint.",
+      "Do round containers at 14px and controls at 8px.",
+      "Do define every new colour role for both `:root/[data-theme=\"dark\"]` and `[data-theme=\"light\"]`.",
+      "Do keep primary phone actions at 44px and keep every surface reflowing to 320px."
+    ],
+    "donts": [
+      "Don't wash active navigation, rows, or panels in accent; active is a raised neutral fill.",
+      "Don't build a tile wall where every number gets an equal card; one figure leads.",
+      "Don't fill a panel or banner with a solid state colour.",
+      "Don't load a web font or remote asset; the system stacks are required by CSP and tests.",
+      "Don't set reading text in Ink 4.",
+      "Don't put uppercase eyebrows or kicker lines above headings."
+    ]
+  }
+}

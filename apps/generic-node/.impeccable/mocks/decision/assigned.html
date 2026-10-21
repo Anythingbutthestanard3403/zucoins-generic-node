@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0}body{width:1440px;height:900px;overflow:hidden;background:#F3F1EA;color:#15130F;font:14px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:232px 1fr}
+.rail{background:#EFC93B;padding:20px 14px;display:flex;flex-direction:column;gap:4px}
+.mark{font:800 26px/1 ui-monospace,Menlo,monospace;letter-spacing:.12em;margin:0 6px 26px}
+.nav{display:flex;justify-content:space-between;padding:11px 12px;font-weight:650;font-size:15px;border-radius:2px}
+.nav.on{background:#15130F;color:#EFC93B}.cnt{font:700 12px ui-monospace,monospace;background:#15130F;color:#EFC93B;padding:2px 7px}
+.nav.on .cnt{background:#EFC93B;color:#15130F}
+.rf{margin-top:auto;border-top:2px solid #15130F;padding:12px 6px;font:600 12px ui-monospace,monospace;letter-spacing:.08em}
+.main{display:flex;flex-direction:column}
+.top{height:60px;display:flex;align-items:center;gap:14px;padding:0 28px;border-bottom:1px solid #D8D3C2}
+.stamp{font:700 12px ui-monospace,monospace;letter-spacing:.1em;padding:4px 8px;border:2px solid currentColor;outline:1px solid currentColor;outline-offset:2px}
+.ok{color:#2B4FA8}.bad{color:#C2362B}.filed{color:#7A7466}
+.body{padding:26px 28px;display:grid;grid-template-columns:1fr 360px;gap:22px;align-content:start}
+h1{font-size:30px;letter-spacing:-.02em;font-weight:750}
+.kick{font:700 12px ui-monospace,monospace;letter-spacing:.14em;color:#7A7466;margin-bottom:8px}
+.q{background:#fff;border:1px solid #D8D3C2;border-left:6px solid #EFC93B}
+.qh{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #E6E1D2}
+.strip{display:grid;grid-template-columns:150px 1fr 160px 150px;gap:16px;align-items:center;padding:14px 18px;border-bottom:1px solid #EEE9DA}
+.tape{background:#FBF1C8;font:600 13px ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;box-shadow:0 1px 0 #E4D8A8}
+.btn{font-weight:700;padding:10px 16px;border:2px solid #15130F;background:#15130F;color:#fff;text-align:center}
+.btn.g{background:transparent;color:#15130F}
+.halt{background:#15130F;color:#F3F1EA;padding:20px}.halt h2{font-size:18px;margin:6px 0 10px}
+.halt .btn{background:#C2362B;border-color:#C2362B;margin-top:16px;display:block}
+.bal{grid-column:1/-1;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;border:1px solid #D8D3C2;background:#fff}
+.bal>div{padding:18px 20px;border-right:1px solid #E6E1D2}.big{font:700 40px/1.1 ui-monospace,monospace;letter-spacing:-.02em;margin:6px 0 10px}
+.mid{font:700 26px ui-monospace,monospace;margin-top:6px}
+.cells{grid-column:1/-1;display:grid;grid-template-columns:repeat(24,1fr);gap:4px}
+.cell{height:30px;background:#fff;border:1px solid #D8D3C2;font:600 9px ui-monospace,monospace;padding:3px}.cell.l{background:#FBF1C8}.cell.x{border-color:#C2362B;color:#C2362B}
+</style></head><body>
+<aside class="rail"><div class="mark">ZU NODE</div>
+<div class="nav on">Overview <span class="cnt">3</span></div><div class="nav">Wallets</div><div class="nav">Connectors</div><div class="nav">Activity</div><div class="nav">Settings</div>
+<div class="rf">NODE READY · v0.9.4<br>CHAIN READ 03:14:07</div></aside>
+<div class="main"><header class="top"><span class="tape">node-eu1.zucoins.net</span><span class="stamp ok">RCVD · HEALTHY</span><span style="flex:1"></span><b>riley</b></header>
+<div class="body">
+<section><div class="kick">WAITING ON YOU · 3</div><div class="q">
+<div class="qh"><h1>Approve inbox</h1><span class="btn g">Open inbox</span></div>
+<div class="strip"><span class="tape">SEND_EXTERNAL</span><span class="tape">TO 7XQ4…M2PA · 1,250.00</span><span class="stamp filed">FILED 03:11</span><span class="btn">Review</span></div>
+<div class="strip"><span class="tape">SEND_EXTERNAL</span><span class="tape">TO 9KD1…ZZ03 · 84.20</span><span class="stamp filed">FILED 03:09</span><span class="btn">Review</span></div>
+<div class="strip"><span class="tape">MOVE_INTERNAL</span><span class="tape">HUB-A → RES-2 · 5,000.00</span><span class="stamp filed">FILED 02:58</span><span class="btn">Review</span></div>
+</div></section>
+<aside class="halt"><div class="kick" style="color:#B9B29F">KILL SWITCH</div><h2>Money halt is clear</h2><p style="color:#B9B29F">Engaging halt stops every signer on this node. Requires TOTP.</p><span class="btn">Engage halt</span></aside>
+<div class="bal"><div><div class="kick">RESERVE BALANCE</div><div class="big">482,913.40</div><span class="stamp ok">RCVD 03:14 · CHAIN</span></div>
+<div><div class="kick">RECEIVE</div><div class="mid">12</div><span class="stamp ok">8 SETTLED</span></div>
+<div><div class="kick">MOVE</div><div class="mid">4</div><span class="stamp filed">2 IN FLIGHT</span></div>
+<div><div class="kick">SEND</div><div class="mid">7</div><span class="stamp bad">1 INDETERMINATE</span></div></div>
+<div class="cells"><div class="cell l">W01</div><div class="cell">W02</div><div class="cell">W03</div><div class="cell l">W04</div><div class="cell">W05</div><div class="cell x">W06</div><div class="cell">W07</div><div class="cell">W08</div><div class="cell l">W09</div><div class="cell">W10</div><div class="cell">W11</div><div class="cell">W12</div><div class="cell">W13</div><div class="cell l">W14</div><div class="cell">W15</div><div class="cell">W16</div><div class="cell">W17</div><div class="cell">W18</div><div class="cell l">W19</div><div class="cell">W20</div><div class="cell">W21</div><div class="cell">W22</div><div class="cell">W23</div><div class="cell">W24</div></div>
+</div></div></body></html>

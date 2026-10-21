@@ -515,8 +515,6 @@ export function OperationsPage() {
         Attention queue is live from the node operations API.
         {" · "}
         History lists all operations from inventory.
-        {" · "}
-        Detail: <code className="mono">GET …/operations/{"{id}"}</code> + recovery
       </p>
     </div>
   );

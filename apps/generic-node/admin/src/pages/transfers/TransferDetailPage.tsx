@@ -425,7 +425,7 @@ export function TransferDetailPage() {
             style={{ fontSize: 12.5, marginBottom: 12 }}
             data-testid="pack-p-approve-semantics"
           >
-            GET approval-challenge → POST approve with X-ZP-TOTP + device sign + CSRF. Reject only from CREATED.
+            Approving needs your device signature and an authenticator code. Reject only from CREATED.
             The node does not chain-submit SEND. Post-approve status is polled (never claimed paid or
             settled from UI alone). Recipient must finish (AWAITING_REDEMPTION is not paid); observe-land is separate.
           </p>

@@ -7,7 +7,7 @@ import { StatusTag } from "../../components/StatusTag.js";
 import { VerificationModeBadge } from "../../components/VerificationModeBadge.js";
 import { WalletHoldCause } from "../../components/WalletHoldCause.js";
 import {
-  IconArrow, IconHalt, IconMark, IconRefresh,
+  IconArrow, IconHalt, IconMark, IconReceive, IconRefresh, IconSend, IconSwap,
 } from "../../icons.js";
 import { api, ApiError } from "../../lib/api.js";
 import { truncatePubkey } from "../../lib/format.js";
@@ -42,6 +42,7 @@ import {
   type PackChecklistRow,
 } from "../../lib/packs.js";
 import { HaltAction } from "./HaltAction.js";
+import { useApproveInboxBadgeCount } from "../../lib/approve-inbox-count.js";
 
 /** Honest per-state labels for the overview page header.
  * "Node is healthy" is rendered only when /health/ready genuinely reports ready;
@@ -210,6 +211,7 @@ export function OverviewPage() {
 
   const liveAttn = attentionQ.data?.live === true ? attentionQ.data.data : null;
   const attentionCount = liveAttn?.summary?.total ?? 0;
+  const approveWaiting = useApproveInboxBadgeCount(true) ?? 0;
   const attentionLive = liveAttn?.operations ?? [];
   const haltErrored = haltQ.isError;
   const haltEngaged = !haltErrored && haltQ.data?.engaged === true;
@@ -223,14 +225,6 @@ export function OverviewPage() {
   const wallets: readonly WalletInventoryItem[] = walletsLive ? (walletsQ.data?.data ?? []) : [];
   const equity = walletsLive ? sumObservedEquityZkz(wallets) : "—";
   const walletCount = wallets.length;
-  const walletPreview = wallets.slice(0, 6).map((w, i) => ({
-    id: `W${i + 1}`,
-    pubkey: w.public_key,
-    balance: w.observed_balance_zkz ?? "—",
-    state: w.state,
-    role: w.key_origin,
-    wallet: w,
-  }));
   const opsLive = opsQ.data?.live === true;
   const opsRows = opsLive ? (opsQ.data?.data ?? []) : [];
   const recv = countByKind(opsRows, "RECEIVE_EXTERNAL");
@@ -389,6 +383,7 @@ export function OverviewPage() {
                 <>
                   {OVERVIEW_HEALTH_LABEL[healthState]}
                   {" · "}<em>{attentionCount} items</em> need attention
+                  {approveWaiting > 0 ? <>{" · "}<em>{approveWaiting} waiting approval</em></> : null}
                   {liveAttn ? " · live" : " · attention API empty/unavailable"}
                   {haltEngaged ? " · money halt engaged" : ""}
                   {haltUnknown ? " · halt state UNKNOWN" : ""}
@@ -418,7 +413,6 @@ export function OverviewPage() {
           className="banner banner-error"
           role="alert"
           data-testid="device-break-glass-banner"
-          style={{ marginBottom: 16 }}
         >
           Device signatures unavailable — setup used typed break-glass without an approval
           device. Enrol a device under Devices before dual-control bless/approve will work.
@@ -431,11 +425,10 @@ export function OverviewPage() {
           data-testid="readiness-checklist"
           aria-label="Node readiness"
           data-collapsed={showReadinessDetails ? "false" : "true"}
-          style={{ marginBottom: 20 }}
         >
-          <div className="hd" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-            <h2 style={{ margin: 0, fontSize: 15 }}>Node readiness</h2>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div className="hd">
+            <h2>Node readiness</h2>
+            <div className="toolbar">
               {!readinessNeedsAttention && !readinessQ.isPending && !readinessQ.isError ? (
                 <button
                   type="button"
@@ -458,9 +451,9 @@ export function OverviewPage() {
             </div>
           </div>
           {readinessQ.isPending ? (
-            <p className="muted" style={{ padding: 12, margin: 0 }}>Loading checklist…</p>
+            <p className="muted">Loading checklist…</p>
           ) : readinessQ.isError || readiness === null ? (
-            <p className="muted" style={{ padding: 12, margin: 0 }} role="status">
+            <p className="muted" role="status">
               Readiness checklist unavailable — not implying setup is complete.
             </p>
           ) : readinessNeedsAttention ? (
@@ -469,7 +462,7 @@ export function OverviewPage() {
                 {blockedRows.length} item{blockedRows.length === 1 ? "" : "s"} still block money ops —
                 fix the red rows below first.
               </div>
-              <ul className="readiness-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              <ul className="readiness-list">
                 {readinessRows.map((row) => (
                   <ReadinessRowItem key={row.id} row={row} />
                 ))}
@@ -487,7 +480,7 @@ export function OverviewPage() {
                 until something needs attention again.
               </div>
               {showReadinessDetails ? (
-                <ul className="readiness-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                <ul className="readiness-list">
                   {readinessRows.map((row) => (
                     <ReadinessRowItem key={row.id} row={row} />
                   ))}
@@ -502,17 +495,16 @@ export function OverviewPage() {
           className="card"
           data-testid="pack-checklist"
           aria-label="Enabled pack checklists"
-          style={{ marginBottom: 20 }}
         >
           <div className="hd">
-            <h2 style={{ margin: 0, fontSize: 15 }}>Pack checklists</h2>
+            <h2>Pack checklists</h2>
             <p className="muted" style={{ margin: "6px 0 0", fontSize: 12.5 }}>
               From Connect enablement — compositions of Incoming, Internal transfer, and
               Outgoing only.{" "}
               <Link to="/connect" className="linkish">Manage packs</Link> <span className="muted">(pack flags are device-local)</span>
             </p>
           </div>
-          <ul className="readiness-list" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          <ul className="readiness-list">
             {packRows.map((row) => (
               <PackChecklistRowItem key={row.id} row={row} />
             ))}
@@ -530,7 +522,7 @@ export function OverviewPage() {
             <span className="period" style={{ pointerEvents: "none" }}>Observed</span>
           </div>
           <div className="amount">
-            {equity}
+            <AmountFigure value={equity} />
             <span className="unit">ZKZ</span>
           </div>
           <div className="delta">
@@ -551,7 +543,7 @@ export function OverviewPage() {
           <div className="mini-actions">
             <button
               type="button"
-              className="mini-btn primary"
+              className="mini-btn"
               data-testid="quick-action-receive-btn"
               onClick={() => {
                 setOpModalError(null);
@@ -559,7 +551,7 @@ export function OverviewPage() {
                 setActiveOperatorModal("receive");
               }}
             >
-              + Receive Funds
+              <IconReceive aria-hidden /> Receive Funds
             </button>
             <button
               type="button"
@@ -571,7 +563,7 @@ export function OverviewPage() {
                 setActiveOperatorModal("send");
               }}
             >
-              + Send Funds
+              <IconSend aria-hidden /> Send Funds
             </button>
             <button
               type="button"
@@ -583,89 +575,46 @@ export function OverviewPage() {
                 setActiveOperatorModal("move");
               }}
             >
-              ⇄ Move Between Reserves
+              <IconSwap aria-hidden /> Move Between Reserves
             </button>
-            <Link to="/connectors" className="mini-btn" data-testid="quick-action-connect-platform-btn">
-              + Connect Platform
-            </Link>
-            <Link to="/lab/receive" className="mini-btn">Lab receive</Link>
-            <Link to="/approve" className="mini-btn primary">Approve inbox</Link>
-            <Link to="/wallets" className="mini-btn">View wallets</Link>
-            <button type="button" className="mini-btn" onClick={() => void walletsQ.refetch()}>
+          </div>
+          <div className="mini-links">
+            <Link to="/connectors" data-testid="quick-action-connect-platform-btn">Connect Platform</Link>
+            <Link to="/lab/receive">Lab receive</Link>
+            <Link to="/wallets">View wallets</Link>
+            <button type="button" onClick={() => void walletsQ.refetch()}>
               Resync balances
             </button>
           </div>
         </div>
 
-        <div className="card side-card">
-          <div className="hd">
-            <h2>Wallets</h2>
-            <Link to="/wallets" className="link">All</Link>
-          </div>
-          {walletPreview.length === 0 ? (
-            <div className="acct">
-              <div className="meta">
-                <div className="name">No wallets yet</div>
-                <div className="sub">
-                  {walletsLive
-                      ? "Live inventory empty — receive-pool mint runs under signer leadership"
-                      : "Waiting for live inventory"}
-                </div>
-              </div>
-              <div className="bal">—</div>
-            </div>
-          ) : (
-            walletPreview.map((t) => (
-              <div className="acct" key={t.id + t.pubkey} data-wallet-state={t.state}>
-                <div className={`orb ${t.id.toLowerCase()}`}>{t.id}</div>
-                <div className="meta">
-                  <div className="name">
-                    {t.role}{" "}
-                    <StatusTag status={t.state} />
-                  </div>
-                  <div className="sub">
-                    {truncatePubkey(t.pubkey)}
-                    <WalletHoldCause wallet={t.wallet} compact />
-                  </div>
-                </div>
-                <div className="bal">{t.balance}</div>
-              </div>
-            ))
-          )}
-          <div className="acct-foot">
-            <Link to="/wallets" className="linkish">Manage wallets →</Link>
-          </div>
-        </div>
       </div>
 
       <div className="stats" data-testid="three-ops-stats">
         <div className="stat">
           <div className="k">{operationKindLabel("RECEIVE_EXTERNAL")}</div>
-          <div className="h mono" style={{ fontSize: 11 }}>RECEIVE_EXTERNAL</div>
+          <div className="h mono">RECEIVE_EXTERNAL</div>
           <div className="v">{opsLive ? recv.open : "—"}</div>
           <div className="h">{opsLive ? `${recv.landed_today} landed today` : "—"}</div>
         </div>
         <div className="stat">
           <div className="k">{operationKindLabel("MOVE_INTERNAL")}</div>
-          <div className="h mono" style={{ fontSize: 11 }}>MOVE_INTERNAL</div>
+          <div className="h mono">MOVE_INTERNAL</div>
           <div className="v">{opsLive ? move.open : "—"}</div>
           <div className="h">{opsLive ? `${move.landed_today} landed today` : "—"}</div>
         </div>
         <div className="stat">
           <div className="k">{operationKindLabel("SEND_EXTERNAL")}</div>
-          <div className="h mono" style={{ fontSize: 11 }}>SEND_EXTERNAL</div>
+          <div className="h mono">SEND_EXTERNAL</div>
           <div className="v">{opsLive ? send.open : "—"}</div>
           <div className="h">{opsLive ? `${send.landed_today} landed today` : "—"}</div>
         </div>
         <div className="stat" data-testid="halt-stat">
           <div className="k">Halt</div>
+          <div className="h mono" aria-hidden>{"\u00a0"}</div>
           <div
-            className={`v ${haltClear ? "ok" : ""}`}
-            style={{
-              fontSize: 16,
-              paddingTop: 6,
-              color: haltEngaged || haltUnknown ? "var(--danger)" : undefined,
-            }}
+            className="v"
+            style={{ color: haltEngaged || haltUnknown ? "var(--danger)" : undefined }}
           >
             {haltLoading ? "Checking…" : haltEngaged ? "Engaged" : haltClear ? "Clear" : "UNKNOWN"}
           </div>
@@ -681,14 +630,6 @@ export function OverviewPage() {
         </div>
       </div>
 
-      <div id="halt-control" style={{ marginBottom: 24 }}>
-        <HaltAction
-          state={haltEngaged || haltClear ? haltQ.data : undefined}
-          loading={haltLoading}
-          unavailable={haltUnknown ? haltErrorDetail : null}
-          authorityQueryKey={haltQueryKey}
-        />
-      </div>
 
       <div className="split">
         <div className="panel">
@@ -698,7 +639,18 @@ export function OverviewPage() {
           </div>
           {liveAttn ? (
             attentionLive.length === 0 ? (
-              <p className="muted" style={{ padding: 12, margin: 0 }}>No parked operations.</p>
+              approveWaiting > 0 ? (
+                <div className="attn">
+                  <div className="type-ic" aria-hidden><IconSend /></div>
+                  <DivBody
+                    title={`${approveWaiting} ${approveWaiting === 1 ? "send" : "sends"} waiting approval`}
+                    detail="No parked operations"
+                  />
+                  <Link to="/approve" className="go pri">Review</Link>
+                </div>
+              ) : (
+                <p className="muted">No parked operations.</p>
+              )
             ) : (
               attentionLive.slice(0, 5).map((a) => (
                 <div className="attn" key={a.operation_id}>
@@ -718,7 +670,7 @@ export function OverviewPage() {
             )
           ) : (
             <>
-              <p className="muted" style={{ padding: 12, margin: 0 }}>
+              <p className="muted">
                 {"Attention inventory unavailable"}
               </p>
             </>
@@ -731,7 +683,7 @@ export function OverviewPage() {
           </div>
           {wallets.length === 0 ? (
             <>
-              <p className="muted" style={{ padding: 12, margin: 0 }}>
+              <p className="muted">
                 {walletsLive
                     ? "Pool empty"
                     : "Wallet inventory unavailable"}
@@ -757,6 +709,15 @@ export function OverviewPage() {
             ))
           )}
         </div>
+      </div>
+
+      <div id="halt-control">
+        <HaltAction
+          state={haltEngaged || haltClear ? haltQ.data : undefined}
+          loading={haltLoading}
+          unavailable={haltUnknown ? haltErrorDetail : null}
+          authorityQueryKey={haltQueryKey}
+        />
       </div>
 
       <div className="table-wrap">
@@ -833,7 +794,7 @@ export function OverviewPage() {
                         <span className="cell-type">
                           <span className="ti xfer"><IconArrow /></span>
                           {operationKindLabel(row.operation_type)}
-                          <span className="quiet mono" style={{ marginLeft: 6, fontSize: 11 }}>{row.operation_type}</span>
+                          <span className="quiet mono">{row.operation_type}</span>
                         </span>
                       </td>
                       <td className="mono">
@@ -856,7 +817,7 @@ export function OverviewPage() {
                       <span className="cell-type">
                         <span className="ti xfer"><IconArrow /></span>
                         {operationKindLabel(row.operation_type)}
-                        <span className="quiet mono" style={{ marginLeft: 6, fontSize: 11 }}>{row.operation_type}</span>
+                        <span className="quiet mono">{row.operation_type}</span>
                       </span>
                     </td>
                     <td className="mono">
@@ -888,7 +849,7 @@ export function OverviewPage() {
           data-testid="operator-receive-modal"
         >
           <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
-            <h2 style={{ marginTop: 0 }}>+ Receive Funds</h2>
+            <h2><IconReceive aria-hidden /> Receive Funds</h2>
             {opModalError ? (
               <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
                 {opModalError}
@@ -926,7 +887,7 @@ export function OverviewPage() {
                     className="mini-btn"
                     data-testid="operator-receive-open-pay-url"
                   >
-                    Open Payment Page ↗
+                    Open receive page ↗
                   </a>
                   <button
                     type="button"
@@ -1016,7 +977,7 @@ export function OverviewPage() {
           data-testid="operator-send-modal"
         >
           <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
-            <h2 style={{ marginTop: 0 }}>+ Send Funds</h2>
+            <h2><IconSend aria-hidden /> Send Funds</h2>
             {opModalError ? (
               <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
                 {opModalError}
@@ -1127,7 +1088,7 @@ export function OverviewPage() {
           data-testid="operator-move-modal"
         >
           <div className="card" style={{ maxWidth: 460, margin: "10vh auto" }}>
-            <h2 style={{ marginTop: 0 }}>⇄ Move Between Reserves</h2>
+            <h2><IconSwap aria-hidden /> Move Between Reserves</h2>
             {opModalError ? (
               <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
                 {opModalError}
@@ -1335,3 +1296,14 @@ function ReadinessRowItem({ row }: { row: ReadinessRow }) {
   );
 }
 
+/** Balance figure: whole units at full strength, the fraction muted (same text content). */
+function AmountFigure({ value }: { value: string }) {
+  const dot = value.indexOf(".");
+  if (dot < 0) return <>{value}</>;
+  return (
+    <>
+      {value.slice(0, dot)}
+      <span className="frac">{value.slice(dot)}</span>
+    </>
+  );
+}

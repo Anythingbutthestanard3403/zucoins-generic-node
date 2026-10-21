@@ -502,16 +502,6 @@ export function ApproveInboxPage() {
 
   return (
     <div className="page approve-inbox">
-      <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }} data-testid="approve-auto-approve-link">
-        Auto-approve policy:{" "}
-        <Link className="linkish" to="/auto-approve">
-          configure rules
-        </Link>
-        {" · "}
-        <Link className="linkish" to="/operator-security">
-          dual-control & device signature
-        </Link>
-      </p>
       <div className="page-title-row">
         <h1>Approve</h1>
         <div className="toolbar">
@@ -525,6 +515,16 @@ export function ApproveInboxPage() {
         </div>
       </div>
 
+      <p className="muted approve-policy" data-testid="approve-auto-approve-link">
+        Auto-approve policy:{" "}
+        <Link className="linkish" to="/auto-approve">
+          configure rules
+        </Link>
+        {" · "}
+        <Link className="linkish" to="/operator-security">
+          dual-control & device signature
+        </Link>
+      </p>
       <p className="approve-honesty muted" data-testid="approve-honesty">
         Approve authorises formation only — it is <strong>not</strong> paid, redeemed, or
         on-chain. The node <strong>never</strong> submits <code className="mono">SEND_EXTERNAL</code>.
@@ -760,7 +760,7 @@ export function ApproveInboxPage() {
               return (
                 <li key={s.operation_id} className="approve-card" data-testid="approve-send-card">
                   <div className="approve-card-head">
-                    <span className="approve-op-label">{operationKindLabel(s.operation_type)}</span>
+                    <span className="approve-op-label">External send</span>
                     <StatusTag status={s.status} />
                   </div>
                   <div className="approve-card-body">

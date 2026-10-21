@@ -20,6 +20,9 @@ describe("formatRemaining", () => {
     expect(formatRemaining(65_000)).toBe("01:05");
     expect(formatRemaining(0)).toBe("00:00");
   });
+  it("formats days past 24h", () => {
+    expect(formatRemaining((2 * 86400 + 5 * 3600 + 30) * 1000)).toBe("2d 5h");
+  });
 });
 
 describe("deriveReleaseCountdown", () => {

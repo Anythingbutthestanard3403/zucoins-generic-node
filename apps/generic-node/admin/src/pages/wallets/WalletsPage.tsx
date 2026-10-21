@@ -188,7 +188,7 @@ export function WalletsPage() {
           data-testid="worker-pool-toggle"
           aria-expanded={workerPoolExpanded}
           onClick={() => setWorkerPoolExpanded((prev) => !prev)}
-          style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          style={{ width: "100%", display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "space-between", alignItems: "center", textAlign: "left", whiteSpace: "normal", height: "auto", minHeight: 44 }}
         >
           <span>Advanced: Internal Worker Pool &amp; Consolidation</span>
           <span className="mono">

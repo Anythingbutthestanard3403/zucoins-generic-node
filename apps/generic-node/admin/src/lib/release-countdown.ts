@@ -31,6 +31,8 @@ export function parseExpiryUnixSecs(raw: string | null | undefined): number | nu
 
 export function formatRemaining(ms: number): string {
   const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const d = Math.floor(totalSec / 86400);
+  if (d > 0) return `${d}d ${Math.floor((totalSec % 86400) / 3600)}h`;
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;

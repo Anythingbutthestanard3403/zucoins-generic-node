@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router";
+import { IconLogo } from "../icons.js";
 import { useAuth } from "../store/auth.js";
 
 export function LoginPage() {
@@ -30,6 +31,9 @@ export function LoginPage() {
 
   return (
     <div className="auth-shell">
+      <div className="auth-brand" aria-hidden>
+        <span className="logo"><IconLogo /></span>
+      </div>
       <form className="auth-card" onSubmit={(e) => void onSubmit(e)}>
         <h1>Zu Node</h1>
         <p className="lead">Operator sign-in for this self-hosted custody node.</p>
@@ -43,8 +47,8 @@ export function LoginPage() {
         </div>
         {err ? <p className="err">{err}</p> : null}
         <button className="btn-block" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-        <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
-          Authenticator codes are required later for money actions (header <code className="mono">X-ZP-TOTP</code>).
+        <p className="auth-note">
+          Money actions also ask for a code from your authenticator app.
         </p>
       </form>
     </div>

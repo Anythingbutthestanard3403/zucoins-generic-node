@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import {
   IconClipboard, IconGrid,
-  IconKey, IconLogo, IconLogout, IconMoon, IconPin,
+  IconKey, IconLogo, IconLogout, IconMoon, IconPin, IconSun,
   IconWallet, IconBell, IconSettings,
 } from "./icons.js";
 import { useApproveInboxBadgeCount } from "./lib/approve-inbox-count.js";
@@ -33,7 +33,7 @@ const HEALTH_LABEL: Record<NodeHealthUiState, string> = {
   offline: "Offline",
 };
 const HEALTH_DOT_CLASS: Record<NodeHealthUiState, string> = {
-  checking: "",
+  checking: "idle",
   healthy: "",
   degraded: "warn",
   offline: "danger",
@@ -112,6 +112,8 @@ export function App() {
   // ZTR-1257: badge = Approve inbox actionable sum (not needs-attention total).
   const approveBadge = useApproveInboxBadgeCount(Boolean(user));
   const sections = buildSections(approveBadge);
+  const inboxLabel =
+    approveBadge !== undefined && approveBadge > 0 ? `${approveBadge} item(s) in approve inbox` : "Approve inbox";
 
   // Real /health/ready probe.
   const healthQ = useQuery({
@@ -196,16 +198,15 @@ export function App() {
           </div>
         ))}
         <div className="side-foot">
+          <div className="side-status" title={`Node ${HEALTH_LABEL[healthState].toLowerCase()}`}>
+            <span className="ic"><span className={`live ${HEALTH_DOT_CLASS[healthState]}`} /></span>
+            <span className="txt">Node <b className={HEALTH_TEXT_CLASS[healthState]}>{HEALTH_LABEL[healthState].toLowerCase()}</b></span>
+          </div>
           <button type="button" className="pin" onClick={() => setPinned((p) => !p)}>
             <span className="ic"><IconPin /></span>
             <span className="lbl">{pinned ? "Collapse sidebar" : "Pin sidebar"}</span>
           </button>
-          <button
-            type="button"
-            className="nav"
-            style={{ width: "calc(100% - 16px)", border: 0, background: "transparent", cursor: "pointer" }}
-            onClick={() => void logout()}
-          >
+          <button type="button" className="pin" onClick={() => void logout()}>
             <span className="ic"><IconLogout /></span>
             <span className="lbl">Log out</span>
           </button>
@@ -214,23 +215,33 @@ export function App() {
 
       <div className="main">
         <header className="top">
-          <span className="meta-chip" data-testid="network-label">
-            {networkLabel}{versionLabel}
+          <span className="meta-chip host" data-testid="network-label" title={`${networkLabel}${versionLabel}`}>
+            {networkLabel}<span className="ver">{versionLabel}</span>
           </span>
           <span className="meta-chip">
-            <span className={`live ${HEALTH_DOT_CLASS[healthState]}`} /> {HEALTH_LABEL[healthState]}
+            <span className={`live ${HEALTH_DOT_CLASS[healthState]}`} /> <span className="lbl">{HEALTH_LABEL[healthState]}</span>
           </span>
-          <div style={{ flex: 1 }} />
-          <button type="button" className="icon-btn" title="Toggle theme" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
-            <IconMoon />
+          <div className="top-spacer" />
+          <button
+            type="button"
+            className="icon-btn"
+            title="Toggle theme"
+            aria-label="Toggle theme"
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          >
+            {theme === "dark" ? <IconSun /> : <IconMoon />}
           </button>
           <button
             type="button"
             className="icon-btn"
-            title={approveBadge !== undefined && approveBadge > 0 ? `${approveBadge} item(s) in approve inbox` : "Approve inbox"}
+            title={inboxLabel}
+            aria-label={inboxLabel}
             onClick={() => navigate("/approve")}
           >
             <IconBell />
+            {approveBadge !== undefined && approveBadge > 0 ? (
+              <span className="badge" aria-hidden>{approveBadge > 99 ? "99+" : approveBadge}</span>
+            ) : null}
           </button>
           <div className="who">
             {initials ? <div className="av" aria-hidden>{initials}</div> : null}
@@ -239,18 +250,20 @@ export function App() {
         </header>
 
         <div className="body" id="main-content" tabIndex={-1}>
-          <OfflineBanner healthState={healthState} />
-          {pathname === "/" ? (
-            <InstallHomeNudge
-              deferredPrompt={deferredPrompt}
-              onPromptConsumed={consumeDeferredInstallPrompt}
-            />
-          ) : null}
-          <ErrorBoundary variant="inline" key={pathname}>
-            <Suspense fallback={<p className="muted">Loading…</p>}>
-              <Outlet />
-            </Suspense>
-          </ErrorBoundary>
+          <div className="body-inner">
+            <OfflineBanner healthState={healthState} />
+            {pathname === "/" ? (
+              <InstallHomeNudge
+                deferredPrompt={deferredPrompt}
+                onPromptConsumed={consumeDeferredInstallPrompt}
+              />
+            ) : null}
+            <ErrorBoundary variant="inline" key={pathname}>
+              <Suspense fallback={<p className="muted">Loading…</p>}>
+                <Outlet />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         </div>
         <footer className="foot">
           <span>Node <b className={HEALTH_TEXT_CLASS[healthState]}>{HEALTH_LABEL[healthState].toLowerCase()}</b></span>
@@ -264,7 +277,7 @@ export function App() {
           <span className="sep">·</span>
           <span>Session <b className="ok">{"live"}</b></span>
           <span className="sep">·</span>
-          <span style={{ marginLeft: "auto" }}>generic-node-ui</span>
+          <span className="tail">generic-node-ui</span>
         </footer>
       </div>
     </div>

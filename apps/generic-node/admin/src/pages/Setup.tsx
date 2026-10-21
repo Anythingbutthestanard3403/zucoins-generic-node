@@ -536,10 +536,8 @@ function SetupPageInner() {
 
       {showPassword ? (
         <form className="auth-card" onSubmit={(e) => void onPasswordSubmit(e)}>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Step W1 · Change bootstrap password
-          </p>
           <h1>Finish setup</h1>
+          <p className="auth-step">Step W1 · Change bootstrap password</p>
           <p className="lead">
             Change the bootstrap password before operating the node.
             {user.mustEnrolTotp
@@ -585,19 +583,13 @@ function SetupPageInner() {
           <button className="btn-block" type="submit" disabled={busy}>
             {busy ? "Saving…" : "Update password"}
           </button>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
-            Live path: <code className="mono">POST /admin/v1/password</code> with{" "}
-            <code className="mono">X-CSRF-Token</code>.
-          </p>
         </form>
       ) : null}
 
       {showEnrol ? (
         <form className="auth-card" onSubmit={(e) => void onEnrolSubmit(e)}>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Step W2 · Enrol authenticator
-          </p>
           <h1>Enrol authenticator</h1>
+          <p className="auth-step">Step W2 · Enrol authenticator</p>
           <p className="lead">
             Re-enter your password to mint a one-time authenticator secret. The secret
             is shown once and never logged.
@@ -617,18 +609,13 @@ function SetupPageInner() {
           <button className="btn-block" type="submit" disabled={busy}>
             {busy ? "Minting…" : "Generate authenticator secret"}
           </button>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
-            Live path: <code className="mono">POST /admin/v1/enrol-totp</code>.
-          </p>
         </form>
       ) : null}
 
       {showConfirm ? (
         <form className="auth-card" onSubmit={(e) => void onConfirmSubmit(e)}>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Step W2 · Confirm authenticator
-          </p>
           <h1>Confirm authenticator</h1>
+          <p className="auth-step">Step W2 · Confirm authenticator</p>
           <p className="lead">
             Scan this QR code with your authenticator app, then enter the current
             6-digit code. Confirm burns this step so the same code cannot approve money.
@@ -681,17 +668,13 @@ function SetupPageInner() {
           <button className="btn-block" type="submit" disabled={busy || totpCode.length !== 6}>
             {busy ? "Confirming…" : "Confirm and continue"}
           </button>
-          <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
-            Live path: <code className="mono">POST /admin/v1/confirm-totp</code>. Clears{" "}
-            <code className="mono">mustEnrolTotp</code>.
-          </p>
         </form>
       ) : null}
 
       {showWizard && step === "W0" ? (
         <div className="auth-card" data-testid="setup-step-w0">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W0</p>
           <h1>Secure context required</h1>
+          <p className="auth-step">Step W0</p>
           <p className="lead">
             Open the Operator UI over HTTPS or loopback (localhost). This page did not
             detect a secure context.
@@ -727,8 +710,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W4" ? (
         <div className="auth-card" data-testid="setup-step-w4">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W4 · Device #1</p>
           <h1>Register this phone as your approval device</h1>
+          <p className="auth-step">Step W4 · Device #1</p>
           <p className="lead">
             This PWA session enrols a WebCrypto approval key before Home. Fresh TOTP is
             required. The private key stays non-extractable in this browser — never sent to
@@ -815,8 +798,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W5" ? (
         <div className="auth-card" data-testid="setup-step-w5">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W5 · Vault master</p>
           <h1>Vault ready</h1>
+          <p className="auth-step">Step W5 · Vault master</p>
           <p className="lead">
             First-boot: generate a vault master key with CSPRNG entropy, store it{" "}
             <strong>offline</strong> (paper / offline password manager), then continue.
@@ -888,8 +871,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W6" ? (
         <div className="auth-card" data-testid="setup-step-w6">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W6 · Recovery pack</p>
           <h1>Recovery pack create + prove</h1>
+          <p className="auth-step">Step W6 · Recovery pack</p>
           <p className="lead">
             Day-0 happy path is encrypted recovery-pack download + prove.
             Only a real <code className="mono">recovery_verified_at</code> stamp completes
@@ -927,8 +910,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W7" ? (
         <div className="auth-card" data-testid="setup-step-w7">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W7</p>
           <h1>Recovery-verified wallet</h1>
+          <p className="auth-step">Step W7</p>
           <p className="lead">
             Need ≥1 <code className="mono">node_generated</code> wallet with{" "}
             <code className="mono">recovery_verified_at</code>. Complete pack prove or
@@ -948,8 +931,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W8" ? (
         <div className="auth-card" data-testid="setup-step-w8">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W8 · Optional</p>
           <h1>Implementer key</h1>
+          <p className="auth-step">Step W8 · Optional</p>
           <p className="lead">
             Optional: capture the implementer API key when issued (shown once on issue).
             Skip if you will issue later from API keys.
@@ -977,8 +960,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W9" ? (
         <div className="auth-card" data-testid="setup-step-w9">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W9</p>
           <h1>Reporting key</h1>
+          <p className="auth-step">Step W9</p>
           <p className="lead">
             Required for the RECEIVE pack (ARM). Issue a reporting key from Reporting keys,
             then continue.
@@ -997,8 +980,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W10" ? (
         <div className="auth-card" data-testid="setup-step-w10">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W10 · Optional</p>
           <h1>Packs</h1>
+          <p className="auth-step">Step W10 · Optional</p>
           <p className="lead">Optional pack selection. Skip to finish setup.</p>
           {err ? <p className="err">{err}</p> : null}
           <button
@@ -1023,8 +1006,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W11" ? (
         <div className="auth-card" data-testid="setup-step-w11">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W11 · Optional</p>
           <h1>Mini-steps</h1>
+          <p className="auth-step">Step W11 · Optional</p>
           <p className="lead">Optional remaining integration mini-steps.</p>
           {err ? <p className="err">{err}</p> : null}
           <button
@@ -1049,8 +1032,8 @@ function SetupPageInner() {
 
       {showWizard && step === "W12" ? (
         <div className="auth-card" data-testid="setup-step-w12">
-          <p className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Step W12</p>
           <h1>Setup complete</h1>
+          <p className="auth-step">Step W12</p>
           <p className="lead">
             Continue to Home — Node readiness stays collapsed when clear and only expands if
             something blocks money ops again.

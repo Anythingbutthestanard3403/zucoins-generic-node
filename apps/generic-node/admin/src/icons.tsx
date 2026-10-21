@@ -24,3 +24,7 @@ export function IconHalt(p: P) { return <svg {...base} {...p}><rect x="3" y="3" 
 export function IconMark(p: P) { return <svg {...base} width={10} height={10} strokeWidth={2.5} {...p}><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/></svg>; }
 export function IconTarget(p: P) { return <svg {...base} {...p}><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>; }
 export function IconLogo(p: P) { return <svg {...base} width={18} height={18} strokeWidth={2} {...p}><path d="M12 2L3 7v10l9 5 9-5V7l-9-5z"/><path d="M12 22V12"/><path d="M3 7l9 5 9-5"/></svg>; }
+export function IconSun(p: P) { return <svg {...base} width={16} height={16} {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>; }
+export function IconReceive(p: P) { return <svg {...base} {...p}><path d="M17 7L7 17"/><path d="M17 17H7V7"/></svg>; }
+export function IconSend(p: P) { return <svg {...base} {...p}><path d="M7 17L17 7"/><path d="M7 7h10v10"/></svg>; }
+export function IconSwap(p: P) { return <svg {...base} {...p}><path d="M7 4L3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/></svg>; }
